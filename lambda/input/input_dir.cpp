@@ -32,7 +32,6 @@ static Element* create_entry_element(Input* input, const char* name, const char*
     Element* elmt = input_create_element(input, is_dir ? "dir" : "file");
     if (!elmt) return NULL;
     input_add_attribute_to_element(input, elmt, "name", name);
-    input_add_attribute_to_element(input, elmt, "path", path);
     char buf[64];
     snprintf(buf, sizeof(buf), "%ld", (long)st->st_size);
     input_add_attribute_to_element(input, elmt, "size", buf);
@@ -57,11 +56,12 @@ static void traverse_directory(Input* input, Element* parent, const char* dir_pa
         int is_dir = S_ISDIR(st.st_mode);
         Element* elmt = create_entry_element(input, entry->d_name, full_path, &st, is_dir);
         if (!elmt) continue;
-        // Attach to parent
-    Item elmt_item = {0};
-    elmt_item.type_id = LMD_TYPE_ELEMENT;
-    elmt_item.element = elmt;
-    elmt_put(parent, input_create_string(input, entry->d_name), elmt_item, input->pool);
+        // Add as child content, not attribute
+        Item elmt_item = {0};
+        elmt_item.type_id = LMD_TYPE_ELEMENT;
+        elmt_item.element = elmt;
+        list_push((List*)parent, elmt_item);
+        ((TypeElmt*)parent->type)->content_length++;
         // Recurse if directory
         if (recursive && is_dir && (max_depth < 0 || cur_depth < max_depth)) {
             traverse_directory(input, elmt, full_path, recursive, max_depth, cur_depth + 1);
@@ -80,8 +80,21 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
     Input* input = input_new(NULL);
     struct stat st;
     if (stat(directory_path, &st) != 0) return NULL;
-    Element* root = create_entry_element(input, directory_path, directory_path, &st, 1);
+    
+    // Extract just the directory name from the full path
+    const char* dir_name = strrchr(directory_path, '/');
+    if (dir_name) {
+        dir_name++; // Skip the '/'
+    } else {
+        dir_name = directory_path; // No '/' found, use the whole path
+    }
+    
+    Element* root = create_entry_element(input, dir_name, directory_path, &st, 1);
     if (!root) { free(input); return NULL; }
+    
+    // Add the full path as a separate attribute for the root directory
+    input_add_attribute_to_element(input, root, "path", directory_path);
+    
     // Traverse and populate
     traverse_directory(input, root, directory_path, recursive, max_depth, 0);
     input->root = {.item = (uint64_t)root};

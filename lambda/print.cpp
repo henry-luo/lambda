@@ -566,7 +566,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             strbuf_append_str(strbuf, indent ? "\n": (elmt_type->length ? "; ":" "));
             for (long i = 0; i < element->length; i++) {
                 if (i) strbuf_append_str(strbuf, indent ? "\n" : "; ");
-                if (indent) { for (int i=0; i<depth; i++) strbuf_append_str(strbuf, indent); }
+                if (indent) { for (int i=0; i<=depth; i++) strbuf_append_str(strbuf, indent); }
                 print_item(strbuf, element->items[i], depth + 1, indent);
             }
             // if (indent) {
