@@ -44,11 +44,11 @@ RUN useradd -m -s /bin/bash testuser && \
 USER testuser
 WORKDIR /home/testuser
 
-# Copy project files
-COPY . /home/testuser/
+# Copy project files with proper ownership
+COPY --chown=testuser:testuser . /home/testuser/
 
-# Make script executable
-RUN chmod +x setup-linux-deps.sh
+# Make script executable (ensure proper permissions)
+RUN chmod +x /home/testuser/setup-linux-deps.sh
 
 CMD ["/bin/bash"]
 EOF
@@ -82,11 +82,11 @@ docker run --rm -it lambda-setup-test bash -c "
     echo ''
     echo 'Library checks:'
     echo 'libcurl:' && pkg-config --exists libcurl && echo '✓ Found' || echo '✗ Missing'
-    echo 'libmpdec:' && pkg-config --exists libmpdec && echo '✓ Found' || echo '✗ Missing'
-    echo 'libreadline:' && pkg-config --exists libreadline && echo '✓ Found' || echo '✗ Missing'
+    echo 'libmpdec:' && (pkg-config --exists libmpdec || [ -f /usr/lib/x86_64-linux-gnu/libmpdec.so ] || dpkg -l | grep -q libmpdec-dev) && echo '✓ Found' || echo '✗ Missing'
+    echo 'libedit:' && (pkg-config --exists libedit || [ -f /usr/lib/x86_64-linux-gnu/libedit.so ] || dpkg -l | grep -q libedit-dev) && echo '✓ Found' || echo '✗ Missing'
     echo 'libutf8proc:' && ls /usr/local/lib/libutf8proc* 2>/dev/null && echo '✓ Found' || echo '✗ Missing'
     echo 'libmir:' && ls /usr/local/lib/libmir* 2>/dev/null && echo '✓ Found' || echo '✗ Missing'
-    echo 'libcriterion:' && ls /usr/local/lib/libcriterion* 2>/dev/null && echo '✓ Found' || echo '✗ Missing'
+    echo 'libcriterion:' && (ls /usr/local/lib/libcriterion* 2>/dev/null || ls /usr/lib/x86_64-linux-gnu/libcriterion* 2>/dev/null || dpkg -l | grep -q libcriterion-dev) && echo '✓ Found' || echo '✗ Missing'
 "
 
 echo "Test completed. Cleaning up..."
