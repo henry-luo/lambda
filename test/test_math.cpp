@@ -175,6 +175,64 @@ std::string normalize_operator_spacing(const std::string& expr) {
 }
 
 /**
+ * Helper function to check if two matrix expressions are equivalent (handling spacing differences)
+ */
+bool are_matrix_expressions_equivalent(const std::string& expr1, const std::string& expr2) {
+    // Check if both expressions contain matrix environments
+    std::regex matrix_pattern(R"(\\begin\{(?:p|b|v|V|small)?matrix\})");
+    bool is_matrix1 = std::regex_search(expr1, matrix_pattern);
+    bool is_matrix2 = std::regex_search(expr2, matrix_pattern);
+    
+    if (!is_matrix1 || !is_matrix2) {
+        return false;
+    }
+    
+    // Normalize spacing in matrix expressions
+    auto normalize_matrix = [](std::string expr) {
+        // Normalize spaces around & and backslash-backslash
+        std::regex space_around_amp(R"(\s*&\s*)");
+        expr = std::regex_replace(expr, space_around_amp, " & ");
+        
+        std::regex space_around_backslash(R"(\s*\\\\\s*)");
+        expr = std::regex_replace(expr, space_around_backslash, " \\\\ ");
+        
+        // Remove spaces after matrix environment opening
+        std::regex space_after_pmatrix(R"(\{pmatrix\}\s+)");
+        expr = std::regex_replace(expr, space_after_pmatrix, "{pmatrix}");
+        
+        std::regex space_after_bmatrix(R"(\{bmatrix\}\s+)");
+        expr = std::regex_replace(expr, space_after_bmatrix, "{bmatrix}");
+        
+        std::regex space_after_vmatrix(R"(\{vmatrix\}\s+)");
+        expr = std::regex_replace(expr, space_after_vmatrix, "{vmatrix}");
+        
+        std::regex space_after_Vmatrix(R"(\{Vmatrix\}\s+)");
+        expr = std::regex_replace(expr, space_after_Vmatrix, "{Vmatrix}");
+        
+        std::regex space_after_smallmatrix(R"(\{smallmatrix\}\s+)");
+        expr = std::regex_replace(expr, space_after_smallmatrix, "{smallmatrix}");
+        
+        std::regex space_after_matrix(R"(\{matrix\}\s+)");
+        expr = std::regex_replace(expr, space_after_matrix, "{matrix}");
+        
+        // Remove spaces before end
+        std::regex space_before_end(R"(\s+\\end)");
+        expr = std::regex_replace(expr, space_before_end, "\\end");
+        
+        // Normalize function spacing (remove space between function and argument)
+        std::regex func_spacing(R"(\\(sin|cos|tan|log|ln)\s+)");
+        expr = std::regex_replace(expr, func_spacing, "\\$1 ");
+        
+        return expr;
+    };
+    
+    std::string norm1 = normalize_matrix(expr1);
+    std::string norm2 = normalize_matrix(expr2);
+    
+    return norm1 == norm2;
+}
+
+/**
  * Check semantic equivalence for expressions that GiNaC can't parse
  */
 bool are_expressions_semantically_equivalent(const std::string& expr1, const std::string& expr2) {
@@ -847,8 +905,12 @@ bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_
                 printf("🔍 MANUAL: GiNaC can't parse - needs manual verification\n");
                 manual_verification_needed++;
                 
-                // Try semantic equivalence as fallback
-                if (are_expressions_semantically_equivalent(orig, formatted)) {
+                // Try matrix equivalence first for matrix expressions
+                printf("🔍 DEBUG: Trying matrix equivalence check...\n");
+                if (are_matrix_expressions_equivalent(orig, formatted)) {
+                    printf("✅ PASS: Matrix equivalence detected\n");
+                    ginac_matches++;
+                } else if (are_expressions_semantically_equivalent(orig, formatted)) {
                     printf("✅ PASS: Semantic equivalence detected\n");
                     ginac_matches++;
                 } else {
@@ -884,6 +946,9 @@ bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_
                 // Try semantic equivalence as fallback
                 if (are_expressions_semantically_equivalent(orig, formatted)) {
                     printf("✅ PASS: Semantic equivalence detected\n");
+                    ginac_matches++;
+                } else if (are_matrix_expressions_equivalent(orig, formatted)) {
+                    printf("✅ PASS: Matrix equivalence detected\n");
                     ginac_matches++;
                 } else {
                     printf("❌ FAIL: No equivalence found - parser/formatter issue\n");
