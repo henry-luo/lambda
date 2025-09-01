@@ -46,6 +46,15 @@ MemPoolError pool_variable_init(VariableMemPool **pool, size_t grow_size, uint16
 
 static void *from_buffer(Buffer *buff, size_t header_size, size_t block_size)
 {
+    // Debug: Check buffer boundaries before allocation
+    char *allocation_end = buff->curr_ptr + header_size + block_size;
+    if (allocation_end > buff->end) {
+        // This should never happen if buffer_has_space works correctly
+        printf("ERROR: from_buffer would overflow! curr_ptr=%p, end=%p, needed=%zu\n", 
+               buff->curr_ptr, buff->end, header_size + block_size);
+        return NULL;
+    }
+
     Header *header = (void *) buff->curr_ptr;
     header->size = block_size;
     header->prev_in_buff = (void *) buff->prev_ptr;
@@ -102,9 +111,17 @@ MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr)
     }
 
     if (!buffer_has_space(buff, pool->header_size + block_size)) {
+        printf("DEBUG: Creating new buffer - old buff curr_ptr=%p, end=%p, needed=%zu\n", 
+               buff->curr_ptr, buff->end, pool->header_size + block_size);
         buff->next = buffer_new(pool->header_size + max(pool->buff_size, block_size));
+        if (!buff->next) {
+            printf("ERROR: buffer_new failed!\n");
+            return MEM_POOL_ERR_MALLOC;
+        }
         buff = buff->next;
         pool->buff_last = buff;
+        printf("DEBUG: New buffer created - curr_ptr=%p, end=%p, size=%zu\n", 
+               buff->curr_ptr, buff->end, (size_t)(buff->end - buff->start));
     }
     *ptr = from_buffer(buff, pool->header_size, block_size);
     // unlock(pool);
@@ -115,6 +132,10 @@ MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr)
 void* pool_calloc(VariableMemPool* pool, size_t size) {
     void* bytes;
     if (pool_variable_alloc(pool, size, &bytes) == MEM_POOL_ERR_OK) {
+        if (bytes == NULL) {
+            printf("ERROR: pool_variable_alloc returned OK but bytes is NULL\n");
+            return NULL;
+        }
         memset(bytes, 0, size);
         return bytes;
     }

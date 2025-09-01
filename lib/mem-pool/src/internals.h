@@ -76,7 +76,7 @@ Buffer *buffer_list_find(Buffer *head, void *ptr);
 
 static inline bool buffer_has_space(Buffer *buff, size_t size)
 {
-    return (char *)buff->end - (char *)buff->curr_ptr >= (long)size;
+    return (char *)buff->end - (char *)buff->curr_ptr > (long)size;
 }
 
 static inline bool buffer_has(Buffer *buff, char *ptr)
