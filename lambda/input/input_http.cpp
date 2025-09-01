@@ -3,6 +3,7 @@
 // Handles downloading files to cache and returning Input*
 
 #include "input.h"
+#include "../../lib/file.h"
 #include <curl/curl.h>
 #include <string.h>
 #include <stdio.h>
@@ -56,20 +57,6 @@ static bool init_curl() {
             return false;
         }
         curl_initialized = true;
-    }
-    return true;
-}
-
-// Create cache directory if it doesn't exist
-static bool ensure_cache_directory(const char* cache_dir) {
-    struct stat st = {0};
-    
-    if (stat(cache_dir, &st) == -1) {
-        if (mkdir(cache_dir, 0755) == -1) {
-            fprintf(stderr, "HTTP: Failed to create cache directory %s: %s\n", 
-                    cache_dir, strerror(errno));
-            return false;
-        }
     }
     return true;
 }
@@ -171,7 +158,7 @@ char* download_to_cache(const char* url, const char* cache_dir, char** out_cache
     }
     
     // Ensure cache directory exists
-    if (!ensure_cache_directory(cache_dir)) {
+    if (!create_dir(cache_dir)) {
         return NULL;
     }
     
