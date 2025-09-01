@@ -107,9 +107,9 @@ void print_help() {
     printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nREPL Commands:\n");
-    printf("  :quit, :q, :exit     - Exit REPL\n");
-    printf("  :help, :h            - Show help\n");
-    printf("  :clear               - Clear REPL history\n");
+    printf("  .quit, .q, .exit     - Exit REPL\n");
+    printf("  .help, .h            - Show help\n");
+    printf("  .clear               - Clear REPL history\n");
     printf("\nValidation Commands:\n");
     printf("  validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  validate <file>                 - Validate using doc_schema.ls (default)\n");
@@ -159,7 +159,7 @@ const char* get_repl_prompt() {
 
 void run_repl(Runtime *runtime, bool use_mir) {
     printf("Lambda Script REPL v1.0%s\n", use_mir ? " (MIR JIT)" : "");
-    printf("Type :help for commands, :quit to exit\n");
+    printf("Type .help for commands, .quit to exit\n");
     
     // Get the best prompt for this system
     const char* prompt = get_repl_prompt();
@@ -179,18 +179,18 @@ void run_repl(Runtime *runtime, bool use_mir) {
         add_history(line);
         
         // Handle REPL commands
-        if (strcmp(line, ":quit") == 0 || strcmp(line, ":q") == 0 || strcmp(line, ":exit") == 0) {
+        if (strcmp(line, ".quit") == 0 || strcmp(line, ".q") == 0 || strcmp(line, ".exit") == 0) {
             free(line);
             break;
         }
         
-        if (strcmp(line, ":help") == 0 || strcmp(line, ":h") == 0) {
+        if (strcmp(line, ".help") == 0 || strcmp(line, ".h") == 0) {
             print_help();
             free(line);
             continue;
         }
         
-        if (strcmp(line, ":clear") == 0) {
+        if (strcmp(line, ".clear") == 0) {
             strbuf_reset(repl_history);
             printf("REPL history cleared\n");
             free(line);
