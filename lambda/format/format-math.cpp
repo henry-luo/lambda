@@ -388,6 +388,29 @@ static const MathFormatDef boxed_operators[] = {
     {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
 };
 
+// Matrix environments - need special handling for multi-child elements
+static void format_matrix_rows(StringBuf* sb, List* children, MathOutputFlavor flavor, int depth) {
+    if (!children) return;
+    
+    for (int i = 0; i < children->length; i++) {
+        if (i > 0) {
+            stringbuf_append_str(sb, " \\\\\n");
+        }
+        format_math_item(sb, children->items[i], flavor, depth + 1);
+    }
+}
+
+static const MathFormatDef matrices[] = {
+    {"matrix", "\\begin{matrix}\n{1}\n\\end{matrix}", "matrix({1})", "matrix({1})", "<mtable>{1}</mtable>", "matrix", true, false, false, -1},
+    {"pmatrix", "\\begin{pmatrix}\n{1}\n\\end{pmatrix}", "pmatrix({1})", "pmatrix({1})", "<mrow><mo>(</mo><mtable>{1}</mtable><mo>)</mo></mrow>", "pmatrix", true, false, false, -1},
+    {"bmatrix", "\\begin{bmatrix}\n{1}\n\\end{bmatrix}", "bmatrix({1})", "bmatrix({1})", "<mrow><mo>[</mo><mtable>{1}</mtable><mo>]</mo></mrow>", "bmatrix", true, false, false, -1},
+    {"vmatrix", "\\begin{vmatrix}\n{1}\n\\end{vmatrix}", "vmatrix({1})", "vmatrix({1})", "<mrow><mo>|</mo><mtable>{1}</mtable><mo>|</mo></mrow>", "vmatrix", true, false, false, -1},
+    {"Vmatrix", "\\begin{Vmatrix}\n{1}\n\\end{Vmatrix}", "Vmatrix({1})", "Vmatrix({1})", "<mrow><mo>‖</mo><mtable>{1}</mtable><mo>‖</mo></mrow>", "Vmatrix", true, false, false, -1},
+    {"smallmatrix", "\\begin{smallmatrix}\n{1}\n\\end{smallmatrix}", "smallmatrix({1})", "smallmatrix({1})", "<mtable displaystyle='false'>{1}</mtable>", "smallmatrix", true, false, false, -1},
+    {"row", "{1}", "row({1})", "row({1})", "<mtr>{1}</mtr>", "row", true, false, false, -1},
+    {NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, 0}
+};
+
 // Helper function to check if an item represents a single character/digit
 static bool is_single_character_item(Item item) {
     TypeId type = get_type_id(item);    
@@ -666,12 +689,7 @@ static const MathFormatDef* find_format_def(const char* element_name) {
     // Search through all format tables
     const MathFormatDef* tables[] = {
         basic_operators, functions, special_symbols, fractions, 
-        roots, text_formatting, grouping, accents, relations, big_operators, arrows, modular, spacing, boxed_operators
-    };
-    
-    const char* table_names[] = {
-        "basic_operators", "functions", "special_symbols", "fractions",
-        "roots", "text_formatting", "grouping", "accents", "relations", "big_operators", "arrows", "modular", "spacing", "boxed_operators"
+        roots, text_formatting, grouping, accents, relations, big_operators, arrows, modular, spacing, boxed_operators, matrices
     };
     
     int table_count = sizeof(tables) / sizeof(tables[0]);
@@ -895,48 +913,101 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         name_buf[name_len] = '\0';
         element_name = name_buf;
         
-        // Debug output to stderr
+        printf("DEBUG: format_math_element processing element: '%s'\n", element_name);
+        
         #ifdef DEBUG_MATH_FORMAT
         log_debug("Math element name: '%s'", element_name);
         #endif
         
         if (strcmp(element_name, "implicit_mul") == 0) {
-        // Debug: Processing implicit_mul element
             implicit_mul_depth++;  // Increment depth when entering implicit_mul
         }
     }
     
-    if (!element_name) {
-        // Generic element, just format children if any
+    // Special handling for matrix environments - handle before format definition lookup
+    printf("DEBUG: Checking matrix element: '%s'\n", element_name ? element_name : "NULL");
+    if (element_name && (strcmp(element_name, "pmatrix") == 0 || strcmp(element_name, "bmatrix") == 0 || 
+        strcmp(element_name, "matrix") == 0 || strcmp(element_name, "vmatrix") == 0 || 
+        strcmp(element_name, "Vmatrix") == 0 || strcmp(element_name, "smallmatrix") == 0)) {
+        
+        printf("DEBUG: Matrix element detected: '%s', flavor=%d (LATEX=%d)\n", element_name, flavor, MATH_OUTPUT_LATEX);
+        
+        List* children = NULL;
         if (elmt_type->content_length > 0) {
-            List* children = (List*)elem;
-            format_math_children(sb, children, flavor, depth);
+            children = (List*)elem;
+        }
+        
+        printf("DEBUG: Children count: %d\n", children ? (int)children->length : 0);
+        
+        if (flavor == MATH_OUTPUT_LATEX) {
+            printf("DEBUG: Using LaTeX matrix formatting\n");
+            stringbuf_append_str(sb, "\\begin{");
+            stringbuf_append_str(sb, element_name);
+            stringbuf_append_str(sb, "}");
+            
+            if (children) {
+                for (int i = 0; i < children->length; i++) {
+                    if (i > 0) {
+                        stringbuf_append_str(sb, " \\\\ ");
+                    }
+                    
+                    // Handle row elements specially - format children with & separators
+                    Item row_item = children->items[i];
+                    if (get_type_id(row_item) == LMD_TYPE_ELEMENT) {
+                        Element* row_elem = (Element*)row_item.pointer;
+                        if (row_elem && row_elem->type) {
+                            TypeElmt* row_type = (TypeElmt*)row_elem->type;
+                            if (row_type && row_type->name.str && 
+                                row_type->name.length == 3 && strncmp(row_type->name.str, "row", 3) == 0) {
+                                // Format row children with & separators
+                                if (row_type->content_length > 0) {
+                                    List* row_children = (List*)row_elem;
+                                    for (int j = 0; j < row_children->length; j++) {
+                                        if (j > 0) {
+                                            stringbuf_append_str(sb, " & ");
+                                        }
+                                        format_math_item(sb, row_children->items[j], flavor, depth + 1);
+                                    }
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                    
+                    // Fallback for non-row elements
+                    format_math_item(sb, children->items[i], flavor, depth + 1);
+                }
+            }
+            
+            stringbuf_append_str(sb, "\\end{");
+            stringbuf_append_str(sb, element_name);
+            stringbuf_append_str(sb, "}");
+        } else {
+            // Fall back to function notation for other formats
+            stringbuf_append_str(sb, element_name);
+            stringbuf_append_str(sb, "(");
+            if (children) {
+                for (int i = 0; i < children->length; i++) {
+                    if (i > 0) {
+                        stringbuf_append_str(sb, ", ");
+                    }
+                    format_math_item(sb, children->items[i], flavor, depth + 1);
+                }
+            }
+            stringbuf_append_str(sb, ")");
         }
         return;
     }
     
     // Find format definition
     const MathFormatDef* def = find_format_def(element_name);
-    if (strcmp(element_name, "implicit_mul") == 0) {
-        // Debug: implicit_mul def
-        // Debug: implicit_mul binary op check
-    }
-    #ifdef DEBUG_MATH_FORMAT
-    log_debug("Format def for '%s': %s", element_name, def ? "found" : "not found");
-    if (def) {
-        log_debug("is_binary_op: %s, has_children: %s, needs_braces: %s", 
-                def->is_binary_op ? "true" : "false",
-                def->has_children ? "true" : "false", 
-                def->needs_braces ? "true" : "false");
-        log_debug("latex_format: '%s'", def->latex_format ? def->latex_format : "NULL");
-    }
-    #endif
-    // Enable debug output unconditionally for testing
+    
     #ifdef DEBUG_MATH_FORMAT
     log_debug("format_math_element called with element_name='%s', def=%p", element_name, def);
     #endif
     
     if (!def) {
+        
         // Unknown element, check if it has children (function call)
         if (elmt_type->content_length > 0) {
             List* children = (List*)elem;
@@ -963,6 +1034,51 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         return;
     }
     
+    // Special handling for matrix environments
+    if (strcmp(element_name, "pmatrix") == 0 || strcmp(element_name, "bmatrix") == 0 || 
+        strcmp(element_name, "matrix") == 0 || strcmp(element_name, "vmatrix") == 0 || 
+        strcmp(element_name, "Vmatrix") == 0 || strcmp(element_name, "smallmatrix") == 0) {
+        
+        
+        List* children = NULL;
+        if (elmt_type->content_length > 0) {
+            children = (List*)elem;
+        }
+        
+        if (flavor == MATH_OUTPUT_LATEX) {
+            stringbuf_append_str(sb, "\\begin{");
+            stringbuf_append_str(sb, element_name);
+            stringbuf_append_str(sb, "}");
+            
+            if (children) {
+                for (int i = 0; i < children->length; i++) {
+                    if (i > 0) {
+                        stringbuf_append_str(sb, " \\\\ ");
+                    }
+                    format_math_item(sb, children->items[i], flavor, depth + 1);
+                }
+            }
+            
+            stringbuf_append_str(sb, "\\end{");
+            stringbuf_append_str(sb, element_name);
+            stringbuf_append_str(sb, "}");
+        } else {
+            // Fall back to function notation for other formats
+            stringbuf_append_str(sb, element_name);
+            stringbuf_append_str(sb, "(");
+            if (children) {
+                for (int i = 0; i < children->length; i++) {
+                    if (i > 0) {
+                        stringbuf_append_str(sb, ", ");
+                    }
+                    format_math_item(sb, children->items[i], flavor, depth + 1);
+                }
+            }
+            stringbuf_append_str(sb, ")");
+        }
+        return;
+    }
+
     // Get format string and children
     const char* format_str = get_format_string(def, flavor);
     List* children = NULL;
