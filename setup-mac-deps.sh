@@ -508,7 +508,7 @@ build_nghttp2_for_mac() {
         cd - > /dev/null
     elif [ -f "configure" ]; then
         echo "Configuring nghttp2 (autotools)..."
-        if ./configure --prefix=/Users/$(whoami)/Projects/lambda/mac-deps/nghttp2 \
+        if ./configure --prefix="$SCRIPT_DIR/mac-deps/nghttp2" \
             --enable-static --disable-shared \
             --disable-app --disable-hpack-tools \
             --disable-examples --disable-python-bindings \
@@ -534,7 +534,7 @@ build_nghttp2_for_mac() {
             autoreconf -i
             if [ -f "configure" ]; then
                 echo "Configuring nghttp2 (autotools with autoreconf)..."
-                if ./configure --prefix=/Users/$(whoami)/Projects/lambda/mac-deps/nghttp2 \
+                if ./configure --prefix="$SCRIPT_DIR/mac-deps/nghttp2" \
                     --enable-static --disable-shared \
                     --disable-app --disable-hpack-tools \
                     --disable-examples --disable-python-bindings \
@@ -598,7 +598,7 @@ build_sigar_for_mac() {
     
     # Configure and build SIGAR
     echo "Configuring SIGAR..."
-    if ./autogen.sh && ./configure --prefix=/Users/$(whoami)/Projects/lambda/mac-deps/sigar \
+    if ./autogen.sh && ./configure --prefix="$SCRIPT_DIR/mac-deps/sigar" \
         --enable-static --disable-shared \
         --disable-java --disable-perl --disable-csharp; then
         
@@ -654,10 +654,10 @@ build_curl_with_http2_for_mac() {
     
     # Configure libcurl with HTTP/2 support
     echo "Configuring libcurl with HTTP/2 support..."
-    if ./configure --prefix=/Users/$(whoami)/Projects/lambda/mac-deps/curl-8.10.1 \
+    if ./configure --prefix="$SCRIPT_DIR/mac-deps/curl-8.10.1" \
         --enable-static --disable-shared \
         --with-openssl="$OPENSSL_PATH" \
-        --with-nghttp2=/Users/$(whoami)/Projects/lambda/mac-deps/nghttp2 \
+        --with-nghttp2="$SCRIPT_DIR/mac-deps/nghttp2" \
         --disable-ldap --disable-ldaps --disable-rtsp --disable-proxy \
         --disable-dict --disable-telnet --disable-tftp --disable-pop3 \
         --disable-imap --disable-smb --disable-smtp --disable-gopher \
