@@ -27,7 +27,7 @@ static int is_directory(const char* path) {
 #include <time.h>
 
 // Helper: create <file> or <dir> element with metadata
-static Element* create_entry_element(Input* input, const char* name, const char* path, struct stat* st, int is_dir) {
+static Element* create_entry_element(Input* input, const char* name, const char* path, struct stat* st, int is_dir, bool is_link) {
     Element* elmt = input_create_element(input, is_dir ? "dir" : "file");
     if (!elmt) return NULL;
     input_add_attribute_to_element(input, elmt, "name", name);
@@ -48,6 +48,12 @@ static Element* create_entry_element(Input* input, const char* name, const char*
         input_add_attribute_item_to_element(input, elmt, "modified", datetime_item);
     }
     
+    // Add is_link attribute if it's a symbolic link
+    if (is_link) {
+        Item link_item = {.item = b2it(true)};
+        input_add_attribute_item_to_element(input, elmt, "is_link", link_item);
+    }
+    
     // Keep mode as string for permissions
     char buf[64];
     snprintf(buf, sizeof(buf), "%o", (unsigned int)(st->st_mode & 0777));
@@ -65,10 +71,22 @@ static void traverse_directory(Input* input, Element* parent, const char* dir_pa
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
         char full_path[4096];
         snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
+        
+        // Use lstat to detect symbolic links
+        struct stat lst;
+        if (lstat(full_path, &lst) != 0) continue;
+        bool is_link = S_ISLNK(lst.st_mode);
+        
+        // Use stat for target information (follows links)
         struct stat st;
-        if (stat(full_path, &st) != 0) continue;
+        if (stat(full_path, &st) != 0) {
+            // If stat fails but lstat succeeded, it's a broken symlink
+            // Use lstat data for broken symlinks
+            st = lst;
+        }
+        
         int is_dir = S_ISDIR(st.st_mode);
-        Element* elmt = create_entry_element(input, entry->d_name, full_path, &st, is_dir);
+        Element* elmt = create_entry_element(input, entry->d_name, full_path, &st, is_dir, is_link);
         if (!elmt) continue;
         // Add as child content, not attribute
         Item elmt_item = {0};
@@ -103,7 +121,7 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
         dir_name = directory_path; // No '/' found, use the whole path
     }
     
-    Element* root = create_entry_element(input, dir_name, directory_path, &st, 1);
+    Element* root = create_entry_element(input, dir_name, directory_path, &st, 1, false);
     if (!root) { free(input); return NULL; }
     
     // Add the full path as a separate attribute for the root directory

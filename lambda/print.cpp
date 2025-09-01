@@ -361,6 +361,9 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
             print_item(strbuf, temp_item, depth + 1, indent);
         }
         break;
+    case LMD_TYPE_ERROR:
+        strbuf_append_str(strbuf, "error");
+        break;
     default:
         strbuf_append_format(strbuf, "unknown_type_%d", titem->type_id);
         break;
@@ -566,7 +569,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             strbuf_append_str(strbuf, indent ? "\n": (elmt_type->length ? "; ":" "));
             for (long i = 0; i < element->length; i++) {
                 if (i) strbuf_append_str(strbuf, indent ? "\n" : "; ");
-                if (indent) { for (int i=0; i<=depth; i++) strbuf_append_str(strbuf, indent); }
+                if (indent) { for (int i=0; i<depth; i++) strbuf_append_str(strbuf, indent); }
                 print_item(strbuf, element->items[i], depth + 1, indent);
             }
             // if (indent) {
