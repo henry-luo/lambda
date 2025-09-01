@@ -1,0 +1,8 @@
+{
+ name: :"test.txt",
+ size: :9
+}
+{
+ name: :"child_dir",
+ size: :64
+}

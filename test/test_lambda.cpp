@@ -200,3 +200,7 @@ Test(lambda_tests, test_func_ls) {
 Test(lambda_tests, test_int64_ls) {
     test_lambda_script_against_file("test/lambda/int64.ls", "test/lambda/int64.txt");
 }
+
+Test(lambda_tests, test_input_dir_ls) {
+    test_lambda_script_against_file("test/lambda/input_dir.ls", "test/lambda/input_dir.txt");
+}
