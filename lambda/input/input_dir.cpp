@@ -10,9 +10,8 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
-
-
 #include <stdlib.h>
+#include "../../lib/datetime.h"
 #include <sys/stat.h>
 
 // Helper: check if path is a directory
@@ -32,13 +31,28 @@ static Element* create_entry_element(Input* input, const char* name, const char*
     Element* elmt = input_create_element(input, is_dir ? "dir" : "file");
     if (!elmt) return NULL;
     input_add_attribute_to_element(input, elmt, "name", name);
+    
+    // Create size as integer
+    long* size_ptr;
+    MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&size_ptr);
+    if (err == MEM_POOL_ERR_OK) {
+        *size_ptr = (long)st->st_size;
+        Item size_item = {.item = l2it(size_ptr)};
+        input_add_attribute_item_to_element(input, elmt, "size", size_item);
+    }
+    
+    // Create modified as Lambda datetime from Unix timestamp
+    DateTime* dt_ptr = datetime_from_unix(input->pool, (int64_t)st->st_mtime);
+    if (dt_ptr) {
+        Item datetime_item = {.item = k2it(dt_ptr)};
+        input_add_attribute_item_to_element(input, elmt, "modified", datetime_item);
+    }
+    
+    // Keep mode as string for permissions
     char buf[64];
-    snprintf(buf, sizeof(buf), "%ld", (long)st->st_size);
-    input_add_attribute_to_element(input, elmt, "size", buf);
-    snprintf(buf, sizeof(buf), "%ld", (long)st->st_mtime);
-    input_add_attribute_to_element(input, elmt, "modified", buf);
     snprintf(buf, sizeof(buf), "%o", (unsigned int)(st->st_mode & 0777));
-    input_add_attribute_to_element(input, elmt, "mode", buf);
+    String* mode_str = input_create_string(input, buf);
+    input_add_attribute_item_to_element(input, elmt, "mode", {.item = y2it(mode_str)});
     return elmt;
 }
 
