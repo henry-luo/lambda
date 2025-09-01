@@ -3366,13 +3366,15 @@ static Item parse_inline_math(MarkupParser* parser, const char** text) {
     // Add type attribute for inline math
     add_attribute_to_element(parser->input, math_elem, "type", "inline");
     
-    // Create content string
-    char* content = (char*)malloc(content_len + 1);
+    // Create content string with extra padding to prevent buffer overflow
+    char* content = (char*)malloc(content_len + 16);  // Add 16 bytes padding
     if (!content) {
         return (Item){.item = ITEM_ERROR};
     }
     strncpy(content, content_start, content_len);
     content[content_len] = '\0';
+    // Zero out the padding to ensure clean memory
+    memset(content + content_len + 1, 0, 15);
     
     // Parse the math content using the math parser
     const char* math_flavor = detect_math_flavor(content);
