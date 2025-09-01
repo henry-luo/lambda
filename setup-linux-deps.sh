@@ -98,7 +98,7 @@ sudo apt install -y \
     python3 \
     python3-pip \
     libmpdec-dev \
-    libreadline-dev \
+    libedit-dev \
     coreutils
 
 # Try to install criterion via apt, build from source if not available
@@ -536,7 +536,7 @@ echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo 
 echo "- curl: $([ -f "/usr/lib/x86_64-linux-gnu/libcurl.so" ] || dpkg -l | grep -q libcurl && echo "✓ Available" || echo "✗ Missing")"
 echo "- mpdecimal: $([ -f "/usr/lib/x86_64-linux-gnu/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- utf8proc: $([ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] && echo "✓ Available" || echo "✗ Missing")"
-echo "- readline: $([ -f "/usr/lib/x86_64-linux-gnu/libreadline.so" ] || dpkg -l | grep -q libreadline-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- libedit: $([ -f "/usr/lib/x86_64-linux-gnu/libedit.so" ] || dpkg -l | grep -q libedit-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- criterion: $([ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ] || dpkg -l | grep -q libcriterion-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo ""
