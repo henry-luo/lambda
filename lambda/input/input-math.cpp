@@ -1171,8 +1171,8 @@ static Item parse_latex_command(Input *input, const char **math) {
     stringbuf_reset(sb);
     
     // Handle spacing commands first (single punctuation characters)
-    // Note: Exclude ':' as it's used in function type annotations like f: A -> B
-    if (**math == '!' || **math == ',' || **math == ';') {
+    // Include ':' for LaTeX spacing command \:
+    if (**math == '!' || **math == ',' || **math == ';' || **math == ':') {
         stringbuf_append_char(sb, **math);
         (*math)++;
     } else {
@@ -1223,7 +1223,10 @@ static Item parse_latex_command(Input *input, const char **math) {
         stringbuf_reset(sb);
         Element* elem = create_math_element(input, "thin_space");
         return {.item = (uint64_t)elem};
-    // Removed colon handling - colons should be parsed at expression level for type annotations
+    } else if (strcmp(cmd_string->chars, ":") == 0) {
+        stringbuf_reset(sb);
+        Element* elem = create_math_element(input, "med_space");
+        return {.item = (uint64_t)elem};
     } else if (strcmp(cmd_string->chars, ";") == 0) {
         stringbuf_reset(sb);
         Element* elem = create_math_element(input, "thick_space");
