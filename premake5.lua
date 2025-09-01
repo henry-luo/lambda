@@ -386,7 +386,7 @@ project "test_strbuf"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -439,7 +439,7 @@ project "test_stringbuf"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -491,7 +491,7 @@ project "test_strview"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -544,7 +544,7 @@ project "test_variable_pool"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -597,7 +597,7 @@ project "test_num_stack"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -650,7 +650,7 @@ project "test_datetime"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -703,7 +703,7 @@ project "test_url"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -756,7 +756,7 @@ project "test_url_extra"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -809,7 +809,7 @@ project "test_mime_detect"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -887,7 +887,7 @@ project "test_math"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -978,7 +978,7 @@ project "test_markup_roundtrip"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -1059,7 +1059,7 @@ project "test_input_roundtrip"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -1140,7 +1140,7 @@ project "test_dir"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -1221,7 +1221,7 @@ project "test_http"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -1302,7 +1302,7 @@ project "test_sysinfo"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -1383,7 +1383,7 @@ project "test_validator"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -1464,7 +1464,7 @@ project "test_mir"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -1545,7 +1545,7 @@ project "test_lambda"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
@@ -1603,6 +1603,59 @@ project "test_lambda"
     }
     
 
+project "test_lambda_repl_simple"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_lambda_repl_simple.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "mac-deps/nghttp2/include",
+        "/opt/homebrew/opt/libedit/include",
+        "/opt/homebrew/Cellar/ginac/1.8.9/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "criterion",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-fms-extensions",
+        "-fcolor-diagnostics",
+        "-pedantic",
+    }
+    
+
 project "test_lambda_runner"
     kind "ConsoleApp"
     language "C++"
@@ -1627,7 +1680,7 @@ project "test_lambda_runner"
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/Cellar/readline/8.3.1/include",
+        "/opt/homebrew/opt/libedit/include",
         "/opt/homebrew/Cellar/ginac/1.8.9/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
