@@ -327,7 +327,7 @@ static void format_item(StringBuf* sb, Item item, const char* tag_name) {
     }
     case LMD_TYPE_ELEMENT: {
         printf("format_item: handling LMD_TYPE_ELEMENT\n");
-        Element* element = (Element*)item.pointer;
+        Element* element = item.element;
         if (!element || !element->type) {
             printf("format_item: element is null or element->type is null\n");
             stringbuf_append_format(sb, "<%s/>", tag_name);

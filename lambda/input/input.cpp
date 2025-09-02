@@ -516,6 +516,11 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             const char* math_flavor = (flavor && flavor->chars) ? flavor->chars : "latex";
             parse_math(input, source, math_flavor);
         }
+        else if (strncmp(effective_type, "math-", 5) == 0) {
+            // Handle compound math formats like "math-ascii", "math-latex", etc.
+            const char* math_flavor = effective_type + 5; // Skip "math-" prefix
+            parse_math(input, source, math_flavor);
+        }
         else if (strcmp(effective_type, "markup") == 0) {
             input->root = input_markup(input, source);
         }

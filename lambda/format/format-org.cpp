@@ -918,7 +918,7 @@ static void format_org_text(StringBuf* sb, Item item) {
             append_string(sb, str->chars);
         }
     } else if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         format_org_element(sb, elem);
     }
 }
