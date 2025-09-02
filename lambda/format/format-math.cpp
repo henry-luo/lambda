@@ -637,7 +637,7 @@ static SpaceType determine_element_spacing(const char* left_element, const char*
 
 static const char* get_item_element_name(Item item) {
     if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str) {
@@ -699,7 +699,7 @@ static bool is_single_character_item(Item item) {
         return result;
     } else if (type == LMD_TYPE_ELEMENT) {
         // Check for single-symbol LaTeX commands like \circ, \alpha, etc.
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -745,8 +745,8 @@ static bool item_contains_integral(Item item) {
             }
         }
     } else if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
-        
+        Element* elem = item.element;
+
         // Check if this element is an integral
         TypeElmt* elmt_type = (TypeElmt*)elem->type;
         if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -774,7 +774,7 @@ static bool item_contains_integral(Item item) {
 static bool item_is_latex_command(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -803,7 +803,7 @@ static bool item_is_latex_command(Item item) {
 static bool item_is_quantifier(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         if (elem && elem->type) {
             // Get the element type to access the name
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
@@ -825,7 +825,7 @@ static bool item_contains_only_symbols(Item item) {
     TypeId type = get_type_id(item);
     
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -853,7 +853,7 @@ static bool item_contains_only_symbols(Item item) {
 static bool item_is_symbol_element(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -929,7 +929,7 @@ static bool item_is_identifier_or_variable(Item item) {
     
     // Check if it's an element that represents a variable (single letter)
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -1316,7 +1316,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                     // Handle row elements specially - format children with & separators
                     Item row_item = children->items[i];
                     if (get_type_id(row_item) == LMD_TYPE_ELEMENT) {
-                        Element* row_elem = (Element*)row_item.pointer;
+                        Element* row_elem = row_item.element;
                         if (row_elem && row_elem->type) {
                             TypeElmt* row_type = (TypeElmt*)row_elem->type;
                             if (row_type && row_type->name.str && 
@@ -1368,9 +1368,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     log_debug("format_math_element called with element_name='%s', def=%p, flavor=%d", element_name, def, flavor);
     #endif
     
-    
     if (!def) {
-        
         // Unknown element, check if it has children (function call)
         if (elmt_type->content_length > 0) {
             List* children = (List*)elem;
@@ -1506,7 +1504,6 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         }
         return;
     }
-    
     
     // Special handling for styled fractions
     if (strcmp(element_name, "frac") == 0) {
@@ -1704,15 +1701,11 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     }
     #endif
     if (def->has_children && children && (strstr(format_str, "{1}") || strstr(format_str, "{*}"))) {
-        #ifdef DEBUG_MATH_FORMAT
-        log_debug("Using template formatting for element '%s' with format: '%s'", element_name, format_str);
-        #endif
-        
+        log_debug("Using template for element '%s' with format: '%s'", element_name, format_str);
+
         // Special handling for pow and subscript elements
         if (strcmp(element_name, "pow") == 0 && children->length == 2 && flavor == MATH_OUTPUT_LATEX) {
-            #ifdef DEBUG_MATH_FORMAT
             log_debug("Using special pow formatting for LaTeX");
-            #endif
             // Format as base^exponent with compact context to avoid extra spaces
             format_math_item(sb, children->items[0], flavor, depth + 1);
             stringbuf_append_str(sb, "^");
@@ -1731,12 +1724,13 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
             }
             
             in_compact_context = prev_compact_context;
-        } else if (strcmp(element_name, "eq") == 0 && children->length == 2 && 
-                   flavor == MATH_OUTPUT_LATEX) {
+        } 
+        else if (strcmp(element_name, "eq") == 0 && children->length == 2 && flavor == MATH_OUTPUT_LATEX) {
             // Always use template formatting for equals to get proper spacing
             format_math_children_with_template(sb, children, " = ", flavor, depth);
-        } else if (strcmp(element_name, "subscript") == 0 && children->length == 2 && 
-                   flavor == MATH_OUTPUT_LATEX && is_single_character_item(children->items[1])) {
+        } 
+        else if (strcmp(element_name, "subscript") == 0 && children->length == 2 && 
+            flavor == MATH_OUTPUT_LATEX && is_single_character_item(children->items[1])) {
             // Special handling for subscript - use _i for single characters instead of _{i}
             format_math_item(sb, children->items[0], flavor, depth + 1);
             stringbuf_append_str(sb, "_");
@@ -1745,14 +1739,10 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
             in_compact_context = true;
             format_math_item(sb, children->items[1], flavor, depth + 1);
             in_compact_context = prev_compact_context;
-        } else {
-            #ifdef DEBUG_MATH_FORMAT
-            if (strcmp(element_name, "pow") == 0) {
-                log_debug("pow element debug - element_name='%s', children->length=%ld, flavor=%d", 
-                        element_name, children->length, flavor);
-                log_debug("MATH_OUTPUT_LATEX constant value = %d", MATH_OUTPUT_LATEX);
-            }
-            #endif
+        } 
+        else {
+            log_debug("element format - element_name='%s', children->length=%ld, flavor=%d", 
+                element_name, children->length, flavor);
             
             // Set compact context for subscripts and superscripts
             bool prev_compact_context = in_compact_context;
@@ -1885,8 +1875,7 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
             #ifdef DEBUG_MATH_FORMAT
             log_debug("format_math_item: Processing ELEMENT");
             #endif
-            Element* elem = (Element*)item.pointer;
-            format_math_element(sb, elem, flavor, depth);
+            format_math_element(sb, item.element, flavor, depth);
             break;
         }
         case LMD_TYPE_SYMBOL: {
@@ -1917,7 +1906,7 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
         }
         case LMD_TYPE_INT: {
             // Check for invalid raw integer values that weren't properly encoded
-            if (item.item < 0x1000 && item.item > 0) {
+            if (item.item < 0x1000) {
                 log_debug("Detected invalid raw integer item=0x%llx, treating as value=%lld", item.item, item.item);
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%lld", item.item);
@@ -2277,7 +2266,7 @@ static void append_char_if_needed(StringBuf* sb, char c) {
 // Helper function to check if an item ends with a partial derivative
 static bool item_ends_with_partial(Item item) {
     if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && 
@@ -2303,7 +2292,7 @@ static bool item_ends_with_partial(Item item) {
 // Helper function to check if an item starts with a partial derivative
 static bool item_starts_with_partial(Item item) {
     if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && 
