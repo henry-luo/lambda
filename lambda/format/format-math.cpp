@@ -95,7 +95,7 @@ static const MathFormatDef basic_operators[] = {
     {"sub", " - ", " - ", " - ", "<mo>-</mo>", " - ", true, false, true, 2},
     {"unary_minus", "-{1}", "-{1}", "-{1}", "<mo>-</mo>{1}", "-{1}", true, false, false, 1},
     {"mul", " \\cdot ", " * ", " * ", "<mo>⋅</mo>", " × ", true, false, true, 2},
-    {"implicit_mul", "", "", " ", "", "", true, false, true, 2},
+    {"implicit_mul", "{1} {2}", "{1} {2}", "{1} {2}", "{1} {2}", "{1} {2}", true, false, true, 2},
     {"div", " / ", " / ", " / ", "<mo>/</mo>", " / ", true, false, true, 2},
     {"latex_div", " \\div ", " / ", " / ", "<mo>÷</mo>", " ÷ ", true, false, true, 2},
     {"pow", "{1}^{2}", "{1}^{2}", "{1}**{2}", "<msup>{1}{2}</msup>", "^", true, false, false, 2},
@@ -1401,49 +1401,6 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         return;
     }
     
-    // Special handling for implicit multiplication - apply comprehensive spacing rules
-    if (strcmp(element_name, "implicit_mul") == 0) {
-        List* children = NULL;
-        if (elmt->length > 0) {
-            children = (List*)elmt;
-        }
-        
-        if (children) {
-            for (int i = 0; i < children->length; i++) {
-                if (i > 0) {
-                    const char* prev_name = get_item_element_name(children->items[i-1]);
-                    const char* curr_name = get_item_element_name(children->items[i]);
-                    
-                    bool space_added = false;
-                    
-                    // Critical: Add space before differential elements (dx, dy, dA, etc.)
-                    if (curr_name && (strcmp(curr_name, "dx") == 0 || strcmp(curr_name, "dy") == 0 || 
-                                     strcmp(curr_name, "dz") == 0 || strcmp(curr_name, "dt") == 0 ||
-                                     strcmp(curr_name, "dA") == 0 || strcmp(curr_name, "dV") == 0 ||
-                                     strcmp(curr_name, "dS") == 0 || strcmp(curr_name, "dr") == 0)) {
-                        stringbuf_append_str(sb, " ");
-                        space_added = true;
-                    }
-                    // Critical: Add space after integral with bounds
-                    else if (prev_name && (strcmp(prev_name, "int") == 0 || strcmp(prev_name, "iint") == 0 || 
-                                          strcmp(prev_name, "iiint") == 0 || strcmp(prev_name, "oint") == 0)) {
-                        stringbuf_append_str(sb, " ");
-                        space_added = true;
-                    }
-                    
-                    // Apply config-driven spacing if no special case was handled
-                    if (!space_added) {
-                        SpaceType space_type = determine_element_spacing(prev_name, curr_name, MATH_CONTEXT_NORMAL);
-                        if (space_type != SPACE_NONE) {
-                            append_space_by_type(sb, space_type);
-                        }
-                    }
-                }
-                format_math_item(sb, children->items[i], flavor, depth + 1);
-            }
-        }
-        return;
-    }
 
     // Get format string and children
     const char* format_str = get_format_string(def, flavor);
@@ -1470,43 +1427,22 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     log_debug("format_str='%s'", format_str);
     #endif
 
-    // Special handling for binary operators using new spacing system
-    // Special case for implicit_mul: use config-driven spacing
-    if (def->is_binary_op && strcmp(element_name, "implicit_mul") == 0 && children && children->length >= 2) {
-        // Use new spacing system for implicit multiplication
-        MathContext current_context = in_compact_context ? MATH_CONTEXT_SUBSCRIPT : MATH_CONTEXT_NORMAL;
-        
-        for (int i = 0; i < children->length; i++) {
-            if (i > 0) {
-                // Get element names for spacing decision
-                const char* prev_name = get_item_element_name(children->items[i-1]);
-                const char* curr_name = get_item_element_name(children->items[i]);
-                
-                // Determine spacing using config-driven system
-                SpaceType space_needed = determine_element_spacing(prev_name, curr_name, current_context);
-                
-                // Apply the spacing
-                if (space_needed != SPACE_NONE && flavor == MATH_OUTPUT_LATEX) {
-                    append_space_by_type(sb, space_needed);
-                } else if (space_needed != SPACE_NONE) {
-                    stringbuf_append_str(sb, " ");  // Fallback for non-LaTeX formats
-                }
-            }
-            format_math_item(sb, children->items[i], flavor, depth + 1);
-        }
+    // Check if this is a template format (contains placeholders like {1}, {2})
+    if (strchr(format_str, '{')) {
+        format_math_children_with_template(sb, children, format_str, flavor, depth);
         return;
     }
     
     // Standard binary operator handling - format with proper operator symbols
-    if (def->is_binary_op && children && children->length >= 2 && strcmp(element_name, "implicit_mul") != 0) {
-        // For standard binary operators, format as: left operator right
-        if (children->length == 2) {
+    if (def->is_binary_op && children && children->length >= 2) {
+        // For implicit_mul and operators with more than 2 operands, use template formatting
+        if (strcmp(element_name, "implicit_mul") == 0 || children->length > 2) {
+            format_math_children_with_template(sb, children, format_str, flavor, depth);
+        } else {
+            // For standard binary operators with exactly 2 operands, format as: left operator right
             format_math_item(sb, children->items[0], flavor, depth + 1);
             stringbuf_append_str(sb, format_str);  // This contains the operator symbol with spacing
             format_math_item(sb, children->items[1], flavor, depth + 1);
-        } else {
-            // For operators with more than 2 operands, use template formatting
-            format_math_children_with_template(sb, children, format_str, flavor, depth);
         }
         return;
     }
@@ -1571,19 +1507,26 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                 // ASCII format: sum_(i=1)^n i
                 for (int i = 0; i < children->length; i++) {
                     if (i == 0) {
-                        // First child is always subscript (lower bound)
+                        // First child is subscript (lower bound)
                         #ifdef DEBUG_MATH_FORMAT
                         log_debug("Adding subscript for ASCII big operator, StringBuf before: '%s'", sb->str ? sb->str->chars : "NULL");
                         #endif
-                        stringbuf_append_str(sb, "_(");
+                        stringbuf_append_str(sb, "_");
+                        // Don't use parentheses for single characters in ASCII
+                        bool needs_parens = !is_single_character_item(children->items[i]);
+                        if (needs_parens) {
+                            stringbuf_append_str(sb, "(");
+                        }
                         #ifdef DEBUG_MATH_FORMAT
-                        log_debug("Added '_(' to StringBuf, now: '%s'", sb->str ? sb->str->chars : "NULL");
+                        log_debug("Added subscript prefix to StringBuf, now: '%s'", sb->str ? sb->str->chars : "NULL");
                         #endif
                         bool prev_compact_context = in_compact_context;
                         in_compact_context = true;
                         format_math_item(sb, children->items[i], flavor, depth + 1);
                         in_compact_context = prev_compact_context;
-                        stringbuf_append_str(sb, ")");
+                        if (needs_parens) {
+                            stringbuf_append_str(sb, ")");
+                        }
                         #ifdef DEBUG_MATH_FORMAT
                         log_debug("Completed subscript formatting, StringBuf now: '%s'", sb->str ? sb->str->chars : "NULL");
                         #endif
