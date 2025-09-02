@@ -258,6 +258,7 @@ project "lambda-runtime-full-c"
     
     linkoptions {
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     links {
@@ -322,6 +323,7 @@ project "lambda-runtime-full-cpp"
     
     linkoptions {
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     links {
@@ -832,11 +834,13 @@ project "test_mime_detect"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
+        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -921,11 +925,13 @@ project "test_math"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
+        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -1012,11 +1018,13 @@ project "test_math_ascii"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
+        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -1093,11 +1101,13 @@ project "test_markup_roundtrip"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
+        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -1174,11 +1184,13 @@ project "test_input_roundtrip"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
+        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -1255,11 +1267,13 @@ project "test_dir"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
+        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -1336,11 +1350,13 @@ project "test_http"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
+        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -1417,11 +1433,13 @@ project "test_sysinfo"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
+        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -1498,11 +1516,13 @@ project "test_validator"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
+        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -1581,11 +1601,13 @@ project "test_mir"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
+        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -1662,11 +1684,13 @@ project "test_lambda"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
+        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -1797,11 +1821,13 @@ project "test_lambda_runner"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
+        "ncurses",
     }
     
     -- Add macOS frameworks

@@ -41,6 +41,7 @@
         "lambda/validator/validate.cpp",
         "lambda/validator/validator.cpp",
         "lambda/validator/schema_parser.cpp",
+        "lambda/main-repl.cpp",
         "lambda/main.cpp"
     ],
     "libraries": [
@@ -233,7 +234,7 @@
                 "lib/log.c", 
                 "lib/utf.c"
             ],
-            "libraries": ["mem-pool", "strbuf", "strview", "string", "num_stack", "datetime", "url", "mime-detect", "criterion"],
+            "libraries": ["mem-pool", "strbuf", "strview", "string", "num_stack", "datetime", "url", "mime-detect", "criterion", "libedit"],
             "include": "lib/mem-pool/include",
             "special_flags": "-lstdc++",
             "link": "static"
