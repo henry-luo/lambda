@@ -419,8 +419,28 @@ if [ "$CROSS_COMPILE" = "true" ] && [ -n "$TARGET_TRIPLET" ]; then
         exit 1
     fi
 else
-    CC="clang"
-    CXX="clang++"
+    # Use build configuration or environment variables for compiler selection
+    if [ -n "$CC" ]; then
+        # Use environment variable if set
+        CC="$CC"
+    elif [ -f "build_lambda_config.json" ] && command -v jq >/dev/null 2>&1; then
+        # Use compiler from build config
+        CONFIG_COMPILER=$(jq -r '.compiler // "gcc"' build_lambda_config.json 2>/dev/null)
+        CC="$CONFIG_COMPILER"
+    else
+        CC="gcc"  # Default to gcc for Linux compatibility
+    fi
+    
+    if [ -n "$CXX" ]; then
+        # Use environment variable if set
+        CXX="$CXX"
+    elif [ "$CC" = "gcc" ]; then
+        CXX="g++"
+    elif [ "$CC" = "clang" ]; then
+        CXX="clang++"
+    else
+        CXX="${CC}++"
+    fi
 fi
 
 echo "Using C compiler: $CC"
@@ -533,7 +553,7 @@ else
         FLAGS="-fms-extensions -static -DCROSS_COMPILE -D_WIN32"
         LINKER_FLAGS="-static-libgcc -static-libstdc++"
     else
-        INCLUDES="-Ilambda/tree-sitter/lib/include -Ilambda/tree-sitter-lambda/bindings/c -I/usr/local/include -I/opt/homebrew/include"
+        INCLUDES="-Ilambda/tree-sitter/lib/include -Ilambda/tree-sitter-lambda/bindings/c -I/usr/local/include -I/opt/homebrew/include -I."
         LIBS="lambda/tree-sitter/libtree-sitter.a lambda/tree-sitter-lambda/libtree-sitter-lambda.a /usr/local/lib/libmir.a /usr/local/lib/liblexbor_static.a"
         LINK_LIBS="-L/opt/homebrew/lib -lgmp"
         WARNINGS="-Werror=format -Werror=incompatible-pointer-types -Werror=multichar"
