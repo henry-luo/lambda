@@ -1,65 +1,112 @@
 "===== BASIC ASCII COMPARISON TESTS ====="
+"hello equals hello:"
 true
+"hello equals world:"
 false
+"hello not equals world:"
 true
+"abc less than def:"
 true
+"def greater than abc:"
 true
+"abc less than or equal abc:"
 true
+"abc greater than or equal abc:"
 true
+"hello less than world:"
 true
 "Basic ASCII tests completed"
 "===== UNICODE NORMALIZATION TESTS ====="
+"café equals café (normalization):"
 true
+"naïve equals naïve:"
 true
+"résumé equals résumé:"
 true
 "Unicode normalization tests completed"
 "===== LATIN EXTENDED CHARACTER TESTS ====="
+"café not equals cafe:"
 true
+"naïve not equals naive:"
 true
+"résumé not equals resume:"
 true
+"Straße not equals Strasse:"
 true
+"müller not equals muller:"
 true
+"København not equals Kobenhavn:"
 true
+"Göteborg not equals Goteborg:"
 true
 "Latin extended tests completed"
 "===== UNICODE RELATIONAL COMPARISON TESTS ====="
+"a less than á:"
 true
+"á less than b:"
 false
+"n less than ñ:"
 true
+"ñ less than o:"
 false
+"A less than a:"
 true
+"Hello less than hello:"
 true
 "Unicode relational tests completed"
 "===== EMOJI AND SYMBOL TESTS ====="
+"apple emoji equals apple emoji:"
 true
+"apple not equals banana emoji:"
 true
+"waving hand equals waving hand:"
 true
+"waving hand medium tone equals same:"
 true
+"waving hand medium tone not equals default:"
 true
+"copyright equals copyright:"
 true
+"registered not equals copyright:"
 true
 "Emoji and symbol tests completed"
 "===== NON-LATIN SCRIPT TESTS ====="
+"alpha equals alpha:"
 true
+"alpha not equals beta:"
 true
+"alpha less than beta:"
 true
+"cyrillic a equals cyrillic a:"
 true
+"cyrillic a not equals cyrillic b:"
 true
+"Moscow equals Moscow:"
 true
 "Non-Latin script tests completed"
 "===== EDGE CASES AND ERROR HANDLING ====="
+"hello equals 42 (type error):"
 error
+"hello less than true (type error):"
 error
 "Edge case tests completed"
 "===== COMPLEX UNICODE TESTS ====="
+"Hello世界 equals Hello世界:"
 true
+"café東京 equals café東京:"
 true
+"long English string equals same:"
 true
+"long accented string equals same:"
 true
+"fullwidth 123 equals fullwidth 123:"
 true
+"fullwidth 123 not equals ascii 123:"
 true
 "Complex Unicode tests completed"
 "===== PERFORMANCE TESTS (ASCII FAST PATH) ====="
+"long ASCII string equals same:"
 true
+"long Unicode string equals same:"
 true
 "Unicode tests completed"
