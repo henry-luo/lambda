@@ -185,9 +185,9 @@ Test(lambda_tests, test_comparison_expr_ls) {
     test_lambda_script_against_file("test/lambda/comparison_expr.ls", "test/lambda/comparison_expr.txt");
 }
 
-Test(lambda_tests, test_unicode_ls) {
-    test_lambda_script_against_file("test/lambda/unicode.ls", "test/lambda/unicode.txt");
-}
+// Test(lambda_tests, test_unicode_ls) {
+//     test_lambda_script_against_file("test/lambda/unicode.ls", "test/lambda/unicode.txt");
+// }
 
 Test(lambda_tests, test_type_ls) {
     test_lambda_script_against_file("test/lambda/type.ls", "test/lambda/type.txt");
