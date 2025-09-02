@@ -159,6 +159,11 @@ The math parser produces a syntax tree composed of nested Lambda elements using 
 3. **ASCII Math** - Simplified ASCII-based math notation with `^` and `**` power operators
 4. **MathML** - W3C standard XML markup for mathematical expressions
 
+- LaTeX Math inline mode in Markdown: $ expr $
+- LaTeX Math block mode in Markdown: `$$ expr $$`
+- ASCII Math inline mode in Markdown: \` expr \` 
+- ASCII Math block mode in Markdown: \`\`\`asciimath expr \`\`\` ```
+
 ### MathML Integration
 **Mathematical Markup Language (MathML)** is the W3C standard for representing mathematical notation in web pages and applications. The Lambda math parser documentation includes MathML equivalents for all supported expressions to facilitate:
 
@@ -248,30 +253,6 @@ static const struct {
 };
 ```
 
-#### **Unified Lookup System**
-The new system uses a single, efficient lookup function:
-
-```c
-static const MathExprDef* find_math_expression(const char* cmd, MathFlavor flavor) {
-    // Search all groups for the expression
-    for (int group_idx = 0; group_idx < GROUP_COUNT; group_idx++) {
-        const MathExprDef* defs = math_groups[group_idx].definitions;
-        for (int def_idx = 0; defs[def_idx].latex_cmd; def_idx++) {
-            const MathExprDef* def = &defs[def_idx];
-            
-            // Match based on input flavor (LaTeX, Typst, ASCII)
-            const char* target_cmd = (flavor == MATH_FLAVOR_LATEX) ? def->latex_cmd :
-                                   (flavor == MATH_FLAVOR_TYPST) ? def->typst_syntax :
-                                   def->ascii_syntax;
-            
-            if (target_cmd && strcmp(cmd, target_cmd) == 0) {
-                return def;
-            }
-        }
-    }
-    return NULL;
-}
-```
 
 ### 📊 **Testing Results & Validation**
 
@@ -315,14 +296,6 @@ The refactored parser has been extensively tested with comprehensive test suites
 - **📦 25% smaller code size** due to eliminated redundancy  
 - **🧠 Reduced memory** footprint from unified data structures
 - **⚡ O(1) group identification** vs. O(n) linear search
-
-### 🛣️ **Migration & Compatibility**
-
-#### **Backward Compatibility**
-- ✅ **100% compatible** with existing Lambda math expressions
-- ✅ **No breaking changes** to public API
-- ✅ **Existing test suites** continue to pass
-- ✅ **Legacy syntax** still supported
 
 #### **Future Extensibility**
 The new architecture makes adding mathematical expressions trivial:
@@ -480,26 +453,26 @@ The following table lists all math expressions supported by Lambda's math parser
 
 The following constructs were added in the most recent enhancement phase:
 
-| Lambda Expression | LaTeX | MathML | Unicode | Description |
-|------------------|-------|--------|---------|-------------|
-| `<ell 'ℓ'>` | `\ell` | `<mi>ℓ</mi>` | ℓ | Script lowercase l |
-| `<hbar 'ℏ'>` | `\hbar` | `<mi>ℏ</mi>` | ℏ | Planck constant |
-| `<imath 'ı'>` | `\imath` | `<mi>ı</mi>` | ı | Dotless i |
-| `<jmath 'ȷ'>` | `\jmath` | `<mi>ȷ</mi>` | ȷ | Dotless j |
-| `<aleph_0 'ℵ₀'>` | `\aleph_0` | `<mi>ℵ₀</mi>` | ℵ₀ | Aleph null (cardinal) |
-| `<beth_1 'ב₁'>` | `\beth_1` | `<mi>ב₁</mi>` | ב₁ | Beth one (cardinal) |
-| `<bigcup 'A'>` | `\bigcup A` | `<mo>⋃</mo><mi>A</mi>` | ⋃ | Big union |
-| `<bigcap 'B'>` | `\bigcap B` | `<mo>⋂</mo><mi>B</mi>` | ⋂ | Big intersection |
-| `<bigoplus 'C'>` | `\bigoplus C` | `<mo>⊕</mo><mi>C</mi>` | ⊕ | Big circled plus |
-| `<bigotimes 'D'>` | `\bigotimes D` | `<mo>⊗</mo><mi>D</mi>` | ⊗ | Big circled times |
-| `<bigwedge 'E'>` | `\bigwedge E` | `<mo>⋀</mo><mi>E</mi>` | ⋀ | Big logical and |
-| `<bigvee 'F'>` | `\bigvee F` | `<mo>⋁</mo><mi>F</mi>` | ⋁ | Big logical or |
-| `<frac style:"dfrac";'a';'b'>` | `\dfrac{a}{b}` | `<mfrac displaystyle="true"><mi>a</mi><mi>b</mi></mfrac>` | — | Display-style fraction |
-| `<frac style:"tfrac";'c';'d'>` | `\tfrac{c}{d}` | `<mfrac displaystyle="false"><mi>c</mi><mi>d</mi></mfrac>` | — | Text-style fraction |
-| `<frac style:"cfrac";'e';'f'>` | `\cfrac{e}{f}` | `<mfrac><mi>e</mi><mi>f</mi></mfrac>` | — | Continued fraction |
-| `<root index:"3";8>` | `\cbrt{8}` | `<mroot><mn>8</mn><mn>3</mn></mroot>` | ∛ | Cube root |
-| `<root index:"n";'x'>` | `\sqrt[n]{x}` | `<mroot><mi>x</mi><mi>n</mi></mroot>` | — | n-th root |
-| `<sqrt 16>` | `\sqrt{16}` | `<msqrt><mn>16</mn></msqrt>` | √ | Square root |
+| Lambda Expression              | LaTeX          | MathML                                                     | Unicode | Description            |
+| ------------------------------ | -------------- | ---------------------------------------------------------- | ------- | ---------------------- |
+| `<ell 'ℓ'>`                    | `\ell`         | `<mi>ℓ</mi>`                                               | ℓ       | Script lowercase l     |
+| `<hbar 'ℏ'>`                   | `\hbar`        | `<mi>ℏ</mi>`                                               | ℏ       | Planck constant        |
+| `<imath 'ı'>`                  | `\imath`       | `<mi>ı</mi>`                                               | ı       | Dotless i              |
+| `<jmath 'ȷ'>`                  | `\jmath`       | `<mi>ȷ</mi>`                                               | ȷ       | Dotless j              |
+| `<aleph_0 'ℵ₀'>`               | `\aleph_0`     | `<mi>ℵ₀</mi>`                                              | ℵ₀      | Aleph null (cardinal)  |
+| `<beth_1 'ב₁'>`                | `\beth_1`      | `<mi>ב₁</mi>`                                              | ב₁      | Beth one (cardinal)    |
+| `<bigcup 'A'>`                 | `\bigcup A`    | `<mo>⋃</mo><mi>A</mi>`                                     | ⋃       | Big union              |
+| `<bigcap 'B'>`                 | `\bigcap B`    | `<mo>⋂</mo><mi>B</mi>`                                     | ⋂       | Big intersection       |
+| `<bigoplus 'C'>`               | `\bigoplus C`  | `<mo>⊕</mo><mi>C</mi>`                                     | ⊕       | Big circled plus       |
+| `<bigotimes 'D'>`              | `\bigotimes D` | `<mo>⊗</mo><mi>D</mi>`                                     | ⊗       | Big circled times      |
+| `<bigwedge 'E'>`               | `\bigwedge E`  | `<mo>⋀</mo><mi>E</mi>`                                     | ⋀       | Big logical and        |
+| `<bigvee 'F'>`                 | `\bigvee F`    | `<mo>⋁</mo><mi>F</mi>`                                     | ⋁       | Big logical or         |
+| `<frac style:"dfrac";'a';'b'>` | `\dfrac{a}{b}` | `<mfrac displaystyle="true"><mi>a</mi><mi>b</mi></mfrac>`  | —       | Display-style fraction |
+| `<frac style:"tfrac";'c';'d'>` | `\tfrac{c}{d}` | `<mfrac displaystyle="false"><mi>c</mi><mi>d</mi></mfrac>` | —       | Text-style fraction    |
+| `<frac style:"cfrac";'e';'f'>` | `\cfrac{e}{f}` | `<mfrac><mi>e</mi><mi>f</mi></mfrac>`                      | —       | Continued fraction     |
+| `<root index:"3";8>`           | `\cbrt{8}`     | `<mroot><mn>8</mn><mn>3</mn></mroot>`                      | ∛       | Cube root              |
+| `<root index:"n";'x'>`         | `\sqrt[n]{x}`  | `<mroot><mi>x</mi><mi>n</mi></mroot>`                      | —       | n-th root              |
+| `<sqrt 16>`                    | `\sqrt{16}`    | `<msqrt><mn>16</mn></msqrt>`                               | √       | Square root            |
 
 **Complex Expression Example**:
 ```latex
@@ -689,6 +662,7 @@ Input: "x^2 + y**3"          → <add <pow 'x' "2"> <pow 'y' "3">>
 - **⚡ Flavors**: 3 syntax flavors (LaTeX, Typst, ASCII)
 - **🚀 Performance**: O(1) group-based lookup
 - **🎨 Coverage**: Industry-leading mathematical notation support
+
 ## Current Limitations and Known Issues
 
 ### Input Format Limitations
