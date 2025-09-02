@@ -411,8 +411,8 @@ static const MathFormatDef modular[] = {
 
 // Spacing commands
 static const MathFormatDef spacing[] = {
-    {"quad", "\\quad ", "quad", "quad", "<mspace width='1em'/>", "  ", false, false, false, 0},
-    {"qquad", "\\qquad ", "qquad", "qquad", "<mspace width='2em'/>", "    ", false, false, false, 0},
+    {"quad", "\\quad", "quad", "quad", "<mspace width='1em'/>", "  ", false, false, false, 0},
+    {"qquad", "\\qquad", "qquad", "qquad", "<mspace width='2em'/>", "    ", false, false, false, 0},
     {"thin_space", "\\,", ",", "thin_space", "<mspace width='0.167em'/>", " ", false, false, false, 0},
     {"med_space", "\\:", ":", "med_space", "<mspace width='0.222em'/>", " ", false, false, false, 0},
     {"thick_space", "\\;", ";", "thick_space", "<mspace width='0.278em'/>", " ", false, false, false, 0},
@@ -483,6 +483,11 @@ static const ElementSpacingRule element_spacing_rules[] = {
 
 // Pair-specific spacing overrides
 static const SpacingPairRule pair_spacing_rules[] = {
+    // Function calls - no space before parentheses
+    {"*", "paren_group", SPACE_NONE, MATH_CONTEXT_NORMAL},
+    {"*", "parentheses", SPACE_NONE, MATH_CONTEXT_NORMAL},
+    {"*", "lparen", SPACE_NONE, MATH_CONTEXT_NORMAL},
+    
     // Function applications - functions need space before arguments
     {"sin", "*", SPACE_THIN, MATH_CONTEXT_NORMAL},
     {"cos", "*", SPACE_THIN, MATH_CONTEXT_NORMAL},
@@ -604,8 +609,24 @@ static const char* get_element_category(const char* element_name) {
 static SpaceType determine_element_spacing(const char* left_element, const char* right_element, MathContext context) {
     if (!left_element || !right_element) return SPACE_NONE;
     
+    // Debug output for function spacing issues
+    if (strstr(left_element, "text") || strstr(right_element, "text") || 
+        strcmp(left_element, "im") == 0 || strcmp(right_element, "im") == 0) {
+        printf("DEBUG SPACING: left='%s', right='%s', context=%d\n", left_element, right_element, context);
+    }
+    
     // In compact contexts (subscripts, superscripts), minimize spacing
     if (context == MATH_CONTEXT_SUBSCRIPT || context == MATH_CONTEXT_SUPERSCRIPT) {
+        return SPACE_NONE;
+    }
+    
+    // Don't add spaces around spacing commands - they handle their own spacing
+    if (strcmp(left_element, "thin_space") == 0 || strcmp(left_element, "thick_space") == 0 ||
+        strcmp(left_element, "med_space") == 0 || strcmp(left_element, "neg_space") == 0 ||
+        strcmp(left_element, "quad") == 0 || strcmp(left_element, "qquad") == 0 ||
+        strcmp(right_element, "thin_space") == 0 || strcmp(right_element, "thick_space") == 0 ||
+        strcmp(right_element, "med_space") == 0 || strcmp(right_element, "neg_space") == 0 ||
+        strcmp(right_element, "quad") == 0 || strcmp(right_element, "qquad") == 0) {
         return SPACE_NONE;
     }
     
@@ -1175,16 +1196,23 @@ static void format_math_children(StringBuf* sb, List* children, MathOutputFlavor
             const char* prev_name = get_item_element_name(children->items[i-1]);
             const char* curr_name = get_item_element_name(children->items[i]);
             
+            // Debug: print all element names for integral expressions (only for implicit_mul)
+            if (prev_name && curr_name) {
+                printf("DEBUG SPACING: prev='%s', curr='%s'\n", prev_name, curr_name);
+            }
+            
             // Check for differential spacing (space before dx, dy, dA, etc.)
             if (curr_name && (strcmp(curr_name, "dx") == 0 || strcmp(curr_name, "dy") == 0 || 
                              strcmp(curr_name, "dz") == 0 || strcmp(curr_name, "dt") == 0 ||
                              strcmp(curr_name, "dA") == 0 || strcmp(curr_name, "dV") == 0 ||
                              strcmp(curr_name, "dS") == 0 || strcmp(curr_name, "dr") == 0)) {
+                printf("DEBUG: Adding space before differential '%s'\n", curr_name);
                 stringbuf_append_str(sb, " ");
             }
             // Check for spacing after integral bounds
             else if (prev_name && (strcmp(prev_name, "int") == 0 || strcmp(prev_name, "iint") == 0 || 
                                   strcmp(prev_name, "iiint") == 0 || strcmp(prev_name, "oint") == 0)) {
+                printf("DEBUG: Adding space after integral '%s'\n", prev_name);
                 stringbuf_append_str(sb, " ");
             }
             // Check for operator spacing using config rules
@@ -1193,7 +1221,17 @@ static void format_math_children(StringBuf* sb, List* children, MathOutputFlavor
                 if (space_type != SPACE_NONE) {
                     append_space_by_type(sb, space_type);
                 } else if (flavor != MATH_OUTPUT_MATHML) {
-                    append_space_if_needed(sb);
+                    // Debug spacing decisions for integrals
+                    if (prev_name && (strcmp(prev_name, "int") == 0 || strcmp(prev_name, "iint") == 0)) {
+                        printf("DEBUG INTEGRAL SPACING: prev='%s', curr='%s'\n", prev_name, curr_name);
+                    }
+                    
+                    // Don't add space before parentheses in function calls
+                    if (curr_name && (curr_name[0] == '(' || strstr(curr_name, "paren") != NULL)) {
+                        // No space before parentheses
+                    } else {
+                        append_space_if_needed(sb);
+                    }
                 }
             }
         }
@@ -1503,7 +1541,9 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
             printf("DEBUG: StringBuf after appending format_str: '%s'\n", sb->str ? sb->str->chars : "NULL");
             
             // Handle ASCII and LaTeX formatting for big operators with bounds
+            printf("DEBUG: About to check flavor, flavor=%d (ASCII=%d, LaTeX=%d)\n", flavor, MATH_OUTPUT_ASCII, MATH_OUTPUT_LATEX);
             if (flavor == MATH_OUTPUT_ASCII) {
+                printf("DEBUG: Taking ASCII path for big operator\n");
                 // ASCII format: sum_(i=1)^n i
                 for (int i = 0; i < children->length; i++) {
                     if (i == 0) {
@@ -1530,8 +1570,8 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                         #ifdef DEBUG_MATH_FORMAT
                         log_debug("Completed subscript formatting, StringBuf now: '%s'", sb->str ? sb->str->chars : "NULL");
                         #endif
-                    } else if (i == 1 && children->length > 2) {
-                        // Second child is superscript (upper bound) only if there are 3+ children
+                    } else if (i == 1 && children->length >= 2) {
+                        // Second child is superscript (upper bound) if there are 2+ children
                         stringbuf_append_str(sb, "^");
                         // Don't use parentheses for single characters in ASCII
                         bool needs_parens = !is_single_character_item(children->items[i]);
@@ -1552,26 +1592,37 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                     }
                 }
             } else {
+                printf("DEBUG: Taking LaTeX path for big operator\n");
                 // LaTeX format: \sum_{i=1}^n i
+                printf("DEBUG: LaTeX big operator formatting, children_length=%ld\n", children->length);
                 for (int i = 0; i < children->length; i++) {
+                    printf("DEBUG: Processing child %d of %ld, condition check: i=%d, children->length=%ld\n", i, children->length, i, children->length);
                     if (i == 0) {
                         // First child is always subscript
+                        printf("DEBUG: Adding subscript for child %d\n", i);
                         stringbuf_append_str(sb, "_{");
                         format_math_item(sb, children->items[i], flavor, depth + 1);
                         stringbuf_append_str(sb, "}");
-                    } else if (i == 1 && children->length > 2) {
-                        // Second child is superscript only if there are 3+ children
+                        printf("DEBUG: After subscript, StringBuf: '%s'\n", sb->str ? sb->str->chars : "NULL");
+                    } else if (i == 1 && children->length >= 2) {
+                        // Second child is superscript if there are 2+ children
+                        printf("DEBUG: Condition met for superscript: i=%d, children->length=%ld\n", i, children->length);
+                        printf("DEBUG: Adding superscript for child %d\n", i);
                         stringbuf_append_str(sb, "^{");
                         format_math_item(sb, children->items[i], flavor, depth + 1);
                         stringbuf_append_str(sb, "}");
+                        printf("DEBUG: After superscript, StringBuf: '%s'\n", sb->str ? sb->str->chars : "NULL");
                     } else {
                         // Remaining children are summands/integrands
+                        printf("DEBUG: Adding integrand for child %d (else case)\n", i);
                         stringbuf_append_str(sb, " ");
                         format_math_item(sb, children->items[i], flavor, depth + 1);
+                        printf("DEBUG: After integrand, StringBuf: '%s'\n", sb->str ? sb->str->chars : "NULL");
                     }
                 }
             }
             
+            printf("DEBUG: Big operator formatting complete, returning\n");
             return;
         }
     }
@@ -1843,6 +1894,7 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
 
 // Format math expression to LaTeX
 String* format_math_latex(VariableMemPool* pool, Item root_item) {
+    printf("DEBUG: format_math_latex called with pool=%p, root_item=0x%llx\n", (void*)pool, root_item.item);
     #ifdef DEBUG_MATH_FORMAT
     log_debug("format_math_latex: Starting with pool=%p, root_item=%p", 
             (void*)pool, (void*)root_item.pointer);
@@ -1879,8 +1931,8 @@ String* format_math_latex(VariableMemPool* pool, Item root_item) {
     }
     #endif
 
-    // Post-process to fix specific spacing issues
-    if (result && result->chars) {
+    // Post-process to fix specific spacing issues - TEMPORARILY DISABLED
+    if (false && result && result->chars) {
         StringBuf* fixed_sb = stringbuf_new(pool);
         if (fixed_sb) {
             const char* src = result->chars;
@@ -2099,17 +2151,6 @@ String* format_math_mathml(VariableMemPool* pool, Item root_item) {
     stringbuf_append_str(sb, "<math xmlns=\"http://www.w3.org/1998/Math/MathML\">");
     format_math_item(sb, root_item, MATH_OUTPUT_MATHML, 0);
     stringbuf_append_str(sb, "</math>");
-    
-    String* result = stringbuf_to_string(sb);
-    return result;
-}
-
-// Format math expression to Unicode symbols
-String* format_math_unicode(VariableMemPool* pool, Item root_item) {
-    StringBuf* sb = stringbuf_new(pool);
-    if (!sb) return NULL;
-    
-    format_math_item(sb, root_item, MATH_OUTPUT_UNICODE, 0);
     
     String* result = stringbuf_to_string(sb);
     return result;

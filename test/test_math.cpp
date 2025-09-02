@@ -281,6 +281,7 @@ std::string normalize_operators(const std::string& expr) {
  */
 bool are_expressions_semantically_equivalent(const std::string& expr1, const std::string& expr2) {
     // Enhanced semantic equivalence checks for mathematical expressions
+    printf("DEBUG SEMANTIC: Comparing '%s' vs '%s'\n", expr1.c_str(), expr2.c_str());
     
     std::string s1 = expr1;
     std::string s2 = expr2;
@@ -295,42 +296,46 @@ bool are_expressions_semantically_equivalent(const std::string& expr1, const std
     
     // Additional normalizations for specific patterns
     
-    // Normalize integral bounds: \iint_D → \iint_{D}
+    // Normalize integral bounds: \int_0^1 → \int_{0}^{1} and \iint_D → \iint_{D}
+    std::regex integral_bounds_simple(R"(\\(i*int)_([^{}\s]+)\^([^{}\s]+))");
+    s1 = std::regex_replace(s1, integral_bounds_simple, R"(\$1_{$2}^{$3})");
+    s2 = std::regex_replace(s2, integral_bounds_simple, R"(\$1_{$2}^{$3})");
+    
     std::regex integral_bounds(R"(\\(i*int)_([^{}\s]+))");
-    s1 = std::regex_replace(s1, integral_bounds, R"(\\$1_{$2})");
-    s2 = std::regex_replace(s2, integral_bounds, R"(\\$1_{$2})");
+    s1 = std::regex_replace(s1, integral_bounds, R"(\$1_{$2})");
+    s2 = std::regex_replace(s2, integral_bounds, R"(\$1_{$2})");
     
     // Normalize function spacing: \cos\theta → \cos \theta
     std::regex func_spacing(R"(\\(sin|cos|tan|sec|csc|cot|log|ln|exp)([a-zA-Z]))");
-    s1 = std::regex_replace(s1, func_spacing, R"(\\$1 $2)");
-    s2 = std::regex_replace(s2, func_spacing, R"(\\$1 $2)");
+    s1 = std::regex_replace(s1, func_spacing, R"(\$1 $2)");
+    s2 = std::regex_replace(s2, func_spacing, R"(\$1 $2)");
     
     // Normalize partial derivatives: \partialx → \partial x
     std::regex partial_spacing(R"(\\partial([a-zA-Z]))");
-    s1 = std::regex_replace(s1, partial_spacing, R"(\\partial $1)");
-    s2 = std::regex_replace(s2, partial_spacing, R"(\\partial $1)");
+    s1 = std::regex_replace(s1, partial_spacing, R"(\partial $1)");
+    s2 = std::regex_replace(s2, partial_spacing, R"(\partial $1)");
     
     // Normalize floor/ceiling: \lfloora → \lfloor a
     std::regex floor_spacing(R"(\\lfloor([a-zA-Z]))");
-    s1 = std::regex_replace(s1, floor_spacing, R"(\\lfloor $1)");
-    s2 = std::regex_replace(s2, floor_spacing, R"(\\lfloor $1)");
+    s1 = std::regex_replace(s1, floor_spacing, R"(\lfloor $1)");
+    s2 = std::regex_replace(s2, floor_spacing, R"(\lfloor $1)");
     
     std::regex ceil_spacing(R"(\\lceil([a-zA-Z]))");
-    s1 = std::regex_replace(s1, ceil_spacing, R"(\\lceil $1)");
-    s2 = std::regex_replace(s2, ceil_spacing, R"(\\lceil $1)");
+    s1 = std::regex_replace(s1, ceil_spacing, R"(\lceil $1)");
+    s2 = std::regex_replace(s2, ceil_spacing, R"(\lceil $1)");
     
     // Normalize geometric symbols: \angleABC → \angle ABC
     std::regex angle_spacing(R"(\\angle([A-Z]+))");
-    s1 = std::regex_replace(s1, angle_spacing, R"(\\angle $1)");
-    s2 = std::regex_replace(s2, angle_spacing, R"(\\angle $1)");
+    s1 = std::regex_replace(s1, angle_spacing, R"(\angle $1)");
+    s2 = std::regex_replace(s2, angle_spacing, R"(\angle $1)");
     
     std::regex triangle_spacing(R"(\\triangle([A-Z]+))");
-    s1 = std::regex_replace(s1, triangle_spacing, R"(\\triangle $1)");
-    s2 = std::regex_replace(s2, triangle_spacing, R"(\\triangle $1)");
+    s1 = std::regex_replace(s1, triangle_spacing, R"(\triangle $1)");
+    s2 = std::regex_replace(s2, triangle_spacing, R"(\triangle $1)");
     
     // Normalize arrow spacing: \twohea drightarrow → \twoheadrightarrow
-    s1 = std::regex_replace(s1, std::regex(R"(\\twohea drightarrow)"), R"(\\twoheadrightarrow)");
-    s2 = std::regex_replace(s2, std::regex(R"(\\twohea drightarrow)"), R"(\\twoheadrightarrow)");
+    s1 = std::regex_replace(s1, std::regex(R"(\\twohea drightarrow)"), R"(\twoheadrightarrow)");
+    s2 = std::regex_replace(s2, std::regex(R"(\\twohea drightarrow)"), R"(\twoheadrightarrow)");
     
     // Fix integral bounds normalization: \iint_D → \iint_{D}
     s1 = std::regex_replace(s1, std::regex(R"(\\(i*int)_([^{}\s]+))"), "\\$1_{$2}");
@@ -405,15 +410,10 @@ bool are_expressions_semantically_equivalent(const std::string& expr1, const std
     s2 = std::regex_replace(s2, std::regex(R"(\\bigcup_\{([^}]+)\})"), "\\bigcup_{$1}");
     
     // Final comprehensive normalization for stubborn cases
-    // Check if strings are now identical after all normalization
-    if (s1 == s2) return true;
-    
-    // Special handling for expressions that should be considered equivalent
-    // Handle cases where GiNaC can't parse but expressions are mathematically equivalent
-    
-    // Case 1: Simple expressions that are identical but test framework issues
-    if (s1.find("a & b") != std::string::npos && s2.find("a & b") != std::string::npos &&
-        s1.find("c & d") != std::string::npos && s2.find("c & d") != std::string::npos) {
+    // Check if strings are identical after normalization
+    printf("DEBUG SEMANTIC: After normalization: '%s' vs '%s'\n", s1.c_str(), s2.c_str());
+    if (s1 == s2) {
+        printf("DEBUG SEMANTIC: Match found after normalization\n");
         return true;
     }
     
@@ -1104,15 +1104,22 @@ bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_
                 
                 // Try matrix equivalence first for matrix expressions
                 printf("DEBUG: Trying matrix equivalence check...\n");
-                if (are_matrix_expressions_equivalent(orig, formatted)) {
+                bool matrix_equiv = are_matrix_expressions_equivalent(orig, formatted);
+                printf("DEBUG: Matrix equivalence result: %s\n", matrix_equiv ? "true" : "false");
+                if (matrix_equiv) {
                     printf("PASS: Matrix equivalence detected\n");
                     ginac_matches++;
-                } else if (are_expressions_semantically_equivalent(orig, formatted)) {
-                    printf("PASS: Semantic equivalence detected\n");
-                    ginac_matches++;
                 } else {
-                    printf("FAIL: No equivalence found - parser/formatter issue\n");
-                    failures++;
+                    printf("DEBUG: Matrix equivalence failed, trying semantic equivalence...\n");
+                    bool semantic_equiv = are_expressions_semantically_equivalent(orig, formatted);
+                    printf("DEBUG: Semantic equivalence result: %s\n", semantic_equiv ? "true" : "false");
+                    if (semantic_equiv) {
+                        printf("PASS: Semantic equivalence detected\n");
+                        ginac_matches++;
+                    } else {
+                        printf("FAIL: No equivalence found - parser/formatter issue\n");
+                        failures++;
+                    }
                 }
                 continue;
             }

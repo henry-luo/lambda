@@ -35,7 +35,7 @@ const char* trig_functions[] = {
 
 const char* log_functions[] = {
     "log", "ln", "lg", "exp", "max", "min", "arg", "det", "gcd", "lcm", 
-    "deg", "dim", "ker", "hom", "lim", "limsup", "liminf", "sup", "inf", NULL
+    "deg", "dim", "ker", "hom", "limsup", "liminf", "sup", "inf", NULL
 };
 
 // LaTeX document commands - from input-latex.c
