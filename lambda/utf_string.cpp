@@ -161,91 +161,91 @@ bool string_equal_unicode(const char* str1, int len1, const char* str2, int len2
 }
 
 // Lambda Script comparison functions
-CompResult equal_comp_unicode(Item a_item, Item b_item) {
+Bool equal_comp_unicode(Item a_item, Item b_item) {
     log_debug("equal_comp_unicode");
     String* a_str = (String*)a_item.pointer;
     String* b_str = (String*)b_item.pointer;
 
-    if (!a_str || !b_str) { return COMP_ERROR; }
+    if (!a_str || !b_str) { return BOOL_ERROR; }
     
     // Quick length check first
-    if (a_str->len != b_str->len) { return COMP_FALSE; }
+    if (a_str->len != b_str->len) { return BOOL_FALSE; }
 
     // If both are empty strings
-    if (a_str->len == 0) { return COMP_TRUE; }
+    if (a_str->len == 0) { return BOOL_TRUE; }
     
     // Use byte comparison for identical strings
-    if (a_str == b_str) { return COMP_TRUE; }
+    if (a_str == b_str) { return BOOL_TRUE; }
 
     bool result = string_equal_unicode(a_str->chars, a_str->len, b_str->chars, b_str->len);
-    return result ? COMP_TRUE : COMP_FALSE;
+    return result ? BOOL_TRUE : BOOL_FALSE;
 }
 
-CompResult less_comp_unicode(Item a_item, Item b_item) {
+Bool less_comp_unicode(Item a_item, Item b_item) {
     String* a_str = (String*)a_item.pointer;
     String* b_str = (String*)b_item.pointer;
 
-    if (!a_str || !b_str) { return COMP_ERROR; }
+    if (!a_str || !b_str) { return BOOL_ERROR; }
 
     // Use byte comparison for identical strings
-    if (a_str == b_str) { return COMP_FALSE; }
+    if (a_str == b_str) { return BOOL_FALSE; }
 
     UnicodeCompareResult result = string_compare_unicode(a_str->chars, a_str->len, b_str->chars, b_str->len);
     if (result == UTF8PROC_COMPARE_ERROR) {
-        return COMP_ERROR;
+        return BOOL_ERROR;
     }
     
-    return (result == UTF8PROC_COMPARE_LESS) ? COMP_TRUE : COMP_FALSE;
+    return (result == UTF8PROC_COMPARE_LESS) ? BOOL_TRUE : BOOL_FALSE;
 }
 
-CompResult greater_comp_unicode(Item a_item, Item b_item) {
+Bool greater_comp_unicode(Item a_item, Item b_item) {
     String* a_str = (String*)a_item.pointer;
     String* b_str = (String*)b_item.pointer;
 
-    if (!a_str || !b_str) { return COMP_ERROR; }
+    if (!a_str || !b_str) { return BOOL_ERROR; }
     
     // Use byte comparison for identical strings
-    if (a_str == b_str) { return COMP_FALSE; }
+    if (a_str == b_str) { return BOOL_FALSE; }
 
     UnicodeCompareResult result = string_compare_unicode(a_str->chars, a_str->len, b_str->chars, b_str->len);
     if (result == UTF8PROC_COMPARE_ERROR) {
-        return COMP_ERROR;
+        return BOOL_ERROR;
     }
     
-    return (result == UTF8PROC_COMPARE_GREATER) ? COMP_TRUE : COMP_FALSE;
+    return (result == UTF8PROC_COMPARE_GREATER) ? BOOL_TRUE : BOOL_FALSE;
 }
 
-CompResult less_equal_comp_unicode(Item a_item, Item b_item) {
+Bool less_equal_comp_unicode(Item a_item, Item b_item) {
     String* a_str = (String*)a_item.pointer;
     String* b_str = (String*)b_item.pointer;
 
-    if (!a_str || !b_str) { return COMP_ERROR; }
+    if (!a_str || !b_str) { return BOOL_ERROR; }
 
     // Use byte comparison for identical strings
-    if (a_str == b_str) { return COMP_TRUE; }
+    if (a_str == b_str) { return BOOL_TRUE; }
 
     UnicodeCompareResult result = string_compare_unicode(a_str->chars, a_str->len, b_str->chars, b_str->len);
     if (result == UTF8PROC_COMPARE_ERROR) {
-        return COMP_ERROR;
+        return BOOL_ERROR;
     }
     
-    return (result == UTF8PROC_COMPARE_LESS || result == UTF8PROC_COMPARE_EQUAL) ? COMP_TRUE : COMP_FALSE;
+    return (result == UTF8PROC_COMPARE_LESS || result == UTF8PROC_COMPARE_EQUAL) ? BOOL_TRUE : BOOL_FALSE;
 }
 
-CompResult greater_equal_comp_unicode(Item a_item, Item b_item) {
+Bool greater_equal_comp_unicode(Item a_item, Item b_item) {
     String* a_str = (String*)a_item.pointer;
     String* b_str = (String*)b_item.pointer;
-    if (!a_str || !b_str) { return COMP_ERROR; }
+    if (!a_str || !b_str) { return BOOL_ERROR; }
 
     // Use byte comparison for identical strings
-    if (a_str == b_str) { return COMP_TRUE; }
+    if (a_str == b_str) { return BOOL_TRUE; }
     
     UnicodeCompareResult result = string_compare_unicode(a_str->chars, a_str->len, b_str->chars, b_str->len);
     if (result == UTF8PROC_COMPARE_ERROR) {
-        return COMP_ERROR;
+        return BOOL_ERROR;
     }
     
-    return (result == UTF8PROC_COMPARE_GREATER || result == UTF8PROC_COMPARE_EQUAL) ? COMP_TRUE : COMP_FALSE;
+    return (result == UTF8PROC_COMPARE_GREATER || result == UTF8PROC_COMPARE_EQUAL) ? BOOL_TRUE : BOOL_FALSE;
 }
 
 // Missing normalization functions

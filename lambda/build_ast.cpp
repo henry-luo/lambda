@@ -726,8 +726,10 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
             type_id = LMD_TYPE_ANY;
         }
     } 
-    else if (ast_node->op == OPERATOR_AND || ast_node->op == OPERATOR_OR || 
-        ast_node->op == OPERATOR_EQ || ast_node->op == OPERATOR_NE || 
+    else if (ast_node->op == OPERATOR_AND || ast_node->op == OPERATOR_OR) {
+        type_id = LMD_TYPE_ANY;  // based on truthy idiom, not simple logic and/or
+    }
+    else if (ast_node->op == OPERATOR_EQ || ast_node->op == OPERATOR_NE || 
         ast_node->op == OPERATOR_LT || ast_node->op == OPERATOR_LE || 
         ast_node->op == OPERATOR_GT || ast_node->op == OPERATOR_GE || 
         ast_node->op == OPERATOR_IS || ast_node->op == OPERATOR_IN) {

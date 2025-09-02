@@ -334,8 +334,6 @@ extern Item ItemError;
 extern String EMPTY_STRING;
 extern TypeInfo type_info[];
 
-CompResult equal_comp(Item a, Item b);
-
 typedef struct Input {
     void* url;
     void* path;

@@ -33,11 +33,11 @@ void init_utf8proc_support(void);
 void cleanup_utf8proc_support(void);
 
 // Enhanced string comparison functions using utf8proc
-CompResult equal_comp_unicode(Item a_item, Item b_item);
-CompResult less_comp_unicode(Item a_item, Item b_item);
-CompResult greater_comp_unicode(Item a_item, Item b_item);
-CompResult less_equal_comp_unicode(Item a_item, Item b_item);
-CompResult greater_equal_comp_unicode(Item a_item, Item b_item);
+Bool equal_comp_unicode(Item a_item, Item b_item);
+Bool less_comp_unicode(Item a_item, Item b_item);
+Bool greater_comp_unicode(Item a_item, Item b_item);
+Bool less_equal_comp_unicode(Item a_item, Item b_item);
+Bool greater_equal_comp_unicode(Item a_item, Item b_item);
 
 UnicodeCompareResult string_compare_unicode(const char* str1, int len1, 
                                            const char* str2, int len2);
@@ -61,7 +61,7 @@ Item fn_le_unicode(Item a_item, Item b_item);
 Item fn_ge_unicode(Item a_item, Item b_item);
 
 // UTF8PROC variants (called by lambda-eval.cpp)
-CompResult equal_comp_unicode(Item a_item, Item b_item);
+Bool equal_comp_unicode(Item a_item, Item b_item);
 Item fn_lt_utf8proc(Item a_item, Item b_item);
 Item fn_gt_utf8proc(Item a_item, Item b_item);
 Item fn_le_utf8proc(Item a_item, Item b_item);

@@ -22,8 +22,6 @@ typedef long long int64_t;
 #endif
 
 #define null 0
-// #define infinity (1.0 / 0.0)
-// #define not_a_number (0.0 / 0.0)
 
 enum EnumTypeId {
     LMD_TYPE_RAW_POINTER = 0,
@@ -59,12 +57,13 @@ enum EnumTypeId {
 };
 typedef uint8_t TypeId;
 
-// Comparison result enum: 0=false, 1=true, 2=error
+// 3-state boolean:
 typedef enum {
-    COMP_FALSE = 0,
-    COMP_TRUE = 1,
-    COMP_ERROR = 2
-} CompResult;
+    BOOL_FALSE = 0,
+    BOOL_TRUE = 1,
+    BOOL_ERROR = 2
+} BoolEnum;
+typedef uint8_t Bool;
 
 #define  LMD_TYPE_CONTAINER LMD_TYPE_LIST
 
@@ -275,6 +274,8 @@ struct Function {
 #define ITEM_NULL           ((uint64_t)LMD_TYPE_NULL << 56)
 #define ITEM_INT            ((uint64_t)LMD_TYPE_INT << 56)
 #define ITEM_ERROR          ((uint64_t)LMD_TYPE_ERROR << 56)
+#define ITEM_TRUE           ((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)1
+#define ITEM_FALSE          ((uint64_t)LMD_TYPE_BOOL << 56) | (uint8_t)0
 
 #define b2it(bool_val)       ((((uint64_t)LMD_TYPE_BOOL)<<56) | (uint8_t)(bool_val))
 #define l2it(long_ptr)       ((((uint64_t)LMD_TYPE_INT64)<<56) | (uint64_t)(long_ptr))
@@ -290,8 +291,6 @@ Array* array_fill(Array* arr, int count, ...);
 ArrayInt* array_int_fill(ArrayInt* arr, int count, ...);
 ArrayInt64* array_int64_fill(ArrayInt64* arr, int count, ...);
 ArrayFloat* array_float_fill(ArrayFloat* arr, int count, ...);
-
-// void array_push(Array *array, Item item);
 
 typedef struct Map Map;
 Map* map_fill(Map* map, ...);
@@ -338,7 +337,7 @@ Item list_get(List *list, int index);
 Item map_get(Map* map, Item key);
 Item elmt_get(Element *elmt, Item key);
 
-bool item_true(Item item);
+Bool is_truthy(Item item);
 Item v2it(List *list);
 
 Item push_d(double dval);
@@ -346,10 +345,8 @@ Item push_l(long lval);
 Item push_k(DateTime dtval);
 Item push_c(long cval);
 
-Item safe_b2it(Item item);  // Convert Item to boolean Item, preserving errors
 // int overflow check and promotion to decimal
 #ifndef __cplusplus
-// int overflow check and promotion to decimal
 #define i2it(int_val)        ((int_val) <= INT32_MAX && (int_val) >= INT32_MIN ? (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : push_c(int_val))
 #else
 #define i2it(int_val)        ((int_val) <= INT32_MAX && (int_val) >= INT32_MIN ? (ITEM_INT | ((int64_t)(int_val) & 0x00FFFFFFFFFFFFFF)) : push_c(int_val).item)
@@ -396,19 +393,24 @@ Item fn_sum(Item a);
 Item fn_avg(Item a);
 Item fn_pos(Item a);
 Item fn_neg(Item a);
-Item fn_eq(Item a, Item b);
-Item fn_ne(Item a, Item b);
-Item fn_lt(Item a, Item b);
-Item fn_gt(Item a, Item b);
-Item fn_le(Item a, Item b);
-Item fn_ge(Item a, Item b);
-Item fn_not(Item a);
+
+// truthy idioms
 Item fn_and(Item a, Item b);
 Item fn_or(Item a, Item b);
-bool fn_is(Item a, Item b);
-bool fn_in(Item a, Item b);
-Range* fn_to(Item a, Item b);
+Item op_and(Bool a, Bool b);
+Item op_or(Bool a, Bool b);
 
+Bool fn_eq(Item a, Item b);
+Bool fn_ne(Item a, Item b);
+Bool fn_lt(Item a, Item b);
+Bool fn_gt(Item a, Item b);
+Bool fn_le(Item a, Item b);
+Bool fn_ge(Item a, Item b);
+Bool fn_not(Item a);
+Bool fn_is(Item a, Item b);
+Bool fn_in(Item a, Item b);
+
+Range* fn_to(Item a, Item b);
 String* fn_string(Item item);
 String *fn_strcat(String *left, String *right);
 Item fn_normalize(Item str, Item type);
