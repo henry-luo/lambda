@@ -20,34 +20,25 @@ extern __thread Context* context;
 
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
 
-bool item_true(Item item) {
+Bool is_truthy(Item item) {
     switch (item.type_id) {
     case LMD_TYPE_NULL:
-        return false;
+        return BOOL_FALSE;
     case LMD_TYPE_ERROR:
-        return false;
+        return BOOL_ERROR;
     case LMD_TYPE_BOOL:
-        return item.bool_val;
-    default:
-        return true;
+        return item.bool_val ? BOOL_TRUE : BOOL_FALSE;
+    default: // all other value considered truthy
+        return BOOL_TRUE;
     }
 }
 
-// Convert Item to boolean Item, preserving errors
-Item safe_b2it(Item item) {
-    switch (item.type_id) {
-    case LMD_TYPE_ERROR:
-        // Preserve error - don't convert to boolean
-        return item;
-    case LMD_TYPE_BOOL:
-        // Already boolean, return as-is
-        return item;
-    case LMD_TYPE_NULL:
-        return {.item = b2it(false)};
-    default:
-        // Convert to boolean based on truthiness
-        return {.item = b2it(item_true(item))};
-    }
+Item op_and(Bool a, Bool b) { 
+    return {.item = (a >= BOOL_ERROR || b >= BOOL_ERROR) ? ITEM_ERROR : (a && b) ? ITEM_TRUE : ITEM_FALSE};
+}
+
+Item op_or(Bool a, Bool b) { 
+    return {.item = (a >= BOOL_ERROR || b >= BOOL_ERROR) ? ITEM_ERROR : (a || b) ? ITEM_TRUE : ITEM_FALSE};
 }
 
 // list to item
@@ -219,287 +210,245 @@ Function* to_fn(fn_ptr ptr) {
     return fn;
 }
 
-bool fn_is(Item a, Item b) {
+Bool fn_is(Item a, Item b) {
     log_debug("is expr");
     TypeId b_type_id = get_type_id(b);
     if (b_type_id != LMD_TYPE_TYPE) {
-        return false;
+        return BOOL_ERROR;
     }
     TypeType *type_b = (TypeType *)b.type;
     TypeId a_type_id = get_type_id(a);
     log_debug("is type %d, %d", a_type_id, type_b->type->type_id);
     switch (type_b->type->type_id) {
     case LMD_TYPE_ANY:
-        return a_type_id != LMD_TYPE_ERROR;
-    case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_NUMBER:
+        return a_type_id == LMD_TYPE_ERROR ? BOOL_FALSE : BOOL_TRUE;
+    case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_DECIMAL:  case LMD_TYPE_NUMBER:
         return LMD_TYPE_INT <= a_type_id && a_type_id <= type_b->type->type_id;
-    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
-        log_debug("is array type: %d, %d", a_type_id, type_b->type->type_id);
-        return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT || a_type_id == LMD_TYPE_ARRAY_FLOAT;
+    case LMD_TYPE_ARRAY:
+        return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT || 
+            a_type_id == LMD_TYPE_ARRAY_INT64 || a_type_id == LMD_TYPE_ARRAY_FLOAT;
+    // case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
+        // KIV: promotion among other array types? probably not at the moment
     default:
         return a_type_id == type_b->type->type_id;
     }
 }
 
-bool equal(Item a_item, Item b_item) {
-    CompResult result = equal_comp(a_item, b_item);
-    return result == COMP_TRUE;
-}
+// bool equal(Item a_item, Item b_item) {
+//     Bool result = equal_comp(a_item, b_item);
+//     return result == BOOL_TRUE;
+// }
 
 // 3-states comparison
-CompResult equal_comp(Item a_item, Item b_item) {
+Bool fn_eq(Item a_item, Item b_item) {
     log_debug("equal_comp expr");
     if (a_item.type_id != b_item.type_id) {
         // number promotion - only for int/float types
         if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
             LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
-            return (a_val == b_val) ? COMP_TRUE : COMP_FALSE;
+            return (a_val == b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
         // Type mismatch error for equality comparisons (e.g., true == 1, "test" != null)
         // Note: null can only be compared to null, any other comparison is a type error
-        return COMP_ERROR;
+        return BOOL_ERROR;
     }
     
     if (a_item.type_id == LMD_TYPE_NULL) {
-        return COMP_TRUE; // null == null
+        return BOOL_TRUE; // null == null
     }    
     else if (a_item.type_id == LMD_TYPE_BOOL) {
-        return (a_item.bool_val == b_item.bool_val) ? COMP_TRUE : COMP_FALSE;
+        return (a_item.bool_val == b_item.bool_val) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_INT) {
-        return (a_item.int_val == b_item.int_val) ? COMP_TRUE : COMP_FALSE;
+        return (a_item.int_val == b_item.int_val) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_INT64) {
-        return (*(long*)a_item.pointer == *(long*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
+        return (*(long*)a_item.pointer == *(long*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT) {
-        return (*(double*)a_item.pointer == *(double*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
+        return (*(double*)a_item.pointer == *(double*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_DECIMAL) {
         Decimal* dec_a = (Decimal*)a_item.pointer;  Decimal* dec_b = (Decimal*)b_item.pointer;
         int cmp = mpd_cmp(dec_a->dec_val, dec_b->dec_val, context->decimal_ctx);
-        if (cmp < 0) return COMP_FALSE;
-        else if (cmp > 0) return COMP_FALSE;
-        else return COMP_TRUE;
+        if (cmp < 0) return BOOL_FALSE;
+        else if (cmp > 0) return BOOL_FALSE;
+        else return BOOL_TRUE;
     }
     else if (a_item.type_id == LMD_TYPE_DTIME) {
         DateTime* dt_a = (DateTime*)a_item.pointer;  DateTime* dt_b = (DateTime*)b_item.pointer;
         // todo: do a normalized field comparison
-        return (*(uint64_t*)dt_a == *(uint64_t*)dt_b) ? COMP_TRUE : COMP_FALSE;
+        return (*(uint64_t*)dt_a == *(uint64_t*)dt_b) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL || 
         a_item.type_id == LMD_TYPE_BINARY) {
         String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
         bool result = (str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0);
-        return result ? COMP_TRUE : COMP_FALSE;
+        return result ? BOOL_TRUE : BOOL_FALSE;
     }
     log_error("unknown comparing type %d\n", a_item.type_id);
-    return COMP_ERROR;
+    return BOOL_ERROR;
 }
 
-Item fn_eq(Item a_item, Item b_item) {
-    CompResult result = equal_comp(a_item, b_item);
-    if (result == COMP_ERROR) {
-        log_info("fn_eq type error for types: %d, %d", a_item.type_id, b_item.type_id);
-        return ItemError;
-    }
-    return {.item = b2it(result == COMP_TRUE)};
-}
-
-Item fn_ne(Item a_item, Item b_item) {
-    CompResult result = equal_comp(a_item, b_item);
-    if (result == COMP_ERROR) {
-        log_info("fn_ne type error for types: %d, %d", a_item.type_id, b_item.type_id);
-        return ItemError;
-    }
-    return {.item = b2it(result == COMP_FALSE)};
+Bool fn_ne(Item a_item, Item b_item) {
+    Bool result = fn_eq(a_item, b_item);
+    if (result == BOOL_ERROR) { return BOOL_ERROR; }
+    return !result;
 }
 
 // 3-state value/ordered comparison
-CompResult less_comp(Item a_item, Item b_item) {
+Bool fn_lt(Item a_item, Item b_item) {
     log_debug("less_comp expr");
     if (a_item.type_id != b_item.type_id) {
         // number promotion - only for int/float types
         if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
             LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
-            return (a_val < b_val) ? COMP_TRUE : COMP_FALSE;
+            return (a_val < b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
         // Type mismatch error for equality comparisons (e.g., true == 1, "test" != null)
         // Note: null can only be compared to null, any other comparison is a type error
-        return COMP_ERROR;
+        return BOOL_ERROR;
     }
     
     if (a_item.type_id == LMD_TYPE_NULL) {
-        return COMP_ERROR;  // null does not support <, >, <=, >=
+        return BOOL_ERROR;  // null does not support <, >, <=, >=
     }    
     else if (a_item.type_id == LMD_TYPE_BOOL) {
-        return COMP_ERROR;  // bool does not support <, >, <=, >=
+        return BOOL_ERROR;  // bool does not support <, >, <=, >=
     }
     else if (a_item.type_id == LMD_TYPE_INT) {
-        return (a_item.int_val < b_item.int_val) ? COMP_TRUE : COMP_FALSE;
+        return (a_item.int_val < b_item.int_val) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_INT64) {
-        return (*(long*)a_item.pointer < *(long*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
+        return (*(long*)a_item.pointer < *(long*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT) {
-        return (*(double*)a_item.pointer < *(double*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
+        return (*(double*)a_item.pointer < *(double*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_DECIMAL) {
         Decimal* dec_a = (Decimal*)a_item.pointer;  Decimal* dec_b = (Decimal*)b_item.pointer;
         int cmp = mpd_cmp(dec_a->dec_val, dec_b->dec_val, context->decimal_ctx);
-        return (cmp < 0) ? COMP_TRUE : COMP_FALSE;
+        return (cmp < 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_DTIME) {
         DateTime* dt_a = (DateTime*)a_item.pointer;  DateTime* dt_b = (DateTime*)b_item.pointer;
         // todo: do a proper normalized field comparison
-        return (*(uint64_t*)dt_a < *(uint64_t*)dt_b) ? COMP_TRUE : COMP_FALSE;
+        return (*(uint64_t*)dt_a < *(uint64_t*)dt_b) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL || 
         a_item.type_id == LMD_TYPE_BINARY) {
         String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
         bool result = strcmp(str_a->chars, str_b->chars) < 0;
-        return result ? COMP_TRUE : COMP_FALSE;
+        return result ? BOOL_TRUE : BOOL_FALSE;
     }
     log_error("unknown comparing type %d\n", a_item.type_id);
-    return COMP_ERROR;
-}
-
-Item fn_lt(Item a_item, Item b_item) {
-    CompResult result = less_comp(a_item, b_item);
-    if (result == COMP_ERROR) { return ItemError; }
-    return {.item = b2it(result == COMP_TRUE)};
+    return BOOL_ERROR;
 }
 
 // 3-state value/ordered comparison
-CompResult greater_comp(Item a_item, Item b_item) {
+Bool fn_gt(Item a_item, Item b_item) {
     log_debug("greater_comp expr");
     if (a_item.type_id != b_item.type_id) {
         // number promotion - only for int/float types
         if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
             LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
-            return (a_val > b_val) ? COMP_TRUE : COMP_FALSE;
+            return (a_val > b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
         // Type mismatch error for equality comparisons (e.g., true == 1, "test" != null)
         // Note: null can only be compared to null, any other comparison is a type error
-        return COMP_ERROR;
+        return BOOL_ERROR;
     }
     
     if (a_item.type_id == LMD_TYPE_NULL) {
-        return COMP_ERROR;  // null does not support <, >, <=, >=
+        return BOOL_ERROR;  // null does not support <, >, <=, >=
     }    
     else if (a_item.type_id == LMD_TYPE_BOOL) {
-        return COMP_ERROR;  // bool does not support <, >, <=, >=
+        return BOOL_ERROR;  // bool does not support <, >, <=, >=
     }
     else if (a_item.type_id == LMD_TYPE_INT) {
-        return (a_item.int_val > b_item.int_val) ? COMP_TRUE : COMP_FALSE;
+        return (a_item.int_val > b_item.int_val) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_INT64) {
-        return (*(long*)a_item.pointer > *(long*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
+        return (*(long*)a_item.pointer > *(long*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT) {
-        return (*(double*)a_item.pointer > *(double*)b_item.pointer) ? COMP_TRUE : COMP_FALSE;
+        return (*(double*)a_item.pointer > *(double*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_DECIMAL) {
         Decimal* dec_a = (Decimal*)a_item.pointer;  Decimal* dec_b = (Decimal*)b_item.pointer;
         int cmp = mpd_cmp(dec_a->dec_val, dec_b->dec_val, context->decimal_ctx);
-        return (cmp > 0) ? COMP_TRUE : COMP_FALSE;
+        return (cmp > 0) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_DTIME) {
         DateTime* dt_a = (DateTime*)a_item.pointer;  DateTime* dt_b = (DateTime*)b_item.pointer;
         // todo: do a proper normalized field comparison
-        return (*(uint64_t*)dt_a > *(uint64_t*)dt_b) ? COMP_TRUE : COMP_FALSE;
+        return (*(uint64_t*)dt_a > *(uint64_t*)dt_b) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL || 
         a_item.type_id == LMD_TYPE_BINARY) {
         String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
         bool result = strcmp(str_a->chars, str_b->chars) > 0;
-        return result ? COMP_TRUE : COMP_FALSE;
+        return result ? BOOL_TRUE : BOOL_FALSE;
     }
     log_error("unknown comparing type %d\n", a_item.type_id);
-    return COMP_ERROR;
+    return BOOL_ERROR;
 }
 
-Item fn_gt(Item a_item, Item b_item) {
-    CompResult result = greater_comp(a_item, b_item);
-    if (result == COMP_ERROR) return ItemError;
-    return {.item = b2it(result == COMP_TRUE)};
+Bool fn_le(Item a_item, Item b_item) {
+    Bool result = fn_gt(b_item, a_item);
+    if (result == BOOL_ERROR) return BOOL_ERROR;
+    return !result;
 }
 
-Item fn_le(Item a_item, Item b_item) {
-    CompResult result = greater_comp(a_item, b_item);
-    if (result == COMP_ERROR) return ItemError;
-    return {.item = b2it(result == COMP_FALSE)};
+Bool fn_ge(Item a_item, Item b_item) {
+    Bool result = fn_lt(b_item, a_item);
+    if (result == BOOL_ERROR) return BOOL_ERROR;
+    return !result;
 }
 
-Item fn_ge(Item a_item, Item b_item) {
-    CompResult result = less_comp(a_item, b_item);
-    if (result == COMP_ERROR) return ItemError;
-    return {.item = b2it(result == COMP_FALSE)};
-}
-
-Item fn_not(Item item) {
-    // Logical NOT - invert the truthiness of the item
+Bool fn_not(Item item) {
+    // invert the truthiness of the item, not just logic NOT
     log_debug("fn_not expr");
-    return {.item = b2it(!item_true(item))};
+    Bool result = is_truthy(item);
+    if (result == BOOL_ERROR) return BOOL_ERROR;
+    return !result;
 }
 
-// todo: 3-state and
+// 3-state AND with short-circuiting truthy idiom
 Item fn_and(Item a_item, Item b_item) {
     log_debug("fn_and called with types: %d, %d", a_item.type_id, b_item.type_id);
-    // Fast path for boolean types
+    // fast path for boolean types
     if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
         log_debug("fn_and: bool fast path");
         return {.item = b2it(a_item.bool_val && b_item.bool_val)};
     }
-    
-    // Type error for string operands in logical operations
-    if (a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING) {
-        log_debug("logical AND not supported with string types: %d, %d", a_item.type_id, b_item.type_id);
-        return ItemError;
-    }
-    
-    // Type error for null operands in logical operations
-    if (a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
-        log_debug("logical AND not supported with null types: %d, %d", a_item.type_id, b_item.type_id);
-        return ItemError;
-    }
-     
-    // Fallback to generic truthiness evaluation for numeric and boolean combinations
-    log_debug("fn_and: generic truthiness fallback");
-    bool a_truth = item_true(a_item);
-    bool b_truth = item_true(b_item);
-    return {.item = b2it(a_truth && b_truth)};
+    // fallback to generic truthy idiom
+    log_debug("fn_and: generic truth fallback");
+    Bool a_truth = is_truthy(a_item);
+    if (a_truth == BOOL_ERROR) return ItemError;
+    if (a_truth == BOOL_FALSE) return a_item; // short-circuit return
+    if (b_item.type_id == LMD_TYPE_ERROR) return ItemError;
+    return b_item;  // always return b_item, no matter truthy or falsy
 }
 
-// todo: 3-state ors
+// 3-state OR with short-circuiting truthy idiom
 Item fn_or(Item a_item, Item b_item) {
-    // Fast path for boolean types
+    // fast path for boolean types
     if (a_item.type_id == LMD_TYPE_BOOL && b_item.type_id == LMD_TYPE_BOOL) {
         return {.item = b2it(a_item.bool_val || b_item.bool_val)};
     }
-    
-    // Type error for string operands in logical operations
-    if (a_item.type_id == LMD_TYPE_STRING || b_item.type_id == LMD_TYPE_STRING) {
-        log_debug("logical OR not supported with string types: %d, %d", a_item.type_id, b_item.type_id);
-        return ItemError;
-    }
-    
-    // Type error for null operands in logical operations
-    if (a_item.type_id == LMD_TYPE_NULL || b_item.type_id == LMD_TYPE_NULL) {
-        log_debug("logical OR not supported with null types: %d, %d", a_item.type_id, b_item.type_id);
-        return ItemError;
-    }
-    
-    // Fallback to generic truthiness evaluation for numeric and boolean combinations
-    bool a_truth = item_true(a_item);
-    bool b_truth = item_true(b_item);
-    return {.item = b2it(a_truth || b_truth)};
+    // fallback to generic truthy idiom
+    Bool a_truth = is_truthy(a_item);
+    if (a_truth == BOOL_ERROR) return ItemError;
+    if (a_truth == BOOL_TRUE) return a_item; // short-circuit return
+    if (b_item.type_id == LMD_TYPE_ERROR) return ItemError;
+    return b_item;  // always return b_item, no matter truthy or falsy
 }
 
-bool fn_in(Item a_item, Item b_item) {
+Bool fn_in(Item a_item, Item b_item) {
     log_debug("fn_in");
     if (b_item.type_id) { // b is scalar
         if (b_item.type_id == LMD_TYPE_STRING && a_item.type_id == LMD_TYPE_STRING) {
@@ -512,7 +461,7 @@ bool fn_in(Item a_item, Item b_item) {
         if (b_type == LMD_TYPE_LIST) {
             List *list = b_item.list;
             for (int i = 0; i < list->length; i++) {
-                if (equal(list->items[i], a_item)) {
+                if (fn_eq(list->items[i], a_item) == BOOL_TRUE) {
                     return true;
                 }
             }
@@ -526,7 +475,7 @@ bool fn_in(Item a_item, Item b_item) {
         else if (b_type == LMD_TYPE_ARRAY) {
             Array *arr = b_item.array;
             for (int i = 0; i < arr->length; i++) {
-                if (equal(arr->items[i], a_item)) {
+                if (fn_eq(arr->items[i], a_item) == BOOL_TRUE) {
                     return true;
                 }
             }
