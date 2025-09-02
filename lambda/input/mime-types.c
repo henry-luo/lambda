@@ -150,6 +150,8 @@ MimeGlob glob_patterns[] = {
     {"*.yml", "application/x-yaml"},
     {"*.toml", "application/toml"},
     {"*.ini", "text/plain"},
+    {"*.properties", "text/x-java-properties"},
+    {"*.props", "text/x-java-properties"},
     {"*.md", "text/markdown"},
     {"*.markdown", "text/markdown"},
     {"*.rst", "text/x-rst"},

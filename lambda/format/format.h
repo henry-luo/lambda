@@ -18,6 +18,7 @@ String* format_html(VariableMemPool* pool, Item root_item);
 String* format_yaml(VariableMemPool* pool, Item root_item);
 String* format_toml(VariableMemPool* pool, Item root_item);
 String* format_ini(VariableMemPool* pool, Item root_item);
+String* format_properties(VariableMemPool* pool, Item root_item);
 String* format_css(VariableMemPool* pool, Item root_item);
 String* format_latex(VariableMemPool* pool, Item root_item);
 void format_rst(StringBuf* sb, Item root_item);
