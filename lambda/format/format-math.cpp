@@ -95,12 +95,12 @@ static const MathFormatDef basic_operators[] = {
     {"sub", " - ", " - ", " - ", "<mo>-</mo>", " - ", true, false, true, 2},
     {"unary_minus", "-{1}", "-{1}", "-{1}", "<mo>-</mo>{1}", "-{1}", true, false, false, 1},
     {"mul", " \\cdot ", " * ", " * ", "<mo>⋅</mo>", " × ", true, false, true, 2},
-    {"implicit_mul", "{1} {2}", "{1} {2}", "{1} {2}", "{1} {2}", "{1} {2}", true, false, true, 2},
+    {"implicit_mul", "", "", "", "", "", true, false, true, 2},
     {"div", " / ", " / ", " / ", "<mo>/</mo>", " / ", true, false, true, 2},
     {"latex_div", " \\div ", " / ", " / ", "<mo>÷</mo>", " ÷ ", true, false, true, 2},
-    {"pow", "{1}^{2}", "{1}^{2}", "{1}**{2}", "<msup>{1}{2}</msup>", "^", true, false, false, 2},
-    {"subscript", "{1}_{2}", "{1}_{2}", "{1}_({2})", "<msub>{1}{2}</msub>", "_", true, false, false, 2},
-    {"eq", " = ", " = ", "=", "<mo>=</mo>", " = ", true, false, true, 2},
+    {"pow", "{1}^{2}", "{1}^{2}", "{1}^{2}", "<msup>{1}{2}</msup>", "^", true, false, false, 2},
+    {"subscript", "{1}_{2}", "{1}_{2}", "{1}_{2}", "<msub>{1}{2}</msub>", "_", true, false, false, 2},
+    {"eq", " = ", " = ", " = ", "<mo>=</mo>", " = ", true, false, true, 2},
     {"lt", " < ", " < ", " < ", "<mo>&lt;</mo>", " < ", true, false, true, 2},
     {"gt", " > ", " > ", " > ", "<mo>&gt;</mo>", " > ", true, false, true, 2},
     {"pm", "\\pm", "+-", "+-", "<mo>±</mo>", "±", false, false, false, 0},
@@ -133,7 +133,7 @@ static const MathFormatDef functions[] = {
     {"ln", "\\ln {1}", "ln", "ln", "<mi>ln</mi>", "ln", true, false, false, -1},
     {"lg", "\\lg {1}", "lg", "lg", "<mi>lg</mi>", "lg", true, false, false, -1},
     {"exp", "\\exp {1}", "exp", "exp", "<mi>exp</mi>", "exp", true, false, false, -1},
-    {"abs", "|{1}|", "abs({1})", "abs({1})", "<mrow><mo>|</mo>{1}<mo>|</mo></mrow>", "|·|", true, false, false, 1},
+    {"abs", "|{1}|", "abs({1})", "|{1}|", "<mrow><mo>|</mo>{1}<mo>|</mo></mrow>", "|·|", true, false, false, 1},
     {"norm", "\\|{1}\\|", "norm({1})", "‖{1}‖", "<mrow><mo>‖</mo>{1}<mo>‖</mo></mrow>", "‖·‖", true, false, false, 1},
     {"inner_product", "\\langle {1} \\rangle", "⟨{1}⟩", "⟨{1}⟩", "<mrow><mo>⟨</mo>{1}<mo>⟩</mo></mrow>", "⟨·⟩", true, false, false, -1},
     {"mathbf", "\\mathbf{{1}}", "bold({1})", "mathbf({1})", "<mi mathvariant=\"bold\">{1}</mi>", "𝐛", true, false, false, 1},
@@ -339,7 +339,7 @@ static const MathFormatDef accents[] = {
 static const MathFormatDef relations[] = {
     {"leq", " \\leq ", "<=", "<=", "<mo>≤</mo>", "≤", true, false, true, 0},
     {"geq", " \\geq ", ">=", ">=", "<mo>≥</mo>", "≥", true, false, true, 0},
-    {"neq", " \\neq ", " != ", " != ", "<mo>≠</mo>", "≠", true, false, true, 0},
+    {"neq", " \\neq ", "!=", "!=", "<mo>≠</mo>", "≠", true, false, true, 0},
     {"lt", " < ", "<", "<", "<mo>&lt;</mo>", "<", true, false, true, 0},
     {"gt", " > ", ">", ">", "<mo>&gt;</mo>", ">", true, false, true, 0},
     {"eq", " = ", "=", "=", "<mo>=</mo>", "=", true, false, true, 0},
@@ -411,8 +411,8 @@ static const MathFormatDef modular[] = {
 
 // Spacing commands
 static const MathFormatDef spacing[] = {
-    {"quad", "\\quad", "quad", "quad", "<mspace width='1em'/>", "  ", false, false, false, 0},
-    {"qquad", "\\qquad", "qquad", "qquad", "<mspace width='2em'/>", "    ", false, false, false, 0},
+    {"quad", "\\quad ", "quad", "quad", "<mspace width='1em'/>", "  ", false, false, false, 0},
+    {"qquad", "\\qquad ", "qquad", "qquad", "<mspace width='2em'/>", "    ", false, false, false, 0},
     {"thin_space", "\\,", ",", "thin_space", "<mspace width='0.167em'/>", " ", false, false, false, 0},
     {"med_space", "\\:", ":", "med_space", "<mspace width='0.222em'/>", " ", false, false, false, 0},
     {"thick_space", "\\;", ";", "thick_space", "<mspace width='0.278em'/>", " ", false, false, false, 0},
@@ -483,11 +483,6 @@ static const ElementSpacingRule element_spacing_rules[] = {
 
 // Pair-specific spacing overrides
 static const SpacingPairRule pair_spacing_rules[] = {
-    // Function calls - no space before parentheses
-    {"*", "paren_group", SPACE_NONE, MATH_CONTEXT_NORMAL},
-    {"*", "parentheses", SPACE_NONE, MATH_CONTEXT_NORMAL},
-    {"*", "lparen", SPACE_NONE, MATH_CONTEXT_NORMAL},
-    
     // Function applications - functions need space before arguments
     {"sin", "*", SPACE_THIN, MATH_CONTEXT_NORMAL},
     {"cos", "*", SPACE_THIN, MATH_CONTEXT_NORMAL},
@@ -609,24 +604,8 @@ static const char* get_element_category(const char* element_name) {
 static SpaceType determine_element_spacing(const char* left_element, const char* right_element, MathContext context) {
     if (!left_element || !right_element) return SPACE_NONE;
     
-    // Debug output for function spacing issues
-    if (strstr(left_element, "text") || strstr(right_element, "text") || 
-        strcmp(left_element, "im") == 0 || strcmp(right_element, "im") == 0) {
-        printf("DEBUG SPACING: left='%s', right='%s', context=%d\n", left_element, right_element, context);
-    }
-    
     // In compact contexts (subscripts, superscripts), minimize spacing
     if (context == MATH_CONTEXT_SUBSCRIPT || context == MATH_CONTEXT_SUPERSCRIPT) {
-        return SPACE_NONE;
-    }
-    
-    // Don't add spaces around spacing commands - they handle their own spacing
-    if (strcmp(left_element, "thin_space") == 0 || strcmp(left_element, "thick_space") == 0 ||
-        strcmp(left_element, "med_space") == 0 || strcmp(left_element, "neg_space") == 0 ||
-        strcmp(left_element, "quad") == 0 || strcmp(left_element, "qquad") == 0 ||
-        strcmp(right_element, "thin_space") == 0 || strcmp(right_element, "thick_space") == 0 ||
-        strcmp(right_element, "med_space") == 0 || strcmp(right_element, "neg_space") == 0 ||
-        strcmp(right_element, "quad") == 0 || strcmp(right_element, "qquad") == 0) {
         return SPACE_NONE;
     }
     
@@ -658,7 +637,7 @@ static SpaceType determine_element_spacing(const char* left_element, const char*
 
 static const char* get_item_element_name(Item item) {
     if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-        Element* elem = item.element;
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str) {
@@ -720,7 +699,7 @@ static bool is_single_character_item(Item item) {
         return result;
     } else if (type == LMD_TYPE_ELEMENT) {
         // Check for single-symbol LaTeX commands like \circ, \alpha, etc.
-        Element* elem = item.element;
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -766,8 +745,8 @@ static bool item_contains_integral(Item item) {
             }
         }
     } else if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = item.element;
-
+        Element* elem = (Element*)item.pointer;
+        
         // Check if this element is an integral
         TypeElmt* elmt_type = (TypeElmt*)elem->type;
         if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -795,7 +774,7 @@ static bool item_contains_integral(Item item) {
 static bool item_is_latex_command(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = item.element;
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -824,7 +803,7 @@ static bool item_is_latex_command(Item item) {
 static bool item_is_quantifier(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = item.element;
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             // Get the element type to access the name
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
@@ -846,7 +825,7 @@ static bool item_contains_only_symbols(Item item) {
     TypeId type = get_type_id(item);
     
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = item.element;
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -874,7 +853,7 @@ static bool item_contains_only_symbols(Item item) {
 static bool item_is_symbol_element(Item item) {
     TypeId type = get_type_id(item);
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = item.element;
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -950,7 +929,7 @@ static bool item_is_identifier_or_variable(Item item) {
     
     // Check if it's an element that represents a variable (single letter)
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = item.element;
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && elmt_type->name.length > 0) {
@@ -1049,13 +1028,7 @@ static void format_math_string(StringBuf* sb, String* str) {
         return;
     }
     
-    // Debug: Print string content to trace corruption
-    if (str->chars && str->len > 0) {
-        fprintf(stderr, "DEBUG: format_math_string content='%.*s' (len=%d, ptr=%p)\n", 
-               str->len, str->chars, str->len, str->chars);
-    }
-    
-    // Use strlen to get the actual string length
+    // The length field seems corrupted, so let's use strlen as a workaround
     size_t string_len = strlen(str->chars);
     
     #ifdef DEBUG_MATH_FORMAT
@@ -1095,9 +1068,8 @@ static void format_math_string(StringBuf* sb, String* str) {
 
 // Format children elements based on format string
 static void format_math_children_with_template(StringBuf* sb, List* children, const char* format_str, MathOutputFlavor flavor, int depth) {
-    if (!sb || !children || !format_str) return;
+    if (!format_str || !children) return;
     
-    printf("DEBUG: format_math_children_with_template called with format_str='%s', flavor=%d\n", format_str, flavor);
     
     int child_count = children->length;
     
@@ -1110,7 +1082,6 @@ static void format_math_children_with_template(StringBuf* sb, List* children, co
                     if (i > 0) {
                         stringbuf_append_str(sb, ", ");
                     }
-                    log_debug("format_math_children_with_template: child %d", i);
                     format_math_item(sb, children->items[i], flavor, depth + 1);
                 }
                 p += 3; // Skip "{*}"
@@ -1120,7 +1091,7 @@ static void format_math_children_with_template(StringBuf* sb, List* children, co
                 
                 if (child_index >= 0 && child_index < child_count) {
                     Item child_item = children->items[child_index];
-                    log_debug("format_math_children_with_template: child index %d", child_index);
+                    
                     // Don't force compact context for template formatting - let the element decide
                     format_math_item(sb, child_item, flavor, depth + 1);
                 } else {
@@ -1131,54 +1102,6 @@ static void format_math_children_with_template(StringBuf* sb, List* children, co
                 }
                 p += 3; // Skip "{N}"
             }
-        } 
-        else if (*p == '_' && *(p+1) == '{' && flavor == MATH_OUTPUT_ASCII) {
-            // Convert LaTeX-style _{...} to ASCII-style _(...)
-            stringbuf_append_str(sb, "_(");
-            p += 2; // Skip "_{" 
-            // Find matching closing brace
-            int brace_count = 1;
-            const char* start = p;
-            while (*p && brace_count > 0) {
-                if (*p == '{') brace_count++;
-                else if (*p == '}') brace_count--;
-                if (brace_count > 0) p++;
-            }
-            // Copy content between braces
-            while (start < p) {
-                stringbuf_append_char(sb, *start);
-                start++;
-            }
-            stringbuf_append_str(sb, ")");
-            if (*p == '}') p++; // Skip closing brace
-        } 
-        else if (*p == '^' && *(p+1) == '{' && flavor == MATH_OUTPUT_ASCII) {
-            log_debug("Convert LaTeX-style ^{...} to ASCII-style ^(...)");
-            const char* brace_start = p + 2;
-            int brace_count = 1;
-            const char* brace_end = brace_start;
-            while (*brace_end && brace_count > 0) {
-                if (*brace_end == '{') brace_count++;
-                else if (*brace_end == '}') brace_count--;
-                brace_end++;
-            }
-            
-            // Check if content is a single character
-            bool is_single_char = (brace_end - brace_start - 1 == 1) && isalnum(*brace_start);
-            
-            stringbuf_append_str(sb, "^");
-            if (!is_single_char) {
-                stringbuf_append_str(sb, "(");
-            }
-            // Copy content between braces
-            while (brace_start < brace_end - 1) {
-                stringbuf_append_char(sb, *brace_start);
-                brace_start++;
-            }
-            if (!is_single_char) {
-                stringbuf_append_str(sb, ")");
-            }
-            p = brace_end; // Skip past closing brace
         } else {
             stringbuf_append_char(sb, *p);
             p++;
@@ -1196,23 +1119,16 @@ static void format_math_children(StringBuf* sb, List* children, MathOutputFlavor
             const char* prev_name = get_item_element_name(children->items[i-1]);
             const char* curr_name = get_item_element_name(children->items[i]);
             
-            // Debug: print all element names for integral expressions (only for implicit_mul)
-            if (prev_name && curr_name) {
-                printf("DEBUG SPACING: prev='%s', curr='%s'\n", prev_name, curr_name);
-            }
-            
             // Check for differential spacing (space before dx, dy, dA, etc.)
             if (curr_name && (strcmp(curr_name, "dx") == 0 || strcmp(curr_name, "dy") == 0 || 
                              strcmp(curr_name, "dz") == 0 || strcmp(curr_name, "dt") == 0 ||
                              strcmp(curr_name, "dA") == 0 || strcmp(curr_name, "dV") == 0 ||
                              strcmp(curr_name, "dS") == 0 || strcmp(curr_name, "dr") == 0)) {
-                printf("DEBUG: Adding space before differential '%s'\n", curr_name);
                 stringbuf_append_str(sb, " ");
             }
             // Check for spacing after integral bounds
             else if (prev_name && (strcmp(prev_name, "int") == 0 || strcmp(prev_name, "iint") == 0 || 
                                   strcmp(prev_name, "iiint") == 0 || strcmp(prev_name, "oint") == 0)) {
-                printf("DEBUG: Adding space after integral '%s'\n", prev_name);
                 stringbuf_append_str(sb, " ");
             }
             // Check for operator spacing using config rules
@@ -1221,17 +1137,7 @@ static void format_math_children(StringBuf* sb, List* children, MathOutputFlavor
                 if (space_type != SPACE_NONE) {
                     append_space_by_type(sb, space_type);
                 } else if (flavor != MATH_OUTPUT_MATHML) {
-                    // Debug spacing decisions for integrals
-                    if (prev_name && (strcmp(prev_name, "int") == 0 || strcmp(prev_name, "iint") == 0)) {
-                        printf("DEBUG INTEGRAL SPACING: prev='%s', curr='%s'\n", prev_name, curr_name);
-                    }
-                    
-                    // Don't add space before parentheses in function calls
-                    if (curr_name && (curr_name[0] == '(' || strstr(curr_name, "paren") != NULL)) {
-                        // No space before parentheses
-                    } else {
-                        append_space_if_needed(sb);
-                    }
+                    append_space_if_needed(sb);
                 }
             }
         }
@@ -1301,32 +1207,38 @@ static const char* get_styled_frac_format(const char* style, MathOutputFlavor fl
     return NULL;
 }
 
-
 // Format a math element
 static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor flavor, int depth) {
-    if (!elem || !sb) return;
+    // Debug: format_math_element called
+    if (!elem) return;
     
-    // Get element name using the correct function
-    Item item = {.element = elem};
-    const char* element_name = get_item_element_name(item);
-    if (!element_name) return;
+    TypeElmt* elmt_type = (TypeElmt*)elem->type;
+    if (!elmt_type) return;
     
-    printf("DEBUG: format_math_element processing element='%s', flavor=%d\n", element_name, flavor);
-    
-    // Get the element structure for accessing children
-    Element* elmt = elem;
-    if (!elmt) return;
-    
-    // Debug power elements specifically
-    if (strcmp(element_name, "pow") == 0) {
-        fprintf(stderr, "DEBUG: Found pow element, flavor=%d\n", flavor);
-    }
-    
-    if (strcmp(element_name, "implicit_mul") == 0) {
-        implicit_mul_depth++;  // Increment depth when entering implicit_mul
+    // Get element name
+    const char* element_name = NULL;
+    char name_buf[256];  // Local buffer instead of static
+    if (elmt_type->name.str && elmt_type->name.length > 0) {
+        // Create null-terminated string for element name
+        int name_len = elmt_type->name.length;
+        if (name_len >= sizeof(name_buf)) name_len = sizeof(name_buf) - 1;
+        strncpy(name_buf, elmt_type->name.str, name_len);
+        name_buf[name_len] = '\0';
+        element_name = name_buf;
+        
+        printf("DEBUG: format_math_element processing element: '%s'\n", element_name);
+        
+        #ifdef DEBUG_MATH_FORMAT
+        log_debug("Math element name: '%s'", element_name);
+        #endif
+        
+        if (strcmp(element_name, "implicit_mul") == 0) {
+            implicit_mul_depth++;  // Increment depth when entering implicit_mul
+        }
     }
     
     // Special handling for matrix environments - handle before format definition lookup
+    printf("DEBUG: Checking matrix element: '%s'\n", element_name ? element_name : "NULL");
     if (element_name && (strcmp(element_name, "pmatrix") == 0 || strcmp(element_name, "bmatrix") == 0 || 
         strcmp(element_name, "matrix") == 0 || strcmp(element_name, "vmatrix") == 0 || 
         strcmp(element_name, "Vmatrix") == 0 || strcmp(element_name, "smallmatrix") == 0)) {
@@ -1334,8 +1246,8 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         printf("DEBUG: Matrix element detected: '%s', flavor=%d (LATEX=%d)\n", element_name, flavor, MATH_OUTPUT_LATEX);
         
         List* children = NULL;
-        if (elmt->length > 0) {
-            children = (List*)elmt;
+        if (elmt_type->content_length > 0) {
+            children = (List*)elem;
         }
         
         printf("DEBUG: Children count: %d\n", children ? (int)children->length : 0);
@@ -1358,7 +1270,7 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
                     // Handle row elements specially - format children with & separators
                     Item row_item = children->items[i];
                     if (get_type_id(row_item) == LMD_TYPE_ELEMENT) {
-                        Element* row_elem = row_item.element;
+                        Element* row_elem = (Element*)row_item.pointer;
                         if (row_elem && row_elem->type) {
                             TypeElmt* row_type = (TypeElmt*)row_elem->type;
                             if (row_type && row_type->name.str && 
@@ -1406,16 +1318,16 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     // Find format definition
     const MathFormatDef* def = find_format_def(element_name);
     
-    printf("DEBUG: format_math_element element='%s', def=%p, flavor=%d\n", element_name, def, flavor);
-    if (def) {
-        const char* format_str = get_format_string(def, flavor);
-        printf("DEBUG: format_str='%s' for element='%s'\n", format_str ? format_str : "NULL", element_name);
-    }
+    #ifdef DEBUG_MATH_FORMAT
+    log_debug("format_math_element called with element_name='%s', def=%p", element_name, def);
+    #endif
+    
     
     if (!def) {
+        
         // Unknown element, check if it has children (function call)
-        if (elmt->length > 0) {
-            List* children = (List*)elmt;
+        if (elmt_type->content_length > 0) {
+            List* children = (List*)elem;
             // Format as function call: name(arg1, arg2, ...)
             stringbuf_append_str(sb, element_name);
             stringbuf_append_str(sb, "(");
@@ -1439,12 +1351,55 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         return;
     }
     
+    // Special handling for implicit multiplication - apply comprehensive spacing rules
+    if (strcmp(element_name, "implicit_mul") == 0) {
+        List* children = NULL;
+        if (elmt_type->content_length > 0) {
+            children = (List*)elem;
+        }
+        
+        if (children) {
+            for (int i = 0; i < children->length; i++) {
+                if (i > 0) {
+                    const char* prev_name = get_item_element_name(children->items[i-1]);
+                    const char* curr_name = get_item_element_name(children->items[i]);
+                    
+                    bool space_added = false;
+                    
+                    // Critical: Add space before differential elements (dx, dy, dA, etc.)
+                    if (curr_name && (strcmp(curr_name, "dx") == 0 || strcmp(curr_name, "dy") == 0 || 
+                                     strcmp(curr_name, "dz") == 0 || strcmp(curr_name, "dt") == 0 ||
+                                     strcmp(curr_name, "dA") == 0 || strcmp(curr_name, "dV") == 0 ||
+                                     strcmp(curr_name, "dS") == 0 || strcmp(curr_name, "dr") == 0)) {
+                        stringbuf_append_str(sb, " ");
+                        space_added = true;
+                    }
+                    // Critical: Add space after integral with bounds
+                    else if (prev_name && (strcmp(prev_name, "int") == 0 || strcmp(prev_name, "iint") == 0 || 
+                                          strcmp(prev_name, "iiint") == 0 || strcmp(prev_name, "oint") == 0)) {
+                        stringbuf_append_str(sb, " ");
+                        space_added = true;
+                    }
+                    
+                    // Apply config-driven spacing if no special case was handled
+                    if (!space_added) {
+                        SpaceType space_type = determine_element_spacing(prev_name, curr_name, MATH_CONTEXT_NORMAL);
+                        if (space_type != SPACE_NONE) {
+                            append_space_by_type(sb, space_type);
+                        }
+                    }
+                }
+                format_math_item(sb, children->items[i], flavor, depth + 1);
+            }
+        }
+        return;
+    }
 
     // Get format string and children
     const char* format_str = get_format_string(def, flavor);
     List* children = NULL;
-    if (elmt->length > 0) {
-        children = (List*)elmt;
+    if (elmt_type->content_length > 0) {
+        children = (List*)elem;
     }
     
     // Debug: check template condition components
@@ -1465,29 +1420,51 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
     log_debug("format_str='%s'", format_str);
     #endif
 
-    // Check if this is a template format (contains placeholders like {1}, {2})
-    if (strchr(format_str, '{')) {
-        format_math_children_with_template(sb, children, format_str, flavor, depth);
-        return;
-    }
-    
-    // Standard binary operator handling - format with proper operator symbols
-    if (def->is_binary_op && children && children->length >= 2) {
-        // For implicit_mul and operators with more than 2 operands, use template formatting
-        if (strcmp(element_name, "implicit_mul") == 0 || children->length > 2) {
-            format_math_children_with_template(sb, children, format_str, flavor, depth);
-        } else {
-            // For standard binary operators with exactly 2 operands, format as: left operator right
-            format_math_item(sb, children->items[0], flavor, depth + 1);
-            stringbuf_append_str(sb, format_str);  // This contains the operator symbol with spacing
-            format_math_item(sb, children->items[1], flavor, depth + 1);
+    // Special handling for binary operators using new spacing system
+    // Special case for implicit_mul: use config-driven spacing
+    if (def->is_binary_op && strcmp(element_name, "implicit_mul") == 0 && children && children->length >= 2) {
+        // Use new spacing system for implicit multiplication
+        MathContext current_context = in_compact_context ? MATH_CONTEXT_SUBSCRIPT : MATH_CONTEXT_NORMAL;
+        
+        for (int i = 0; i < children->length; i++) {
+            if (i > 0) {
+                // Get element names for spacing decision
+                const char* prev_name = get_item_element_name(children->items[i-1]);
+                const char* curr_name = get_item_element_name(children->items[i]);
+                
+                // Determine spacing using config-driven system
+                SpaceType space_needed = determine_element_spacing(prev_name, curr_name, current_context);
+                
+                // Apply the spacing
+                if (space_needed != SPACE_NONE && flavor == MATH_OUTPUT_LATEX) {
+                    append_space_by_type(sb, space_needed);
+                } else if (space_needed != SPACE_NONE) {
+                    stringbuf_append_str(sb, " ");  // Fallback for non-LaTeX formats
+                }
+            }
+            format_math_item(sb, children->items[i], flavor, depth + 1);
         }
         return;
     }
     
+    // Standard binary operator handling - format with proper operator symbols
+    if (def->is_binary_op && children && children->length >= 2 && strcmp(element_name, "implicit_mul") != 0) {
+        // For standard binary operators, format as: left operator right
+        if (children->length == 2) {
+            format_math_item(sb, children->items[0], flavor, depth + 1);
+            stringbuf_append_str(sb, format_str);  // This contains the operator symbol with spacing
+            format_math_item(sb, children->items[1], flavor, depth + 1);
+        } else {
+            // For operators with more than 2 operands, use template formatting
+            format_math_children_with_template(sb, children, format_str, flavor, depth);
+        }
+        return;
+    }
+    
+    
     // Special handling for styled fractions
     if (strcmp(element_name, "frac") == 0) {
-        const char* style = get_element_style(elmt);
+        const char* style = get_element_style(elem);
         if (style) {
             const char* styled_format = get_styled_frac_format(style, flavor);
             if (styled_format && children && children->length >= 2) {
@@ -1509,8 +1486,9 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
         }
         
         if (is_big_op) {
-            printf("DEBUG: Big operator detected: %s, flavor=%d, children_length=%ld\n", element_name, flavor, children->length);
-            printf("DEBUG: StringBuf at start of big operator handling: '%s'\n", sb->str ? sb->str->chars : "NULL");
+            #ifdef DEBUG_MATH_FORMAT
+            log_debug("Big operator detected: %s", element_name);
+            #endif
             
             // Special handling for lim - different from sum/int
             if (strcmp(element_name, "lim") == 0) {
@@ -1535,115 +1513,105 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
             }
             
             // Format as operator with subscript for limits/bounds (sum, int, etc.)
-            printf("DEBUG: Big operator format_str='%s' for element='%s', flavor=%d\n", format_str, element_name, flavor);
-            printf("DEBUG: StringBuf before appending format_str: '%s'\n", sb->str ? sb->str->chars : "NULL");
-            stringbuf_append_str(sb, format_str);  // e.g., "\\sum" or "sum"
-            printf("DEBUG: StringBuf after appending format_str: '%s'\n", sb->str ? sb->str->chars : "NULL");
+            stringbuf_append_str(sb, format_str);  // e.g., "\\sum"
             
-            // Handle ASCII and LaTeX formatting for big operators with bounds
-            printf("DEBUG: About to check flavor, flavor=%d (ASCII=%d, LaTeX=%d)\n", flavor, MATH_OUTPUT_ASCII, MATH_OUTPUT_LATEX);
-            if (flavor == MATH_OUTPUT_ASCII) {
-                printf("DEBUG: Taking ASCII path for big operator\n");
-                // ASCII format: sum_(i=1)^n i
-                for (int i = 0; i < children->length; i++) {
-                    if (i == 0) {
-                        // First child is subscript (lower bound)
-                        #ifdef DEBUG_MATH_FORMAT
-                        log_debug("Adding subscript for ASCII big operator, StringBuf before: '%s'", sb->str ? sb->str->chars : "NULL");
-                        #endif
-                        stringbuf_append_str(sb, "_");
-                        // Don't use parentheses for single characters in ASCII
-                        bool needs_parens = !is_single_character_item(children->items[i]);
-                        if (needs_parens) {
-                            stringbuf_append_str(sb, "(");
-                        }
-                        #ifdef DEBUG_MATH_FORMAT
-                        log_debug("Added subscript prefix to StringBuf, now: '%s'", sb->str ? sb->str->chars : "NULL");
-                        #endif
-                        bool prev_compact_context = in_compact_context;
-                        in_compact_context = true;
-                        format_math_item(sb, children->items[i], flavor, depth + 1);
-                        in_compact_context = prev_compact_context;
-                        if (needs_parens) {
-                            stringbuf_append_str(sb, ")");
-                        }
-                        #ifdef DEBUG_MATH_FORMAT
-                        log_debug("Completed subscript formatting, StringBuf now: '%s'", sb->str ? sb->str->chars : "NULL");
-                        #endif
-                    } else if (i == 1 && children->length >= 2) {
-                        // Second child is superscript (upper bound) if there are 2+ children
-                        stringbuf_append_str(sb, "^");
-                        // Don't use parentheses for single characters in ASCII
-                        bool needs_parens = !is_single_character_item(children->items[i]);
-                        if (needs_parens) {
-                            stringbuf_append_str(sb, "(");
-                        }
-                        bool prev_compact_context = in_compact_context;
-                        in_compact_context = true;
-                        format_math_item(sb, children->items[i], flavor, depth + 1);
-                        in_compact_context = prev_compact_context;
-                        if (needs_parens) {
-                            stringbuf_append_str(sb, ")");
-                        }
-                    } else {
-                        // Remaining children are summands/integrands
-                        stringbuf_append_str(sb, " ");
-                        format_math_item(sb, children->items[i], flavor, depth + 1);
-                    }
+            if (children->length >= 1) {
+                // Use braces only for complex expressions, not single characters
+                bool needs_braces = !is_single_character_item(children->items[0]);
+                
+                if (needs_braces) {
+                    stringbuf_append_str(sb, "_{");
+                } else {
+                    stringbuf_append_str(sb, "_");
                 }
-            } else {
-                printf("DEBUG: Taking LaTeX path for big operator\n");
-                // LaTeX format: \sum_{i=1}^n i
-                printf("DEBUG: LaTeX big operator formatting, children_length=%ld\n", children->length);
-                for (int i = 0; i < children->length; i++) {
-                    printf("DEBUG: Processing child %d of %ld, condition check: i=%d, children->length=%ld\n", i, children->length, i, children->length);
-                    if (i == 0) {
-                        // First child is always subscript
-                        printf("DEBUG: Adding subscript for child %d\n", i);
-                        stringbuf_append_str(sb, "_{");
-                        format_math_item(sb, children->items[i], flavor, depth + 1);
-                        stringbuf_append_str(sb, "}");
-                        printf("DEBUG: After subscript, StringBuf: '%s'\n", sb->str ? sb->str->chars : "NULL");
-                    } else if (i == 1 && children->length >= 2) {
-                        // Second child is superscript if there are 2+ children
-                        printf("DEBUG: Condition met for superscript: i=%d, children->length=%ld\n", i, children->length);
-                        printf("DEBUG: Adding superscript for child %d\n", i);
+                bool prev_compact_context = in_compact_context;
+                in_compact_context = true;
+                format_math_item(sb, children->items[0], flavor, depth + 1);
+                in_compact_context = prev_compact_context;
+                if (needs_braces) {
+                    stringbuf_append_str(sb, "}");
+                }
+            }
+            
+            // Handle additional children
+            if (children->length >= 2) {
+                // Check if this is an integral-like operator that needs upper bounds as superscript
+                bool needs_superscript = (strcmp(element_name, "int") == 0 || 
+                                        strcmp(element_name, "iint") == 0 || 
+                                        strcmp(element_name, "iiint") == 0 ||
+                                        strcmp(element_name, "oint") == 0);
+                
+                if (needs_superscript) {
+                    bool needs_super_braces = !is_single_character_item(children->items[1]);
+                    if (needs_super_braces) {
                         stringbuf_append_str(sb, "^{");
-                        format_math_item(sb, children->items[i], flavor, depth + 1);
-                        stringbuf_append_str(sb, "}");
-                        printf("DEBUG: After superscript, StringBuf: '%s'\n", sb->str ? sb->str->chars : "NULL");
                     } else {
-                        // Remaining children are summands/integrands
-                        printf("DEBUG: Adding integrand for child %d (else case)\n", i);
+                        stringbuf_append_str(sb, "^");
+                    }
+                    bool prev_compact_context = in_compact_context;
+                    in_compact_context = true;
+                    format_math_item(sb, children->items[1], flavor, depth + 1);
+                    in_compact_context = prev_compact_context;
+                    if (needs_super_braces) {
+                        stringbuf_append_str(sb, "}");
+                    }
+                } else {
+                    // For sum/prod operators, second child might be upper limit
+                    // For bigcup/bigcap, check if we have upper limit syntax
+                    bool has_upper_limit = (strcmp(element_name, "sum") == 0 || 
+                                          strcmp(element_name, "prod") == 0 ||
+                                          strcmp(element_name, "bigcup") == 0 ||
+                                          strcmp(element_name, "bigcap") == 0) && 
+                                          children->length >= 3;
+                    
+                    if (has_upper_limit) {
+                        // Second child is upper limit for sum/prod/bigcup/bigcap
+                        // For prod and sum, always use braces; for others, use braces only for complex expressions
+                        bool needs_braces = (strcmp(element_name, "prod") == 0 || 
+                                            strcmp(element_name, "sum") == 0 ||
+                                            !is_single_character_item(children->items[1]));
+                        
+                        if (needs_braces) {
+                            stringbuf_append_str(sb, "^{");
+                        } else {
+                            stringbuf_append_str(sb, "^");
+                        }
+                        bool prev_compact_context = in_compact_context;
+                        in_compact_context = true;
+                        format_math_item(sb, children->items[1], flavor, depth + 1);
+                        in_compact_context = prev_compact_context;
+                        if (needs_braces) {
+                            stringbuf_append_str(sb, "}");
+                        }
+                    } else {
+                        // For other operators, second child is the main expression
                         stringbuf_append_str(sb, " ");
-                        format_math_item(sb, children->items[i], flavor, depth + 1);
-                        printf("DEBUG: After integrand, StringBuf: '%s'\n", sb->str ? sb->str->chars : "NULL");
+                        format_math_item(sb, children->items[1], flavor, depth + 1);
                     }
                 }
             }
             
-            printf("DEBUG: Big operator formatting complete, returning\n");
+            // Handle summand/integrand (the expression being summed/integrated)
+            if (children->length >= 3) {
+                stringbuf_append_str(sb, " ");
+                format_math_item(sb, children->items[2], flavor, depth + 1);
+            }
+            
             return;
         }
     }
     
     // Check if this element has a format template with placeholders
-    #ifdef DEBUG_MATH_FORMAT
-    if (strcmp(element_name, "sum") == 0) {
-        log_debug("sum element debug - has_children=%s, children=%p, format_str='%s', has_placeholders=%s", 
-                def->has_children ? "true" : "false", children, format_str,
-                (strstr(format_str, "{1}") || strstr(format_str, "{*}")) ? "true" : "false");
-        log_debug("sum will take template path: %s", 
-                (def->has_children && children && (strstr(format_str, "{1}") || strstr(format_str, "{*}"))) ? "true" : "false");
-    }
-    #endif
     if (def->has_children && children && (strstr(format_str, "{1}") || strstr(format_str, "{*}"))) {
-        log_enter();
+        #ifdef DEBUG_MATH_FORMAT
         log_debug("Using template formatting for element '%s' with format: '%s'", element_name, format_str);
+        #endif
         
         // Special handling for pow and subscript elements
         if (strcmp(element_name, "pow") == 0 && children->length == 2 && flavor == MATH_OUTPUT_LATEX) {
+            #ifdef DEBUG_MATH_FORMAT
             log_debug("Using special pow formatting for LaTeX");
+            #endif
             // Format as base^exponent with compact context to avoid extra spaces
             format_math_item(sb, children->items[0], flavor, depth + 1);
             stringbuf_append_str(sb, "^");
@@ -1662,13 +1630,12 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
             }
             
             in_compact_context = prev_compact_context;
-        } 
-        else if (strcmp(element_name, "eq") == 0 && children->length == 2 && flavor == MATH_OUTPUT_LATEX) {
+        } else if (strcmp(element_name, "eq") == 0 && children->length == 2 && 
+                   flavor == MATH_OUTPUT_LATEX) {
             // Always use template formatting for equals to get proper spacing
             format_math_children_with_template(sb, children, " = ", flavor, depth);
-        } 
-        else if (strcmp(element_name, "subscript") == 0 && children->length == 2 && 
-            flavor == MATH_OUTPUT_LATEX && is_single_character_item(children->items[1])) {
+        } else if (strcmp(element_name, "subscript") == 0 && children->length == 2 && 
+                   flavor == MATH_OUTPUT_LATEX && is_single_character_item(children->items[1])) {
             // Special handling for subscript - use _i for single characters instead of _{i}
             format_math_item(sb, children->items[0], flavor, depth + 1);
             stringbuf_append_str(sb, "_");
@@ -1677,12 +1644,12 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
             in_compact_context = true;
             format_math_item(sb, children->items[1], flavor, depth + 1);
             in_compact_context = prev_compact_context;
-        } 
-        else {
+        } else {
             #ifdef DEBUG_MATH_FORMAT
             if (strcmp(element_name, "pow") == 0) {
                 log_debug("pow element debug - element_name='%s', children->length=%ld, flavor=%d", 
                         element_name, children->length, flavor);
+                log_debug("MATH_OUTPUT_LATEX constant value = %d", MATH_OUTPUT_LATEX);
             }
             #endif
             
@@ -1697,7 +1664,6 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
             // Restore previous compact context
             in_compact_context = prev_compact_context;
         }
-        log_leave();
     } else {
         #ifdef DEBUG_MATH_FORMAT
         log_debug("Using simple formatting without template for '%s', has_children=%s, children=%p, format_str='%s'", 
@@ -1775,13 +1741,6 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
     log_debug("format_math_item: sb before - length=%zu, str='%s'", sb->length, sb->str ? sb->str->chars : "NULL");
     #endif
     
-    if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-        const char* element_name = get_item_element_name(item);
-        if (element_name && strcmp(element_name, "sum") == 0) {
-            printf("DEBUG: format_math_item processing sum element, flavor=%d\n", flavor);
-        }
-    }
-    
     // Check for invalid raw integer values that weren't properly encoded
     if (item.item > 0 && item.item < 0x1000) {
         char num_buf[32];
@@ -1799,7 +1758,8 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
             #ifdef DEBUG_MATH_FORMAT
             log_debug("format_math_item: Processing ELEMENT");
             #endif
-            format_math_element(sb, item.element, flavor, depth);
+            Element* elem = (Element*)item.pointer;
+            format_math_element(sb, elem, flavor, depth);
             break;
         }
         case LMD_TYPE_SYMBOL: {
@@ -1830,7 +1790,7 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
         }
         case LMD_TYPE_INT: {
             // Check for invalid raw integer values that weren't properly encoded
-            if (item.item < 0x1000) {
+            if (item.item < 0x1000 && item.item > 0) {
                 log_debug("Detected invalid raw integer item=0x%llx, treating as value=%lld", item.item, item.item);
                 char num_buf[32];
                 snprintf(num_buf, sizeof(num_buf), "%lld", item.item);
@@ -1894,7 +1854,6 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
 
 // Format math expression to LaTeX
 String* format_math_latex(VariableMemPool* pool, Item root_item) {
-    printf("DEBUG: format_math_latex called with pool=%p, root_item=0x%llx\n", (void*)pool, root_item.item);
     #ifdef DEBUG_MATH_FORMAT
     log_debug("format_math_latex: Starting with pool=%p, root_item=%p", 
             (void*)pool, (void*)root_item.pointer);
@@ -1931,8 +1890,8 @@ String* format_math_latex(VariableMemPool* pool, Item root_item) {
     }
     #endif
 
-    // Post-process to fix specific spacing issues - TEMPORARILY DISABLED
-    if (false && result && result->chars) {
+    // Post-process to fix specific spacing issues
+    if (result && result->chars) {
         StringBuf* fixed_sb = stringbuf_new(pool);
         if (fixed_sb) {
             const char* src = result->chars;
@@ -2156,6 +2115,17 @@ String* format_math_mathml(VariableMemPool* pool, Item root_item) {
     return result;
 }
 
+// Format math expression to Unicode symbols
+String* format_math_unicode(VariableMemPool* pool, Item root_item) {
+    StringBuf* sb = stringbuf_new(pool);
+    if (!sb) return NULL;
+    
+    format_math_item(sb, root_item, MATH_OUTPUT_UNICODE, 0);
+    
+    String* result = stringbuf_to_string(sb);
+    return result;
+}
+
 // Generic math formatter (defaults to LaTeX)
 String* format_math(VariableMemPool* pool, Item root_item) {
     return format_math_latex(pool, root_item);
@@ -2180,7 +2150,7 @@ static void append_char_if_needed(StringBuf* sb, char c) {
 // Helper function to check if an item ends with a partial derivative
 static bool item_ends_with_partial(Item item) {
     if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-        Element* elem = item.element;
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && 
@@ -2206,7 +2176,7 @@ static bool item_ends_with_partial(Item item) {
 // Helper function to check if an item starts with a partial derivative
 static bool item_starts_with_partial(Item item) {
     if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-        Element* elem = item.element;
+        Element* elem = (Element*)item.pointer;
         if (elem && elem->type) {
             TypeElmt* elmt_type = (TypeElmt*)elem->type;
             if (elmt_type && elmt_type->name.str && 
