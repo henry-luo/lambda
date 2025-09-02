@@ -228,7 +228,7 @@ static void format_list(StringBuf* sb, Element* elem) {
         for (long i = 0; i < list->length; i++) {
             Item item = list->items[i];
             if (get_type_id(item) == LMD_TYPE_ELEMENT) {
-                Element* li_elem = (Element*)item.pointer;
+                Element* li_elem = item.element;
                 TypeElmt* li_type = (TypeElmt*)li_elem->type;
                 
                 if (li_type && li_type->name.str && strcmp(li_type->name.str, "li") == 0) {
@@ -576,7 +576,7 @@ static bool is_block_element(Item item) {
     TypeId type = get_type_id(item);
     if (type != LMD_TYPE_ELEMENT) return false;
     
-    Element* elem = (Element*)item.pointer;
+    Element* elem = item.element;
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return false;
     
@@ -609,7 +609,7 @@ static int get_heading_level(Item item) {
     TypeId type = get_type_id(item);
     if (type != LMD_TYPE_ELEMENT) return 0;
     
-    Element* elem = (Element*)item.pointer;
+    Element* elem = item.element;
     TypeElmt* elem_type = (TypeElmt*)elem->type;
     if (!elem_type || !elem_type->name.str) return 0;
     
@@ -794,7 +794,7 @@ static void format_item(StringBuf* sb, Item item) {
         break;
     }
     case LMD_TYPE_ELEMENT: {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         if (elem) {
             format_element(sb, elem);
         }

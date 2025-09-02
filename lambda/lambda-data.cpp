@@ -371,7 +371,7 @@ TypedItem list_get_typed(List* list, int index) {
         result.map = (Map*)item.pointer;
         return result;
     case LMD_TYPE_ELEMENT:
-        result.element = (Element*)item.pointer;
+        result.element = item.element;
         return result;
     case LMD_TYPE_TYPE:  case LMD_TYPE_FUNC:
         result.pointer = item.raw_pointer;
