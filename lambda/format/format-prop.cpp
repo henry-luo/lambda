@@ -188,22 +188,50 @@ static void format_map_flattened(StringBuf* sb, Map* map, const char* prefix) {
 
 // main Properties formatter function
 String* format_properties(VariableMemPool* pool, Item root_item) {
-    printf("format_properties: ENTRY - flattened key-value format\n");
-    fflush(stdout);
+    TypeId type_id = get_type_id(root_item);
     
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) {
-        printf("format_properties: failed to create string buffer\n");
-        fflush(stdout);
         return NULL;
     }
     
-    // temporary implementation - just output a note that this is work in progress
-    stringbuf_append_str(sb, "# properties formatting is work in progress\n");
-    stringbuf_append_str(sb, "# use 'format(data, \"json\")' or other formats for now\n");
+    stringbuf_append_str(sb, "# Properties formatted output\n");
     
-    printf("format_properties: completed successfully\n");
-    fflush(stdout);
+    if (type_id == LMD_TYPE_MAP) {
+        Map* map = (Map*)root_item.pointer;
+        if (map && map->type && map->data) {
+            TypeMap* map_type = (TypeMap*)map->type;
+            
+            // iterate through map fields
+            ShapeEntry* field = map_type->shape;
+            int field_count = 0;
+            
+            while (field && field_count < map_type->length) {
+                if (field->name) {
+                    // named field - create proper Lambda Item
+                    void* field_data = ((char*)map->data) + field->byte_offset;
+                    TypeId field_type = field->type->type_id;
+                    
+                    Item field_item = create_item_from_field_data(field_data, field_type);
+                    
+                    // format key=value pair
+                    stringbuf_append_format(sb, "%.*s=", (int)field->name->length, field->name->str);
+                    format_item(sb, field_item, field->name->str);
+                    stringbuf_append_char(sb, '\n');
+                }
+                
+                field = field->next;
+                field_count++;
+            }
+        }
+    } else if (is_simple_value(type_id)) {
+        // single value - create a generic key
+        stringbuf_append_str(sb, "value=");
+        format_item(sb, root_item, "value");
+        stringbuf_append_char(sb, '\n');
+    } else {
+        stringbuf_append_str(sb, "# Unsupported type for Properties format\n");
+    }
     
     return stringbuf_to_string(sb);
 }
