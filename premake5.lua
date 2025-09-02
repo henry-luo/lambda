@@ -279,22 +279,9 @@ project "lambda-runtime-full-cpp"
     objdir "build/obj/%{prj.name}"
     
     files {
-        "lambda/print.cpp",
-        "lambda/transpile.cpp",
-        "lambda/transpile-mir.cpp",
-        "lambda/utf_string.cpp",
-        "lambda/build_ast.cpp",
-        "lambda/lambda-data.cpp",
-        "lambda/lambda-data-runtime.cpp",
-        "lambda/lambda-eval.cpp",
-        "lambda/lambda-mem.cpp",
-        "lambda/runner.cpp",
-        "lambda/name_pool.cpp",
         "lambda/validator/validate.cpp",
         "lambda/validator/validator.cpp",
         "lambda/validator/schema_parser.cpp",
-        "lambda/pack.cpp",
-        "lambda/input/input-common.cpp",
     }
     
     files {
@@ -303,6 +290,10 @@ project "lambda-runtime-full-cpp"
     
     files {
         "lambda/format/format*.cpp",
+    }
+    
+    files {
+        "lambda/*.cpp",
     }
     
     includedirs {
