@@ -2174,9 +2174,9 @@ bool fn_in(Item a_item, Item b_item) {
     return false;
 }
 
-String STR_NULL = {.chars = "null", .len = 4};
-String STR_TRUE = {.chars = "true", .len = 4};
-String STR_FALSE = {.chars = "false", .len = 5};
+String STR_NULL = {.len = 4, .ref_cnt = 0, .chars = "null"};
+String STR_TRUE = {.len = 4, .ref_cnt = 0, .chars = "true"};
+String STR_FALSE = {.len = 5, .ref_cnt = 0, .chars = "false"};
 
 String* fn_string(Item itm) {
     if (itm.type_id == LMD_TYPE_NULL) {

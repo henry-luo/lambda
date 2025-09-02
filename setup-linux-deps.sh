@@ -157,6 +157,13 @@ install_if_missing() {
     fi
 }
 
+# Install clang if not present
+if ! command -v clang >/dev/null 2>&1; then
+    echo "Installing clang..."
+    sudo apt update
+    sudo apt install -y clang
+fi
+
 # Check for cmake (needed for some dependencies)
 if command -v cmake >/dev/null 2>&1; then
     echo "✅ cmake already available"

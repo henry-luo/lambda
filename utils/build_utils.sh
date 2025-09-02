@@ -118,7 +118,7 @@ get_global_compiler() {
     local variant="$1"  # Optional: "c" or "cpp" to get C or C++ variant
     local config_file="${BUILD_CONFIG_FILE:-build_lambda_config.json}"
     
-    local base_compiler="clang"  # Default fallback
+    local base_compiler="gcc"  # Default fallback for Linux compatibility
     
     if [ -f "$config_file" ] && has_jq_support; then
         local config_compiler=$(jq -r '.compiler // empty' "$config_file" 2>/dev/null)
