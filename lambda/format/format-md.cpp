@@ -710,10 +710,44 @@ static void format_element(StringBuf* sb, Element* elem) {
     
     const char* tag_name = elem_type->name.str;
     
-    printf("DEBUG format_element: processing element '%s'\n", tag_name);
+    printf("DEBUG format_element: processing element '%s' (len=%zu)\n", tag_name, strlen(tag_name));
+    
+    // Special debug for math elements - print exact bytes
+    if (strcmp(tag_name, "math") == 0) {
+        printf("DEBUG: EXACT MATCH for math element!\n");
+        for (int i = 0; i < 5; i++) {
+            printf("DEBUG: tag_name[%d] = 0x%02x ('%c')\n", i, (unsigned char)tag_name[i], tag_name[i]);
+        }
+    }
+    if (strcmp(tag_name, "math") == 0) {
+        printf("DEBUG: math element detected!\n");
+    }
     
     // Handle different element types
-    if (strncmp(tag_name, "h", 1) == 0 && isdigit(tag_name[1])) {
+    if (strcmp(tag_name, "math") == 0) {
+        // Math element - check type attribute to determine formatting
+        printf("DEBUG: *** MATH ELEMENT HANDLER TRIGGERED ***\n");
+        printf("DEBUG: Found math element, checking type attribute\n");
+        String* type_attr = get_attribute(elem, "type");
+        printf("DEBUG: type_attr = %p\n", type_attr);
+        if (type_attr) {
+            printf("DEBUG: type_attr->chars = '%s'\n", type_attr->chars);
+        }
+        
+        if (type_attr && strcmp(type_attr->chars, "block") == 0) {
+            // Display math ($$math$$)
+            printf("DEBUG: Calling format_math_display\n");
+            format_math_display(sb, elem);
+        } else if (type_attr && strcmp(type_attr->chars, "code") == 0) {
+            // Math code block (```math)
+            printf("DEBUG: Calling format_math_code_block\n");
+            format_math_code_block(sb, elem);
+        } else {
+            // Inline math ($math$) - default when no type or unknown type
+            printf("DEBUG: Calling format_math_inline\n");
+            format_math_inline(sb, elem);
+        }
+    } else if (strncmp(tag_name, "h", 1) == 0 && isdigit(tag_name[1])) {
         format_heading(sb, elem);
     } else if (strcmp(tag_name, "p") == 0) {
         format_paragraph(sb, elem);
@@ -735,21 +769,31 @@ static void format_element(StringBuf* sb, Element* elem) {
         stringbuf_append_char(sb, '\n');
     } else if (strcmp(tag_name, "math") == 0) {
         // Math element - check type attribute to determine formatting
+        printf("DEBUG: *** MATH ELEMENT HANDLER TRIGGERED ***\n");
+        printf("DEBUG: Found math element, checking type attribute\n");
         String* type_attr = get_attribute(elem, "type");
+        printf("DEBUG: type_attr = %p\n", type_attr);
+        if (type_attr) {
+            printf("DEBUG: type_attr->chars = '%s'\n", type_attr->chars);
+        }
         
         if (type_attr && strcmp(type_attr->chars, "block") == 0) {
             // Display math ($$math$$)
+            printf("DEBUG: Calling format_math_display\n");
             format_math_display(sb, elem);
         } else if (type_attr && strcmp(type_attr->chars, "code") == 0) {
             // Math code block (```math)
+            printf("DEBUG: Calling format_math_code_block\n");
             format_math_code_block(sb, elem);
         } else {
             // Inline math ($math$) - default when no type or unknown type
+            printf("DEBUG: Calling format_math_inline\n");
             format_math_inline(sb, elem);
         }
     } else if (strcmp(tag_name, "doc") == 0 || strcmp(tag_name, "document") == 0 || 
                strcmp(tag_name, "body") == 0 || strcmp(tag_name, "span") == 0) {
         // Just format children for document root, body, and span containers
+        printf("DEBUG: Container element case triggered for '%s'\n", tag_name);
         format_element_children(sb, elem);
     } else if (strcmp(tag_name, "meta") == 0) {
         // Skip meta elements in markdown output
