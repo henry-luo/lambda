@@ -655,8 +655,6 @@ static bool is_relational_operator(const char *math);
 static const MathExprDef* find_math_expression(const char* cmd, MathFlavor flavor);
 static Item create_math_element_with_attributes(Input *input, const char* element_name, const char* symbol, const char* description);
 static Item parse_function_call(Input *input, const char **math, MathFlavor flavor, const char* func_name);
-static Item parse_ascii_superscript(Input *input, const char **math, Item base);
-static Item parse_ascii_subscript(Input *input, const char **math, Item base);
 
 // use common utility functions from input.c and input-common.c
 #define create_math_element input_create_element
@@ -781,7 +779,6 @@ static Item parse_math_number(Input *input, const char **math) {
 // parse identifier/variable name as symbol with optional prime notation
 static Item parse_math_identifier(Input *input, const char **math) {
     StringBuf* sb = input->sb;
-    printf("DEBUG: parse_math_identifier called at position: '%.10s'\n", *math);
     
     // parse letters and digits
     while (**math && (isalpha(**math) || isdigit(**math))) {
@@ -795,8 +792,28 @@ static Item parse_math_identifier(Input *input, const char **math) {
         return {.item = ITEM_ERROR}; 
     }
 
-    String* id_string = stringbuf_to_string(sb);
+    // Create a null-terminated string from the buffer content
+    char temp_buffer[256];  // Reasonable limit for math identifiers
+    if (sb->length >= sizeof(temp_buffer)) {
+        stringbuf_reset(sb);
+        return {.item = ITEM_ERROR};
+    }
+    
+    // Copy the content and null-terminate
+    memcpy(temp_buffer, sb->str->chars, sb->length);
+    temp_buffer[sb->length] = '\0';
+    
+    // Create proper string using input pool allocation
+    String *id_string = input_create_string(input, temp_buffer);
+    stringbuf_reset(sb);
+    
     if (!id_string) {
+        return {.item = ITEM_ERROR};
+    }
+    
+    // Verify the string pointer is valid before encoding
+    if ((uintptr_t)id_string < 0x1000) {
+        // Invalid pointer - this would create a corrupted y2it value
         return {.item = ITEM_ERROR};
     }
     
@@ -1085,92 +1102,9 @@ static Item parse_latex_subscript(Input *input, const char **math, Item base) {
     return {.item = (uint64_t)sub_element};
 }
 
-// parse ascii superscript ^expression or ^(expression)
-static Item parse_ascii_superscript(Input *input, const char **math, Item base) {
-    skip_math_whitespace(math);
-    
-    Item exponent;
-    if (**math == '(') {
-        // parenthesized superscript ^(expr)
-        (*math)++; // skip (
-        exponent = parse_math_expression(input, math, MATH_FLAVOR_ASCII);
-        if (exponent .item == ITEM_ERROR) {
-            return {.item = ITEM_ERROR};
-        }
-        
-        if (**math != ')') {
-            return {.item = ITEM_ERROR};
-        }
-        (*math)++; // skip )
-    } else {
-        // single token superscript ^x
-        exponent = parse_math_primary(input, math, MATH_FLAVOR_ASCII);
-        if (exponent .item == ITEM_ERROR) {
-            return {.item = ITEM_ERROR};
-        }
-    }
-    
-    // create power expression element
-    Element* pow_element = create_math_element(input, "pow");
-    if (!pow_element) {
-        return {.item = ITEM_ERROR};
-    }
-    
-    // add base and exponent as children
-    list_push((List*)pow_element, base);
-    list_push((List*)pow_element, exponent);
-    
-    // set content length
-    ((TypeElmt*)pow_element->type)->content_length = ((List*)pow_element)->length;
-    
-    return {.item = (uint64_t)pow_element};
-}
-
-// parse ascii subscript _expression or _(expression)
-static Item parse_ascii_subscript(Input *input, const char **math, Item base) {
-    skip_math_whitespace(math);
-    
-    Item subscript;
-    if (**math == '(') {
-        // parenthesized subscript _(expr)
-        (*math)++; // skip (
-        subscript = parse_math_expression(input, math, MATH_FLAVOR_ASCII);
-        if (subscript .item == ITEM_ERROR) {
-            return {.item = ITEM_ERROR};
-        }
-        
-        if (**math != ')') {
-            return {.item = ITEM_ERROR};
-        }
-        (*math)++; // skip )
-    } else {
-        // single token subscript _x
-        subscript = parse_math_primary(input, math, MATH_FLAVOR_ASCII);
-        if (subscript .item == ITEM_ERROR) {
-            return {.item = ITEM_ERROR};
-        }
-    }
-    
-    // create subscript expression element
-    Element* sub_element = create_math_element(input, "subscript");
-    if (!sub_element) {
-        return {.item = ITEM_ERROR};
-    }
-    
-    // add base and subscript as children
-    list_push((List*)sub_element, base);
-    list_push((List*)sub_element, subscript);
-    
-    // set content length
-    ((TypeElmt*)sub_element->type)->content_length = ((List*)sub_element)->length;
-    
-    return {.item = (uint64_t)sub_element};
-}
-
 // Forward declarations for advanced LaTeX features
 static Item parse_latex_sum_or_prod(Input *input, const char **math, const char* op_name);
 static Item parse_latex_integral(Input *input, const char **math);
-static Item parse_limit(Input *input, const char **math, MathFlavor flavor);
 static Item parse_latex_limit(Input *input, const char **math);
 static Item parse_latex_matrix(Input *input, const char **math, const char* matrix_type);
 static Item parse_latex_cases(Input *input, const char **math);
@@ -2048,127 +1982,8 @@ static Item parse_math_primary(Input *input, const char **math, MathFlavor flavo
                         }
                     }
                 } else {
-                    // First check if this is a math operator that should use special parsing
-                    const char* lookahead = *math;
-                    StringBuf* temp_sb = input->sb;
-                    stringbuf_reset(temp_sb);
-                    
-                    // Parse the identifier
-                    while (*lookahead && (isalpha(*lookahead) || isdigit(*lookahead))) {
-                        stringbuf_append_char(temp_sb, *lookahead);
-                        lookahead++;
-                    }
-                    
-                    String* id_string = temp_sb->str;
-                    id_string->len = temp_sb->length;
-                    id_string->ref_cnt = 0;
-                    
-                    // Check if this is a math operator (like lim, sum, etc.)
-                    const MathExprDef* def = find_math_expression(id_string->chars, MATH_FLAVOR_ASCII);
-                    printf("DEBUG: Math operator lookup for '%s': %s\n", id_string->chars, def ? "FOUND" : "NOT FOUND");
-                    if (def) {
-                        printf("DEBUG: Found operator '%s' with special_parser: %s\n", def->element_name, def->special_parser ? def->special_parser : "NULL");
-                        // Move past the identifier
-                        *math = lookahead;
-                        stringbuf_reset(temp_sb);
-                        
-                        // Handle special parsers
-                        if (def->special_parser) {
-                            if (strcmp(def->special_parser, "parse_big_operator") == 0) {
-                                return parse_big_operator(input, math, MATH_FLAVOR_ASCII, def);
-                            } else if (strcmp(def->special_parser, "parse_limit") == 0) {
-                                return parse_limit(input, math, MATH_FLAVOR_ASCII);
-                            } else if (strcmp(def->special_parser, "parse_frac") == 0 || 
-                                       strcmp(def->special_parser, "parse_frac_style") == 0) {
-                                return parse_function_call(input, math, MATH_FLAVOR_ASCII, def->element_name);
-                            }
-                        }
-                        
-                        // For operators without special parsers, check if they have arguments
-                        if (def->has_arguments) {
-                            return parse_function_call(input, math, MATH_FLAVOR_ASCII, def->element_name);
-                        } else {
-                            // Simple symbol without arguments
-                            return create_math_element_with_attributes(input, def->element_name, def->unicode_symbol, def->description);
-                        }
-                    }
-                    
-                    // Check if it's a big operator and has subscript notation (fallback for unrecognized operators)
-                    if ((strcmp(id_string->chars, "sum") == 0 || 
-                         strcmp(id_string->chars, "prod") == 0 || 
-                         strcmp(id_string->chars, "int") == 0 ||
-                         strcmp(id_string->chars, "lim") == 0) && *lookahead == '_') {
-                        
-                        // Parse as big operator with bounds
-                        *math = lookahead; // move to after identifier
-                        Element* op_element = create_math_element(input, id_string->chars);
-                        if (!op_element) {
-                            stringbuf_reset(temp_sb);
-                            return {.item = ITEM_ERROR};
-                        }
-                        
-                        // Parse subscript (lower bound)
-                        if (**math == '_') {
-                            (*math)++; // skip _
-                            skip_math_whitespace(math);
-                            
-                            Item lower_bound;
-                            if (**math == '(') {
-                                (*math)++; // skip (
-                                lower_bound = parse_math_expression(input, math, flavor);
-                                if (**math == ')') {
-                                    (*math)++; // skip )
-                                }
-                            } else {
-                                lower_bound = parse_math_primary(input, math, flavor);
-                            }
-                            
-                            if (lower_bound.item != ITEM_ERROR) {
-                                list_push((List*)op_element, lower_bound);
-                            }
-                        }
-                        
-                        skip_math_whitespace(math);
-                        
-                        // Parse superscript (upper bound)
-                        if (**math == '^') {
-                            (*math)++; // skip ^
-                            skip_math_whitespace(math);
-                            
-                            Item upper_bound;
-                            if (**math == '(') {
-                                (*math)++; // skip (
-                                upper_bound = parse_math_expression(input, math, flavor);
-                                if (**math == ')') {
-                                    (*math)++; // skip )
-                                }
-                            } else {
-                                upper_bound = parse_math_primary(input, math, flavor);
-                            }
-                            
-                            if (upper_bound.item != ITEM_ERROR) {
-                                list_push((List*)op_element, upper_bound);
-                            }
-                        }
-                        
-                        skip_math_whitespace(math);
-                        
-                        // Parse the main expression (summand/integrand)
-                        if (**math && **math != '}' && **math != '$' && **math != '\n') {
-                            Item main_expr = parse_multiplication_expression(input, math, flavor);
-                            if (main_expr.item != ITEM_ERROR && main_expr.item != ITEM_NULL) {
-                                list_push((List*)op_element, main_expr);
-                            }
-                        }
-                        
-                        ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
-                        stringbuf_reset(temp_sb);
-                        return {.item = (uint64_t)op_element};
-                    } else {
-                        // Regular identifier
-                        stringbuf_reset(temp_sb);
-                        return parse_math_identifier(input, math);
-                    }
+                    // Regular identifier
+                    return parse_math_identifier(input, math);
                 }
             } else if (**math == '(') {
                 (*math)++; // skip (
@@ -2233,12 +2048,6 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
         } else if (**math == '<' && *(*math + 1) == '=') {
             op_name = "leq";
             op_len = 2;
-        } else if (**math == '-' && *(*math + 1) == '>') {
-            op_name = "to";
-            op_len = 2;
-        } else if (**math == '<' && *(*math + 1) == '-') {
-            op_name = "leftarrow";
-            op_len = 2;
         } else if (**math == '>' && *(*math + 1) == '=') {
             op_name = "geq";
             op_len = 2;
@@ -2248,9 +2057,6 @@ static Item parse_relational_expression(Input *input, const char **math, MathFla
         } else if (**math == '>') {
             op_name = "gt";
             op_len = 1;
-        } else if (**math == '!' && *(*math + 1) == '=' && flavor == MATH_FLAVOR_ASCII) {
-            op_name = "neq";
-            op_len = 2;
         } else if (**math == '\\') {
             // Check for LaTeX relational commands
             if (strncmp(*math, "\\neq", 4) == 0 && !isalpha(*(*math + 4))) {
@@ -2741,8 +2547,8 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
                 processed = true;
             }
             
-            // Handle factorial notation (but check for != first)
-            if (**math == '!' && *(*math + 1) != '=') {
+            // Handle factorial notation
+            if (**math == '!') {
                 (*math)++; // skip !
                 log_debug("Creating factorial with base item=0x%llx, type=%d", left.item, get_type_id(left));
                 Element* factorial_element = create_math_element(input, "factorial");
@@ -2774,7 +2580,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
             }
             
             // Handle factorial notation
-            if (**math == '!' && *(*math + 1) != '=') {
+            if (**math == '!') {
                 (*math)++; // skip !
                 Element* factorial_element = create_math_element(input, "factorial");
                 if (!factorial_element) {
@@ -2786,23 +2592,6 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
                 processed = true;
             }
         } else if (flavor == MATH_FLAVOR_ASCII) {
-            // Handle subscript and superscript for ASCII flavor
-            if (**math == '_') {
-                (*math)++; // skip _
-                left = parse_ascii_subscript(input, math, left);
-                if (left .item == ITEM_ERROR) {
-                    return {.item = ITEM_ERROR};
-                }
-                processed = true;
-            } else if (**math == '^') {
-                (*math)++; // skip ^
-                left = parse_ascii_superscript(input, math, left);
-                if (left .item == ITEM_ERROR) {
-                    return {.item = ITEM_ERROR};
-                }
-                processed = true;
-            }
-            
             // Handle prime notation for all flavors
             if (**math == '\'') {
                 left = parse_prime_notation(input, math, left);
@@ -2813,7 +2602,7 @@ static Item parse_primary_with_postfix(Input *input, const char **math, MathFlav
             }
             
             // Handle factorial notation
-            if (**math == '!' && *(*math + 1) != '=') {
+            if (**math == '!') {
                 (*math)++; // skip !
                 Element* factorial_element = create_math_element(input, "factorial");
                 if (!factorial_element) {
@@ -3000,8 +2789,8 @@ static Item parse_latex_integral(Input *input, const char **math) {
     return {.item = (uint64_t)int_element};
 }
 
-// Parse limit: \lim_{x \to 0} f(x) (LaTeX) or lim_(x->0) f(x) (ASCII)
-static Item parse_limit(Input *input, const char **math, MathFlavor flavor) {
+// Parse LaTeX limit: \lim_{x \to 0} f(x)
+static Item parse_latex_limit(Input *input, const char **math) {
     skip_math_whitespace(math);
     
     // Create the limit element
@@ -3010,45 +2799,26 @@ static Item parse_limit(Input *input, const char **math, MathFlavor flavor) {
         return {.item = ITEM_ERROR};
     }
     
-    // Parse subscript (limit expression like x \to 0 or x->0)
+    // Parse subscript (limit expression like x \to 0)
     if (**math == '_') {
         (*math)++; // skip _
         skip_math_whitespace(math);
         
         Item limit_expr;
-        if (flavor == MATH_FLAVOR_LATEX) {
-            if (**math == '{') {
-                (*math)++; // skip {
-                limit_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
-                if (limit_expr .item == ITEM_ERROR) {
-                    return {.item = ITEM_ERROR};
-                }
-                if (**math != '}') {
-                    return {.item = ITEM_ERROR};
-                }
-                (*math)++; // skip }
-            } else {
-                limit_expr = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
-                if (limit_expr .item == ITEM_ERROR) {
-                    return {.item = ITEM_ERROR};
-                }
+        if (**math == '{') {
+            (*math)++; // skip {
+            limit_expr = parse_math_expression(input, math, MATH_FLAVOR_LATEX);
+            if (limit_expr .item == ITEM_ERROR) {
+                return {.item = ITEM_ERROR};
             }
-        } else if (flavor == MATH_FLAVOR_ASCII) {
-            if (**math == '(') {
-                (*math)++; // skip (
-                limit_expr = parse_math_expression(input, math, MATH_FLAVOR_ASCII);
-                if (limit_expr .item == ITEM_ERROR) {
-                    return {.item = ITEM_ERROR};
-                }
-                if (**math != ')') {
-                    return {.item = ITEM_ERROR};
-                }
-                (*math)++; // skip )
-            } else {
-                limit_expr = parse_math_primary(input, math, MATH_FLAVOR_ASCII);
-                if (limit_expr .item == ITEM_ERROR) {
-                    return {.item = ITEM_ERROR};
-                }
+            if (**math != '}') {
+                return {.item = ITEM_ERROR};
+            }
+            (*math)++; // skip }
+        } else {
+            limit_expr = parse_math_primary(input, math, MATH_FLAVOR_LATEX);
+            if (limit_expr .item == ITEM_ERROR) {
+                return {.item = ITEM_ERROR};
             }
         }
         
@@ -3057,18 +2827,13 @@ static Item parse_limit(Input *input, const char **math, MathFlavor flavor) {
     }
     
     // Parse the function expression
-    Item func_expr = parse_primary_with_postfix(input, math, flavor);
+    Item func_expr = parse_primary_with_postfix(input, math, MATH_FLAVOR_LATEX);
     if (func_expr .item != ITEM_ERROR && func_expr .item != ITEM_NULL) {
         list_push((List*)lim_element, func_expr);
     }
     
     ((TypeElmt*)lim_element->type)->content_length = ((List*)lim_element)->length;
     return {.item = (uint64_t)lim_element};
-}
-
-// Parse LaTeX limit: \lim_{x \to 0} f(x)
-static Item parse_latex_limit(Input *input, const char **math) {
-    return parse_limit(input, math, MATH_FLAVOR_LATEX);
 }
 
 // Forward declaration for full matrix environment parsing
@@ -4555,7 +4320,7 @@ static Item parse_big_operator(Input *input, const char **math, MathFlavor flavo
             // Fallback to basic parsing for other operators
             return parse_function_call(input, math, flavor, def->element_name);
         } else if (strcmp(def->special_parser, "parse_limit") == 0) {
-            return parse_limit(input, math, flavor);
+            return parse_function_call(input, math, flavor, def->element_name);
         }
     }
     
