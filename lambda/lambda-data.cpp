@@ -62,6 +62,10 @@ TypeElmt EmptyElmt;
 
 Item ItemNull = {.type_id = LMD_TYPE_NULL};
 Item ItemError = {.type_id = LMD_TYPE_ERROR};
+String EMPTY_STRING = {.len = sizeof("lambda.nil") - 1, .ref_cnt = 0, .chars = "lambda.nil"};
+
+TypedItem error_result = {.type_id = LMD_TYPE_ERROR};
+TypedItem null_result = {.type_id = LMD_TYPE_NULL};
 
 void init_typetype() {
     *(Type*)&TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
@@ -94,16 +98,6 @@ void init_typetype() {
     EmptyElmt.type_id = LMD_TYPE_ELEMENT;  EmptyElmt.type_index = -1;  EmptyElmt.name = {0};
 }
 
-struct Initializer {
-    Initializer() {
-        init_typetype();
-        init_type_info();
-    }
-};
-static Initializer initializer; 
-
-String EMPTY_STRING = {.len = sizeof("lambda.nil") - 1, .ref_cnt = 0, .chars = "lambda.nil"};
-
 TypeInfo type_info[32];
 
 void init_type_info() {
@@ -134,8 +128,13 @@ void init_type_info() {
     type_info[LMD_CONTAINER_HEAP_START] = {0, "container_start", &TYPE_NULL, (Type*)&LIT_TYPE_NULL};
 }
 
-TypedItem error_result = {.type_id = LMD_TYPE_ERROR};
-TypedItem null_result = {.type_id = LMD_TYPE_NULL};
+struct Initializer {
+    Initializer() {
+        init_typetype();
+        init_type_info();
+    }
+};
+static Initializer initializer; 
 
 Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
     Type* t;
