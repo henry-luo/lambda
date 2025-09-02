@@ -652,7 +652,7 @@ class PremakeGenerator:
             # Add other external libraries
             # If lambda-input-full is a dependency, we need to include curl/ssl/crypto/nghttp2 for proper linking
             # since static libraries don't propagate their dependencies in Premake
-            for lib_name in ['mpdec', 'utf8proc', 'mir', 'curl', 'nghttp2', 'ssl', 'crypto']:
+            for lib_name in ['mpdec', 'utf8proc', 'mir', 'curl', 'nghttp2', 'ssl', 'crypto', 'libedit']:
                 if lib_name in self.external_libraries:
                     lib_path = self.external_libraries[lib_name]['lib']
                     # Convert to relative path from build directory
@@ -674,6 +674,9 @@ class PremakeGenerator:
                     if lib_flag.startswith('-l'):
                         lib_flag = lib_flag[2:]  # Remove -l prefix
                     self.premake_content.append(f'        "{lib_flag}",')
+            
+            # Add system libraries that libedit depends on
+            self.premake_content.append('        "ncurses",')
             
             self.premake_content.extend([
                 '    }',
