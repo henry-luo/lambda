@@ -36,6 +36,5 @@ String* format_math_latex(VariableMemPool* pool, Item root_item);
 String* format_math_typst(VariableMemPool* pool, Item root_item);
 String* format_math_ascii(VariableMemPool* pool, Item root_item);
 String* format_math_mathml(VariableMemPool* pool, Item root_item);
-String* format_math_unicode(VariableMemPool* pool, Item root_item);
 
 #endif // FORMAT_H

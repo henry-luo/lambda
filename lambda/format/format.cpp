@@ -173,9 +173,6 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Variable
         else if (strcmp(flavor->chars, "mathml") == 0) {
             result = format_math_mathml(pool, item);
         }
-        else if (strcmp(flavor->chars, "unicode") == 0) {
-            result = format_math_unicode(pool, item);
-        }
         else {
             printf("Unsupported math flavor: %s, defaulting to latex\n", flavor->chars);
             result = format_math_latex(pool, item);
@@ -193,9 +190,6 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Variable
     }
     else if (strcmp(format_type_with_flavor, "math-mathml") == 0) {
         result = format_math_mathml(pool, item);
-    }
-    else if (strcmp(format_type_with_flavor, "math-unicode") == 0) {
-        result = format_math_unicode(pool, item);
     }
     else {
         printf("Unsupported format type: %s\n", format_type_with_flavor);
