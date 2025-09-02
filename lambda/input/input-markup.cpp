@@ -43,6 +43,7 @@ static Item parse_superscript(MarkupParser* parser, const char** text);
 static Item parse_subscript(MarkupParser* parser, const char** text);
 static Item parse_emoji_shortcode(MarkupParser* parser, const char** text);
 static Item parse_inline_math(MarkupParser* parser, const char** text);
+static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text);
 static Item parse_small_caps(MarkupParser* parser, const char** text);
 
 // Math parser integration functions
@@ -903,17 +904,73 @@ static Item parse_code_block(MarkupParser* parser, const char* line) {
     // Extract language from fence line (```python, ~~~javascript, etc.)
     const char* fence = line;
     skip_whitespace(&fence);
+    char lang[32] = {0};
+    bool has_language = false;
+    
     if (*fence == '`' || *fence == '~') {
         fence += 3; // Skip fence chars
         skip_whitespace(&fence);
         if (*fence && !isspace(*fence)) {
             // Extract language
-            char lang[32] = {0};
             int i = 0;
             while (*fence && !isspace(*fence) && i < 31) {
                 lang[i++] = *fence++;
             }
             lang[i] = '\0';
+            has_language = true;
+            
+            // Check if this is an ASCII math block
+            if (strcmp(lang, "asciimath") == 0 || strcmp(lang, "ascii-math") == 0) {
+                // Convert code block to math block
+                Element* math = create_element(parser->input, "math");
+                if (!math) {
+                    parser->current_line++;
+                    return (Item){.item = ITEM_ERROR};
+                }
+                
+                add_attribute_to_element(parser->input, math, "type", "block");
+                add_attribute_to_element(parser->input, math, "flavor", "ascii");
+                
+                parser->current_line++; // Skip opening fence
+                
+                // Collect math content until closing fence
+                StringBuf* sb = parser->input->sb;
+                stringbuf_reset(sb);
+                
+                while (parser->current_line < parser->line_count) {
+                    const char* current = parser->lines[parser->current_line];
+                    
+                    // Check for closing fence
+                    if (is_code_fence(current)) {
+                        parser->current_line++; // Skip closing fence
+                        break;
+                    }
+                    
+                    // Add line to math content
+                    if (sb->length > 0) {
+                        stringbuf_append_char(sb, '\n');
+                    }
+                    stringbuf_append_str(sb, current);
+                    parser->current_line++;
+                }
+                
+                // Parse the math content using ASCII flavor
+                String* math_content_str = stringbuf_to_string(sb);
+                Item parsed_math = parse_math_content(parser->input, math_content_str->chars, "ascii");
+                
+                if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
+                    list_push((List*)math, parsed_math);
+                    increment_element_content_length(math);
+                } else {
+                    // Fallback to plain text if math parsing fails
+                    Item math_item = {.item = s2it(math_content_str)};
+                    list_push((List*)math, math_item);
+                    increment_element_content_length(math);
+                }
+                
+                return (Item){.item = (uint64_t)math};
+            }
+            
             add_attribute_to_element(parser->input, code, "language", lang);
         }
     }
@@ -1628,7 +1685,7 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
             }
         }
         else if (*pos == ':') {
-            // Flush text and try to parse emoji shortcode
+            // Flush text and try to parse emoji shortcode or ASCII math prefix
             if (sb->length > 0) {
                 String* text_content = stringbuf_to_string(sb);
                 Item text_item = {.item = s2it(text_content)};
@@ -1638,14 +1695,24 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
             }
             
             const char* old_pos = pos;
-            Item emoji_item = parse_emoji_shortcode(parser, &pos);
-            if (emoji_item.item != ITEM_ERROR && emoji_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, emoji_item);
+            
+            // First try ASCII math prefix (asciimath:: or AM::)
+            Item ascii_math_item = parse_ascii_math_prefix(parser, &pos);
+            if (ascii_math_item.item != ITEM_ERROR && ascii_math_item.item != ITEM_UNDEFINED) {
+                list_push((List*)span, ascii_math_item);
                 increment_element_content_length(span);
-            } else if (pos == old_pos) {
-                // Parse failed and didn't advance, add the colon to text buffer and advance
-                stringbuf_append_char(sb, ':');
-                pos++;
+            } else {
+                // Reset position and try emoji shortcode
+                pos = old_pos;
+                Item emoji_item = parse_emoji_shortcode(parser, &pos);
+                if (emoji_item.item != ITEM_ERROR && emoji_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, emoji_item);
+                    increment_element_content_length(span);
+                } else if (pos == old_pos) {
+                    // Parse failed and didn't advance, add the colon to text buffer and advance
+                    stringbuf_append_char(sb, ':');
+                    pos++;
+                }
             }
         }
         // Phase 6: Wiki template parsing {{template|args}}
@@ -2203,15 +2270,48 @@ static Item parse_math_content(Input* input, const char* math_content, const cha
 static const char* detect_math_flavor(const char* content) {
     if (!content) return "latex";
     
-    // Simple heuristics to detect math flavor
+    // Look for ASCII math indicators first
+    // ASCII math uses simple operators without backslashes
+    bool has_ascii_indicators = (
+        // Basic ASCII operators
+        (strstr(content, "^") && !strstr(content, "\\")) ||  // Power without LaTeX
+        (strstr(content, "!=") != NULL) ||                   // Not equal ASCII style
+        (strstr(content, "**") != NULL) ||                   // Double star power
+        (strstr(content, "sqrt(") != NULL) ||                // Function style sqrt
+        (strstr(content, "sum_(") != NULL) ||                // ASCII summation
+        (strstr(content, "int_") != NULL) ||                 // ASCII integration
+        (strstr(content, "lim_(") != NULL) ||                // ASCII limit
+        // Greek letters without backslashes
+        (strstr(content, "alpha") && !strstr(content, "\\alpha")) ||
+        (strstr(content, "beta") && !strstr(content, "\\beta")) ||
+        (strstr(content, "gamma") && !strstr(content, "\\gamma")) ||
+        (strstr(content, "pi") && !strstr(content, "\\pi")) ||
+        (strstr(content, "infinity") != NULL) ||
+        (strstr(content, "oo") != NULL)                      // ASCII infinity
+    );
+    
     // Look for LaTeX-specific commands
-    if (strstr(content, "\\frac") || strstr(content, "\\sum") || 
-        strstr(content, "\\int") || strstr(content, "\\alpha")) {
-        return "latex";
-    }
+    bool has_latex_indicators = (
+        strstr(content, "\\frac") || strstr(content, "\\sum") || 
+        strstr(content, "\\int") || strstr(content, "\\alpha") ||
+        strstr(content, "\\beta") || strstr(content, "\\gamma") ||
+        strstr(content, "\\pi") || strstr(content, "\\sqrt") ||
+        strstr(content, "\\begin") || strstr(content, "\\end") ||
+        strstr(content, "\\left") || strstr(content, "\\right")
+    );
     
     // Look for Typst-specific syntax
-    if (strstr(content, "frac(") || strstr(content, "sum_")) {
+    bool has_typst_indicators = (
+        strstr(content, "frac(") || strstr(content, "sum_") ||
+        strstr(content, "integral") || strstr(content, "sqrt(")
+    );
+    
+    // Priority: LaTeX > ASCII > Typst > Default LaTeX
+    if (has_latex_indicators) {
+        return "latex";
+    } else if (has_ascii_indicators) {
+        return "ascii";
+    } else if (has_typst_indicators) {
         return "typst";
     }
     
@@ -3398,6 +3498,85 @@ static Item parse_inline_math(MarkupParser* parser, const char** text) {
     
     free(content);
     *text = pos + 1; // Skip closing $
+    
+    return (Item){.item = (uint64_t)math_elem};
+}
+
+// Parse ASCII math with prefix (asciimath:: or AM::)
+static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text) {
+    const char* start = *text;
+    
+    // Check for asciimath:: or AM:: prefix
+    bool is_asciimath = false;
+    const char* pos = start;
+    
+    if (strncmp(pos, "asciimath::", 11) == 0) {
+        pos += 11;
+        is_asciimath = true;
+    } else if (strncmp(pos, "AM::", 4) == 0) {
+        pos += 4;
+        is_asciimath = true;
+    }
+    
+    if (!is_asciimath) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Find the end of the math expression (end of line or whitespace)
+    const char* content_start = pos;
+    while (*pos && *pos != '\n' && *pos != '\r') {
+        pos++;
+    }
+    
+    // Trim trailing whitespace
+    while (pos > content_start && (*(pos-1) == ' ' || *(pos-1) == '\t')) {
+        pos--;
+    }
+    
+    if (pos == content_start) {
+        // No content after prefix
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Extract content
+    size_t content_len = pos - content_start;
+    
+    // Create math element
+    Element* math_elem = create_element(parser->input, "math");
+    if (!math_elem) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    
+    // Add type attribute for ASCII math
+    add_attribute_to_element(parser->input, math_elem, "type", "ascii");
+    add_attribute_to_element(parser->input, math_elem, "flavor", "ascii");
+    
+    // Create content string
+    char* content = (char*)malloc(content_len + 1);
+    if (!content) {
+        return (Item){.item = ITEM_ERROR};
+    }
+    strncpy(content, content_start, content_len);
+    content[content_len] = '\0';
+    
+    // Parse the math content using ASCII flavor
+    Item parsed_math = parse_math_content(parser->input, content, "ascii");
+    
+    if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
+        list_push((List*)math_elem, parsed_math);
+        increment_element_content_length(math_elem);
+    } else {
+        // Fallback to plain text if math parsing fails
+        String* math_str = input_create_string(parser->input, content);
+        if (math_str) {
+            Item math_item = {.item = s2it(math_str)};
+            list_push((List*)math_elem, math_item);
+            increment_element_content_length(math_elem);
+        }
+    }
+    
+    free(content);
+    *text = pos;
     
     return (Item){.item = (uint64_t)math_elem};
 }
