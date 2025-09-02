@@ -331,6 +331,8 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_toml(input->pool, input->root);
         } else if (strcmp(to_format, "ini") == 0) {
             formatted_output = format_ini(input->pool, input->root);
+        } else if (strcmp(to_format, "properties") == 0) {
+            formatted_output = format_properties(input->pool, input->root);
         } else if (strcmp(to_format, "css") == 0) {
             formatted_output = format_css(input->pool, input->root);
         } else if (strcmp(to_format, "latex") == 0) {
@@ -503,7 +505,7 @@ int main(int argc, char *argv[]) {
             printf("  Math formats:    math-ascii, math-latex, math-typst, math-mathml, math-unicode\n");
             printf("  Document formats: pdf, rtf\n");
             printf("  Markup formats:  asciidoc, textile, wiki, man, mark\n");
-            printf("  Data formats:    json, xml, yaml, csv, ini, toml\n");
+            printf("  Data formats:    json, xml, yaml, csv, ini, properties, toml\n");
             printf("\nCommon Conversions:\n");
             printf("  markdown → html:   %s convert doc.md -t html -o doc.html\n", argv[0]);
             printf("  json → yaml:       %s convert data.json -t yaml -o data.yaml\n", argv[0]);
