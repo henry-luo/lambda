@@ -269,7 +269,7 @@ static void format_item_with_indent(StringBuf* sb, Item item, int indent) {
         break;
     }
     case LMD_TYPE_ELEMENT: {
-        Element* element = (Element*)item.pointer;
+        Element* element = item.element;
         TypeElmt* elmt_type = (TypeElmt*)element->type;
         
         stringbuf_append_format(sb, "\n{\"$\":\"%.*s\"", (int)elmt_type->name.length, elmt_type->name.str);

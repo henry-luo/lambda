@@ -270,7 +270,7 @@ String* format_latex(VariableMemPool *pool, Item item) {
             }
         }
     } else if (type == LMD_TYPE_ELEMENT) {
-        Element* element = (Element*)item.pointer;
+        Element* element = item.element;
         if (element && element->type) {
             TypeElmt* elmt_type = (TypeElmt*)element->type;
             
@@ -284,7 +284,7 @@ String* format_latex(VariableMemPool *pool, Item item) {
                 format_latex_element(sb, element, 0);
             }
         } else {
-            format_latex_element(sb, (Element*)item.pointer, 0);
+            format_latex_element(sb, item.element, 0);
         }
     } else {
         // Fallback - format as value

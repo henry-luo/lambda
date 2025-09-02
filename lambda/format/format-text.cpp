@@ -247,7 +247,7 @@ static void format_item_text(StringBuf* sb, Item item) {
         }
         
         case LMD_TYPE_ELEMENT: {
-            Element* elem = (Element*)item.pointer;
+            Element* elem = item.element;
             if (elem) {
                 format_element_text(sb, elem);
             }

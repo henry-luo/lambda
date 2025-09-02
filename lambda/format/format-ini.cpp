@@ -162,7 +162,7 @@ static void format_item(StringBuf* sb, Item item, const char* key_name) {
             break;
         }
         case LMD_TYPE_ELEMENT: {
-            Element* element = (Element*)item.pointer;
+            Element* element = item.element;
             TypeElmt* elmt_type = (TypeElmt*)element->type;
             
             // represent element as its tag name

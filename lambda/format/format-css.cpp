@@ -309,7 +309,7 @@ String* format_css(VariableMemPool *pool, Item item) {
     TypeId type = get_type_id(item);
     
     if (type == LMD_TYPE_ELEMENT) {
-        Element* element = (Element*)item.pointer;
+        Element* element = item.element;
         if (element && element->type) {
             TypeElmt* elmt_type = (TypeElmt*)element->type;
             if (elmt_type->name.length == 10 && strncmp(elmt_type->name.str, "stylesheet", 10) == 0) {
@@ -320,10 +320,10 @@ String* format_css(VariableMemPool *pool, Item item) {
             }
         } else {
             // Handle single rule or other elements  
-            format_css_rule(sb, (Element*)item.pointer, 0);
+            format_css_rule(sb, item.element, 0);
         }
     } else if (type == LMD_TYPE_MAP) {
-        Element* element = (Element*)item.pointer;
+        Element* element = item.element;
         if (element && element->type) {
             TypeElmt* elmt_type = (TypeElmt*)element->type;
             if (elmt_type->name.length == 10 && strncmp(elmt_type->name.str, "stylesheet", 10) == 0) {
@@ -334,7 +334,7 @@ String* format_css(VariableMemPool *pool, Item item) {
             }
         } else {
             // Handle single rule or other elements  
-            format_css_rule(sb, (Element*)item.pointer, 0);
+            format_css_rule(sb, item.element, 0);
         }
     } else {
         // Fallback - try to format as value
