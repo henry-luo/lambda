@@ -349,9 +349,25 @@ int exec_convert(int argc, char* argv[]) {
             format_markdown(sb, input->root);
             formatted_output = stringbuf_to_string(sb);
             stringbuf_free(sb);
+        } else if (strcmp(to_format, "math-ascii") == 0) {
+            formatted_output = format_math_ascii(input->pool, input->root);
+        } else if (strcmp(to_format, "math-latex") == 0) {
+            formatted_output = format_math_latex(input->pool, input->root);
+        } else if (strcmp(to_format, "math-typst") == 0) {
+            formatted_output = format_math_typst(input->pool, input->root);
+        } else if (strcmp(to_format, "math-mathml") == 0) {
+            formatted_output = format_math_mathml(input->pool, input->root);
+        } else if (strcmp(to_format, "math-unicode") == 0) {
+            formatted_output = format_math_unicode(input->pool, input->root);
+        } else if (strcmp(to_format, "mark") == 0) {
+            // Use print_item to format as mark representation
+            StrBuf* sb = strbuf_new_cap(1024);
+            print_item(sb, input->root);
+            formatted_output = create_string(input->pool, sb->str);
+            strbuf_free(sb);
         } else {
             printf("Error: Unsupported output format '%s'\n", to_format);
-            printf("Supported formats: json, xml, html, yaml, toml, ini, css, latex, rst, org, wiki, text, markdown\n");
+            printf("Supported formats: json, xml, html, yaml, toml, ini, css, latex, rst, org, wiki, text, markdown, math-ascii, math-latex, math-typst, math-mathml, math-unicode, mark\n");
             pool_variable_destroy(temp_pool);
             return 1;
         }
@@ -484,8 +500,9 @@ int main(int argc, char *argv[]) {
             printf("  -h, --help     Show this help message\n");
             printf("\nSupported Formats:\n");
             printf("  Text formats:    markdown, html, xml, json, yaml, toml, ini, csv, latex, rst, org, text\n");
+            printf("  Math formats:    math-ascii, math-latex, math-typst, math-mathml, math-unicode\n");
             printf("  Document formats: pdf, rtf\n");
-            printf("  Markup formats:  asciidoc, textile, wiki, man\n");
+            printf("  Markup formats:  asciidoc, textile, wiki, man, mark\n");
             printf("  Data formats:    json, xml, yaml, csv, ini, toml\n");
             printf("\nCommon Conversions:\n");
             printf("  markdown → html:   %s convert doc.md -t html -o doc.html\n", argv[0]);

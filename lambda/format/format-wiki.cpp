@@ -392,7 +392,7 @@ static void format_item(StringBuf* sb, Item item) {
         break;
     }
     case LMD_TYPE_ELEMENT: {
-        Element* elem = (Element*)item.pointer;
+        Element* elem = item.element;
         format_element(sb, elem);
         break;
     }

@@ -289,7 +289,7 @@ static void format_item(StringBuf* sb, Item item, int indent_level) {
             break;
         }
         case LMD_TYPE_ELEMENT: {
-            Element* element = (Element*)item.pointer;
+            Element* element = item.element;
             TypeElmt* elmt_type = (TypeElmt*)element->type;
             
             // for yaml, represent element as an object with special "$" key for tag name
