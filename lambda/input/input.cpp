@@ -9,6 +9,7 @@
 void parse_json(Input* input, const char* json_string);
 void parse_csv(Input* input, const char* csv_string);
 void parse_ini(Input* input, const char* ini_string);
+void parse_properties(Input* input, const char* prop_string);
 void parse_toml(Input* input, const char* toml_string);
 void parse_yaml(Input *input, const char* yaml_str);
 void parse_xml(Input* input, const char* xml_string);
@@ -244,6 +245,8 @@ static const char* mime_to_parser_type(const char* mime_type) {
     if (strcmp(mime_type, "application/x-latex") == 0) return "latex";
     if (strcmp(mime_type, "application/toml") == 0) return "toml";
     if (strcmp(mime_type, "application/x-yaml") == 0) return "yaml";
+    if (strcmp(mime_type, "text/x-java-properties") == 0) return "properties";
+    if (strcmp(mime_type, "application/x-java-properties") == 0) return "properties";
     if (strcmp(mime_type, "message/rfc822") == 0) return "eml";
     if (strcmp(mime_type, "application/eml") == 0) return "eml";
     if (strcmp(mime_type, "message/eml") == 0) return "eml";
@@ -454,6 +457,9 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         }
         else if (strcmp(effective_type, "ini") == 0) {
             parse_ini(input, source);
+        }
+        else if (strcmp(effective_type, "properties") == 0) {
+            parse_properties(input, source);
         }
         else if (strcmp(effective_type, "toml") == 0) {
             parse_toml(input, source);

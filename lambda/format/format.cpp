@@ -8,14 +8,22 @@ Item create_item_from_field_data(void* field_data, TypeId type_id) {
             return {.item = b2it(*(bool*)field_data)};
         case LMD_TYPE_INT:
             return {.item = l2it(*(int64_t*)field_data)};
+        case LMD_TYPE_INT64:
+            return {.item = l2it((long*)field_data)};
         case LMD_TYPE_FLOAT:
             return {.item = d2it((double*)field_data)};
         case LMD_TYPE_STRING:
+        case LMD_TYPE_SYMBOL:
+        case LMD_TYPE_DTIME:
+        case LMD_TYPE_BINARY:
             return {.item = s2it((String*)*(void**)field_data)};
         case LMD_TYPE_ARRAY:
+        case LMD_TYPE_LIST:
             return {.item = (uint64_t)*(void**)field_data};
         case LMD_TYPE_MAP:
             return {.item = (uint64_t)*(void**)field_data};
+        case LMD_TYPE_NULL:
+            return {.item = ITEM_NULL};
         default:
             // fallback for unknown types
             return {.item = (uint64_t)field_data};
@@ -31,6 +39,15 @@ void format_number(StringBuf* sb, Item item) {
         char num_buf[32];
         snprintf(num_buf, sizeof(num_buf), "%d", val);
         stringbuf_append_str(sb, num_buf);
+    } else if (type == LMD_TYPE_INT64) {
+        long* lptr = (long*)item.pointer;
+        if (lptr) {
+            char num_buf[32];
+            snprintf(num_buf, sizeof(num_buf), "%ld", *lptr);
+            stringbuf_append_str(sb, num_buf);
+        } else {
+            stringbuf_append_str(sb, "0");
+        }
     } else if (type == LMD_TYPE_FLOAT) {
         // Double stored as pointer
         double* dptr = (double*)item.pointer;
@@ -48,16 +65,9 @@ void format_number(StringBuf* sb, Item item) {
         } else {
             stringbuf_append_str(sb, "null");
         }
-    } else if (type == LMD_TYPE_INT64) {
-        // 64-bit integer stored as pointer
-        long* lptr = (long*)item.pointer;
-        if (lptr) {
-            char num_buf[32];
-            snprintf(num_buf, sizeof(num_buf), "%ld", *lptr);
-            stringbuf_append_str(sb, num_buf);
-        } else {
-            stringbuf_append_str(sb, "null");
-        }
+    } else {
+        // fallback for unknown numeric types
+        stringbuf_append_str(sb, "0");
     }
 }
 
@@ -107,6 +117,9 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Variable
     }
     else if (strcmp(type->chars, "ini") == 0) {
         result = format_ini(pool, item);
+    }
+    else if (strcmp(type->chars, "properties") == 0) {
+        result = format_properties(pool, item);
     }
     else if (strcmp(type->chars, "css") == 0) {
         result = format_css(pool, item);
