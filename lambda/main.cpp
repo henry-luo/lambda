@@ -27,16 +27,9 @@ void transpile_ast(Transpiler* tp, AstScript *script);
 // External function declarations
 extern "C" {
     #include "../lib/url.h"
-    
     // String utility functions from lib/string.h
     #include "../lib/string.h"
     // create_string function is declared in lib/string.h
-    
-    // For accessing the validator's internal structure
-    // typedef struct {
-    //     StrView name;
-    //     TypeSchema* schema;  
-    // } SchemaEntry;
 }
 
 // System includes for environment and string functions
@@ -50,112 +43,13 @@ extern "C" {
 #include <fcntl.h>
 #endif
 
+char *repl_readline(const char *prompt);
+int repl_add_history(const char *line);
+const char* get_repl_prompt();
+void print_help();
+
 // Forward declare MIR transpiler function
 Item run_script_mir(Runtime *runtime, const char* source, char* script_path);
-
-// Include libedit header for line editing functionality
-#ifndef _WIN32
-#include <editline/readline.h>
-#endif
-
-// Forward declare libedit functions to avoid header conflicts
-#ifndef _WIN32
-extern "C" {
-    char *readline(const char *);
-    int add_history(const char *);
-}
-#else
-// Simple Windows fallback for libedit functionality
-char *simple_readline(const char *prompt) {
-    printf("%s", prompt);
-    fflush(stdout);
-    
-    char *line = (char*)malloc(1024);
-    if (!line) return NULL;
-    
-    if (fgets(line, 1024, stdin) == NULL) {
-        free(line);
-        return NULL;
-    }
-    
-    // Remove trailing newline
-    size_t len = strlen(line);
-    if (len > 0 && line[len-1] == '\n') {
-        line[len-1] = '\0';
-    }
-    
-    return line;
-}
-
-void simple_add_history(const char *line) {
-    // Simple stub - no history on Windows for now
-    (void)line;
-}
-
-#define readline simple_readline
-#define add_history simple_add_history
-#endif
-
-void print_help() {
-    printf("Lambda Script Interpreter v1.0\n");
-    printf("Usage:\n");
-    printf("  lambda                       - Start REPL mode (default)\n");
-    printf("  lambda [script.ls]           - Run a script file\n");
-    printf("  lambda --mir [script.ls]     - Run with MIR JIT compilation\n");
-    printf("  lambda --transpile-only [script.ls] - Transpile to C code only (no execution)\n");
-    printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
-    printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
-    printf("  lambda --help                - Show this help message\n");
-    printf("\nREPL Commands:\n");
-    printf("  .quit, .q, .exit     - Exit REPL\n");
-    printf("  .help, .h            - Show help\n");
-    printf("  .clear               - Clear REPL history\n");
-    printf("\nValidation Commands:\n");
-    printf("  validate <file> -s <schema.ls>  - Validate file against schema\n");
-    printf("  validate <file>                 - Validate using doc_schema.ls (default)\n");
-    printf("\nConversion Commands:\n");
-    printf("  convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
-    printf("  convert <input> -t <to> -o <output>           - Auto-detect input format\n");
-}
-
-// Function to determine the best REPL prompt based on system capabilities
-const char* get_repl_prompt() {
-#ifdef _WIN32
-    // Try to enable UTF-8 support on Windows
-    UINT old_cp = GetConsoleOutputCP();
-    UINT old_input_cp = GetConsoleCP();
-    
-    if (SetConsoleOutputCP(CP_UTF8) && SetConsoleCP(CP_UTF8)) {
-        // Check Windows version - lambda works reliably on Windows 10+
-        DWORD version = GetVersion();
-        DWORD major = (DWORD)(LOBYTE(LOWORD(version)));
-        
-        if (major >= 10) {
-            return "λ> ";  // Use lambda on Windows 10+
-        } else {
-            // Restore old code pages and use fallback
-            SetConsoleOutputCP(old_cp);
-            SetConsoleCP(old_input_cp);
-            return "L> ";
-        }
-    } else {
-        // Failed to set UTF-8, use safe ASCII prompt
-        return "L> ";
-    }
-#else
-    // On Unix-like systems, UTF-8 is usually supported
-    // Check if LANG/LC_ALL suggests UTF-8 support
-    const char* lang = getenv("LANG");
-    const char* lc_all = getenv("LC_ALL");
-    
-    if ((lang && strstr(lang, "UTF-8")) || (lc_all && strstr(lc_all, "UTF-8"))) {
-        return "λ> ";
-    } else {
-        // Fallback for non-UTF-8 locales
-        return "L> ";
-    }
-#endif
-}
 
 void run_repl(Runtime *runtime, bool use_mir) {
     printf("Lambda Script REPL v1.0%s\n", use_mir ? " (MIR JIT)" : "");
@@ -168,7 +62,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
     char *line;
     int exec_count = 0;
     
-    while ((line = readline(prompt)) != NULL) {
+    while ((line = repl_readline(prompt)) != NULL) {
         // Skip empty lines
         if (strlen(line) == 0) {
             free(line);
@@ -176,7 +70,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
         }
         
         // Add to libedit history
-        add_history(line);
+        repl_add_history(line);
         
         // Handle REPL commands
         if (strcmp(line, ".quit") == 0 || strcmp(line, ".q") == 0 || strcmp(line, ".exit") == 0) {
