@@ -21,6 +21,13 @@ typedef enum {
     UTF8PROC_COMPARE_ERROR = 2
 } UnicodeCompareResult;
 
+// Collation modes for utf8proc-based comparison
+typedef enum {
+    UTF8PROC_COLLATE_BINARY,     // Byte comparison (fastest)
+    UTF8PROC_COLLATE_NORMALIZED, // NFC normalization + compare
+    UTF8PROC_COLLATE_CASEFOLD,   // Case-insensitive comparison
+} Utf8procCollateMode;
+
 // utf8proc support initialization and cleanup
 void init_utf8proc_support(void);
 void cleanup_utf8proc_support(void);
@@ -59,6 +66,7 @@ Item fn_lt_utf8proc(Item a_item, Item b_item);
 Item fn_gt_utf8proc(Item a_item, Item b_item);
 Item fn_le_utf8proc(Item a_item, Item b_item);
 Item fn_ge_utf8proc(Item a_item, Item b_item);
+
 
 #ifdef __cplusplus
 }

@@ -3,6 +3,7 @@
 #include <utf8proc.h>
 #include <string.h>
 #include <stdlib.h>
+#include "../lib/log.h"
 
 void init_utf8proc_support(void) {
     // utf8proc is initialized automatically, no setup needed
@@ -125,11 +126,13 @@ UnicodeCompareResult string_compare_unicode(const char* str1, int len1, const ch
     char* fold2 = normalize_utf8proc_casefold(str2, len2, &fold2_len);
     
     if (!fold1 || !fold2) {
-        free(fold1);
-        free(fold2);
+        if (fold1) free(fold1);
+        if (fold2) free(fold2);
         return UTF8PROC_COMPARE_ERROR;
     }
-    
+    log_debug("fold1: origin %s vs. %s", str1, fold1);
+    log_debug("fold2: origin %s vs. %s", str2, fold2);
+
     // Compare casefolded strings byte by byte for proper collation
     int min_len = fold1_len < fold2_len ? fold1_len : fold2_len;
     int cmp = memcmp(fold1, fold2, min_len);
@@ -149,8 +152,7 @@ UnicodeCompareResult string_compare_unicode(const char* str1, int len1, const ch
         result = UTF8PROC_COMPARE_GREATER;
     }
     
-    free(fold1);
-    free(fold2);
+    free(fold1);  free(fold2);
     return result;
 }
 
@@ -160,6 +162,7 @@ bool string_equal_unicode(const char* str1, int len1, const char* str2, int len2
 
 // Lambda Script comparison functions
 CompResult equal_comp_unicode(Item a_item, Item b_item) {
+    log_debug("equal_comp_unicode");
     String* a_str = (String*)a_item.pointer;
     String* b_str = (String*)b_item.pointer;
 
