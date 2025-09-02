@@ -264,6 +264,7 @@
         "O0"
     ],
     "build_dir": "build",
+    "cross_compile": false,
     "platforms": {
         "debug": {
             "output": "lambda_debug.exe",

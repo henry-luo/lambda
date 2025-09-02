@@ -26,8 +26,12 @@ typedef struct NamePool NamePool;
 #include "../lib/datetime.h"
 #include "../lib/url.h"
 
+#ifndef max
 #define max(a, b) ((a) > (b) ? (a) : (b))
+#endif
+#ifndef min
 #define min(a, b) ((a) < (b) ? (a) : (b))
+#endif
 
 #include "lambda.h"
 

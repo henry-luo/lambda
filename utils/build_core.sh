@@ -26,8 +26,8 @@ is_cpp_file() {
 # Function to get appropriate compiler and flags for a file
 get_compiler_for_file() {
     local file="$1"
-    local base_cc="${CC:-clang}"
-    local base_cxx="${CXX:-clang++}"
+    local base_cc="${CC:-gcc}"
+    local base_cxx="${CXX:-g++}"
     
     if is_cpp_file "$file"; then
         echo "$base_cxx"
