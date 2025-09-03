@@ -712,41 +712,19 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');   
     }
     else if (bi_node->op == OPERATOR_EQ) {
-        // Check if we need to use the runtime equal() function
-        // This happens when one operand is an Item (e.g., from fn_mod) and the other is a plain type
-        TypeId left_type = bi_node->left->type->type_id;
-        TypeId right_type = bi_node->right->type->type_id;
-        
-        // Check if one side is an Item-returning expression (e.g., modulo, division, etc.)
-        bool left_returns_item = false;
-        bool right_returns_item = false;
-        
-        if (bi_node->left->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* left_bin = (AstBinaryNode*)bi_node->left;
-            if (left_bin->op == OPERATOR_MOD || left_bin->op == OPERATOR_DIV || 
-                left_bin->op == OPERATOR_IDIV || left_bin->op == OPERATOR_POW) {
-                left_returns_item = true;
-            }
-        }
-        
-        if (bi_node->right->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* right_bin = (AstBinaryNode*)bi_node->right;
-            if (right_bin->op == OPERATOR_MOD || right_bin->op == OPERATOR_DIV || 
-                right_bin->op == OPERATOR_IDIV || right_bin->op == OPERATOR_POW) {
-                right_returns_item = true;
-            }
-        }
-        
-        // Use runtime equal() function if types are incompatible, one side returns Item, or comparing strings
-        if (left_returns_item || right_returns_item || left_type != right_type || 
-            left_type == LMD_TYPE_STRING) {
+        // TypeId left_type = bi_node->left->type->type_id;
+        // TypeId right_type = bi_node->right->type->type_id;
+        // because of encoding of error value, it is very hard to have a fast path
+        bool has_fast_path = false; // (left_type == right_type && left_type != LMD_TYPE_STRING);
+        if (!has_fast_path) {
             strbuf_append_str(tp->code_buf, "fn_eq(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
             transpile_box_item(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
         } else {
-            // Use direct C comparison for compatible non-string types
+            // Use direct C comparison for compatible types
+            // todo: need to split into cases, and handle diff type differently
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, " == ");
@@ -755,34 +733,11 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         }
     }
     else if (bi_node->op == OPERATOR_NE) {
-        // Check if we need to use the runtime equal() function (then negate the result)
-        // This happens when one operand is an Item (e.g., from fn_mod) and the other is a plain type
-        TypeId left_type = bi_node->left->type->type_id;
-        TypeId right_type = bi_node->right->type->type_id;
-        
-        // Check if one side is an Item-returning expression (e.g., modulo, division, etc.)
-        bool left_returns_item = false;
-        bool right_returns_item = false;
-        
-        if (bi_node->left->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* left_bin = (AstBinaryNode*)bi_node->left;
-            if (left_bin->op == OPERATOR_MOD || left_bin->op == OPERATOR_DIV || 
-                left_bin->op == OPERATOR_IDIV || left_bin->op == OPERATOR_POW) {
-                left_returns_item = true;
-            }
-        }
-        
-        if (bi_node->right->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* right_bin = (AstBinaryNode*)bi_node->right;
-            if (right_bin->op == OPERATOR_MOD || right_bin->op == OPERATOR_DIV || 
-                right_bin->op == OPERATOR_IDIV || right_bin->op == OPERATOR_POW) {
-                right_returns_item = true;
-            }
-        }
-        
-        // Use runtime equal() function (negated) if types are incompatible, one side returns Item, or comparing strings
-        if (left_returns_item || right_returns_item || left_type != right_type || 
-            left_type == LMD_TYPE_STRING) {
+        // TypeId left_type = bi_node->left->type->type_id;
+        // TypeId right_type = bi_node->right->type->type_id;
+        // because of encoding of error value, it is very hard to have a fast path
+        bool has_fast_path = false; // (left_type == right_type && left_type != LMD_TYPE_STRING);        
+        if (!has_fast_path) {
             strbuf_append_str(tp->code_buf, "fn_ne(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
@@ -790,6 +745,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             strbuf_append_char(tp->code_buf, ')');
         } else {
             // Use direct C comparison for compatible non-string types
+            // todo: need to split into cases, and handle diff type differently
             strbuf_append_char(tp->code_buf, '(');
             transpile_expr(tp, bi_node->left);
             strbuf_append_str(tp->code_buf, " != ");
@@ -798,40 +754,11 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         }
     }
     else if (bi_node->op == OPERATOR_LT) {
-        // Check if we need to use the runtime comparison function for type checking
-        TypeId left_type = bi_node->left->type->type_id;
-        TypeId right_type = bi_node->right->type->type_id;
-        
-        // Check if one side is an Item-returning expression (e.g., modulo, division, etc.)
-        bool left_returns_item = false;
-        bool right_returns_item = false;
-        
-        if (bi_node->left->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* left_bin = (AstBinaryNode*)bi_node->left;
-            if (left_bin->op == OPERATOR_MOD || left_bin->op == OPERATOR_DIV || 
-                left_bin->op == OPERATOR_IDIV || left_bin->op == OPERATOR_POW) {
-                left_returns_item = true;
-            }
-        }
-        
-        if (bi_node->right->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* right_bin = (AstBinaryNode*)bi_node->right;
-            if (right_bin->op == OPERATOR_MOD || right_bin->op == OPERATOR_DIV || 
-                right_bin->op == OPERATOR_IDIV || right_bin->op == OPERATOR_POW) {
-                right_returns_item = true;
-            }
-        }
-        
-        // Check if the operation is invalid for these types
-        bool operation_invalid = false;
-        if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING ||
-            left_type == LMD_TYPE_BOOL || right_type == LMD_TYPE_BOOL ||
-            left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) {
-            operation_invalid = true;  // < comparison not valid for these types
-        }
-        
-        // Use runtime function if types are incompatible or operation is invalid or one side returns Item
-        if (left_returns_item || right_returns_item || left_type != right_type || operation_invalid) {
+        // TypeId left_type = bi_node->left->type->type_id;
+        // TypeId right_type = bi_node->right->type->type_id;
+        // because of encoding of error value, it is very hard to have a fast path
+        bool has_fast_path = false; // (left_type == right_type && left_type != LMD_TYPE_STRING);
+        if (!has_fast_path) {
             strbuf_append_str(tp->code_buf, "fn_lt(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
@@ -848,39 +775,11 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
     else if (bi_node->op == OPERATOR_LE) {
         // Check if we need to use the runtime comparison function for type checking
-        TypeId left_type = bi_node->left->type->type_id;
-        TypeId right_type = bi_node->right->type->type_id;
-        
-        // Check if one side is an Item-returning expression (e.g., modulo, division, etc.)
-        bool left_returns_item = false;
-        bool right_returns_item = false;
-        
-        if (bi_node->left->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* left_bin = (AstBinaryNode*)bi_node->left;
-            if (left_bin->op == OPERATOR_MOD || left_bin->op == OPERATOR_DIV || 
-                left_bin->op == OPERATOR_IDIV || left_bin->op == OPERATOR_POW) {
-                left_returns_item = true;
-            }
-        }
-        
-        if (bi_node->right->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* right_bin = (AstBinaryNode*)bi_node->right;
-            if (right_bin->op == OPERATOR_MOD || right_bin->op == OPERATOR_DIV || 
-                right_bin->op == OPERATOR_IDIV || right_bin->op == OPERATOR_POW) {
-                right_returns_item = true;
-            }
-        }
-        
-        // Check if the operation is invalid for these types
-        bool operation_invalid = false;
-        if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING ||
-            left_type == LMD_TYPE_BOOL || right_type == LMD_TYPE_BOOL ||
-            left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) {
-            operation_invalid = true;  // <= comparison not valid for these types
-        }
-        
-        // Use runtime function if types are incompatible or operation is invalid or one side returns Item
-        if (left_returns_item || right_returns_item || left_type != right_type || operation_invalid) {
+        // TypeId left_type = bi_node->left->type->type_id;
+        // TypeId right_type = bi_node->right->type->type_id;
+        // because of encoding of error value, it is very hard to have a fast path
+        bool has_fast_path = false; // (left_type == right_type && left_type != LMD_TYPE_STRING);
+        if (!has_fast_path) {
             strbuf_append_str(tp->code_buf, "fn_le(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
@@ -897,39 +796,11 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
     else if (bi_node->op == OPERATOR_GT) {
         // Check if we need to use the runtime comparison function for type checking
-        TypeId left_type = bi_node->left->type->type_id;
-        TypeId right_type = bi_node->right->type->type_id;
-        
-        // Check if one side is an Item-returning expression (e.g., modulo, division, etc.)
-        bool left_returns_item = false;
-        bool right_returns_item = false;
-        
-        if (bi_node->left->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* left_bin = (AstBinaryNode*)bi_node->left;
-            if (left_bin->op == OPERATOR_MOD || left_bin->op == OPERATOR_DIV || 
-                left_bin->op == OPERATOR_IDIV || left_bin->op == OPERATOR_POW) {
-                left_returns_item = true;
-            }
-        }
-        
-        if (bi_node->right->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* right_bin = (AstBinaryNode*)bi_node->right;
-            if (right_bin->op == OPERATOR_MOD || right_bin->op == OPERATOR_DIV || 
-                right_bin->op == OPERATOR_IDIV || right_bin->op == OPERATOR_POW) {
-                right_returns_item = true;
-            }
-        }
-        
-        // Check if the operation is invalid for these types
-        bool operation_invalid = false;
-        if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING ||
-            left_type == LMD_TYPE_BOOL || right_type == LMD_TYPE_BOOL ||
-            left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) {
-            operation_invalid = true;  // > comparison not valid for these types
-        }
-        
-        // Use runtime function if types are incompatible or operation is invalid or one side returns Item
-        if (left_returns_item || right_returns_item || left_type != right_type || operation_invalid) {
+        // TypeId left_type = bi_node->left->type->type_id;
+        // TypeId right_type = bi_node->right->type->type_id;
+        // because of encoding of error value, it is very hard to have a fast path
+        bool has_fast_path = false; // (left_type == right_type && left_type != LMD_TYPE_STRING);
+        if (!has_fast_path) {
             strbuf_append_str(tp->code_buf, "fn_gt(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
@@ -946,39 +817,11 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
     else if (bi_node->op == OPERATOR_GE) {
         // Check if we need to use the runtime comparison function for type checking
-        TypeId left_type = bi_node->left->type->type_id;
-        TypeId right_type = bi_node->right->type->type_id;
-        
-        // Check if one side is an Item-returning expression (e.g., modulo, division, etc.)
-        bool left_returns_item = false;
-        bool right_returns_item = false;
-        
-        if (bi_node->left->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* left_bin = (AstBinaryNode*)bi_node->left;
-            if (left_bin->op == OPERATOR_MOD || left_bin->op == OPERATOR_DIV || 
-                left_bin->op == OPERATOR_IDIV || left_bin->op == OPERATOR_POW) {
-                left_returns_item = true;
-            }
-        }
-        
-        if (bi_node->right->node_type == AST_NODE_BINARY) {
-            AstBinaryNode* right_bin = (AstBinaryNode*)bi_node->right;
-            if (right_bin->op == OPERATOR_MOD || right_bin->op == OPERATOR_DIV || 
-                right_bin->op == OPERATOR_IDIV || right_bin->op == OPERATOR_POW) {
-                right_returns_item = true;
-            }
-        }
-        
-        // Check if the operation is invalid for these types
-        bool operation_invalid = false;
-        if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING ||
-            left_type == LMD_TYPE_BOOL || right_type == LMD_TYPE_BOOL ||
-            left_type == LMD_TYPE_NULL || right_type == LMD_TYPE_NULL) {
-            operation_invalid = true;  // >= comparison not valid for these types
-        }
-        
-        // Use runtime function if types are incompatible or operation is invalid or one side returns Item
-        if (left_returns_item || right_returns_item || left_type != right_type || operation_invalid) {
+        // TypeId left_type = bi_node->left->type->type_id;
+        // TypeId right_type = bi_node->right->type->type_id;
+        // because of encoding of error value, it is very hard to have a fast path
+        bool has_fast_path = false; // (left_type == right_type && left_type != LMD_TYPE_STRING);
+        if (!has_fast_path) {
             strbuf_append_str(tp->code_buf, "fn_ge(");
             transpile_box_item(tp, bi_node->left);
             strbuf_append_char(tp->code_buf, ',');
