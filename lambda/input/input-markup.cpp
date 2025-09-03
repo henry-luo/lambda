@@ -2344,7 +2344,7 @@ static const char* detect_math_flavor(const char* content) {
         (strstr(content, "gamma") && !strstr(content, "\\gamma")) ||
         (strstr(content, "pi") && !strstr(content, "\\pi")) ||
         (strstr(content, "infinity") != NULL) ||
-        (strstr(content, "oo") != NULL)                      // ASCII infinity
+        (strstr(content, "oo") && !strstr(content, "\\"))    // ASCII infinity (not in LaTeX commands)
     );
     
     // Look for LaTeX-specific commands
@@ -2355,6 +2355,8 @@ static const char* detect_math_flavor(const char* content) {
         strstr(content, "\\beta") || strstr(content, "\\gamma") ||
         strstr(content, "\\pi") || strstr(content, "\\sqrt") ||
         strstr(content, "\\begin") || strstr(content, "\\end") ||
+        strstr(content, "\\hookleftarrow") || strstr(content, "\\hookrightarrow") ||
+        strstr(content, "\\twoheadleftarrow") || strstr(content, "\\twoheadrightarrow") ||
         strstr(content, "\\left") || strstr(content, "\\right")
     );
     

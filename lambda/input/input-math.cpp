@@ -1475,8 +1475,10 @@ static Item parse_latex_command(Input *input, const char **math) {
         return {.item = ITEM_ERROR};
     } else {
         // Use new group-based parsing system
+        printf("DEBUG: Looking up LaTeX command: '%s'\n", cmd_string->chars);
         const MathExprDef* def = find_math_expression(cmd_string->chars, MATH_FLAVOR_LATEX);
         if (def) {
+            printf("DEBUG: Found definition for '%s': element_name='%s'\n", cmd_string->chars, def->element_name);
             stringbuf_reset(sb);
             
             // Find the appropriate group parser
@@ -1499,6 +1501,7 @@ static Item parse_latex_command(Input *input, const char **math) {
         }
         
         // Fallback for unrecognized commands - treat as symbol
+        printf("DEBUG: Command '%s' not found, falling back to symbol\n", cmd_string->chars);
         stringbuf_reset(sb);
         String* symbol_string = input_create_string(input, cmd_string->chars);
         return symbol_string ? (Item){.item = y2it(symbol_string)} : (Item){.item = ITEM_ERROR};
