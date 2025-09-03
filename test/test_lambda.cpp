@@ -222,6 +222,10 @@ Test(lambda_tests, test_comp_expr_ls) {
     test_lambda_script_against_file("test/lambda/comp_expr.ls", "test/lambda/comp_expr.txt");
 }
 
+Test(lambda_tests, test_comp_expr_edge_ls) {
+    test_lambda_script_against_file("test/lambda/comp_expr_edge.ls", "test/lambda/comp_expr_edge.txt");
+}
+
 // Test(lambda_tests, test_unicode_ls) {
 //     test_lambda_script_against_file("test/lambda/unicode.ls", "test/lambda/unicode.txt");
 // }
