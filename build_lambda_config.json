@@ -413,6 +413,12 @@
                         "defines": ["GINAC_AVAILABLE"]
                     },
                     {
+                        "source": "test_ascii_formatter_standalone.cpp",
+                        "name": "🎯 ASCII Math Standalone Formatter Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_ascii_formatter_standalone.exe"
+                    },
+                    {
                         "source": "test_markup_roundtrip.cpp",
                         "name": "📝 Markup Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],

@@ -37,4 +37,7 @@ String* format_math_typst(VariableMemPool* pool, Item root_item);
 String* format_math_ascii(VariableMemPool* pool, Item root_item);
 String* format_math_mathml(VariableMemPool* pool, Item root_item);
 
+// Standalone ASCII math formatter
+String* format_math_ascii_standalone(VariableMemPool* pool, Item root_item);
+
 #endif // FORMAT_H

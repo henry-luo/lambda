@@ -2093,13 +2093,8 @@ String* format_math_typst(VariableMemPool* pool, Item root_item) {
 
 // Format math expression to ASCII
 String* format_math_ascii(VariableMemPool* pool, Item root_item) {
-    StringBuf* sb = stringbuf_new(pool);
-    if (!sb) return NULL;
-    
-    format_math_item(sb, root_item, MATH_OUTPUT_ASCII, 0);
-    
-    String* result = stringbuf_to_string(sb);
-    return result;
+    // Use the dedicated standalone ASCII math formatter for better results
+    return format_math_ascii_standalone(pool, root_item);
 }
 
 // Format math expression to MathML
