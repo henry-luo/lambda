@@ -457,12 +457,16 @@ static void format_thematic_break(StringBuf* sb) {
     stringbuf_append_str(sb, "---\n\n");
 }
 
-// Format inline math elements ($math$)
+// Format inline math elements ($math$ or asciimath::...)
 // Format inline math
 static void format_math_inline(StringBuf* sb, Element* elem) {
     if (!elem) return;
     
     List* element_list = (List*)elem;
+    
+    // Check if this is ASCII math by looking at the type attribute
+    String* type_attr = get_attribute(elem, "type");
+    bool is_ascii_math = (type_attr && strcmp(type_attr->chars, "ascii") == 0);
     
     // Get the math content from the first child
     // The parsed math AST should be the first child of the math element
@@ -472,17 +476,43 @@ static void format_math_inline(StringBuf* sb, Element* elem) {
         // Use heap-allocated memory pool for formatting
         VariableMemPool* pool = NULL;
         if (pool_variable_init(&pool, 8192, 50) == MEM_POOL_ERR_OK) {
-            String* latex_output = format_math_latex(pool, math_item);
-            
-            if (latex_output && latex_output->len > 0) {
-                stringbuf_append_str(sb, "$");
-                stringbuf_append_str(sb, latex_output->chars);
-                stringbuf_append_str(sb, "$");
+            if (is_ascii_math) {
+                // Format as ASCII math with original prefix
+                String* ascii_output = format_math_ascii_standalone(pool, math_item);
+                
+                if (ascii_output && ascii_output->len > 0) {
+                    // Check if we have a flavor attribute to determine the original prefix
+                    String* flavor_attr = get_attribute(elem, "flavor");
+                    printf("DEBUG: flavor_attr = %p\n", flavor_attr);
+                    if (flavor_attr) {
+                        printf("DEBUG: flavor_attr->chars = '%s'\n", flavor_attr->chars);
+                    }
+                    if (flavor_attr && strcmp(flavor_attr->chars, "AM") == 0) {
+                        printf("DEBUG: Using AM:: prefix\n");
+                        stringbuf_append_str(sb, "AM::");
+                    } else {
+                        printf("DEBUG: Using asciimath:: prefix\n");
+                        stringbuf_append_str(sb, "asciimath::");
+                    }
+                    stringbuf_append_str(sb, ascii_output->chars);
+                } else {
+                    // Fallback if ASCII math formatting fails
+                    stringbuf_append_str(sb, "asciimath::math");
+                }
             } else {
-                // Fallback if math formatting fails
-                stringbuf_append_str(sb, "$");
-                stringbuf_append_str(sb, "math");
-                stringbuf_append_str(sb, "$");
+                // Format as LaTeX math with $ delimiters
+                String* latex_output = format_math_latex(pool, math_item);
+                
+                if (latex_output && latex_output->len > 0) {
+                    stringbuf_append_str(sb, "$");
+                    stringbuf_append_str(sb, latex_output->chars);
+                    stringbuf_append_str(sb, "$");
+                } else {
+                    // Fallback if math formatting fails
+                    stringbuf_append_str(sb, "$");
+                    stringbuf_append_str(sb, "math");
+                    stringbuf_append_str(sb, "$");
+                }
             }
             
             pool_variable_destroy(pool);
