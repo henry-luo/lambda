@@ -218,9 +218,9 @@
             "description": "Complete Lambda runtime with all dependencies for complex tests",
             "source_patterns": [
                 "lambda/input/input*.cpp",
-                "lambda/format/format*.cpp",
-                "lambda/*.cpp"
+                "lambda/format/format*.cpp"
             ],
+            "note": "Explicitly excludes main.cpp and main-repl.cpp to avoid multiple main() functions",
             "source_files": [
                 "lambda/mir.c", 
                 "lambda/parse.c", 
@@ -228,12 +228,26 @@
                 "lambda/validator/validate.cpp", 
                 "lambda/validator/validator.cpp", 
                 "lambda/validator/schema_parser.cpp", 
+                "lambda/build_ast.cpp", 
+                "lambda/runner.cpp",
+                "lambda/print.cpp",
+                "lambda/name_pool.cpp",
+                "lambda/pack.cpp",
+                "lambda/transpile.cpp",
+                "lambda/transpile-mir.cpp",
+                "lambda/utf_string.cpp",
+                "lambda/lambda-data.cpp",
+                "lambda/lambda-data-runtime.cpp",
+                "lambda/lambda-eval.cpp",
+                "lambda/lambda-eval-num.cpp",
+                "lambda/lambda-mem.cpp",
                 "lib/arraylist.c", 
                 "lib/hashmap.c",
                 "lib/file.c", 
                 "lib/log.c", 
                 "lib/utf.c"
             ],
+            "note": "Explicitly excludes main.cpp and main-repl.cpp to avoid multiple main() functions",
             "libraries": ["mem-pool", "strbuf", "strview", "string", "num_stack", "datetime", "url", "mime-detect", "criterion", "libedit"],
             "include": "lib/mem-pool/include",
             "special_flags": "-lstdc++",

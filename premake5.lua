@@ -283,6 +283,19 @@ project "lambda-runtime-full-cpp"
         "lambda/validator/validate.cpp",
         "lambda/validator/validator.cpp",
         "lambda/validator/schema_parser.cpp",
+        "lambda/build_ast.cpp",
+        "lambda/runner.cpp",
+        "lambda/print.cpp",
+        "lambda/name_pool.cpp",
+        "lambda/pack.cpp",
+        "lambda/transpile.cpp",
+        "lambda/transpile-mir.cpp",
+        "lambda/utf_string.cpp",
+        "lambda/lambda-data.cpp",
+        "lambda/lambda-data-runtime.cpp",
+        "lambda/lambda-eval.cpp",
+        "lambda/lambda-eval-num.cpp",
+        "lambda/lambda-mem.cpp",
     }
     
     files {
@@ -291,10 +304,6 @@ project "lambda-runtime-full-cpp"
     
     files {
         "lambda/format/format*.cpp",
-    }
-    
-    files {
-        "lambda/*.cpp",
     }
     
     includedirs {

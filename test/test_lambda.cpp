@@ -181,8 +181,8 @@ Test(lambda_tests, test_array_float_ls) {
     test_lambda_script_against_file("test/lambda/array_float.ls", "test/lambda/array_float.txt");
 }
 
-Test(lambda_tests, test_comparison_expr_ls) {
-    test_lambda_script_against_file("test/lambda/comparison_expr.ls", "test/lambda/comparison_expr.txt");
+Test(lambda_tests, test_comp_expr_ls) {
+    test_lambda_script_against_file("test/lambda/comp_expr.ls", "test/lambda/comp_expr.txt");
 }
 
 // Test(lambda_tests, test_unicode_ls) {

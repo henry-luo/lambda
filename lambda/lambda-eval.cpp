@@ -234,11 +234,6 @@ Bool fn_is(Item a, Item b) {
     }
 }
 
-// bool equal(Item a_item, Item b_item) {
-//     Bool result = equal_comp(a_item, b_item);
-//     return result == BOOL_TRUE;
-// }
-
 // 3-states comparison
 Bool fn_eq(Item a_item, Item b_item) {
     log_debug("equal_comp expr");
@@ -355,6 +350,7 @@ Bool fn_gt(Item a_item, Item b_item) {
         if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
             LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
+            log_debug("fn_gt: a_val %f, b_val %f", a_val, b_val);
             return (a_val > b_val) ? BOOL_TRUE : BOOL_FALSE;
         }
         // Type mismatch error for equality comparisons (e.g., true == 1, "test" != null)
@@ -398,13 +394,15 @@ Bool fn_gt(Item a_item, Item b_item) {
 }
 
 Bool fn_le(Item a_item, Item b_item) {
-    Bool result = fn_gt(b_item, a_item);
+    log_debug("fn_le expr");
+    Bool result = fn_gt(a_item, b_item);
+    log_debug("fn_le result %d", result);
     if (result == BOOL_ERROR) return BOOL_ERROR;
     return !result;
 }
 
 Bool fn_ge(Item a_item, Item b_item) {
-    Bool result = fn_lt(b_item, a_item);
+    Bool result = fn_lt(a_item, b_item);
     if (result == BOOL_ERROR) return BOOL_ERROR;
     return !result;
 }
