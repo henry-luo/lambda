@@ -206,7 +206,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             log_debug("nested map at field %d: %p", i, data);
             Map *nest_map = *(Map**)data;
             TypeMap *nest_map_type = (TypeMap*)nest_map->type;
-            print_named_items(strbuf, nest_map_type, nest_map->data, depth + 1, indent, is_attrs);
+            print_named_items(strbuf, nest_map_type, nest_map->data, depth, indent, is_attrs);
         }
         else {
             // printf("field %d: %p, name: %.*s, type: %d, data: %p\n", 
@@ -295,10 +295,10 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  
             case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
-                print_item(strbuf, *(Item*)data, depth + 1, indent);
+                print_item(strbuf, *(Item*)data, depth, indent);
                 break;
             case LMD_TYPE_ANY:
-                print_typeditem(strbuf, (TypedItem*)data, depth + 1, indent);
+                print_typeditem(strbuf, (TypedItem*)data, depth, indent);
                 break;
             default:
                 strbuf_append_format(strbuf, "[unknown]");
@@ -545,7 +545,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         Map *map = item.map;
         TypeMap *map_type = (TypeMap*)map->type;
         strbuf_append_char(strbuf, '{');
-        print_named_items(strbuf, map_type, map->data, !depth ? 1: depth, indent);
+        print_named_items(strbuf, map_type, map->data, !depth ? 1: depth + 1, indent);
         strbuf_append_char(strbuf, '}');
         break;
     }
@@ -563,7 +563,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             strbuf_append_str(strbuf, indent ? "\n": (elmt_type->length ? "; ":" "));
             for (long i = 0; i < element->length; i++) {
                 if (i) strbuf_append_str(strbuf, indent ? "\n" : "; ");
-                if (indent) { for (int i=0; i<depth; i++) strbuf_append_str(strbuf, indent); }
+                if (indent) { for (int i=0; i<=depth; i++) strbuf_append_str(strbuf, indent); }
                 print_item(strbuf, element->items[i], depth + 1, indent);
             }
             // if (indent) {
