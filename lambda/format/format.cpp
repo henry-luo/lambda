@@ -71,8 +71,11 @@ void format_number(StringBuf* sb, Item item) {
     }
 }
 
-extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool) {
-    String* result = NULL;
+extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool* pool) {
+    printf("DEBUG: format_data called with type='%s', flavor='%s'\n", 
+           type ? type->chars : "NULL", flavor ? flavor->chars : "NULL");
+    fflush(stdout);
+    if (!type) return NULL;
     
     // If type is null, try to auto-detect from item type
     if (!type) {
@@ -90,6 +93,8 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Variable
     }
     
     printf("Formatting with type: %s\n", format_type_with_flavor);
+    
+    String* result = NULL;
     
     if (strcmp(type->chars, "json") == 0) {
         result = format_json(pool, item);
@@ -168,6 +173,8 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Variable
             result = format_math_typst(pool, item);
         }
         else if (strcmp(flavor->chars, "ascii") == 0) {
+            printf("DEBUG: format.cpp calling format_math_ascii\n");
+            fflush(stdout);
             result = format_math_ascii(pool, item);
         }
         else if (strcmp(flavor->chars, "mathml") == 0) {
@@ -186,6 +193,8 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Variable
         result = format_math_typst(pool, item);
     }
     else if (strcmp(format_type_with_flavor, "math-ascii") == 0) {
+        printf("DEBUG: format_data calling format_math_ascii via legacy path\n");
+        fflush(stdout);
         result = format_math_ascii(pool, item);
     }
     else if (strcmp(format_type_with_flavor, "math-mathml") == 0) {

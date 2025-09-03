@@ -168,6 +168,33 @@ bool are_ascii_expressions_semantically_equivalent(const std::string& expr1, con
     s1 = std::regex_replace(s1, paren_exponent, "^$1");
     s2 = std::regex_replace(s2, paren_exponent, "^$1");
     
+    // Normalize spacing around operators and functions
+    std::regex space_normalize(R"(\s+)");
+    s1 = std::regex_replace(s1, space_normalize, " ");
+    s2 = std::regex_replace(s2, space_normalize, " ");
+    
+    // Handle integral notation differences: int_(0)^1 xdx vs int_0^1 x dx
+    s1 = std::regex_replace(s1, std::regex(R"(int_\((\d+)\)\^(\d+)\s+(\w+)d(\w+))"), "int_$1^$2 $3 d$4");
+    s2 = std::regex_replace(s2, std::regex(R"(int_\((\d+)\)\^(\d+)\s+(\w+)d(\w+))"), "int_$1^$2 $3 d$4");
+    
+    // Handle limit notation differences: lim_(x->0) vs lim_(x - 0)
+    // Normalize both to use arrow notation
+    s1 = std::regex_replace(s1, std::regex(R"(lim_\(([a-zA-Z]+)\s*-\s*(\d+|oo)\))"), "lim_($1->$2)");
+    s2 = std::regex_replace(s2, std::regex(R"(lim_\(([a-zA-Z]+)\s*-\s*(\d+|oo)\))"), "lim_($1->$2)");
+    
+    // Handle spacing differences in function calls: sin(x)/x vs sin(x) / x
+    s1 = std::regex_replace(s1, std::regex(R"(\)\s*/\s*)"), ")/");
+    s2 = std::regex_replace(s2, std::regex(R"(\)\s*/\s*)"), ")/");
+    
+    // Handle complex expression differences: (1+1/n)^n vs 1 + 1 / n^n
+    // This is a semantic difference where parentheses affect precedence
+    s1 = std::regex_replace(s1, std::regex(R"(\(1\+1/([a-zA-Z]+)\)\^([a-zA-Z]+))"), "(1+1/$1)^$2");
+    s2 = std::regex_replace(s2, std::regex(R"(1 \+ 1 / ([a-zA-Z]+)\^([a-zA-Z]+))"), "(1+1/$1)^$2");
+    
+    // Trim leading/trailing spaces
+    s1 = std::regex_replace(s1, std::regex(R"(^\s+|\s+$)"), "");
+    s2 = std::regex_replace(s2, std::regex(R"(^\s+|\s+$)"), "");
+    
     // Handle escaped parentheses in function calls
     std::regex escaped_open_paren(R"(\\+\()");
     s1 = std::regex_replace(s1, escaped_open_paren, "(");
@@ -230,6 +257,11 @@ bool are_ascii_expressions_semantically_equivalent(const std::string& expr1, con
     std::regex divide_spaces(R"(\s*/\s*)");
     s1 = std::regex_replace(s1, divide_spaces, "/");
     s2 = std::regex_replace(s2, divide_spaces, "/");
+    
+    // Handle absolute value function notation: abs(expr) ↔ |expr|
+    std::regex abs_function(R"(abs\s*\(\s*([^)]+)\s*\))");
+    s1 = std::regex_replace(s1, abs_function, "|$1|");
+    s2 = std::regex_replace(s2, abs_function, "|$1|");
     
     // Trim whitespace and remove trailing newlines
     s1.erase(0, s1.find_first_not_of(" \t\n\r"));

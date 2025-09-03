@@ -1685,25 +1685,82 @@ static Item parse_inline_spans(MarkupParser* parser, const char* text) {
             }
         }
         else if (*pos == ':') {
-            // Flush text and try to parse emoji shortcode or ASCII math prefix
-            if (sb->length > 0) {
-                String* text_content = stringbuf_to_string(sb);
-                Item text_item = {.item = s2it(text_content)};
-                list_push((List*)span, text_item);
-                increment_element_content_length(span);
-                stringbuf_reset(sb);
+            // Check if this might be an ASCII math prefix before flushing text
+            const char* lookahead_pos = pos;
+            bool is_ascii_math_prefix = false;
+            
+            // Check if we have "asciimath::" or "AM::" starting from the text buffer + current position
+            if (sb->str && sb->length >= 9 && 
+                strncmp(sb->str->chars + sb->length - 9, "asciimath", 9) == 0 && 
+                strncmp(pos, "::", 2) == 0) {
+                is_ascii_math_prefix = true;
+            } else if (sb->str && sb->length >= 2 && 
+                       strncmp(sb->str->chars + sb->length - 2, "AM", 2) == 0 && 
+                       strncmp(pos, "::", 2) == 0) {
+                is_ascii_math_prefix = true;
             }
             
-            const char* old_pos = pos;
-            
-            // First try ASCII math prefix (asciimath:: or AM::)
-            Item ascii_math_item = parse_ascii_math_prefix(parser, &pos);
-            if (ascii_math_item.item != ITEM_ERROR && ascii_math_item.item != ITEM_UNDEFINED) {
-                list_push((List*)span, ascii_math_item);
-                increment_element_content_length(span);
+            if (is_ascii_math_prefix) {
+                // Extract the prefix length
+                size_t prefix_len = (sb->length >= 9 && 
+                                   strncmp(sb->str->chars + sb->length - 9, "asciimath", 9) == 0) ? 9 : 2;
+                
+                // Create a temporary buffer with the content before the prefix
+                size_t before_prefix_len = sb->length - prefix_len;
+                
+                // Flush any text before the prefix
+                if (before_prefix_len > 0) {
+                    // Create a string with content before the prefix
+                    char* before_prefix = (char*)malloc(before_prefix_len + 1);
+                    if (before_prefix) {
+                        strncpy(before_prefix, sb->str->chars, before_prefix_len);
+                        before_prefix[before_prefix_len] = '\0';
+                        
+                        String* text_content = input_create_string(parser->input, before_prefix);
+                        if (text_content) {
+                            Item text_item = {.item = s2it(text_content)};
+                            list_push((List*)span, text_item);
+                            increment_element_content_length(span);
+                        }
+                        free(before_prefix);
+                    }
+                }
+                
+                // Reset string buffer 
+                stringbuf_reset(sb);
+                
+                // Parse ASCII math starting from the prefix in the original text
+                // We need to back up the position to the start of the prefix
+                const char* prefix_start = pos - 1; // Back up to the first ':'
+                // Back up further to the start of "asciimath" or "AM"
+                prefix_start -= (prefix_len - 1);
+                const char* parse_pos = prefix_start;
+                
+                // Try to parse ASCII math prefix
+                Item ascii_math_item = parse_ascii_math_prefix(parser, &parse_pos);
+                if (ascii_math_item.item != ITEM_ERROR && ascii_math_item.item != ITEM_UNDEFINED) {
+                    list_push((List*)span, ascii_math_item);
+                    increment_element_content_length(span);
+                    pos = parse_pos; // Update position to where parsing ended
+                } else {
+                    // Parsing failed, add the prefix back to buffer
+                    stringbuf_append_str(sb, (prefix_len == 9) ? "asciimath" : "AM");
+                    stringbuf_append_char(sb, ':');
+                    pos++;
+                }
             } else {
-                // Reset position and try emoji shortcode
-                pos = old_pos;
+                // Regular colon handling - flush text and try emoji shortcode
+                if (sb->length > 0) {
+                    String* text_content = stringbuf_to_string(sb);
+                    Item text_item = {.item = s2it(text_content)};
+                    list_push((List*)span, text_item);
+                    increment_element_content_length(span);
+                    stringbuf_reset(sb);
+                }
+                
+                const char* old_pos = pos;
+                
+                // Try emoji shortcode
                 Item emoji_item = parse_emoji_shortcode(parser, &pos);
                 if (emoji_item.item != ITEM_ERROR && emoji_item.item != ITEM_UNDEFINED) {
                     list_push((List*)span, emoji_item);
@@ -2287,16 +2344,19 @@ static const char* detect_math_flavor(const char* content) {
         (strstr(content, "gamma") && !strstr(content, "\\gamma")) ||
         (strstr(content, "pi") && !strstr(content, "\\pi")) ||
         (strstr(content, "infinity") != NULL) ||
-        (strstr(content, "oo") != NULL)                      // ASCII infinity
+        (strstr(content, "oo") && !strstr(content, "\\"))    // ASCII infinity (not in LaTeX commands)
     );
     
     // Look for LaTeX-specific commands
     bool has_latex_indicators = (
         strstr(content, "\\frac") || strstr(content, "\\sum") || 
-        strstr(content, "\\int") || strstr(content, "\\alpha") ||
+        strstr(content, "\\int") || strstr(content, "\\iint") ||
+        strstr(content, "\\iiint") || strstr(content, "\\alpha") ||
         strstr(content, "\\beta") || strstr(content, "\\gamma") ||
         strstr(content, "\\pi") || strstr(content, "\\sqrt") ||
         strstr(content, "\\begin") || strstr(content, "\\end") ||
+        strstr(content, "\\hookleftarrow") || strstr(content, "\\hookrightarrow") ||
+        strstr(content, "\\twoheadleftarrow") || strstr(content, "\\twoheadrightarrow") ||
         strstr(content, "\\left") || strstr(content, "\\right")
     );
     
@@ -3505,25 +3565,34 @@ static Item parse_inline_math(MarkupParser* parser, const char** text) {
 // Parse ASCII math with prefix (asciimath:: or AM::)
 static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text) {
     const char* start = *text;
+    printf("*** DEBUG: ENTERING parse_ascii_math_prefix with text: '%.20s' ***\n", start);
     
     // Check for asciimath:: or AM:: prefix
     bool is_asciimath = false;
+    bool is_am_prefix = false;
     const char* pos = start;
     
     if (strncmp(pos, "asciimath::", 11) == 0) {
         pos += 11;
         is_asciimath = true;
+        printf("DEBUG: Found asciimath:: prefix\n");
     } else if (strncmp(pos, "AM::", 4) == 0) {
         pos += 4;
         is_asciimath = true;
+        is_am_prefix = true;
+        printf("DEBUG: Found AM:: prefix\n");
     }
     
     if (!is_asciimath) {
+        printf("DEBUG: No ASCII math prefix found, returning error\n");
         return (Item){.item = ITEM_ERROR};
     }
     
+    printf("DEBUG: ASCII math prefix detected, is_am_prefix = %s\n", is_am_prefix ? "true" : "false");
+    
     // Find the end of the math expression (end of line or whitespace)
     const char* content_start = pos;
+    printf("DEBUG: Content starts at: '%.20s'\n", content_start);
     while (*pos && *pos != '\n' && *pos != '\r') {
         pos++;
     }
@@ -3535,11 +3604,13 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text) {
     
     if (pos == content_start) {
         // No content after prefix
+        printf("DEBUG: No content after prefix\n");
         return (Item){.item = ITEM_ERROR};
     }
     
     // Extract content
     size_t content_len = pos - content_start;
+    printf("DEBUG: Content length: %zu\n", content_len);
     
     // Create math element
     Element* math_elem = create_element(parser->input, "math");
@@ -3549,7 +3620,14 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text) {
     
     // Add type attribute for ASCII math
     add_attribute_to_element(parser->input, math_elem, "type", "ascii");
-    add_attribute_to_element(parser->input, math_elem, "flavor", "ascii");
+    // Set flavor based on the prefix used
+    if (is_am_prefix) {
+        printf("DEBUG: Setting flavor to 'AM' for AM:: prefix\n");
+        add_attribute_to_element(parser->input, math_elem, "flavor", "AM");
+    } else {
+        printf("DEBUG: Setting flavor to 'ascii' for asciimath:: prefix\n");
+        add_attribute_to_element(parser->input, math_elem, "flavor", "ascii");
+    }
     
     // Create content string
     char* content = (char*)malloc(content_len + 1);
@@ -3559,8 +3637,13 @@ static Item parse_ascii_math_prefix(MarkupParser* parser, const char** text) {
     strncpy(content, content_start, content_len);
     content[content_len] = '\0';
     
+    printf("DEBUG: Extracted content: '%s'\n", content);
+    
     // Parse the math content using ASCII flavor
     Item parsed_math = parse_math_content(parser->input, content, "ascii");
+    printf("DEBUG: Math parsing result: %s\n", 
+           (parsed_math.item == ITEM_ERROR) ? "ERROR" : 
+           (parsed_math.item == ITEM_UNDEFINED) ? "UNDEFINED" : "SUCCESS");
     
     if (parsed_math.item != ITEM_ERROR && parsed_math.item != ITEM_UNDEFINED) {
         list_push((List*)math_elem, parsed_math);

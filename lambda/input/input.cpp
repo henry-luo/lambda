@@ -520,6 +520,17 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         }
         else if (strcmp(effective_type, "math") == 0) {
             const char* math_flavor = (flavor && flavor->chars) ? flavor->chars : "latex";
+            if (strcmp(math_flavor, "ascii") == 0) {
+                // Use standalone ASCII math parser
+                input->root = input_ascii_math(input, source);
+            } else {
+                // Use existing LaTeX/Typst math parser
+                parse_math(input, source, math_flavor);
+            }
+        }
+        else if (strncmp(effective_type, "math-", 5) == 0) {
+            // Handle compound math formats like "math-ascii", "math-latex", etc.
+            const char* math_flavor = effective_type + 5; // Skip "math-" prefix
             parse_math(input, source, math_flavor);
         }
         else if (strncmp(effective_type, "math-", 5) == 0) {

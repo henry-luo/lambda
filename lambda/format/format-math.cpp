@@ -1005,6 +1005,7 @@ static const char* get_format_string(const MathFormatDef* def, MathOutputFlavor 
         case MATH_OUTPUT_TYPST:
             return def->typst_format;
         case MATH_OUTPUT_ASCII:
+            printf("DEBUG: Using general math formatter with ASCII flavor for '%s'\n", def->element_name);
             return def->ascii_format;
         case MATH_OUTPUT_MATHML:
             return def->mathml_format;
@@ -1017,53 +1018,15 @@ static const char* get_format_string(const MathFormatDef* def, MathOutputFlavor 
 
 // Format math string (escape special characters if needed)
 static void format_math_string(StringBuf* sb, String* str) {
-    #ifdef DEBUG_MATH_FORMAT
-    log_debug("format_math_string: called with str=%p", (void*)str);
-    #endif
-    
-    if (!str) {
-        #ifdef DEBUG_MATH_FORMAT
-        log_debug("format_math_string: NULL string");
-        #endif
+    if (!str || !str->chars) {
+        // Instead of outputting '?', let's try to recover the original string
+        // This is likely a memory corruption issue
+        stringbuf_append_str(sb, "[corrupted]");
         return;
     }
     
-    // The length field seems corrupted, so let's use strlen as a workaround
-    size_t string_len = strlen(str->chars);
-    
-    #ifdef DEBUG_MATH_FORMAT
-    log_debug("format_math_string: raw len=%u, strlen=%zu", str->len, string_len);
-    if (string_len > 0 && string_len < 100) {
-        log_debug("format_math_string: string content: '%s'", str->chars);
-    }
-    #endif
-    
-    if (string_len == 0) {
-        #ifdef DEBUG_MATH_FORMAT
-        log_debug("format_math_string: zero length string (by strlen)");
-        #endif
-        return;
-    }
-    
-    // Check if the string has reasonable length to avoid infinite loops
-    if (string_len > 1000000) {  // 1MB limit as sanity check
-        #ifdef DEBUG_MATH_FORMAT
-        log_debug("format_math_string: string too long (%zu), treating as invalid", string_len);
-        #endif
-        stringbuf_append_str(sb, "[invalid_string]");
-        return;
-    }
-    
-    #ifdef DEBUG_MATH_FORMAT
-    log_debug("format_math_string: about to append %zu chars using stringbuf_append_str", string_len);
-    #endif
-    
-    // Use the simpler stringbuf_append_str which relies on null termination
+    // Simple null-terminated string append
     stringbuf_append_str(sb, str->chars);
-    
-    #ifdef DEBUG_MATH_FORMAT
-    log_debug("format_math_string: completed");
-    #endif
 }
 
 // Format children elements based on format string
@@ -1763,15 +1726,14 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
             break;
         }
         case LMD_TYPE_SYMBOL: {
-            #ifdef DEBUG_MATH_FORMAT
-            log_debug("format_math_item: Processing SYMBOL");
-            #endif
+            printf("DEBUG: format_math_item processing LMD_TYPE_SYMBOL\n");
             String* str = (String*)item.pointer;
             if (str) {
-                #ifdef DEBUG_MATH_FORMAT
-                log_debug("format_math_item: SYMBOL string='%s', len=%d", str->chars, str->len);
-                #endif
+                printf("DEBUG: SYMBOL string='%s', len=%d\n", str->chars ? str->chars : "NULL", str->len);
                 format_math_string(sb, str);
+            } else {
+                printf("DEBUG: SYMBOL has NULL string pointer\n");
+                stringbuf_append_str(sb, "?");
             }
             break;
         }
@@ -2093,12 +2055,12 @@ String* format_math_typst(VariableMemPool* pool, Item root_item) {
 
 // Format math expression to ASCII
 String* format_math_ascii(VariableMemPool* pool, Item root_item) {
-    StringBuf* sb = stringbuf_new(pool);
-    if (!sb) return NULL;
-    
-    format_math_item(sb, root_item, MATH_OUTPUT_ASCII, 0);
-    
-    String* result = stringbuf_to_string(sb);
+    printf("DEBUG: format_math_ascii called with item=0x%llx\n", root_item.item);
+    fflush(stdout);
+    // Use the dedicated standalone ASCII math formatter for better results
+    String* result = format_math_ascii_standalone(pool, root_item);
+    printf("DEBUG: format_math_ascii result='%s'\n", result ? result->chars : "NULL");
+    fflush(stdout);
     return result;
 }
 

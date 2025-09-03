@@ -1475,9 +1475,10 @@ static Item parse_latex_command(Input *input, const char **math) {
         return {.item = ITEM_ERROR};
     } else {
         // Use new group-based parsing system
+        printf("DEBUG: Looking up LaTeX command: '%s'\n", cmd_string->chars);
         const MathExprDef* def = find_math_expression(cmd_string->chars, MATH_FLAVOR_LATEX);
         if (def) {
-            stringbuf_reset(sb);
+            strbuf_full_reset(sb);
             
             // Find the appropriate group parser
             for (int group_idx = 0; group_idx < sizeof(math_groups) / sizeof(math_groups[0]); group_idx++) {
@@ -1499,7 +1500,7 @@ static Item parse_latex_command(Input *input, const char **math) {
         }
         
         // Fallback for unrecognized commands - treat as symbol
-        stringbuf_reset(sb);
+        strbuf_full_reset(sb);
         String* symbol_string = input_create_string(input, cmd_string->chars);
         return symbol_string ? (Item){.item = y2it(symbol_string)} : (Item){.item = ITEM_ERROR};
     }
@@ -4671,7 +4672,15 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
         return;
     }
     
-    Item result = parse_math_expression(input, &math, flavor);
+    Item result;
+    
+    // Route to appropriate parser based on flavor
+    if (flavor == MATH_FLAVOR_ASCII) {
+        printf("DEBUG: Routing to ASCII math parser\n");
+        result = input_ascii_math(input, math_string);
+    } else {
+        result = parse_math_expression(input, &math, flavor);
+    }
     
     // Check timeout after parsing
     double elapsed_time = (clock() - start_time) / CLOCKS_PER_SEC;
