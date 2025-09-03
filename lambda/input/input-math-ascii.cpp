@@ -90,6 +90,8 @@ static const ASCIIConstant ascii_constants[] = {
     {"exp", "exp", "exp", ASCII_TOKEN_FUNCTION, true},
     {"sqrt", "√", "sqrt", ASCII_TOKEN_FUNCTION, true},
     {"abs", "|", "abs", ASCII_TOKEN_FUNCTION, true},
+    {"floor", "⌊", "floor", ASCII_TOKEN_FUNCTION, true},
+    {"ceil", "⌈", "ceil", ASCII_TOKEN_FUNCTION, true},
     
     // Special constants
     {"oo", "∞", "infinity", ASCII_TOKEN_SYMBOL, false},
