@@ -116,14 +116,14 @@ static const ASCIIMathFormatDef ascii_format_defs[] = {
     {"pm", "+-", false, false, false, 0},
     {"mp", "-+", false, false, false, 0},
     
-    // Big operators
-    {"sum", "sum", false, false, false, 0},
-    {"prod", "prod", false, false, false, 0},
-    {"int", "int", false, false, false, 0},
-    {"oint", "oint", false, false, false, 0},
+    // Big operators - enable children processing for bounds notation
+    {"sum", "sum", true, false, false, 0},
+    {"prod", "prod", true, false, false, 0},
+    {"int", "int", true, false, false, 0},
+    {"oint", "oint", true, false, false, 0},
     
-    // Limits
-    {"lim", "lim", false, false, false, 0},
+    // Limits - enable children processing for bounds notation
+    {"lim", "lim", true, false, false, 0},
     {"limsup", "limsup", false, false, false, 0},
     {"liminf", "liminf", false, false, false, 0},
     
@@ -221,6 +221,15 @@ static void format_ascii_math_children(StringBuf* sb, List* children, int depth)
     }
 }
 
+// Check if a bound is simple (single character/number) and doesn't need parentheses
+static bool is_simple_bound(Item item) {
+    if (item.item == ITEM_ERROR) return false;
+    
+    // Check if it's a simple single-digit number or single character
+    // For integral bounds like int_0^1, we want to avoid parentheses around single digits
+    return true; // For now, assume most bounds are simple
+}
+
 // Format ASCII math element
 static void format_ascii_math_element(StringBuf* sb, Element* elem, int depth) {
     if (!elem) return;
@@ -232,7 +241,49 @@ static void format_ascii_math_element(StringBuf* sb, Element* elem, int depth) {
     const char* element_name = elmt_type->name.str;
     const ASCIIMathFormatDef* def = find_ascii_format_def(element_name);
     
-    if (def && def->ascii_format) {
+    // Special handling for sum/prod/int/lim with bounds notation
+    printf("DEBUG: Checking element '%s' with length %ld\n", element_name, elem->length);
+    if ((strcmp(element_name, "sum") == 0 || strcmp(element_name, "prod") == 0 || 
+         strcmp(element_name, "int") == 0 || strcmp(element_name, "oint") == 0 ||
+         strcmp(element_name, "lim") == 0) && 
+        elem->length >= 2) {
+        printf("DEBUG: Using special sum/prod/int/lim formatting for '%s'\n", element_name);
+        
+        // Special handling for limit notation
+        if (strcmp(element_name, "lim") == 0) {
+            stringbuf_append_str(sb, element_name);
+            stringbuf_append_str(sb, "_(");
+            format_ascii_math_item(sb, elem->items[0], depth + 1);  // limit expression (e.g., x->0)
+            stringbuf_append_str(sb, ")");
+            if (elem->length >= 2) {
+                stringbuf_append_str(sb, " ");
+                format_ascii_math_item(sb, elem->items[1], depth + 1);  // function expression
+            }
+        } else {
+            // Format as: sum_(lower_bound)^upper_bound summand
+            stringbuf_append_str(sb, element_name);
+            stringbuf_append_str(sb, "_(");
+            format_ascii_math_item(sb, elem->items[0], depth + 1);  // lower bound
+            stringbuf_append_str(sb, ")");
+            if (elem->length >= 2) {
+                stringbuf_append_str(sb, "^");
+                format_ascii_math_item(sb, elem->items[1], depth + 1);  // upper bound
+            }
+            if (elem->length >= 3) {
+                stringbuf_append_str(sb, " ");
+                format_ascii_math_item(sb, elem->items[2], depth + 1);  // summand
+            }
+            
+            // For integrals, add differential if present
+            if ((strcmp(element_name, "int") == 0 || strcmp(element_name, "oint") == 0) && 
+                elem->length >= 4) {
+                stringbuf_append_str(sb, " ");
+                format_ascii_math_item(sb, elem->items[3], depth + 1);  // differential
+            }
+        }
+        printf("DEBUG: Finished special formatting\n");
+        return;
+    } else if (def && def->ascii_format) {
         if (def->has_children && elem->length > 0) {
             if (def->is_binary_op && elem->length == 2) {
                 // Binary operator: format as {left} op {right}

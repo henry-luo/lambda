@@ -94,6 +94,7 @@ static const ASCIIConstant ascii_constants[] = {
     // Special constants
     {"oo", "∞", "infinity", ASCII_TOKEN_SYMBOL, false},
     {"infty", "∞", "infinity", ASCII_TOKEN_SYMBOL, false},
+    {"infinity", "∞", "infinity", ASCII_TOKEN_SYMBOL, false},
     {"emptyset", "∅", "emptyset", ASCII_TOKEN_SYMBOL, false},
     
     // Operators
@@ -134,6 +135,7 @@ static const ASCIIConstant ascii_constants[] = {
     {"prod", "∏", "prod", ASCII_TOKEN_FUNCTION, true},
     {"int", "∫", "int", ASCII_TOKEN_FUNCTION, true},
     {"oint", "∮", "oint", ASCII_TOKEN_FUNCTION, true},
+    {"lim", "lim", "lim", ASCII_TOKEN_FUNCTION, true},
     
     // Arrows
     {"->", "→", "to", ASCII_TOKEN_OPERATOR, false},
@@ -418,20 +420,73 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
         
         (*pos)++;
         
-        // Parse function argument if present
-        if (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_GROUPING && 
-            tokens[*pos].start[0] == '(') {
-            (*pos)++; // skip (
+        // Special handling for sum/prod/int/lim with bounds notation: sum_(lower)^upper summand
+        if (strcmp(element_name, "sum") == 0 || strcmp(element_name, "prod") == 0 || 
+            strcmp(element_name, "int") == 0 || strcmp(element_name, "oint") == 0 ||
+            strcmp(element_name, "lim") == 0) {
             
-            Item arg = parse_ascii_expression(input, tokens, pos, token_count);
-            if (arg.item != ITEM_ERROR) {
-                list_push((List*)func_element, arg);
+            // Check for subscript (lower bound)
+            if (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_SPECIAL && 
+                tokens[*pos].start[0] == '_') {
+                (*pos)++; // skip _
+                
+                Item lower_bound = parse_ascii_simple_expression(input, tokens, pos, token_count);
+                if (lower_bound.item != ITEM_ERROR) {
+                    list_push((List*)func_element, lower_bound);
+                }
+                
+                // Check for superscript (upper bound)
+                if (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_SPECIAL && 
+                    tokens[*pos].start[0] == '^') {
+                    (*pos)++; // skip ^
+                    
+                    Item upper_bound = parse_ascii_simple_expression(input, tokens, pos, token_count);
+                    if (upper_bound.item != ITEM_ERROR) {
+                        list_push((List*)func_element, upper_bound);
+                    }
+                }
+                
+                // Parse summand/integrand (the expression after the bounds)
+                if (*pos < token_count) {
+                    Item summand = parse_ascii_simple_expression(input, tokens, pos, token_count);
+                    if (summand.item != ITEM_ERROR) {
+                        list_push((List*)func_element, summand);
+                    }
+                }
+            } else {
+                // Regular function argument parsing for functions without bounds
+                if (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_GROUPING && 
+                    tokens[*pos].start[0] == '(') {
+                    (*pos)++; // skip (
+                    
+                    Item arg = parse_ascii_expression(input, tokens, pos, token_count);
+                    if (arg.item != ITEM_ERROR) {
+                        list_push((List*)func_element, arg);
+                    }
+                    
+                    // Skip closing )
+                    if (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_GROUPING && 
+                        tokens[*pos].start[0] == ')') {
+                        (*pos)++;
+                    }
+                }
             }
-            
-            // Skip closing )
+        } else {
+            // Regular function argument parsing for other functions
             if (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_GROUPING && 
-                tokens[*pos].start[0] == ')') {
-                (*pos)++;
+                tokens[*pos].start[0] == '(') {
+                (*pos)++; // skip (
+                
+                Item arg = parse_ascii_expression(input, tokens, pos, token_count);
+                if (arg.item != ITEM_ERROR) {
+                    list_push((List*)func_element, arg);
+                }
+                
+                // Skip closing )
+                if (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_GROUPING && 
+                    tokens[*pos].start[0] == ')') {
+                    (*pos)++;
+                }
             }
         }
         
@@ -481,9 +536,12 @@ static Item parse_ascii_relation(Input* input, ASCIIToken* tokens, size_t* pos, 
         ASCIIToken* op_token = &tokens[*pos];
         const char* rel_name = NULL;
         
-        if (op_token->start[0] == '=') rel_name = "eq";
-        else if (op_token->start[0] == '<') rel_name = "lt";
-        else if (op_token->start[0] == '>') rel_name = "gt";
+        if (op_token->start[0] == '=' && op_token->length == 1) rel_name = "eq";
+        else if (op_token->start[0] == '!' && op_token->length == 2 && op_token->start[1] == '=') rel_name = "neq";
+        else if (op_token->start[0] == '<' && op_token->length == 2 && op_token->start[1] == '=') rel_name = "leq";
+        else if (op_token->start[0] == '>' && op_token->length == 2 && op_token->start[1] == '=') rel_name = "geq";
+        else if (op_token->start[0] == '<' && op_token->length == 1) rel_name = "lt";
+        else if (op_token->start[0] == '>' && op_token->length == 1) rel_name = "gt";
         
         if (rel_name) {
             (*pos)++; // skip relation
@@ -617,7 +675,10 @@ static Item parse_ascii_power(Input* input, ASCIIToken* tokens, size_t* pos, siz
         return left;
     }
     
-    while (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_SPECIAL) {
+    while (*pos < token_count && (tokens[*pos].type == ASCII_TOKEN_SPECIAL || 
+                                  (tokens[*pos].type == ASCII_TOKEN_OPERATOR && 
+                                   tokens[*pos].length == 2 && 
+                                   tokens[*pos].start[0] == '*' && tokens[*pos].start[1] == '*'))) {
         ASCIIToken* op_token = &tokens[*pos];
         
         // Handle subscript (_) - higher precedence, parse first
@@ -641,8 +702,10 @@ static Item parse_ascii_power(Input* input, ASCIIToken* tokens, size_t* pos, siz
             left = {.item = (uint64_t)sub_element};
             
             // After subscript, check for power
-            if (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_SPECIAL && 
-                tokens[*pos].start[0] == '^') {
+            if (*pos < token_count && 
+                ((tokens[*pos].type == ASCII_TOKEN_SPECIAL && tokens[*pos].start[0] == '^') ||
+                 (tokens[*pos].type == ASCII_TOKEN_OPERATOR && tokens[*pos].length == 2 && 
+                  tokens[*pos].start[0] == '*' && tokens[*pos].start[1] == '*'))) {
                 (*pos)++; // skip ^
                 Item power = parse_ascii_simple_expression(input, tokens, pos, token_count);
                 if (power.item == ITEM_ERROR) {
@@ -664,8 +727,9 @@ static Item parse_ascii_power(Input* input, ASCIIToken* tokens, size_t* pos, siz
             continue;
         }
         
-        // Handle power (^) without subscript
-        if (op_token->start[0] == '^') {
+        // Handle power (^ or **) without subscript
+        if (op_token->start[0] == '^' || 
+            (op_token->length == 2 && op_token->start[0] == '*' && op_token->start[1] == '*')) {
             (*pos)++; // skip ^
             Item right = parse_ascii_simple_expression(input, tokens, pos, token_count);
             if (right.item == ITEM_ERROR) {
