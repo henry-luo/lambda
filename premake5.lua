@@ -1675,38 +1675,7 @@ project "test_lambda"
     }
     
     links {
-        "lambda-runtime-full-cpp",
-        "lambda-runtime-full-c",
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
