@@ -1,0 +1,196 @@
+"===== COMPREHENSIVE COMPARISON OPERATIONS TEST ====="
+"Error Cases - Type Mismatches (should produce errors):"
+"Testing invalid comparisons..."
+"154."
+error
+"155."
+error
+"156."
+error
+"157."
+error
+"158."
+error
+"159."
+error
+"Additional Error Cases - Invalid Type Comparisons:"
+"160."
+error
+"161."
+error
+"162."
+error
+"163."
+error
+"164."
+error
+"165."
+error
+"166."
+error
+"167."
+error
+"168."
+error
+"169."
+error
+"Error Cases - String Comparisons (non-equality):"
+"170."
+true
+"171."
+false
+"172."
+false
+"173."
+false
+"Error Cases - Boolean with String Operations:"
+"174."
+error
+"175."
+error
+"176."
+error
+"177."
+error
+"178."
+error
+"179."
+error
+"180."
+error
+"181."
+error
+"182."
+error
+"Error Cases - Null Comparisons:"
+"183."
+error
+"184."
+error
+"185."
+error
+"186."
+error
+"187."
+error
+"188."
+error
+"189."
+error
+"190."
+error
+"191."
+error
+"192."
+error
+"193."
+error
+"194."
+error
+"Error Cases - Null with Boolean Operations:"
+"195."
+error
+"196."
+error
+"197."
+error
+"198."
+error
+"199."
+error
+"200."
+error
+"201."
+error
+"202."
+error
+"203."
+error
+"204."
+error
+"Error Cases - Mixed Invalid Types:"
+"205."
+error
+"206."
+error
+"207."
+error
+"208."
+error
+"209."
+error
+"210."
+error
+"211."
+error
+"212."
+error
+"213."
+true
+"214."
+true
+"215."
+true
+"216."
+true
+"Conditional Expressions with Comparisons:"
+"217."
+"five is greater"
+"218."
+"equal"
+"219."
+"not less than"
+"220."
+"both true"
+"Variable Comparisons:"
+"221."
+true
+"222."
+true
+"223."
+true
+"224."
+true
+"225."
+true
+"226."
+false
+"227."
+true
+"Complex Arithmetic in Comparisons:"
+"228."
+true
+"229."
+true
+"230."
+true
+"231."
+true
+"232."
+true
+"Chained Comparisons Logic:"
+"233."
+true
+"234."
+true
+"235."
+true
+"236."
+true
+"Edge Cases with Very Large Numbers:"
+"237."
+true
+"238."
+true
+"239."
+true
+"Float Precision Comparisons:"
+"240."
+false
+"241."
+true
+"242."
+true
+"243."
+true
+"End of Comparison Expression Tests."
