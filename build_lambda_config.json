@@ -26,6 +26,7 @@
         "lambda/input/input-mark.cpp",
         "lambda/input/input-org.cpp",
         "lambda/input/input-math.cpp",
+        "lambda/input/input-math-ascii.cpp",
         "lambda/input/input-rtf.cpp",
         "lambda/input/input-pdf.cpp",
         "lambda/input/input-markup.cpp",

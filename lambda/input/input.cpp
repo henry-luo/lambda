@@ -511,7 +511,13 @@ extern "C" Input* input_from_source(char* source, Url* abs_url, String* type, St
         }
         else if (strcmp(effective_type, "math") == 0) {
             const char* math_flavor = (flavor && flavor->chars) ? flavor->chars : "latex";
-            parse_math(input, source, math_flavor);
+            if (strcmp(math_flavor, "ascii") == 0) {
+                // Use standalone ASCII math parser
+                input->root = input_ascii_math(input, source);
+            } else {
+                // Use existing LaTeX/Typst math parser
+                parse_math(input, source, math_flavor);
+            }
         }
         else if (strcmp(effective_type, "markup") == 0) {
             input->root = input_markup(input, source);

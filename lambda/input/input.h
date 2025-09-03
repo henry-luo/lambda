@@ -23,6 +23,9 @@ void input_add_attribute_item_to_element(Input *input, Element* element, const c
 // Math parsing functions (from input-math.cpp)
 void parse_math(Input* input, const char* math_string, const char* flavor_str);
 
+// ASCII Math parsing functions (from input-math-ascii.cpp)
+Item input_ascii_math(Input* input, const char* ascii_math);
+
 // YAML parsing utility functions (from input-yaml.c)
 void trim_string_inplace(char* str);
 Item parse_scalar_value(Input *input, const char* str);

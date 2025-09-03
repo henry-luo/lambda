@@ -33,7 +33,7 @@ cache/
 # Executables and other project-specific generated files
 flexbox
 transpile
-core
+/core
 lambda-parser/test-lambda-parser
 lambda-parser/tree-sitter-lambda/src/grammar.json
 output.pgm
@@ -73,6 +73,8 @@ lambda/vsce/dist/
 *~
 .project
 .classpath
+# for intellisense
+compile_commands.json
 
 # Temporary files
 *.tmp
@@ -86,6 +88,8 @@ temp/
 log/
 logs/
 
+mac-deps/
+
 # Windows dependencies (built libraries and sources)
 windows-deps/lib/
 windows-deps/src/gmp-6.2.1/
@@ -94,6 +98,7 @@ windows-deps/src/lexbor/
 windows-deps/include/lexbor/
 windows-deps/**/*.xz
 windows-deps/**/*.bz2
+win-native-deps/
 
 # ICU source and build artifacts
 icu/
@@ -116,4 +121,10 @@ Cargo.lock
 
 # Test outputs and artifacts
 *.test
-test/test_validator.dSYM/Contents/Resources/DWARF/test_validator
+test/*.dSYM
+test.ls
+test*.exe
+test_output/
+test/venv
+
+analysis-results*/
