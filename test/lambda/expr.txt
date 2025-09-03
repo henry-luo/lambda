@@ -13,6 +13,13 @@ true
 false
 "helloworld"
 "great"
+"test for statement:"
+124
+"ha!"
+"ha!"
+"ha!"
+"wah!"
+"Test map:"
 123
 -456
 0.5
@@ -31,9 +38,10 @@ b'\xA0FE'
  a:'hello',
  b:0.5
 }
+"Test unary operators:"
 127
 false
-false
+true
 2
 -2
 error
@@ -41,6 +49,7 @@ inf
 -inf
 nan
 234
+"Test element:"
 <elmt a:3
  9
  "hello world"
@@ -60,6 +69,11 @@ error
 [2, 3]
 4
 [1, [2, 3, 4, 5], 6]
+2
+3
+4
+5
+6
 11
 12
 13

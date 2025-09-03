@@ -13,11 +13,13 @@ for b in [123] { b+1 }
 for a in ["a", "b", "c"] { "ha!" }
 for a in ["a"] { "wah!" }
 
+"Test map:"
 let m = {a:123, b:-456, c:0.5, d:true, e:false, f:null, 
     g:"hello", h:'world', i:t'2025-05-01', j:b'\xA0FE', 
     k:(120, 1e-2), l:[121], m:[true, 124], n:{a:'hello', b:0.5}}
 m.a; m.b; m.c; m.d; m.e; [m.f]; m.g; m.h; m.i; m.j; m.k; m.l; m.m; m.n;
 
+"Test unary operators:"
 let d:float = 123
 (d+4, not true, not(1>2), -(-2),+(-2))
 
@@ -25,6 +27,7 @@ let d:float = 123
 
 (234)  // list with one item
 
+"Test element:"
 <elmt a:1+2;  4+5;  "hello" + " world";  1+2 is number;  1+2 is int;  3.5/0 is float>
 
 let nested = {a:678, {b:123, c:456}, d:789}
