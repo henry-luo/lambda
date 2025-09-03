@@ -211,11 +211,9 @@ static ASCIIToken* ascii_tokenize(const char* input, size_t* token_count) {
             continue;
         }
         
-        // Handle identifiers (but not underscores - they're separate tokens in math)
+        // Handle identifiers - single characters only for implicit multiplication
         if (isalpha(*p)) {
-            while (isalnum(*p)) {
-                p++;
-            }
+            p++; // Only consume one character at a time
             count++;
             continue;
         }
@@ -284,13 +282,11 @@ static ASCIIToken* ascii_tokenize(const char* input, size_t* token_count) {
             continue;
         }
         
-        // Handle identifiers
+        // Handle identifiers - single characters only for implicit multiplication
         if (isalpha(*p)) {
             token->type = ASCII_TOKEN_IDENTIFIER;
             const char* start = p;
-            while (isalnum(*p)) {
-                p++;
-            }
+            p++; // Only consume one character at a time
             token->length = p - start;
             token->unicode_output = NULL;
             token_idx++;
@@ -380,7 +376,7 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
         free(number_str);
         
         (*pos)++;
-        return {.item = (uint64_t)number_string};
+        return {.item = s2it(number_string)};
     }
     
     // Handle identifiers and symbols
@@ -396,7 +392,7 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
         free(name_str);
         
         (*pos)++;
-        return {.item = (uint64_t)name_string};
+        return {.item = y2it(name_string)};
     }
     
     // Handle functions
@@ -463,19 +459,169 @@ static Item parse_ascii_simple_expression(Input* input, ASCIIToken* tokens, size
     return {.item = ITEM_ERROR};
 }
 
-// Parse full ASCII math expression
+// Forward declarations for precedence levels
+static Item parse_ascii_relation(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count);
+static Item parse_ascii_addition(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count);
+static Item parse_ascii_multiplication(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count);
+static Item parse_ascii_power(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count);
+
+// Parse full ASCII math expression (lowest precedence - relations)
 static Item parse_ascii_expression(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count) {
+    return parse_ascii_relation(input, tokens, pos, token_count);
+}
+
+// Parse relations (=, <, >, etc.) - lowest precedence
+static Item parse_ascii_relation(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count) {
+    Item left = parse_ascii_addition(input, tokens, pos, token_count);
+    if (left.item == ITEM_ERROR) {
+        return left;
+    }
+    
+    while (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_RELATION) {
+        ASCIIToken* op_token = &tokens[*pos];
+        const char* rel_name = NULL;
+        
+        if (op_token->start[0] == '=') rel_name = "eq";
+        else if (op_token->start[0] == '<') rel_name = "lt";
+        else if (op_token->start[0] == '>') rel_name = "gt";
+        
+        if (rel_name) {
+            (*pos)++; // skip relation
+            Item right = parse_ascii_addition(input, tokens, pos, token_count);
+            if (right.item == ITEM_ERROR) {
+                return right;
+            }
+            
+            Element* rel_element = create_math_element(input, rel_name);
+            if (!rel_element) {
+                return {.item = ITEM_ERROR};
+            }
+            
+            add_attribute_to_element(input, rel_element, "type", "relation");
+            list_push((List*)rel_element, left);
+            list_push((List*)rel_element, right);
+            ((TypeElmt*)rel_element->type)->content_length = ((List*)rel_element)->length;
+            
+            left = {.item = (uint64_t)rel_element};
+        } else {
+            break;
+        }
+    }
+    
+    return left;
+}
+
+// Parse addition and subtraction
+static Item parse_ascii_addition(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count) {
+    Item left = parse_ascii_multiplication(input, tokens, pos, token_count);
+    if (left.item == ITEM_ERROR) {
+        return left;
+    }
+    
+    while (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_OPERATOR) {
+        ASCIIToken* op_token = &tokens[*pos];
+        const char* op_name = NULL;
+        
+        if (op_token->start[0] == '+') op_name = "add";
+        else if (op_token->start[0] == '-') op_name = "sub";
+        else break; // Not addition/subtraction
+        
+        (*pos)++; // skip operator
+        Item right = parse_ascii_multiplication(input, tokens, pos, token_count);
+        if (right.item == ITEM_ERROR) {
+            return right;
+        }
+        
+        Element* op_element = create_math_element(input, op_name);
+        if (!op_element) {
+            return {.item = ITEM_ERROR};
+        }
+        
+        add_attribute_to_element(input, op_element, "type", "binary_op");
+        list_push((List*)op_element, left);
+        list_push((List*)op_element, right);
+        ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
+        
+        left = {.item = (uint64_t)op_element};
+    }
+    
+    return left;
+}
+
+// Parse multiplication, division, and implicit multiplication
+static Item parse_ascii_multiplication(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count) {
+    Item left = parse_ascii_power(input, tokens, pos, token_count);
+    if (left.item == ITEM_ERROR) {
+        return left;
+    }
+    
+    while (*pos < token_count) {
+        ASCIIToken* op_token = &tokens[*pos];
+        
+        // Handle explicit multiplication and division
+        if (op_token->type == ASCII_TOKEN_OPERATOR && 
+            (op_token->start[0] == '*' || op_token->start[0] == '/')) {
+            const char* op_name = (op_token->start[0] == '*') ? "mul" : "div";
+            (*pos)++; // skip operator
+            
+            Item right = parse_ascii_power(input, tokens, pos, token_count);
+            if (right.item == ITEM_ERROR) {
+                return right;
+            }
+            
+            Element* op_element = create_math_element(input, op_name);
+            if (!op_element) {
+                return {.item = ITEM_ERROR};
+            }
+            
+            add_attribute_to_element(input, op_element, "type", "binary_op");
+            list_push((List*)op_element, left);
+            list_push((List*)op_element, right);
+            ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
+            
+            left = {.item = (uint64_t)op_element};
+            continue;
+        }
+        
+        // Handle implicit multiplication between adjacent identifiers/numbers
+        if (op_token->type == ASCII_TOKEN_IDENTIFIER || op_token->type == ASCII_TOKEN_NUMBER) {
+            Item right = parse_ascii_power(input, tokens, pos, token_count);
+            if (right.item == ITEM_ERROR) {
+                return right;
+            }
+            
+            Element* mul_element = create_math_element(input, "implicit_mul");
+            if (!mul_element) {
+                return {.item = ITEM_ERROR};
+            }
+            
+            add_attribute_to_element(input, mul_element, "type", "binary_op");
+            list_push((List*)mul_element, left);
+            list_push((List*)mul_element, right);
+            ((TypeElmt*)mul_element->type)->content_length = ((List*)mul_element)->length;
+            
+            left = {.item = (uint64_t)mul_element};
+            continue;
+        }
+        
+        break;
+    }
+    
+    return left;
+}
+
+// Parse power operations (highest precedence)
+static Item parse_ascii_power(Input* input, ASCIIToken* tokens, size_t* pos, size_t token_count) {
     Item left = parse_ascii_simple_expression(input, tokens, pos, token_count);
     if (left.item == ITEM_ERROR) {
         return left;
     }
     
-    // Handle postfix operations (subscript and power) with proper precedence
-    while (*pos < token_count && tokens[*pos].type != ASCII_TOKEN_EOF) {
+    while (*pos < token_count && tokens[*pos].type == ASCII_TOKEN_SPECIAL) {
         ASCIIToken* op_token = &tokens[*pos];
         
         // Handle subscript (_) - higher precedence, parse first
-        if (op_token->type == ASCII_TOKEN_SPECIAL && op_token->start[0] == '_') {
+        if (op_token->start[0] == '_') {
             (*pos)++; // skip _
             Item right = parse_ascii_simple_expression(input, tokens, pos, token_count);
             if (right.item == ITEM_ERROR) {
@@ -519,7 +665,7 @@ static Item parse_ascii_expression(Input* input, ASCIIToken* tokens, size_t* pos
         }
         
         // Handle power (^) without subscript
-        if (op_token->type == ASCII_TOKEN_SPECIAL && op_token->start[0] == '^') {
+        if (op_token->start[0] == '^') {
             (*pos)++; // skip ^
             Item right = parse_ascii_simple_expression(input, tokens, pos, token_count);
             if (right.item == ITEM_ERROR) {
@@ -540,69 +686,7 @@ static Item parse_ascii_expression(Input* input, ASCIIToken* tokens, size_t* pos
             continue;
         }
         
-        // Handle arithmetic operators
-        if (op_token->type == ASCII_TOKEN_OPERATOR) {
-            const char* op_name = NULL;
-            
-            if (op_token->start[0] == '+') op_name = "add";
-            else if (op_token->start[0] == '-') op_name = "sub";
-            else if (op_token->start[0] == '*') op_name = "mul";
-            else if (op_token->start[0] == '/') op_name = "div";
-            
-            if (op_name) {
-                (*pos)++; // skip operator
-                Item right = parse_ascii_simple_expression(input, tokens, pos, token_count);
-                if (right.item == ITEM_ERROR) {
-                    return right;
-                }
-                
-                Element* op_element = create_math_element(input, op_name);
-                if (!op_element) {
-                    return {.item = ITEM_ERROR};
-                }
-                
-                add_attribute_to_element(input, op_element, "type", "binary_op");
-                list_push((List*)op_element, left);
-                list_push((List*)op_element, right);
-                ((TypeElmt*)op_element->type)->content_length = ((List*)op_element)->length;
-                
-                left = {.item = (uint64_t)op_element};
-                continue;
-            }
-        }
-        
-        // Handle relations
-        if (op_token->type == ASCII_TOKEN_RELATION) {
-            const char* rel_name = NULL;
-            
-            if (op_token->start[0] == '=') rel_name = "eq";
-            else if (op_token->start[0] == '<') rel_name = "lt";
-            else if (op_token->start[0] == '>') rel_name = "gt";
-            
-            if (rel_name) {
-                (*pos)++; // skip relation
-                Item right = parse_ascii_simple_expression(input, tokens, pos, token_count);
-                if (right.item == ITEM_ERROR) {
-                    return right;
-                }
-                
-                Element* rel_element = create_math_element(input, rel_name);
-                if (!rel_element) {
-                    return {.item = ITEM_ERROR};
-                }
-                
-                add_attribute_to_element(input, rel_element, "type", "relation");
-                list_push((List*)rel_element, left);
-                list_push((List*)rel_element, right);
-                ((TypeElmt*)rel_element->type)->content_length = ((List*)rel_element)->length;
-                
-                left = {.item = (uint64_t)rel_element};
-                continue;
-            }
-        }
-        
-        // If we can't handle the token, break
-        break;
+        break; // No more power operations
     }
     
     return left;
@@ -610,20 +694,32 @@ static Item parse_ascii_expression(Input* input, ASCIIToken* tokens, size_t* pos
 
 // Main entry point for ASCII math parsing
 Item input_ascii_math(Input* input, const char* ascii_math) {
+    printf("DEBUG: input_ascii_math called with: '%s'\n", ascii_math ? ascii_math : "NULL");
+    
     if (!input || !ascii_math) {
+        printf("DEBUG: input_ascii_math - NULL input or ascii_math\n");
         return {.item = ITEM_ERROR};
     }
     
     // Tokenize input
     size_t token_count;
+    printf("DEBUG: About to tokenize ASCII math input\n");
     ASCIIToken* tokens = ascii_tokenize(ascii_math, &token_count);
     if (!tokens) {
+        printf("DEBUG: Tokenization failed\n");
         return {.item = ITEM_ERROR};
+    }
+    
+    printf("DEBUG: Tokenized into %zu tokens\n", token_count);
+    for (size_t i = 0; i < token_count; i++) {
+        printf("DEBUG: Token %zu: type=%d, text='%.*s'\n", i, tokens[i].type, (int)tokens[i].length, tokens[i].start);
     }
     
     // Parse expression
     size_t pos = 0;
+    printf("DEBUG: About to parse ASCII expression\n");
     Item result = parse_ascii_expression(input, tokens, &pos, token_count);
+    printf("DEBUG: Parse result: item=0x%llx\n", result.item);
     
     // Clean up
     free(tokens);

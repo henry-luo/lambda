@@ -182,8 +182,7 @@ static const ASCIIMathFormatDef* find_ascii_format_def(const char* element_name)
 }
 
 // Format ASCII math string (simple text)
-static void format_ascii_math_string(StringBuf* sb, Item str_item) {
-    String* str = (String*)str_item.pointer;
+static void format_ascii_math_string(StringBuf* sb, String* str) {
     if (str && str->chars) {
         stringbuf_append_str(sb, str->chars);
     }
@@ -267,6 +266,7 @@ static void format_ascii_math_item(StringBuf* sb, Item item, int depth) {
     }
     
     TypeId type_id = get_type_id(item);
+    printf("DEBUG format_ascii_math_item: item=0x%llx, type_id=%d, depth=%d\n", item.item, type_id, depth);
     
     switch (type_id) {
         case LMD_TYPE_ELEMENT: {
@@ -275,7 +275,24 @@ static void format_ascii_math_item(StringBuf* sb, Item item, int depth) {
             break;
         }
         case LMD_TYPE_STRING: {
-            format_ascii_math_string(sb, item);
+            printf("DEBUG: Processing LMD_TYPE_STRING\n");
+            String* str = (String*)item.pointer;
+            if (str) {
+                printf("DEBUG: String content: '%s'\n", str->chars);
+            }
+            format_ascii_math_string(sb, str);
+            break;
+        }
+        case LMD_TYPE_SYMBOL: {
+            printf("DEBUG: Processing LMD_TYPE_SYMBOL\n");
+            String* str = (String*)item.pointer;
+            if (str && str->chars) {
+                printf("DEBUG: Symbol content: '%s'\n", str->chars);
+                format_ascii_math_string(sb, str);
+            } else {
+                printf("DEBUG: Symbol has NULL content\n");
+                stringbuf_append_str(sb, "?");
+            }
             break;
         }
         case LMD_TYPE_INT: {
@@ -296,18 +313,24 @@ static void format_ascii_math_item(StringBuf* sb, Item item, int depth) {
         }
         default:
             // Unknown type - try to output something reasonable
-            stringbuf_append_str(sb, "?");
+            printf("DEBUG: Unknown type %d for item 0x%llx\n", type_id, item.item);
+            fflush(stdout);
+            stringbuf_append_str(sb, "[UNKNOWN]");
             break;
     }
 }
 
 // Main ASCII math formatter function
 String* format_math_ascii_standalone(VariableMemPool* pool, Item root_item) {
+    printf("DEBUG: format_math_ascii_standalone called with item=0x%llx\n", root_item.item);
+    fflush(stdout);
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
     format_ascii_math_item(sb, root_item, 0);
     
     String* result = stringbuf_to_string(sb);
+    printf("DEBUG: format_math_ascii_standalone result='%s'\n", result ? result->chars : "NULL");
+    fflush(stdout);
     return result;
 }
