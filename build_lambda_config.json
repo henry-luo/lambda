@@ -532,14 +532,15 @@
                     {
                         "source": "test/lambda_test_runner.cpp",
                         "name": "🧪 Lambda Standard Tests",
-                        "dependencies": ["lambda-runtime-full"],
+                        "dependencies": [],
                         "binary": "test/lambda_test_runner.exe"
                     }
                 ],
                 "type": "lambda-std",
-                "special_flags": "-std=c++17 -lstdc++",
+                "special_flags": "-std=c++17",
                 "uses_build_config": true,
                 "requires_jq": false,
+                "requires_lambda_exe": true,
                 "parallel": true,
                 "test_runner": {
                     "type": "custom",
