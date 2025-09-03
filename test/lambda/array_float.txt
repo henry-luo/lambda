@@ -12,16 +12,20 @@
 1
 5
 "Statistical Functions Tests"
-3
-4
-1
+"Test 10: Sum function on various arrays"
+15
+16.11555
+42
 0
+"Test 11: Average function on various arrays"
 5
 15
 2
+"Test 12: Minimum function on various arrays"
 20
 20
 40
+"Test 13: Maximum function on various arrays"
 40
 40
 30
