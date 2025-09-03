@@ -39,9 +39,11 @@ static const ASCIIMathFormatDef ascii_format_defs[] = {
     {"div", " / ", true, false, true, 2},
     
     // Powers and roots
-    {"pow", "{1}^{2}", true, false, false, 2},
+    {"pow", "^", true, false, true, 2},
     {"sqrt", "sqrt({1})", true, false, false, 1},
     {"root", "root({2})({1})", true, false, false, 2},
+    {"floor", "floor({1})", true, false, false, 1},
+    {"ceil", "ceil({1})", true, false, false, 1},
     
     // Fractions
     {"frac", "({1})/({2})", true, false, false, 2},
@@ -221,13 +223,61 @@ static void format_ascii_math_children(StringBuf* sb, List* children, int depth)
     }
 }
 
-// Check if a bound is simple (single character/number) and doesn't need parentheses
+// Helper function to check if an item is a simple bound (single identifier or number)
 static bool is_simple_bound(Item item) {
-    if (item.item == ITEM_ERROR) return false;
+    uint32_t type_id = item.item & 0xFF;
+    return (type_id == LMD_TYPE_SYMBOL || type_id == LMD_TYPE_STRING);
+}
+
+// Get operator precedence (higher number = higher precedence)
+static int get_operator_precedence(const char* op_name) {
+    if (!op_name) return 0;
     
-    // Check if it's a simple single-digit number or single character
-    // For integral bounds like int_0^1, we want to avoid parentheses around single digits
-    return true; // For now, assume most bounds are simple
+    // Relations (lowest precedence)
+    if (strcmp(op_name, "eq") == 0 || strcmp(op_name, "neq") == 0 ||
+        strcmp(op_name, "lt") == 0 || strcmp(op_name, "gt") == 0 ||
+        strcmp(op_name, "leq") == 0 || strcmp(op_name, "geq") == 0) {
+        return 1;
+    }
+    
+    // Addition and subtraction
+    if (strcmp(op_name, "add") == 0 || strcmp(op_name, "sub") == 0) {
+        return 2;
+    }
+    
+    // Multiplication and division
+    if (strcmp(op_name, "mul") == 0 || strcmp(op_name, "div") == 0 || 
+        strcmp(op_name, "implicit_mul") == 0) {
+        return 3;
+    }
+    
+    // Power (highest precedence)
+    if (strcmp(op_name, "pow") == 0 || strcmp(op_name, "power") == 0) {
+        return 4;
+    }
+    
+    return 0; // Unknown operators
+}
+
+// Check if child needs parentheses when used as operand of parent
+static bool needs_parentheses(const char* parent_op, const char* child_op, bool is_right_operand = false) {
+    if (!parent_op || !child_op) return false;
+    
+    int parent_prec = get_operator_precedence(parent_op);
+    int child_prec = get_operator_precedence(child_op);
+    
+    if (child_prec == 0) return false; // Unknown child operator
+    
+    // Child needs parentheses if it has lower precedence than parent
+    if (child_prec < parent_prec) return true;
+    
+    // Special case: for right-associative operators like power,
+    // left operand with same precedence needs parentheses
+    if (strcmp(parent_op, "pow") == 0 && !is_right_operand && child_prec == parent_prec) {
+        return true;
+    }
+    
+    return false;
 }
 
 // Format ASCII math element
@@ -286,10 +336,46 @@ static void format_ascii_math_element(StringBuf* sb, Element* elem, int depth) {
     } else if (def && def->ascii_format) {
         if (def->has_children && elem->length > 0) {
             if (def->is_binary_op && elem->length == 2) {
-                // Binary operator: format as {left} op {right}
+                // Binary operator: format as {left} op {right} with precedence-aware parentheses
+                
+                // Check if left operand needs parentheses
+                bool left_needs_parens = false;
+                TypeId left_type_id = get_type_id(elem->items[0]);
+                if (left_type_id == LMD_TYPE_ELEMENT) {
+                    Element* left_elem = elem->items[0].element;
+                    if (left_elem && left_elem->type) {
+                        TypeElmt* left_elmt_type = (TypeElmt*)left_elem->type;
+                        if (left_elmt_type && left_elmt_type->name.str) {
+                            left_needs_parens = needs_parentheses(element_name, left_elmt_type->name.str, false);
+                        }
+                    }
+                }
+                
+                // Check if right operand needs parentheses
+                bool right_needs_parens = false;
+                TypeId right_type_id = get_type_id(elem->items[1]);
+                if (right_type_id == LMD_TYPE_ELEMENT) {
+                    Element* right_elem = elem->items[1].element;
+                    if (right_elem && right_elem->type) {
+                        TypeElmt* right_elmt_type = (TypeElmt*)right_elem->type;
+                        if (right_elmt_type && right_elmt_type->name.str) {
+                            right_needs_parens = needs_parentheses(element_name, right_elmt_type->name.str, true);
+                        }
+                    }
+                }
+                
+                // Format left operand with parentheses if needed
+                if (left_needs_parens) stringbuf_append_str(sb, "(");
                 format_ascii_math_item(sb, elem->items[0], depth + 1);
+                if (left_needs_parens) stringbuf_append_str(sb, ")");
+                
+                // Add operator
                 stringbuf_append_str(sb, def->ascii_format);
+                
+                // Format right operand with parentheses if needed
+                if (right_needs_parens) stringbuf_append_str(sb, "(");
                 format_ascii_math_item(sb, elem->items[1], depth + 1);
+                if (right_needs_parens) stringbuf_append_str(sb, ")");
             } else {
                 // Use template formatting
                 format_ascii_math_children_with_template(sb, (List*)elem, def->ascii_format, depth);

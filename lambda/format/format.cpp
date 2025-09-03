@@ -75,7 +75,7 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Variable
     printf("DEBUG: format_data called with type='%s', flavor='%s'\n", 
            type ? type->chars : "NULL", flavor ? flavor->chars : "NULL");
     fflush(stdout);
-    if (!type || !flavor) return NULL;
+    if (!type) return NULL;
     
     // If type is null, try to auto-detect from item type
     if (!type) {
