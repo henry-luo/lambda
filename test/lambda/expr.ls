@@ -8,7 +8,7 @@ if c > 10 { "great" }
   (5 <= 5.0), ((7-3.5) > 5), "hello" + "world",
   if (100>90) "great" else "not great")
 
-// // test for statement
+"test for statement:"
 for b in [123] { b+1 }
 for a in ["a", "b", "c"] { "ha!" }
 for a in ["a"] { "wah!" }
