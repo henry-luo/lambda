@@ -64,8 +64,8 @@ Array* array_fill(Array* arr, int count, ...) {
 Item array_get(Array *array, int index) {
     log_debug("array_get: index: %d, length: %ld", index, array->length);
     if (index < 0 || index >= array->length) {
-        log_error("array_get: index out of bounds: %d", index);
-        return ItemError;
+        log_warn("array_get: index out of bounds: %d", index);
+        return ItemNull;  // return null instead of error
     }
     Item item = array->items[index];
     switch (item.type_id) {
@@ -118,6 +118,18 @@ ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
     return arr;
 }
 
+Item array_int_get(ArrayInt *array, int index) {
+    log_debug("array_int_get: index: %d, length: %ld", index, array->length);
+    if (index < 0 || index >= array->length) {
+        log_warn("array_int_get: index out of bounds: %d", index);
+        return ItemNull;  // return null instead of error
+    }
+    int val = array->items[index];
+    Item item = (Item){._type = LMD_TYPE_INT, .int_val = val};
+    log_debug("array_int_get returning: type: %d, int_val: %d", item.type_id, item.int_val);
+    return item;
+}
+
 ArrayInt64* array_int64() {
     ArrayInt64 *arr = (ArrayInt64*)heap_calloc(sizeof(ArrayInt64), LMD_TYPE_ARRAY_INT64);
     arr->type_id = LMD_TYPE_ARRAY_INT64;
@@ -149,8 +161,9 @@ ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
     return arr;
 }
 
-Item array_int64_get_item(ArrayInt64* array, int index) {
-    if (!array || index < 0 || index >= array->length) {
+Item array_int64_get(ArrayInt64* array, int index) {
+    if (index < 0 || index >= array->length) {
+        log_warn("array_int64_get: index out of bounds: %d", index);
         return ItemNull;
     }
     return push_l(array->items[index]);
@@ -160,6 +173,22 @@ ArrayFloat* array_float() {
     ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
     arr->type_id = LMD_TYPE_ARRAY_FLOAT;
     frame_start();
+    return arr;
+}
+
+ArrayFloat* array_float(int count, ...) {
+    if (count <= 0) { return NULL; }
+    va_list args;
+    va_start(args, count);
+    ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+    arr->type_id = LMD_TYPE_ARRAY_FLOAT;
+    arr->capacity = count;
+    arr->items = (double*)malloc(count * sizeof(double));
+    arr->length = count;
+    for (int i = 0; i < count; i++) {
+        arr->items[i] = va_arg(args, double);
+    }       
+    va_end(args);
     return arr;
 }
 
@@ -186,6 +215,89 @@ ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
     }
     frame_end();
     return arr;
+}
+
+Item array_float_get(ArrayFloat* array, int index) {
+    if (index < 0 || index >= array->length) {
+        log_warn("array_float_get: index out of bounds: %d", index);
+        return ItemNull;
+    }
+    log_debug("array_float_get: %d, val: %f", index, array->items[index]);
+    return push_d(array->items[index]);
+}
+
+// fast path
+double array_float_get_value(ArrayFloat *arr, int index) {
+    if (index < 0 || index >= arr->length) {
+        return NAN;  // Return NaN for invalid access
+    }
+    return arr->items[index];
+}
+
+// Wrapper function to return an Item instead of raw ArrayFloat*
+// Item array_float_item(int count, ...) {
+//     if (count <= 0) { 
+//         ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+//         arr->type_id = LMD_TYPE_ARRAY_FLOAT;
+//         arr->capacity = 0;
+//         arr->items = NULL;
+//         arr->length = 0;
+//         return (Item){.array_float = arr};
+//     }
+//     va_list args;
+//     va_start(args, count);
+//     ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+//     arr->type_id = LMD_TYPE_ARRAY_FLOAT;  
+//     arr->capacity = count;
+//     arr->items = (double*)Malloc(count * sizeof(double));
+//     arr->length = count;
+//     for (int i = 0; i < count; i++) {
+//         arr->items[i] = va_arg(args, double);
+//     }       
+//     va_end(args);
+//     return (Item){.array_float = arr};
+// }
+
+void array_float_set(ArrayFloat *arr, int index, double value) {
+    if (!arr || index < 0 || index >= arr->capacity) {
+        return;  // Invalid access, do nothing
+    }
+    arr->items[index] = value;
+    // Update length if we're setting beyond current length
+    if (index >= arr->length) {
+        arr->length = index + 1;
+    }
+}
+
+// set with item value
+void array_float_set_item(ArrayFloat *arr, int index, Item value) {
+    if (!arr || index < 0 || index >= arr->capacity) {
+        return;  // Invalid access, do nothing
+    }
+    
+    double dval = 0.0;
+    TypeId type_id = get_type_id(value);
+    
+    // Convert item to double based on its type
+    switch (type_id) {
+        case LMD_TYPE_FLOAT:
+            dval = *(double*)value.pointer;
+            break;
+        case LMD_TYPE_INT64:
+            dval = (double)(*(long*)value.pointer);
+            break;
+        case LMD_TYPE_INT:
+            dval = (double)(value.int_val);
+            break;
+        default:
+            return;  // Unsupported type, do nothing
+    }
+    
+    arr->items[index] = dval;
+    // Update length if we're setting beyond current length
+    if (index >= arr->length) {
+        arr->length = index + 1;
+    }
 }
 
 List* list() {

@@ -335,6 +335,9 @@ Element* elmt(int type_index);
 
 // these getters use runtime num_stack
 Item array_get(Array *array, int index);
+Item array_int_get(ArrayInt *array, int index);
+Item array_int64_get(ArrayInt64* array, int index);
+Item array_float_get(ArrayFloat* array, int index);
 Item list_get(List *list, int index);
 Item map_get(Map* map, Item key);
 Item elmt_get(Element *elmt, Item key);

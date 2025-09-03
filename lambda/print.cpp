@@ -109,11 +109,15 @@ void write_type(StrBuf* code_buf, Type *type) {
         break;
     case LMD_TYPE_ARRAY: {
         TypeArray *array_type = (TypeArray*)type;
-        if (array_type->nested && 
-            (uintptr_t)array_type->nested >= 0x1000 && 
-            (uintptr_t)array_type->nested < 0x7FFFFFFFFFFF &&
-            array_type->nested->type_id == LMD_TYPE_INT) {
-            strbuf_append_str(code_buf, "ArrayInt*");
+        if (array_type->nested) {
+            if (array_type->nested->type_id == LMD_TYPE_INT)
+                strbuf_append_str(code_buf, "ArrayInt*");
+            else if (array_type->nested->type_id == LMD_TYPE_INT64)
+                strbuf_append_str(code_buf, "ArrayInt64*");
+            else if (array_type->nested->type_id == LMD_TYPE_FLOAT)
+                strbuf_append_str(code_buf, "ArrayFloat*");
+            else
+                strbuf_append_str(code_buf, "Array*");
         } else {
             strbuf_append_str(code_buf, "Array*");
         }
@@ -138,20 +142,43 @@ void write_type(StrBuf* code_buf, Type *type) {
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth = 0, char* indent = NULL, bool is_attrs = false);
 
+void print_double(StrBuf *strbuf, double num) {
+    int exponent;
+    double mantissa = frexp(num, &exponent);
+    if (-20 < exponent && exponent < 30) {
+        // log_debug("printing fancy double: %.10f", num);
+        strbuf_append_format(strbuf, "%.10f", num);
+        // trim trailing zeros
+        char *end = strbuf->str + strbuf->length - 1;
+        while (*end == '0' && end > strbuf->str) { *end-- = '\0'; }
+        // if it ends with a dot, remove that too
+        if (*end == '.') { *end-- = '\0'; }
+        strbuf->length = end - strbuf->str + 1;
+    }
+    else if (-30 < exponent && exponent <= -20) {
+        // log_debug("printing small double: %.10f", num);
+        strbuf_append_format(strbuf, "%.g", num);
+        // remove the zero in exponent, like 'e07'
+        char *end = strbuf->str + strbuf->length - 1;
+        if (*(end-1) == '0' && *(end-2) == '-' && *(end-3) == 'e') { 
+            *(end-1) = *end;  *end = '\0';
+            strbuf->length = end - strbuf->str; 
+        }
+    }
+    else {
+        // log_debug("printing normal double: %.10f", num);
+        strbuf_append_format(strbuf, "%g", num);
+    }
+}
+
 void print_decimal(StrBuf *strbuf, Decimal *decimal) {
-    if (decimal == NULL || decimal->dec_val == NULL) {
-        strbuf_append_str(strbuf, "null");
-        return;
-    }
+    if (!decimal || !decimal->dec_val) { strbuf_append_str(strbuf, "error");  return; }
     // Use libmpdec to format the decimal
-    char *buf = mpd_to_sci(decimal->dec_val, 1);  // Scientific notation
-    if (buf == NULL) {
-        strbuf_append_str(strbuf, "error");
-        return;
-    }
-        log_debug("printed decimal: %s", buf);
-    strbuf_append_str(strbuf, buf);
-    free(buf);  // libmpdec allocates the string, we need to free it
+    char *decimal_str = mpd_to_sci(decimal->dec_val, 1);  // Scientific notation
+    if (!decimal_str) { strbuf_append_str(strbuf, "error");  return; }
+    // log_debug("printed decimal: %s", decimal_str);
+    strbuf_append_str(strbuf, decimal_str);
+    mpd_free(decimal_str);  // libmpdec allocates the string, we need to free it
 }
 
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth, char* indent, bool is_attrs) {
@@ -224,7 +251,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 strbuf_append_format(strbuf, "%ld", *(long*)data);
                 break;
             case LMD_TYPE_FLOAT:
-                strbuf_append_format(strbuf, "%g", *(double*)data);
+                print_double(strbuf, *(double*)data);
                 break;
             case LMD_TYPE_DTIME: {
                 DateTime dt = *(DateTime*)data;
@@ -314,23 +341,13 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
         strbuf_append_format(strbuf, "%ld", titem->long_val);
         break;
     case LMD_TYPE_FLOAT:
-        strbuf_append_format(strbuf, "%.6g", titem->double_val);
+        print_double(strbuf, titem->double_val);
         break;
     case LMD_TYPE_DTIME:
         strbuf_append_format(strbuf, "%ld", titem->datetime_val);
         break;
     case LMD_TYPE_DECIMAL:
-        if (titem->decimal && titem->decimal->dec_val) {
-            char *decimal_str = mpd_to_sci(titem->decimal->dec_val, 1);
-            if (decimal_str) {
-                strbuf_append_str(strbuf, decimal_str);
-                mpd_free(decimal_str);
-            } else {
-                strbuf_append_str(strbuf, "0");
-            }
-        } else {
-            strbuf_append_str(strbuf, "0");
-        }
+        print_decimal(strbuf, titem->decimal);
         break;
     case LMD_TYPE_STRING:
         if (titem->string && titem->string->chars) {
@@ -354,13 +371,12 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
         }
         break;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
+    case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
         // For complex types, create a temporary Item and use existing print_item logic
-        {
-            Item temp_item = {.raw_pointer = titem->pointer};
-            print_item(strbuf, temp_item, depth + 1, indent);
-        }
+        Item temp_item = {.raw_pointer = titem->pointer};
+        print_item(strbuf, temp_item, depth + 1, indent);
         break;
+    }
     case LMD_TYPE_ERROR:
         strbuf_append_str(strbuf, "error");
         break;
@@ -400,29 +416,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_FLOAT: {
         double num = *(double*)item.pointer;
-        int exponent;
-        double mantissa = frexp(num, &exponent);
-        if (-20 < exponent && exponent < 30) {
-            strbuf_append_format(strbuf, "%.10f", num);
-            // trim trailing zeros
-            char *end = strbuf->str + strbuf->length - 1;
-            while (*end == '0' && end > strbuf->str) { *end-- = '\0'; }
-            // if it ends with a dot, remove that too
-            if (*end == '.') { *end-- = '\0'; }
-            strbuf->length = end - strbuf->str + 1;
-        }
-        else if (-30 < exponent && exponent <= -20) {
-            strbuf_append_format(strbuf, "%.g", num);
-            // remove the zero in exponent, like 'e07'
-            char *end = strbuf->str + strbuf->length - 1;
-            if (*(end-1) == '0' && *(end-2) == '-' && *(end-3) == 'e') { 
-                *(end-1) = *end;  *end = '\0';
-                strbuf->length = end - strbuf->str; 
-            }
-        }
-        else {
-            strbuf_append_format(strbuf, "%g", num);
-        }
+        print_double(strbuf, num);
         break;
     }
     case LMD_TYPE_DECIMAL: {
@@ -542,7 +536,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         ArrayFloat *array = item.array_float;
         for (int i = 0; i < array->length; i++) {
             if (i) strbuf_append_str(strbuf, ", ");
-            strbuf_append_format(strbuf, "%.2f", array->items[i]);
+            print_double(strbuf, array->items[i]);
         }
         strbuf_append_str(strbuf, "]");
         break;

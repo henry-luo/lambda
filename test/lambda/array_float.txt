@@ -8,9 +8,9 @@
 [1.1, 2.2, 3.3, 4.444, 5.55555]
 "Array Indexing Tests:"
 2.7
+3
 1
-1
-1
+5
 "Statistical Functions Tests"
 3
 4
