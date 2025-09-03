@@ -4671,7 +4671,15 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
         return;
     }
     
-    Item result = parse_math_expression(input, &math, flavor);
+    Item result;
+    
+    // Route to appropriate parser based on flavor
+    if (flavor == MATH_FLAVOR_ASCII) {
+        printf("DEBUG: Routing to ASCII math parser\n");
+        result = input_ascii_math(input, math_string);
+    } else {
+        result = parse_math_expression(input, &math, flavor);
+    }
     
     // Check timeout after parsing
     double elapsed_time = (clock() - start_time) / CLOCKS_PER_SEC;

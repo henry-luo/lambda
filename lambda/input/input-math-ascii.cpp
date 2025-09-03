@@ -759,18 +759,15 @@ static Item parse_ascii_power(Input* input, ASCIIToken* tokens, size_t* pos, siz
 }
 
 // Main entry point for ASCII math parsing
-Item input_ascii_math(Input* input, const char* ascii_math) {
-    printf("DEBUG: input_ascii_math called with: '%s'\n", ascii_math ? ascii_math : "NULL");
-    
-    if (!input || !ascii_math) {
-        printf("DEBUG: input_ascii_math - NULL input or ascii_math\n");
+Item parse_ascii_math(Input* input, const char* math_text) {
+    if (!input || !math_text) {
         return {.item = ITEM_ERROR};
     }
     
-    // Tokenize input
+    printf("DEBUG: ASCII math parsing: '%s'\n", math_text);
+    
     size_t token_count;
-    printf("DEBUG: About to tokenize ASCII math input\n");
-    ASCIIToken* tokens = ascii_tokenize(ascii_math, &token_count);
+    ASCIIToken* tokens = ascii_tokenize(math_text, &token_count);
     if (!tokens) {
         printf("DEBUG: Tokenization failed\n");
         return {.item = ITEM_ERROR};
@@ -789,6 +786,10 @@ Item input_ascii_math(Input* input, const char* ascii_math) {
     
     // Clean up
     free(tokens);
-    
     return result;
+}
+
+// Entry point for ASCII math parsing (called from input.cpp)
+Item input_ascii_math(Input* input, const char* ascii_math) {
+    return parse_ascii_math(input, ascii_math);
 }
