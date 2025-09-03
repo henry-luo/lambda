@@ -201,6 +201,28 @@ class PremakeGenerator:
                     '    }',
                     '    '
                 ])
+                # Exclude main files from runtime libraries to avoid multiple main() functions
+                if pattern == "lambda/*.cpp" and "runtime" in project_name.lower():
+                    self.premake_content.extend([
+                        '    removefiles {',
+                        '        "lambda/main.cpp",',
+                        '        "lambda/main-repl.cpp",',
+                        '    }',
+                        '    '
+                    ])
+        
+        # Add exclude patterns if specified
+        exclude_patterns = lib.get('exclude_patterns', [])
+        if exclude_patterns:
+            self.premake_content.extend([
+                '    removefiles {',
+            ])
+            for exclude_pattern in exclude_patterns:
+                self.premake_content.append(f'        "{exclude_pattern}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
         
         # Add include directories
         if 'include' in lib:

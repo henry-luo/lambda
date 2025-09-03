@@ -155,15 +155,15 @@ true
 "74."
 false
 "75."
-false
+true
 "76."
 false
 "77."
-false
+true
 "78."
 false
 "79."
-false
+true
 "80."
 false
 "81."
@@ -227,19 +227,19 @@ false
 "108."
 true
 "109."
-false
+true
 "110."
-true
+5
 "111."
-false
+0
 "112."
-true
+5
 "113."
-false
+0
 "114."
-true
+5
 "115."
-false
+0
 "Large Number Comparisons:"
 "116."
 true
@@ -321,5 +321,5 @@ true
 "152."
 true
 "153."
-false
+true
 "End of Comparison Expression Tests."

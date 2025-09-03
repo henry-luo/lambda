@@ -1111,20 +1111,6 @@ static void benchmarks(void) {
     }
 }
 
-int main(void) {
-    hashmap_set_allocator(xmalloc, xfree);
-
-    if (getenv("BENCH")) {
-        printf("Running hashmap.c benchmarks...\n");
-        benchmarks();
-    } else {
-        printf("Running hashmap.c tests...\n");
-        all();
-        printf("PASSED\n");
-    }
-}
-
-
 #endif
 
 
