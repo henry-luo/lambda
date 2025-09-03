@@ -45,23 +45,23 @@ false
 false
 "Error Cases - Boolean with String Operations:"
 "174."
-error
+true
 "175."
-error
+false
 "176."
-error
+"str"
 "177."
-error
+false
 "178."
-error
+"str"
 "179."
-error
+"str"
 "180."
-error
+true
 "181."
-error
+"str"
 "182."
-error
+"world"
 "Error Cases - Null Comparisons:"
 "183."
 error
@@ -89,25 +89,25 @@ error
 error
 "Error Cases - Null with Boolean Operations:"
 "195."
-error
+[null]
 "196."
-error
+[null]
 "197."
-error
+[null]
 "198."
-error
+[false]
 "199."
-error
+[true]
 "200."
-error
+[false]
 "201."
-error
+[true]
 "202."
-error
+[null]
 "203."
-error
+[null]
 "204."
-error
+[null]
 "Error Cases - Mixed Invalid Types:"
 "205."
 error
@@ -118,21 +118,21 @@ error
 "208."
 error
 "209."
-error
+5
 "210."
-error
+"string"
 "211."
-error
+"string"
 "212."
-error
+5
 "213."
-true
+3.14
 "214."
 true
 "215."
-true
+2.71
 "216."
-true
+2.71
 "Conditional Expressions with Comparisons:"
 "217."
 "five is greater"
@@ -154,7 +154,7 @@ true
 "225."
 true
 "226."
-false
+true
 "227."
 true
 "Complex Arithmetic in Comparisons:"

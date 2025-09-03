@@ -55,16 +55,16 @@
 "194."; (null >= null)
 
 "Error Cases - Null with Boolean Operations:"
-"195."; (null and true)
-"196."; (null and false)
-"197."; (true and null)
-"198."; (false and null)
-"199."; (null or true)
-"200."; (null or false)
-"201."; (true or null)
-"202."; (false or null)
-"203."; (null and null)
-"204."; (null or null)
+"195."; [null and true]
+"196."; [null and false]
+"197."; [true and null]
+"198."; [false and null]
+"199."; [null or true]
+"200."; [null or false]
+"201."; [true or null]
+"202."; [false or null]
+"203."; [null and null]
+"204."; [null or null]
 
 "Error Cases - Mixed Invalid Types:"
 "205."; (true < false)
