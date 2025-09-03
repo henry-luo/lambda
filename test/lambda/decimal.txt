@@ -79,6 +79,7 @@
 "===== PRECISION TEST ====="
 0.3
 0.3
+true
 false
 "===== FINANCIAL CALCULATION ====="
 19.99
@@ -100,12 +101,13 @@ false
 1.2345678901234567890123456789012345679
 1.2345678901234567890123456789012345679
 "===== COMPARISONS ====="
-false
-false
-false
 true
 false
 true
+true
+true
+true
+"-----"
 false
 true
 true
