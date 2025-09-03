@@ -5,71 +5,112 @@
 #include <unistd.h>  // for getcwd and chdir
 #include <assert.h>
 #include <string.h>
-#include <tree_sitter/api.h>
-#include <mpdecimal.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <errno.h>
 
-// Include C header and declare extern C functions from the lambda project
-#include "../lambda/lambda.h"
-extern "C" {
-#include "../lib/strbuf.h"
-#include "../lib/num_stack.h"
-}
-
-// Missing function implementations to avoid linking conflicts
-Context* create_test_context(void) {
-    Context* ctx = (Context*)calloc(1, sizeof(Context));
-    if (!ctx) return NULL;
-    
-    // Initialize basic context fields
-    ctx->decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
-    if (ctx->decimal_ctx) {
-        mpd_defaultcontext(ctx->decimal_ctx);
+// Utility functions for file I/O and process execution
+char* read_text_file(const char* file_path) {
+    FILE* file = fopen(file_path, "r");
+    if (!file) {
+        return NULL;
     }
     
-    // Initialize num_stack and heap to avoid crashes
-    ctx->num_stack = num_stack_create(1024);
-    ctx->heap = NULL;
+    // Get file size
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    fseek(file, 0, SEEK_SET);
     
-    return ctx;
+    // Allocate buffer and read file
+    char* content = (char*)malloc(size + 1);
+    if (!content) {
+        fclose(file);
+        return NULL;
+    }
+    
+    size_t read_size = fread(content, 1, size, file);
+    content[read_size] = '\0';
+    fclose(file);
+    
+    return content;
 }
 
-
-extern "C" const TSLanguage *tree_sitter_lambda(void);
-
-TSParser* lambda_parser(void) {
-    TSParser *parser = ts_parser_new();
-    ts_parser_set_language(parser, tree_sitter_lambda());
-    return parser;
+void write_text_file(const char* file_path, const char* content) {
+    FILE* file = fopen(file_path, "w");
+    if (!file) {
+        return;
+    }
+    
+    fputs(content, file);
+    fclose(file);
 }
 
-TSTree* lambda_parse_source(TSParser* parser, const char* source_code) {
-    TSTree* tree = ts_parser_parse_string(parser, NULL, source_code, strlen(source_code));
-    return tree;
+// Execute lambda.exe and capture its output
+char* execute_lambda_script(const char* script_path) {
+    char command[512];
+    snprintf(command, sizeof(command), "./lambda.exe %s 2>/dev/null", script_path);
+    
+    FILE* pipe = popen(command, "r");
+    if (!pipe) {
+        fprintf(stderr, "Error: Failed to execute lambda.exe with script: %s\n", script_path);
+        return NULL;
+    }
+    
+    // Read output from pipe
+    char* full_output = (char*)malloc(8192);
+    if (!full_output) {
+        pclose(pipe);
+        return NULL;
+    }
+    
+    size_t total_read = 0;
+    size_t buffer_size = 8192;
+    char buffer[256];
+    
+    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+        size_t len = strlen(buffer);
+        
+        // Resize output buffer if needed
+        if (total_read + len + 1 > buffer_size) {
+            buffer_size *= 2;
+            full_output = (char*)realloc(full_output, buffer_size);
+            if (!full_output) {
+                pclose(pipe);
+                return NULL;
+            }
+        }
+        
+        strcpy(full_output + total_read, buffer);
+        total_read += len;
+    }
+    
+    full_output[total_read] = '\0';
+    
+    int exit_code = pclose(pipe);
+    if (exit_code != 0) {
+        fprintf(stderr, "Error: lambda.exe exited with code %d for script: %s\n", exit_code, script_path);
+        free(full_output);
+        return NULL;
+    }
+    
+    // Extract only the actual script output after the marker line
+    char* marker = strstr(full_output, "##### Script");
+    if (marker) {
+        // Find the end of the marker line
+        char* result_start = strchr(marker, '\n');
+        if (result_start) {
+            result_start++; // Skip the newline
+            
+            // Create a new string with just the result
+            char* result = strdup(result_start);
+            free(full_output);
+            return result;
+        }
+    }
+    
+    // If no marker found, return the full output (fallback)
+    return full_output;
 }
-
-// Forward declarations for C interface functions from the lambda runtime
-typedef struct Runtime Runtime;
-
-// C++ function declarations
-void runtime_init(Runtime* runtime);
-void runtime_cleanup(Runtime* runtime);
-Item run_script_at(Runtime *runtime, char* script_path, bool transpile_only);
-
-extern "C" {
-    char* read_text_file(const char* file_path);
-    void write_text_file(const char* file_path, const char* content);
-    const TSLanguage *tree_sitter_lambda(void);
-    num_stack_t* num_stack_create(size_t capacity);
-    void format_item(StrBuf *strbuf, Item item, int depth, char* indent);
-}
-
-// Simple C-compatible Runtime structure definition
-// This should match the actual Runtime structure
-typedef struct Runtime {
-    void* scripts;     // ArrayList* scripts
-    void* parser;      // TSParser* parser
-    char* current_dir;
-} Runtime;
 
 // Setup and teardown functions
 void setup(void) {
@@ -93,20 +134,17 @@ void trim_trailing_whitespace(char* str) {
     }
 }
 
-// Helper function to test a lambda script against expected output
-void test_lambda_script_against_file(const char* script_path, const char* expected_output_path) { 
-    // Initialize runtime
-    Runtime runtime;
-    runtime_init(&runtime);  runtime.current_dir = (char*)"";
+// Helper function to test a lambda script against expected output using lambda.exe
+void test_lambda_script_against_file(const char* script_path, const char* expected_output_path) {
+    // Execute lambda script via lambda.exe
+    char* actual_output = execute_lambda_script(script_path);
     
-    // Run the script
-    Item ret = run_script_at(&runtime, (char*)script_path, false);
-    printf("TRACE: test runner - ret: %llu\n", ret.item);
+    cr_assert_neq(actual_output, NULL, "Failed to execute lambda.exe with script: %s", script_path);
     
-    StrBuf* output_buf = strbuf_new_cap(1024);
-    // Cast uint64_t to Item (which is uint64_t in C)
-    format_item(output_buf, ret, 0, (char*)" ");
-    printf("TRACE: test runner - formatted output: '%s'\n", output_buf->str);
+    // Trim trailing whitespace from actual output
+    trim_trailing_whitespace(actual_output);
+    
+    printf("TRACE: test runner - actual output: '%s'\n", actual_output);
     
     // Extract script name from path for output file
     const char* script_name = strrchr(script_path, '/');
@@ -119,7 +157,7 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     if (dot) { strcpy(dot, ".txt"); }
     
     // Save actual output to test_output directory
-    write_text_file(output_filename, output_buf->str);
+    write_text_file(output_filename, actual_output);
     printf("TRACE: Saved actual output to %s\n", output_filename);
         
     // Read expected output to verify the file exists
@@ -127,18 +165,17 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     
     cr_assert_neq(expected_output, NULL, "Failed to read expected output file: %s", expected_output_path);
     
-    // Check that the script ran without error (assuming 0 means error)
-    cr_assert_neq(ret.item, 0ULL, "Lambda script returned error. Script: %s", script_path);
+    // Trim trailing whitespace from expected output
+    trim_trailing_whitespace(expected_output);
 
     // Verify the expected output matches the actual output
-    cr_assert_eq(strcmp(expected_output, output_buf->str), 0,
-                 "Output does not match expected output for script: %s\nExpected:\n%s\nGot:\n%s",
-                 script_path, expected_output, output_buf->str);
-    printf("expect length: %d, got length: %d\n", (int)strlen(expected_output), (int)strlen(output_buf->str));
-    assert(strlen(expected_output) == output_buf->length);
+    cr_assert_eq(strcmp(expected_output, actual_output), 0,
+                 "Output does not match expected output for script: %s\nExpected:\n'%s'\nGot:\n'%s'",
+                 script_path, expected_output, actual_output);
+    printf("Expected length: %d, got length: %d\n", (int)strlen(expected_output), (int)strlen(actual_output));
     
-    free(expected_output);  strbuf_free(output_buf);
-    runtime_cleanup(&runtime);
+    free(expected_output);
+    free(actual_output);
 }
 
 Test(lambda_tests, test_single_ls) {

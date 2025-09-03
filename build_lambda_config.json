@@ -508,8 +508,9 @@
                     {
                         "source": "test/test_lambda.cpp",
                         "name": "🐑 Lambda Runtime Tests",
-                        "dependencies": ["lambda-runtime-full"],
-                        "binary": "test/test_lambda.exe"
+                        "dependencies": [],
+                        "binary": "test/test_lambda.exe",
+                        "libraries": ["criterion"]
                     },
                     {
                         "source": "test/test_lambda_repl.cpp",
