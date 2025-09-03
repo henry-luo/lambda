@@ -811,14 +811,14 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
     bool need_any_type = false;
     if (then_type_id != else_type_id) {
         // check if number coercion is possible
-        if (then_type_id == LMD_TYPE_INT && else_type_id == LMD_TYPE_FLOAT ||
-            then_type_id == LMD_TYPE_FLOAT && else_type_id == LMD_TYPE_INT) {
-            // coercion is possible
-        } else {
+        // if (then_type_id == LMD_TYPE_INT && else_type_id == LMD_TYPE_FLOAT ||
+        //     then_type_id == LMD_TYPE_FLOAT && else_type_id == LMD_TYPE_INT) {
+        //     // coercion is possible
+        // } else {
             // Incompatible types that cannot be coerced, use ANY
             log_warn("Error: incompatible types %d and %d, coercing to ANY", then_type_id, else_type_id);        
             need_any_type = true;
-        }
+        // }
     }
     
     TypeId type_id = need_any_type ? LMD_TYPE_ANY : max(then_type_id, else_type_id);
@@ -853,15 +853,9 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
     
     TSNode else_node = ts_node_child_by_field_id(if_node, FIELD_ELSE);
     if (ts_node_is_null(else_node)) {
-        ast_node->otherwise = NULL;  // Optional for statements
+        ast_node->otherwise = NULL;  // optional for IF statements
     } else {
         ast_node->otherwise = build_expr(tp, else_node);
-        // Defensive validation: if else node exists, ensure it was built successfully
-        if (!ast_node->otherwise) {
-            log_error("Error: build_if_stam failed to build else expression");
-            ast_node->type = &TYPE_ERROR;
-            return (AstNode*)ast_node;
-        }
     }
     
     // Additional validation: ensure expressions have valid types
@@ -872,8 +866,9 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
         return (AstNode*)ast_node;
     }
     
-    // if statement returns type
-    ast_node->type = &TYPE_ANY;
+    // if statement return type
+    ast_node->type = ast_node->otherwise && ast_node->otherwise->type && 
+        ast_node->otherwise->type->type_id == ast_node->then->type->type_id ? ast_node->then->type : &TYPE_ANY;
     log_debug("end build if stam");
     return (AstNode*)ast_node;
 }
