@@ -15,46 +15,50 @@
 #include <unistd.h>
 #include <cstdlib>
 
-// Include Lambda runtime headers
-extern "C" {
-#include <tree_sitter/api.h>
-#include <mpdecimal.h>
-#include "../lambda/lambda.h"
-#include "../lib/strbuf.h"
-#include "../lib/num_stack.h"
+// Helper function to trim whitespace
+void trim(std::string& str) {
+    // Remove leading whitespace
+    str.erase(str.begin(), std::find_if(str.begin(), str.end(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }));
+    // Remove trailing whitespace
+    str.erase(std::find_if(str.rbegin(), str.rend(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }).base(), str.end());
 }
-#include "../lambda/transpiler.hpp"
 
-// Implement missing functions locally to avoid linking conflicts
-extern "C" Context* create_test_context() {
-    Context* ctx = (Context*)calloc(1, sizeof(Context));
-    if (!ctx) return NULL;
+// Helper function to execute lambda.exe and capture output
+std::string executeLambdaScript(const std::string& file_path, int timeout_seconds = 30) {
+    std::string command = "./lambda.exe " + file_path + " 2>/dev/null";
     
-    // Initialize basic context fields
-    ctx->decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
-    if (ctx->decimal_ctx) {
-        mpd_defaultcontext(ctx->decimal_ctx);
+    FILE* pipe = popen(command.c_str(), "r");
+    if (!pipe) {
+        return "ERROR: Failed to execute lambda.exe";
     }
     
-    // Initialize num_stack and heap to avoid crashes
-    ctx->num_stack = num_stack_create(1024);  // Create with reasonable initial capacity
-    ctx->heap = NULL;  // Will be initialized by heap_init()
+    std::string full_output;
+    char buffer[4096];
     
-    return ctx;
-}
-
-// Tree-sitter function declarations
-extern "C" const TSLanguage *tree_sitter_lambda(void);
-
-extern "C" TSParser* lambda_parser(void) {
-    TSParser *parser = ts_parser_new();
-    ts_parser_set_language(parser, tree_sitter_lambda());
-    return parser;
-}
-
-extern "C" TSTree* lambda_parse_source(TSParser* parser, const char* source_code) {
-    TSTree* tree = ts_parser_parse_string(parser, NULL, source_code, strlen(source_code));
-    return tree;
+    while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
+        full_output += buffer;
+    }
+    
+    int exit_code = pclose(pipe);
+    if (exit_code != 0) {
+        return "ERROR: lambda.exe exited with code " + std::to_string(exit_code);
+    }
+    
+    // Extract only the actual script output after the marker line
+    size_t marker_pos = full_output.find("##### Script");
+    if (marker_pos != std::string::npos) {
+        size_t result_start = full_output.find('\n', marker_pos);
+        if (result_start != std::string::npos) {
+            return full_output.substr(result_start + 1);
+        }
+    }
+    
+    // If no marker found, return the full output (fallback)
+    return full_output;
 }
 
 // Test result structure
@@ -140,7 +144,7 @@ public:
         return meta;
     }
 
-    // Execute a single test in a child process with timeout
+    // Execute a single test using CLI invocation
     TestResult executeTestInProcess(const std::string& file_path, const TestMetadata& meta) {
         TestResult result;
         result.name = meta.name;
@@ -150,159 +154,51 @@ public:
         
         auto start_time = std::chrono::high_resolution_clock::now();
         
-        // Create pipes for communication
-        int stdout_pipe[2], stderr_pipe[2];
-        if (pipe(stdout_pipe) == -1 || pipe(stderr_pipe) == -1) {
-            result.passed = false;
-            result.error_message = "Failed to create pipes";
-            return result;
-        }
+        // Execute lambda script via lambda.exe
+        std::string actual_output = executeLambdaScript(file_path, DEFAULT_TIMEOUT_SECONDS);
         
-        pid_t pid = fork();
-        if (pid == -1) {
-            result.passed = false;
-            result.error_message = "Failed to fork process";
-            close(stdout_pipe[0]); close(stdout_pipe[1]);
-            close(stderr_pipe[0]); close(stderr_pipe[1]);
-            return result;
-        }
+        auto end_time = std::chrono::high_resolution_clock::now();
+        result.execution_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
         
-        if (pid == 0) {
-            // Child process
-            close(stdout_pipe[0]); // Close read end
-            close(stderr_pipe[0]); // Close read end
-            
-            // Redirect stdout and stderr to pipes
-            dup2(stdout_pipe[1], STDOUT_FILENO);
-            dup2(stderr_pipe[1], STDERR_FILENO);
-            close(stdout_pipe[1]);
-            close(stderr_pipe[1]);
-            
-            // Execute the test
-            try {
-                Runtime child_runtime;
-                runtime_init(&child_runtime);
-                
-                Item ret = run_script_at(&child_runtime, const_cast<char*>(file_path.c_str()), false);
-                
-                // Format and output the result
-                StrBuf* output_buf = strbuf_new_cap(1024);
-                format_item(output_buf, ret, 0, const_cast<char*>(" "));
-                std::cout << output_buf->str << std::flush;
-                strbuf_free(output_buf);
-                
-                runtime_cleanup(&child_runtime);
-                exit(0);
-            } catch (const std::exception& e) {
-                std::cerr << "ERROR: " << e.what() << std::flush;
-                exit(1);
-            } catch (...) {
-                std::cerr << "ERROR: Unknown exception" << std::flush;
-                exit(2);
-            }
+        // Trim whitespace from actual output
+        trim(actual_output);
+        result.actual = actual_output;
+        
+        // Check for errors in output
+        bool has_errors = (actual_output.find("ERROR") != std::string::npos || 
+                          actual_output.find("error") != std::string::npos ||
+                          actual_output.find("TIMEOUT") != std::string::npos);
+        
+        // Process results based on test expectations
+        if (actual_output.find("ERROR:") == 0) {
+            // Execution failed
+            result.passed = meta.should_fail;
+            result.error_message = actual_output;
+            result.actual = has_errors ? "ERROR" : "PROCESS_ERROR";
         } else {
-            // Parent process
-            close(stdout_pipe[1]); // Close write end
-            close(stderr_pipe[1]); // Close write end
-            
-            // Wait for child with timeout
-            int status;
-            bool timed_out = false;
-            
-            // Use a separate thread to handle timeout
-            std::future<int> wait_future = std::async(std::launch::async, [pid]() {
-                int status;
-                waitpid(pid, &status, 0);
-                return status;
-            });
-            
-            if (wait_future.wait_for(std::chrono::seconds(DEFAULT_TIMEOUT_SECONDS)) == std::future_status::timeout) {
-                // Timeout occurred
-                kill(pid, SIGKILL);
-                wait_future.wait(); // Wait for the kill to complete
-                timed_out = true;
+            // Test completed successfully
+            if (meta.should_fail && !has_errors) {
+                result.passed = false;
+                result.error_message = "Test expected to fail but succeeded";
+            } else if (meta.should_fail && has_errors) {
+                result.passed = true;
+                result.expected = "error";
+            } else if (!meta.should_fail && has_errors) {
+                result.passed = false;
+                result.error_message = "Test failed with error";
             } else {
-                status = wait_future.get();
-            }
-            
-            auto end_time = std::chrono::high_resolution_clock::now();
-            result.execution_time_ms = std::chrono::duration<double, std::milli>(end_time - start_time).count();
-            
-            // Read output from pipes
-            char buffer[4096];
-            std::string stdout_output, stderr_output;
-            
-            // Read stdout
-            ssize_t bytes_read;
-            while ((bytes_read = read(stdout_pipe[0], buffer, sizeof(buffer) - 1)) > 0) {
-                buffer[bytes_read] = '\0';
-                stdout_output += buffer;
-            }
-            
-            // Read stderr
-            while ((bytes_read = read(stderr_pipe[0], buffer, sizeof(buffer) - 1)) > 0) {
-                buffer[bytes_read] = '\0';
-                stderr_output += buffer;
-            }
-            
-            // Filter Lambda output to get just the final result
-            std::string filtered_output = filterLambdaOutput(stdout_output);
-            
-            close(stdout_pipe[0]);
-            close(stderr_pipe[0]);
-            
-            // Process results
-            if (timed_out) {
-                result.passed = (meta.expected_result == "timeout");
-                result.error_message = "Test timed out after " + std::to_string(DEFAULT_TIMEOUT_SECONDS) + " seconds";
-                result.actual = "TIMEOUT";
-                result.expected = meta.expected_result.empty() ? "success" : meta.expected_result;
-            } else if (WIFEXITED(status)) {
-                int exit_code = WEXITSTATUS(status);
-                result.actual = filtered_output;
-                // Trim whitespace from actual output
-                trim(result.actual);
-                
-                if (exit_code == 0) {
-                    // Test completed successfully
-                    bool has_errors = (stderr_output.find("ERROR") != std::string::npos || 
-                                     stdout_output.find("error") != std::string::npos);
-                    
-                    if (meta.should_fail && !has_errors) {
-                        result.passed = false;
-                        result.error_message = "Test expected to fail but succeeded";
-                    } else if (meta.should_fail && has_errors) {
-                        result.passed = true;
-                        result.expected = "error";
-                    } else if (!meta.should_fail && has_errors) {
-                        result.passed = false;
-                        result.error_message = "Test failed with error";
-                    } else {
-                        // Load expected result if available
-                        std::string expected_file = file_path.substr(0, file_path.find_last_of('.')) + ".expected";
-                        if (std::filesystem::exists(expected_file)) {
-                            result.expected = loadExpectedResult(expected_file);
-                            result.passed = (result.actual == result.expected);
-                            if (!result.passed) {
-                                result.error_message = "Output mismatch";
-                            }
-                        } else {
-                            result.passed = true;
-                            result.expected = meta.expected_result.empty() ? "success" : meta.expected_result;
-                        }
+                // Load expected result if available
+                std::string expected_file = file_path.substr(0, file_path.find_last_of('.')) + ".expected";
+                if (std::filesystem::exists(expected_file)) {
+                    result.expected = loadExpectedResult(expected_file);
+                    result.passed = (result.actual == result.expected);
+                    if (!result.passed) {
+                        result.error_message = "Output mismatch";
                     }
                 } else {
-                    // Test crashed or failed
-                    result.passed = meta.should_fail;
-                    result.error_message = "Process exited with code " + std::to_string(exit_code);
-                    result.actual = stderr_output.empty() ? "PROCESS_ERROR" : stderr_output;
+                    result.passed = true;
+                    result.expected = meta.expected_result.empty() ? "success" : meta.expected_result;
                 }
-            } else if (WIFSIGNALED(status)) {
-                // Process was killed by signal
-                int signal_num = WTERMSIG(status);
-                result.passed = meta.should_fail;
-                result.error_message = "Process killed by signal " + std::to_string(signal_num);
-                result.actual = "SIGNAL_" + std::to_string(signal_num);
             }
         }
         
@@ -481,73 +377,6 @@ public:
     }
 
 private:
-    // Filter Lambda output to extract just the final result
-    std::string filterLambdaOutput(const std::string& output) {
-        std::istringstream stream(output);
-        std::string line;
-        std::string result;
-        
-        // Look for the last line that matches a simple result pattern
-        while (std::getline(stream, line)) {
-            // Skip debug lines
-            if (line.find("TRACE:") != std::string::npos ||
-                line.find("loading") != std::string::npos ||
-                line.find("Loading") != std::string::npos ||
-                line.find("Start") != std::string::npos ||
-                line.find("parsing") != std::string::npos ||
-                line.find("Syntax") != std::string::npos ||
-                line.find("build") != std::string::npos ||
-                line.find("pushing") != std::string::npos ||
-                line.find("Debug:") != std::string::npos ||
-                line.find("building") != std::string::npos ||
-                line.find("AST:") != std::string::npos ||
-                line.find("transpiling") != std::string::npos ||
-                line.find("transpiled") != std::string::npos ||
-                line.find("compiling") != std::string::npos ||
-                line.find("C2MIR") != std::string::npos ||
-                line.find("finding") != std::string::npos ||
-                line.find("2025-") != std::string::npos ||
-                line.find("generated") != std::string::npos ||
-                line.find("init") != std::string::npos ||
-                line.find("JIT") != std::string::npos ||
-                line.find("jit_context") != std::string::npos ||
-                line.find("loaded") != std::string::npos ||
-                line.find("Executing") != std::string::npos ||
-                line.find("runner") != std::string::npos ||
-                line.find("heap") != std::string::npos ||
-                line.find("exec") != std::string::npos ||
-                line.find("list_fill") != std::string::npos ||
-                line.find("entering") != std::string::npos ||
-                line.find("frame_end") != std::string::npos ||
-                line.find("free") != std::string::npos ||
-                line.find("reached") != std::string::npos ||
-                line.find("reset") != std::string::npos ||
-                line.find("after") != std::string::npos ||
-                line.find("#####") != std::string::npos ||
-                line.find("utf8proc") != std::string::npos ||
-                line.find("(") != std::string::npos ||
-                line.find("[") != std::string::npos ||
-                line.find("took") != std::string::npos ||
-                line.find("ms") != std::string::npos ||
-                line.empty()) {
-                continue;
-            }
-            
-            // Check if this looks like a result (number, simple value)
-            std::string trimmed = line;
-            trim(trimmed);
-            if (!trimmed.empty() && 
-                (std::isdigit(trimmed[0]) || trimmed[0] == '-' || 
-                 trimmed == "inf" || trimmed == "null" || trimmed == "error" ||
-                 trimmed == "true" || trimmed == "false" ||
-                 trimmed.find("e+") != std::string::npos || trimmed.find("e-") != std::string::npos)) {
-                result = trimmed;
-            }
-        }
-        
-        return result;
-    }
-
     std::string loadExpectedResult(const std::string& file_path) {
         std::ifstream file(file_path);
         std::stringstream buffer;
@@ -555,15 +384,6 @@ private:
         std::string content = buffer.str();
         trim(content);
         return content;
-    }
-
-    void trim(std::string& str) {
-        str.erase(str.begin(), std::find_if(str.begin(), str.end(), [](unsigned char ch) {
-            return !std::isspace(ch);
-        }));
-        str.erase(std::find_if(str.rbegin(), str.rend(), [](unsigned char ch) {
-            return !std::isspace(ch);
-        }).base(), str.end());
     }
 
     std::string escapeJson(const std::string& str) {
