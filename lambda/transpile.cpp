@@ -1619,14 +1619,53 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     
     // Fast path optimizations for specific type combinations
     if (object_type == LMD_TYPE_ARRAY_INT && field_type == LMD_TYPE_INT) {
+        // transpile_expr(tp, field_node->object);
+        // strbuf_append_str(tp->code_buf, "->items[");
+        // transpile_expr(tp, field_node->field);
+        // strbuf_append_str(tp->code_buf, "]");
+        // for safety, we have to call array_int_get
+        strbuf_append_str(tp->code_buf, "array_int_get(");
         transpile_expr(tp, field_node->object);
-        strbuf_append_str(tp->code_buf, "->items[");
+        strbuf_append_char(tp->code_buf, ',');
         transpile_expr(tp, field_node->field);
-        strbuf_append_str(tp->code_buf, "]");
+        strbuf_append_char(tp->code_buf, ')');
         return;
     }
+    else if (object_type == LMD_TYPE_ARRAY_INT64 && field_type == LMD_TYPE_INT) {
+        // for safety, we have to call array_int64_get
+        strbuf_append_str(tp->code_buf, "array_int64_get(");
+        transpile_expr(tp, field_node->object);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_expr(tp, field_node->field);
+        strbuf_append_char(tp->code_buf, ')');
+        return;
+    }
+    else if (object_type == LMD_TYPE_ARRAY_FLOAT && field_type == LMD_TYPE_INT) {
+        // for safety, we have to call array_float_get
+        strbuf_append_str(tp->code_buf, "array_float_get(");
+        transpile_expr(tp, field_node->object);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_expr(tp, field_node->field);
+        strbuf_append_char(tp->code_buf, ')');
+        return;
+    }       
     else if (object_type == LMD_TYPE_ARRAY && field_type == LMD_TYPE_INT) {
-        strbuf_append_str(tp->code_buf, "array_get(");
+        TypeArray* arr_type = (TypeArray*)field_node->object->type;
+        if (arr_type->nested) {
+            switch (arr_type->nested->type_id) {
+                case LMD_TYPE_INT:
+                    strbuf_append_str(tp->code_buf, "array_int_get(");  break;
+                case LMD_TYPE_INT64:
+                    strbuf_append_str(tp->code_buf, "array_int64_get(");  break;
+                case LMD_TYPE_FLOAT:
+                    strbuf_append_str(tp->code_buf, "array_float_get(");  break;
+                default:
+                    strbuf_append_str(tp->code_buf, "array_get(");
+            }
+        }
+        else { 
+            strbuf_append_str(tp->code_buf, "array_get(");
+        }
         transpile_expr(tp, field_node->object);
         strbuf_append_char(tp->code_buf, ',');
         transpile_expr(tp, field_node->field);

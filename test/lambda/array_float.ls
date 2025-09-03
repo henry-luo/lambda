@@ -51,14 +51,14 @@ last_elem
 // ========================================
 
 // Test 10: Sum function on various arrays
-let sum_float = sum(float_arr)      // Should be 15.0 (1+2+3+4+5)
+let sum_float = sum(float_arr)        // Should be 15.0 (1+2+3+4+5)
 let sum_mixed = sum(mixed_arr)        // Should be 16.11555
 let sum_single = sum(single_arr)      // Should be 42.0
 let sum_empty = sum(empty_arr)        // Should be 0
 sum_float; sum_mixed; sum_single; sum_empty
 
 // Test 11: Average function on various arrays
-let avg_float = avg(float_arr)      // Should be 3.0 (15/5)
+let avg_float = avg(float_arr)        // Should be 3.0 (15/5)
 let avg_mixed = avg(mixed_arr)        // Should be 3.22311
 let avg_single = avg(single_arr)      // Should be 42.0
 avg_float; avg_mixed; avg_single

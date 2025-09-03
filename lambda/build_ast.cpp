@@ -88,8 +88,15 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
     }
 
     if (ast_node->object->type->type_id == LMD_TYPE_ARRAY) {
-        Type* nested = ((TypeArray*)ast_node->object->type)->nested;
-        ast_node->type = nested ? nested : &TYPE_ANY;
+        // todo: fast path for array_get 
+        // Type* nested = ((TypeArray*)ast_node->object->type)->nested;
+        // if (nested && nested->is_const) {  // need to copy the type to remove is_const flag
+        //     Type* type = alloc_type(tp->ast_pool, nested->type_id, sizeof(Type));
+        //     type->is_const = 0;  // defensive code
+        //     ast_node->type = type;
+        // }
+        // else { ast_node->type = nested ? nested : &TYPE_ANY; }
+        ast_node->type = &TYPE_ANY;
     }
     else if (ast_node->object->type->type_id == LMD_TYPE_MAP) {
         ast_node->type = &TYPE_ANY;  // todo: derive field type
@@ -314,11 +321,8 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
                 (int)entry->name->len, entry->name->chars, 
                 (int)entry->import->module.length, entry->import->module.str);
             ast_node->type = alloc_type(tp->ast_pool, entry->node->type->type_id, sizeof(Type));
-            // Defensive check: verify is_const was properly reset by alloc_type
-            if (ast_node->type->is_const != 0) {
-        log_debug("Warning: alloc_type did not reset is_const flag - correcting");
-                ast_node->type->is_const = 0;
-            }
+            // defensive code
+            ast_node->type->is_const = 0;
         }
         else { 
             log_debug("Debug: entry->node->type is %p for identifier %.*s", 
