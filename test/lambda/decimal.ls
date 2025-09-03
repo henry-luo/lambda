@@ -93,6 +93,7 @@ let precise_decimal = 0.1n + 0.2n, float_addition = 0.1 + 0.2
 precise_decimal
 float_addition
 (precise_decimal == 0.3n)
+(float_addition == 0.3)
 
 "===== FINANCIAL CALCULATION ====="
 let price = 19.99n, tax_rate = 0.08n, quantity = 3
@@ -132,6 +133,7 @@ max_precision - min_nonzero
 (2.71828n < 3.14159n)
 (3.14159n >= 3.14159n)
 (2.71828n <= 3.14159n)
+"-----"
 (decimal_val > int_val)
 (decimal_val < float_val)
 (int_val >= decimal_val)
