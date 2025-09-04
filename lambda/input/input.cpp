@@ -234,6 +234,7 @@ static const char* mime_to_parser_type(const char* mime_type) {
     if (strcmp(mime_type, "application/xml") == 0) return "xml";
     if (strcmp(mime_type, "text/html") == 0) return "html";
     if (strcmp(mime_type, "text/markdown") == 0) return "markdown";
+    if (strcmp(mime_type, "text/mdx") == 0) return "mdx";
     if (strcmp(mime_type, "text/x-rst") == 0) return "rst";
     if (strcmp(mime_type, "application/rtf") == 0) return "rtf";
     if (strcmp(mime_type, "application/pdf") == 0) return "pdf";
@@ -516,6 +517,9 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         }
         else if (strcmp(effective_type, "jsx") == 0) {
             parse_jsx(input, source);
+        }
+        else if (strcmp(effective_type, "mdx") == 0) {
+            input->root = input_mdx(input, source);
         }
         else if (strcmp(effective_type, "math") == 0) {
             const char* math_flavor = (flavor && flavor->chars) ? flavor->chars : "latex";

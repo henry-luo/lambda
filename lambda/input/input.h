@@ -50,6 +50,9 @@ Item input_markup(Input *input, const char* content);
 Item input_jsx(Input* input, const char* jsx_string);
 void parse_jsx(Input* input, const char* jsx_string);
 
+// MDX parsing functions (from input-mdx.cpp)
+Item input_mdx(Input* input, const char* mdx_string);
+
 // Directory listing functions (from input_dir.cpp)
 Input* input_from_directory(const char* directory_path, bool recursive, int max_depth);
 

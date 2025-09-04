@@ -345,6 +345,10 @@ int exec_convert(int argc, char* argv[]) {
             formatted_output = format_wiki_string(input->pool, input->root);
         } else if (strcmp(to_format, "text") == 0) {
             formatted_output = format_text_string(input->pool, input->root);
+        } else if (strcmp(to_format, "jsx") == 0) {
+            formatted_output = format_jsx(input->pool, input->root);
+        } else if (strcmp(to_format, "mdx") == 0) {
+            formatted_output = format_mdx(input->pool, input->root);
         } else if (strcmp(to_format, "markdown") == 0 || strcmp(to_format, "md") == 0) {
             // Format as markdown using string buffer
             StringBuf* sb = stringbuf_new(input->pool);
@@ -367,7 +371,7 @@ int exec_convert(int argc, char* argv[]) {
             strbuf_free(sb);
         } else {
             printf("Error: Unsupported output format '%s'\n", to_format);
-            printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, latex, rst, org, wiki, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
+            printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, jsx, mdx, latex, rst, org, wiki, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
             pool_variable_destroy(temp_pool);
             return 1;
         }
