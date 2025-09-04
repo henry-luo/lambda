@@ -301,19 +301,13 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 print_typeditem(strbuf, (TypedItem*)data, depth, indent);
                 break;
             default:
-                strbuf_append_format(strbuf, "[unknown]");
+                strbuf_append_str(strbuf, "[unknown]");
             }
         }
         
         advance_field:
         ShapeEntry *next_field = field->next;
         field = next_field;
-    }
-    
-    // Add closing indentation if we have nested structures
-    if (indent && !is_attrs && map_type->length > 0) {
-        strbuf_append_char(strbuf, '\n');
-        for (int i = 0; i < depth - 1; i++) strbuf_append_str(strbuf, indent);
     }
 }
 
@@ -546,6 +540,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         TypeMap *map_type = (TypeMap*)map->type;
         strbuf_append_char(strbuf, '{');
         print_named_items(strbuf, map_type, map->data, depth + 1, indent);
+        // add closing indentation if we have nested structures
+        if (indent && map_type->length > 0) {
+            strbuf_append_char(strbuf, '\n');
+            for (int i = 0; i < depth; i++) strbuf_append_str(strbuf, indent);
+        }        
         strbuf_append_char(strbuf, '}');
         break;
     }
@@ -582,6 +581,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         // printf("print type: %p, type_id: %d\n", type, type->type->type_id);
         char* type_name = type_info[type->type->type_id].name;
         if (type->type->type_id == LMD_TYPE_NULL) {
+            // print as "type.null"
             strbuf_append_format(strbuf, "type.%s", type_name);
         } else {
             strbuf_append_str(strbuf, type_name);
