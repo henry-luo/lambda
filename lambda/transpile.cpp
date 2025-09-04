@@ -872,7 +872,7 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
     }
     else {
         strbuf_append_str(tp->code_buf, "is_truthy(");
-        transpile_expr(tp, if_node->cond);
+        transpile_box_item(tp, if_node->cond);
         strbuf_append_char(tp->code_buf, ')');
     }
     strbuf_append_str(tp->code_buf, " ? ");
