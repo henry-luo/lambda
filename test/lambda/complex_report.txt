@@ -1,0 +1,51 @@
+{
+  simple_sum: 15,
+  comprehension_sum: 68136.5,
+  test_current_value: 17550,
+  portfolio: {
+    portfolio_summary: {
+      total_value: 68136.5,
+      total_cost_basis: 60500,
+      total_gain_loss: 7636.5,
+      overall_return: 12.6223140496
+    },
+    individual_assets: ({
+      symbol: "AAPL",
+      shares: 100,
+      current_value: 17550,
+      cost_basis: 15000,
+      unrealized_gain_loss: 2550,
+      return_percent: 17
+    }, {
+      symbol: "GOOGL",
+      shares: 50,
+      current_value: 7012.5,
+      cost_basis: 6800,
+      unrealized_gain_loss: 212.5,
+      return_percent: 3.125
+    }, {
+      symbol: "MSFT",
+      shares: 80,
+      current_value: 33660,
+      cost_basis: 28000,
+      unrealized_gain_loss: 5660,
+      return_percent: 20.2142857143
+    }, {
+      symbol: "TSLA",
+      shares: 25,
+      current_value: 6140,
+      cost_basis: 7500,
+      unrealized_gain_loss: -1360,
+      return_percent: -18.1333333333
+    }, {
+      symbol: "NVDA",
+      shares: 30,
+      current_value: 3774,
+      cost_basis: 3200,
+      unrealized_gain_loss: 574,
+      return_percent: 17.9375
+    }),
+    asset_count: 5,
+    diversification_score: 0.6678323135
+  }
+}
