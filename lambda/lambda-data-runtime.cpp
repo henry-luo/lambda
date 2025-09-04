@@ -314,17 +314,24 @@ List* list() {
 }
 
 Item list_end(List *list) {
-    log_debug("list_end");
     frame_end();  log_leave();
-    if (list->length == 0) {
-        return ItemNull;
-    } 
-    // flatten list, not element
-    else if (list->length == 1 && list->type_id != LMD_TYPE_ELEMENT) {
-        return list->items[0];
-    } else {
-        log_item({.list = list}, list->type_id == LMD_TYPE_ELEMENT ? "elmt_end" : "list_end");
-        return {.list = list};
+    if (list->type_id == LMD_TYPE_ELEMENT) {
+        log_debug("elmt_end!");
+        log_item({.list = list}, "elmt_end");
+        return {.list = list};        
+    }
+    else {
+        log_debug("list_ended");
+        if (list->length == 0) {
+            return ItemNull;
+        } 
+        // flatten list, not element
+        else if (list->length == 1) {
+            return list->items[0];
+        } else {
+            log_item({.list = list}, "list_end");
+            return {.list = list};
+        }        
     }
 }
 
@@ -473,7 +480,7 @@ Item map_get(Map* map, Item key) {
 }
 
 Element* elmt(int type_index) {
-        log_debug("elmt with type %d", type_index);
+    log_debug("elmt with type index: %d", type_index);
     Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
     elmt->type_id = LMD_TYPE_ELEMENT;
     ArrayList* type_list = (ArrayList*)context->type_list;
@@ -482,6 +489,7 @@ Element* elmt(int type_index) {
     if (elmt_type->length || elmt_type->content_length) {
         frame_start();
     }
+    // else - bare element
     return elmt;
 } 
 
