@@ -1779,27 +1779,27 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
 }
 
 void define_module_import(Transpiler* tp, AstImportNode *import_node) {
-        log_debug("define import module");
+    log_debug("define import module");
     // import module
-        log_debug("misssing script");
-        log_debug("script reference: %s", import_node->script->reference);
+    if (!import_node->script) { log_error("Error: missing script for import");  return; }
+    log_debug("script reference: %s", import_node->script->reference);
     // loop through the public functions in the module
     AstNode *node = import_node->script->ast_root;
-        log_debug("misssing root node");
+    if (!node) { log_debug("missing root node");  return; }
     assert(node->node_type == AST_SCRIPT);
     node = ((AstScript*)node)->child;
-        log_debug("finding content node");
+    log_debug("finding content node");
     while (node) {
         if (node->node_type == AST_NODE_CONTENT) break;
         node = node->next;
     }
-        log_debug("misssing content node");
+    log_debug("missing content node");
     strbuf_append_format(tp->code_buf, "struct Mod%d {\n", import_node->script->index);
     node = ((AstListNode*)node)->item;
     while (node) {
         if (node->node_type == AST_NODE_FUNC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
-        log_debug("got fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
+            log_debug("got fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
                 ((TypeFunc*)func_node->type)->is_public);
             if (((TypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);
