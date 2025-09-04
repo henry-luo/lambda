@@ -1338,7 +1338,12 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
         }
     }
     else { // no content
-        strbuf_append_str(tp->code_buf, " list_end(el);})");
+        if (elmt_node->item) {
+            strbuf_append_str(tp->code_buf, " list_end(el);})"); 
+        }
+        else { // and no attr, thus no frame_end
+            strbuf_append_str(tp->code_buf, " el;})"); 
+        }  
     }
 }
 
