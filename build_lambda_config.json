@@ -421,6 +421,12 @@
                         "name": "⚛️ JSX Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
                         "binary": "test_jsx_roundtrip.exe"
+                    },
+                    {
+                        "source": "test/test_mdx_roundtrip.cpp",
+                        "name": "📝 MDX Roundtrip Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_mdx_roundtrip.exe"
                     }
                 ],
                 "type": "input",
