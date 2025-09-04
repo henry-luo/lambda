@@ -20,11 +20,18 @@ pub fn analyze_investment_portfolio(holdings) {
                         sum(for (asset in asset_analysis) asset.cost_basis)) * 100
     };
     
+    // Calculate Herfindahl-Hirschman Index (HHI) for diversification
+    let total_portfolio_value = sum(for (asset in asset_analysis) asset.current_value);
+    let asset_weights = for (asset in asset_analysis) 
+        (asset.current_value / total_portfolio_value);
+    let hhi = sum(for (weight in asset_weights) weight * weight);
+    let diversification_score = 1 - hhi;
+    
     {
         portfolio_summary: portfolio_metrics,
         individual_assets: asset_analysis,
         asset_count: len(holdings),
-        diversification_score: len(asset_analysis) / max(len(asset_analysis), 1)
+        diversification_score: diversification_score
     }
 }
 
@@ -76,7 +83,7 @@ let test_current_value = test_asset.shares * test_asset.current_price;
 // Test sum() with a comprehension
 let test_comprehension = for (holding in sample_holdings) holding.shares * holding.current_price;
 let sum_comprehension = sum(test_comprehension);
-"sum_comprehension"; sum_comprehension
+// "sum_comprehension"; sum_comprehension
 
 // Return test results and portfolio analysis
 {
@@ -85,6 +92,3 @@ let sum_comprehension = sum(test_comprehension);
     test_current_value: test_current_value,
     portfolio: portfolio_analysis
 }
-"test_comprehension"; test_comprehension
-"sum_comprehension:"; sum_comprehension
-{a: len(sample_holdings)}
