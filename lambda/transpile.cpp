@@ -353,14 +353,14 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     }
 }
 
-void push_list_items(Transpiler* tp, AstNode *item) {
+void push_list_items(Transpiler* tp, AstNode *item, bool is_elmt) {
     while (item) {
         // skip let declaration
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || 
             item->node_type == AST_NODE_FUNC) {
             item = item->next;  continue;
         }
-        strbuf_append_str(tp->code_buf, " list_push(ls,");
+        strbuf_append_format(tp->code_buf, " list_push(%s, ", is_elmt ? "el" : "ls");
         transpile_box_item(tp, item);
         strbuf_append_str(tp->code_buf, ");\n");
         item = item->next;
@@ -1205,7 +1205,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, ");})");
     } 
     else {
-        push_list_items(tp, list_node->item);
+        push_list_items(tp, list_node->item, false);
         strbuf_append_str(tp->code_buf, " ls;})");
     }
 }
@@ -1232,7 +1232,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, "null;})");
         return;
     }
-    push_list_items(tp, list_node->item);
+    push_list_items(tp, list_node->item, false);
     strbuf_append_str(tp->code_buf, " ls;})");
 }
 
@@ -1282,12 +1282,12 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!elmt_node) {
         log_error("Error: transpile_element called with null element node");
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        // todo: raise tranpiling error
         return;
     }
     if (!elmt_node->type) {
         log_error("Error: transpile_element missing type information");
-        strbuf_append_str(tp->code_buf, "({Element* el=elmt(0); el;})");
+        // todo: raise tranpiling error
         return;
     }
     
@@ -1327,7 +1327,11 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
             }
             strbuf_append_str(tp->code_buf, ");");
         } else {
-            push_list_items(tp, ((AstListNode*)elmt_node->content)->item);
+            if (elmt_node->content) {
+                push_list_items(tp, ((AstListNode*)elmt_node->content)->item, true);
+            } else {
+                log_error("Error: transpile_element content missing despite content_length > 0");
+            }
         }
     }
     // Always return the element
