@@ -24,7 +24,6 @@ extern "C" {
     void url_destroy(Url* url);
 }
 char* read_text_doc(Url *url);
-void print_item(StrBuf *strbuf, Item item);
 
 // Helper function to create a Lambda String from C string
 String* create_lambda_string(const char* text) {
