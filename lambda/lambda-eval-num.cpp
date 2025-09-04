@@ -1225,6 +1225,7 @@ Item fn_sum(Item item) {
         return push_l(sum);
     }
     else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        log_debug("fn_sum of LMD_TYPE_ARRAY_FLOAT");
         ArrayFloat* arr = item.array_float;  // Use the correct field
         if (arr->length == 0) {
             return push_d(0.0);  // Empty array sums to 0.0
@@ -1233,6 +1234,7 @@ Item fn_sum(Item item) {
         for (size_t i = 0; i < arr->length; i++) {
             sum += arr->items[i];
         }
+        log_debug("fn_sum result: %f", sum);
         return push_d(sum);
     }
     else if (type_id == LMD_TYPE_LIST) {

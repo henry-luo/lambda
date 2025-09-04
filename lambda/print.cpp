@@ -680,7 +680,7 @@ char* format_type(Type *type) {
     }
 }
 
-void log_item(Item item, char* msg) {
+void log_item(Item item, const char* msg) {
     StrBuf *strbuf = strbuf_new();
     print_item(strbuf, item, 0, NULL);
     log_debug("%s: %s", msg, strbuf->str);

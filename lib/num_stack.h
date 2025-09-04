@@ -19,7 +19,7 @@ typedef struct num_stack_t {
     num_chunk_t *head;             // first chunk
     num_chunk_t *tail;             // last chunk
     num_chunk_t *current_chunk;    // current chunk being written to
-    size_t current_position;       // position within current chunk
+    size_t current_chunk_position; // position within current chunk
     size_t total_length;           // total number of elements across all chunks
     size_t initial_chunk_size;     // size of the first chunk
 } num_stack_t;

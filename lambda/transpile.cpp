@@ -365,6 +365,7 @@ void push_list_items(Transpiler* tp, AstNode *item, bool is_elmt) {
         strbuf_append_str(tp->code_buf, ");\n");
         item = item->next;
     }
+    strbuf_append_format(tp->code_buf, " list_end(%s);})", is_elmt ? "el" : "ls");
 }
 
 void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
@@ -1206,7 +1207,6 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
     } 
     else {
         push_list_items(tp, list_node->item, false);
-        strbuf_append_str(tp->code_buf, " ls;})");
     }
 }
 
@@ -1233,7 +1233,6 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
         return;
     }
     push_list_items(tp, list_node->item, false);
-    strbuf_append_str(tp->code_buf, " ls;})");
 }
 
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
@@ -1295,6 +1294,8 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     TypeElmt* type = (TypeElmt*)elmt_node->type;
     strbuf_append_int(tp->code_buf, type->type_index);
     strbuf_append_str(tp->code_buf, ");");
+
+    // transpile the attributes
     AstNode *item = elmt_node->item;
     if (item) {
         strbuf_append_str(tp->code_buf, "\n elmt_fill(el,");
@@ -1315,6 +1316,8 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
         }
         strbuf_append_str(tp->code_buf, ");");
     }
+
+    // transpile the content items
     if (type->content_length) {
         if (type->content_length < 10) {
             strbuf_append_str(tp->code_buf, "\n list_fill(el,");
@@ -1325,7 +1328,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
             } else {
                 log_error("Error: transpile_element content missing despite content_length > 0");
             }
-            strbuf_append_str(tp->code_buf, ");");
+            strbuf_append_str(tp->code_buf, ");})");
         } else {
             if (elmt_node->content) {
                 push_list_items(tp, ((AstListNode*)elmt_node->content)->item, true);
@@ -1334,9 +1337,9 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
             }
         }
     }
-    // Always return the element
-    strbuf_append_str(tp->code_buf, "\n el;");
-    strbuf_append_str(tp->code_buf, "})");
+    else { // no content
+        strbuf_append_str(tp->code_buf, " list_end(el);})");
+    }
 }
 
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {

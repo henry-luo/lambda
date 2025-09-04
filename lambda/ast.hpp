@@ -290,4 +290,4 @@ void print_root_item(StrBuf *strbuf, Item item, char* indent="  ");
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent);
 
 // for debugging onnly
-void log_item(Item item, char* msg="");
+void log_item(Item item, const char* msg="");
