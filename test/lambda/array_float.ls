@@ -52,25 +52,25 @@ last_elem
 
 "Test 10: Sum function on various arrays"
 let sum_float = sum(float_arr)        // Should be 15.0 (1+2+3+4+5)
-let sum_mixed = sum(mixed_arr)        // Should be 16.11555
+let sum_mixed = sum(mixed_arr)        // Should be 16.59955
 let sum_single = sum(single_arr)      // Should be 42.0
 let sum_empty = sum(empty_arr)        // Should be 0
 sum_float; sum_mixed; sum_single; sum_empty
 
 "Test 11: Average function on various arrays"
 let avg_float = avg(float_arr)        // Should be 3.0 (15/5)
-let avg_mixed = avg(mixed_arr)        // Should be 3.22311
+let avg_mixed = avg(mixed_arr)        // Should be 3.31991
 let avg_single = avg(single_arr)      // Should be 42.0
 avg_float; avg_mixed; avg_single
 
 "Test 12: Minimum function on various arrays"
-let min_float = min(float_arr)      // Should be 1.0
+let min_float = min(float_arr)        // Should be 1.0
 let min_mixed = min(mixed_arr)        // Should be 1.1
 let min_single = min(single_arr)      // Should be 42.0
 min_float; min_mixed; min_single
 
 "Test 13: Maximum function on various arrays"
-let max_float = max(float_arr)      // Should be 5.0
+let max_float = max(float_arr)        // Should be 5.0
 let max_mixed = max(mixed_arr)        // Should be 5.55555
 let max_single = max(single_arr)      // Should be 42.0
 max_float; max_mixed; max_single
@@ -92,7 +92,7 @@ let large_min = min(large_arr)        // Should be 1.0
 let large_max = max(large_arr)        // Should be 10.0
 large_sum; large_avg; large_min; large_max
 
-// Test 16: Negative numbers
+"Test 16: Negative numbers"
 let negative_arr = [-1.0, -2.0, 3.0, -4.0, 5.0]
 let neg_sum = sum(negative_arr)       // Should be 1.0
 let neg_avg = avg(negative_arr)       // Should be 0.2

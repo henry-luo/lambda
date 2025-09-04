@@ -198,6 +198,7 @@ long range_get(Range *range, int index);
 List* list();  // constructs an empty list
 Item list_fill(List *list, int cnt, ...);  // fill the list with the items
 void list_push(List *list, Item item);
+Item list_end(List *list);
 
 #ifndef __cplusplus
     struct ArrayInt {

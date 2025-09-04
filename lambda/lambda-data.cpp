@@ -288,6 +288,7 @@ void list_push(List *list, Item item) {
         *dval = *(double*)item.pointer;
         list->items[list->length-1] = {.item = d2it(dval)};
         list->extra++;
+        log_debug("list_push: float value: %f", *dval);
         break;
     }
     case LMD_TYPE_INT64: {
