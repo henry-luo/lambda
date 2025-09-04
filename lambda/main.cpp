@@ -111,7 +111,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
         
         // Print result
         StrBuf *output = strbuf_new_cap(256);
-        print_item(output, result);
+        print_root_item(output, result);
         printf("%s", output->str);
         strbuf_free(output);
         
@@ -131,7 +131,7 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
     
     printf("##### Script '%s' executed: #####\n", script_path);
     StrBuf *output = strbuf_new_cap(256);
-    print_item(output, result);
+    print_root_item(output, result);
     printf("%s", output->str);
     strbuf_free(output);
     // todo: should have return value
@@ -360,9 +360,9 @@ int exec_convert(int argc, char* argv[]) {
         } else if (strcmp(to_format, "math-mathml") == 0) {
             formatted_output = format_math_mathml(input->pool, input->root);
         } else if (strcmp(to_format, "mark") == 0) {
-            // Use print_item to format as mark representation
+            // Use print_root_item to format as mark representation
             StrBuf* sb = strbuf_new_cap(1024);
-            print_item(sb, input->root);
+            print_root_item(sb, input->root);
             formatted_output = create_string(input->pool, sb->str);
             strbuf_free(sb);
         } else {

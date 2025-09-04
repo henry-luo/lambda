@@ -236,7 +236,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             } else {
                 strbuf_append_str(strbuf, " ");
             }
-            strbuf_append_format(strbuf, "%.*s:", (int)field->name->length, field->name->str);
+            strbuf_append_format(strbuf, "%.*s: ", (int)field->name->length, field->name->str);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL:
                 strbuf_append_str(strbuf, "null");
@@ -495,7 +495,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         if (depth) strbuf_append_char(strbuf, '(');
         for (int i = 0; i < list->length; i++) {
             if (i) strbuf_append_str(strbuf, depth ? ", " : "\n");
-            print_item(strbuf, list->items[i], depth + 1, indent);
+            print_item(strbuf, list->items[i], depth, indent);
         }
         if (depth) strbuf_append_char(strbuf, ')');
         break;
@@ -545,7 +545,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         Map *map = item.map;
         TypeMap *map_type = (TypeMap*)map->type;
         strbuf_append_char(strbuf, '{');
-        print_named_items(strbuf, map_type, map->data, !depth ? 1: depth + 1, indent);
+        print_named_items(strbuf, map_type, map->data, depth + 1, indent);
         strbuf_append_char(strbuf, '}');
         break;
     }
@@ -563,14 +563,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             strbuf_append_str(strbuf, indent ? "\n": (elmt_type->length ? "; ":" "));
             for (long i = 0; i < element->length; i++) {
                 if (i) strbuf_append_str(strbuf, indent ? "\n" : "; ");
-                if (indent) { for (int i=0; i<=depth; i++) strbuf_append_str(strbuf, indent); }
+                if (indent) { for (int i=0; i<depth+1; i++) strbuf_append_str(strbuf, indent); }
                 print_item(strbuf, element->items[i], depth + 1, indent);
             }
-            // if (indent) {
-            //     strbuf_append_char(strbuf, '\n');
-            //     for (int i=0; i<depth-1; i++) strbuf_append_str(strbuf, indent); 
-            // }
         }
+        // no indentation for closing '>'
         strbuf_append_char(strbuf, '>');
         break;
     }
@@ -601,10 +598,12 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     default:
         strbuf_append_format(strbuf, "[unknown type %d!!]", type_id);
     }
+}
 
-    if (depth == 0) { // append last '\n'
-        strbuf_append_char(strbuf, '\n');
-    }
+void print_root_item(StrBuf *strbuf, Item item, char* indent) {
+    print_item(strbuf, item, 0, indent);
+    // append last '\n'
+    strbuf_append_char(strbuf, '\n');
 }
 
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent) {
