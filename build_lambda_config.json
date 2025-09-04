@@ -415,6 +415,12 @@
                         "name": "🖥️ System Information Tests",
                         "dependencies": ["lambda-input-full"],
                         "binary": "test_sysinfo.exe"
+                    },
+                    {
+                        "source": "test/test_jsx_roundtrip.cpp",
+                        "name": "⚛️ JSX Roundtrip Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_jsx_roundtrip.exe"
                     }
                 ],
                 "type": "input",
