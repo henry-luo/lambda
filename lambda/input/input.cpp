@@ -25,17 +25,13 @@ void parse_ics(Input* input, const char* ics_string);
 void parse_mark(Input* input, const char* mark_string);
 void parse_org(Input* input, const char* org_string);
 void parse_css(Input* input, const char* css_string);
+void parse_jsx(Input* input, const char* jsx_string);
 void parse_math(Input* input, const char* math_string, const char* flavor);
 Item input_markup(Input *input, const char* content);
 
 // Import MarkupFormat enum from markup-parser.h
 #include "markup-parser.h"
 Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
-
-
-String* stringbuf_to_string_wrapper(StringBuf *sb) {
-    return stringbuf_to_string(sb);
-}
 
 // Helper function to create string from char content
 String* create_input_string(Input* input, const char* text, int start, int len) {
@@ -517,6 +513,9 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         }
         else if (strcmp(effective_type, "css") == 0) {
             parse_css(input, source);
+        }
+        else if (strcmp(effective_type, "jsx") == 0) {
+            parse_jsx(input, source);
         }
         else if (strcmp(effective_type, "math") == 0) {
             const char* math_flavor = (flavor && flavor->chars) ? flavor->chars : "latex";
