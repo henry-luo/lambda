@@ -739,8 +739,17 @@ void print_const(Script *script, Type* type) {
 }
 
 void print_ast_node(Script *script, AstNode *node, int indent) {
+    if (!script) {
+        for (int i = 0; i < indent; i++) { printf("  "); }
+        printf("[null script]\n");  return;
+    }
+    if (!node) {
+        for (int i = 0; i < indent; i++) { printf("  "); }
+        printf("[null node]\n");  return;
+    }
     for (int i = 0; i < indent; i++) { printf("  "); }
     const char* type_name = node->type ? type_info[node->type->type_id].name : "unknown";
+    log_debug("print_ast_node: node_type=%d, name=%s", node->node_type, type_name);
     switch(node->node_type) {
     case AST_NODE_IDENT:
         printf("[ident:%.*s:%s,const:%d]\n", (int)((AstIdentNode*)node)->name->len, 
@@ -1008,11 +1017,17 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         print_ast_node(script, bt_node->right, indent + 1);        
         break;
     }
-    case AST_NODE_IMPORT:
+    case AST_NODE_IMPORT: {
+        AstImportNode* import_node = (AstImportNode*)node;
+        if (!import_node->alias || !import_node->module.str) {
+            printf("[import: invalid!!]\n");
+            break;
+        }
         printf("[import %.*s:%.*s]\n", 
-            (int)((AstImportNode*)node)->alias->len, ((AstImportNode*)node)->alias->chars, 
-            (int)((AstImportNode*)node)->module.length, ((AstImportNode*)node)->module.str);
+            (int)import_node->alias->len, import_node->alias->chars, 
+            (int)import_node->module.length, import_node->module.str);
         break;
+    }
     case AST_SCRIPT: {
         printf("[script:%s]\n", type_name);
         AstNode* child = ((AstScript*)node)->child;
