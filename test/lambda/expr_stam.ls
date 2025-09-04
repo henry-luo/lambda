@@ -176,6 +176,7 @@ let complex_init = {
     strings_doubled: (for (s in ["a", "b", "c"]) s + s),
     conditions: (for (x in [1, 2, 3, 4]) (if (x > 2) true else false))
 };
+complex_init
 
 "# If statement with for expressions in branches"
 if (numbers[0] > 0) {
@@ -205,10 +206,6 @@ if (numbers[0] > 0) {
 "# Empty collections"
 (for (x in []) x)  // empty array
 (for (y in {}) y)  // empty map
-
-// "Single element collections"
-// (for (single in [42]) single * 2)
-// (for (one in {key: "value"}) one)
 
 "# Null handling"
 (let maybe_null = null, if (maybe_null) "has value" else "is null")

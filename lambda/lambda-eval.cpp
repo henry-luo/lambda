@@ -21,6 +21,7 @@ extern __thread Context* context;
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
 
 Bool is_truthy(Item item) {
+    log_debug("is_truthy: item type %d", item.type_id);
     switch (item.type_id) {
     case LMD_TYPE_NULL:
         return BOOL_FALSE;
@@ -29,7 +30,7 @@ Bool is_truthy(Item item) {
     case LMD_TYPE_BOOL:
         return item.bool_val ? BOOL_TRUE : BOOL_FALSE;
     default: // all other value considered truthy
-        return BOOL_TRUE;
+        return item.item ? BOOL_TRUE : BOOL_FALSE;  // should null be considered ERROR?
     }
 }
 
