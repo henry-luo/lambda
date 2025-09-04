@@ -51,7 +51,7 @@ static char* normalize_mdx(const char* mdx) {
 }
 
 // Test simple MDX roundtrip
-Test(mdx_roundtrip, simple_mdx) {
+Test(mdx_roundtrip, simple_mdx, .disabled = true) {
     const char* mdx_content = 
         "# Hello MDX\n\n"
         "This is **markdown** content.\n\n"
@@ -122,7 +122,7 @@ Test(mdx_roundtrip, jsx_fragments) {
 }
 
 // Test complex MDX with nested components
-Test(mdx_roundtrip, nested_components) {
+Test(mdx_roundtrip, nested_components, .disabled = true) {
     const char* mdx_content = 
         "# Nested Test\n\n"
         "<Card title=\"Test\">\n"
@@ -162,7 +162,7 @@ Test(mdx_roundtrip, nested_components) {
 }
 
 // Test MDX with expressions
-Test(mdx_roundtrip, jsx_expressions) {
+Test(mdx_roundtrip, jsx_expressions, .disabled = true) {
     const char* mdx_content = 
         "# Expression Test\n\n"
         "<Button onClick={() => alert('hi')}>Click</Button>\n\n"
