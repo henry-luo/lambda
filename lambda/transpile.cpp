@@ -78,7 +78,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         log_debug("transpile box item: NULL type, node_type: %d", item->node_type);
         return;
     }
-    log_debug("transpile box item: %d", item->type->type_id);
+    // log_debug("transpile box item: %d", item->type->type_id);
         
     // Debug: if this is a primary node with an identifier, show more info
     if (item->node_type == AST_NODE_PRIMARY) {
@@ -1785,7 +1785,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
     log_debug("script reference: %s", import_node->script->reference);
     // loop through the public functions in the module
     AstNode *node = import_node->script->ast_root;
-    if (!node) { log_debug("missing root node");  return; }
+    if (!node) { log_debug("missing root node in module_import");  return; }
     assert(node->node_type == AST_SCRIPT);
     node = ((AstScript*)node)->child;
     log_debug("finding content node");
@@ -1964,7 +1964,11 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         define_module_import(tp, (AstImportNode*)node);
         break;
     case AST_NODE_SYS_FUNC:
-        // should define its params
+        // todo: should define its params
+        break;
+    case AST_NODE_TYPE:  case AST_NODE_LIST_TYPE:  case AST_NODE_ARRAY_TYPE:
+    case AST_NODE_MAP_TYPE:  case AST_NODE_ELMT_TYPE:  case AST_NODE_BINARY_TYPE:
+        // nothing to define at the moment
         break;
     default:
         log_debug("unknown expression type: %d", node->node_type);

@@ -1851,7 +1851,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
 }
 
 void declare_module_import(Transpiler* tp, AstImportNode *import_node) {
-    log_debug("declare import module");
+    log_debug("declare_module_import");
     // import module
     if (!import_node->script) { log_error("missing script");  return; }
     log_debug("script reference: %s", import_node->script->reference);
@@ -1895,7 +1895,7 @@ void declare_module_import(Transpiler* tp, AstImportNode *import_node) {
 }
 
 AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
-    log_debug("build import module");
+    log_debug("build_module_import");
     AstImportNode* ast_node = (AstImportNode*)alloc_ast_node(
         tp, AST_NODE_IMPORT, import_node, sizeof(AstImportNode));
     ast_node->type = &TYPE_NULL;

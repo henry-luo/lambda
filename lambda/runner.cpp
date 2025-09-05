@@ -268,7 +268,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 }
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source) {
-    // printf("loading script: %s\n", script_path);
+    log_info("loading script: %s\n", script_path);
     // find the script in the list of scripts
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script *script = (Script*)runtime->scripts->data[i];
@@ -293,7 +293,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     memcpy(&transpiler, new_script, sizeof(Script));
     transpiler.parser = runtime->parser;  transpiler.runtime = runtime;
     transpile_script(&transpiler, new_script, script_path);
-    log_debug("loaded main func: %p", new_script->main_func);
+    log_debug("loaded script main func: %s, %p", script_path, new_script->main_func);
     return new_script;
 }
 
