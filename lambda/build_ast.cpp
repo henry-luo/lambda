@@ -1851,30 +1851,30 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
 }
 
 void declare_module_import(Transpiler* tp, AstImportNode *import_node) {
-        log_debug("declare import module");
+    log_debug("declare import module");
     // import module
-        log_debug("misssing script");
-        log_debug("script reference: %s", import_node->script->reference);
+    if (!import_node->script) { log_error("missing script");  return; }
+    log_debug("script reference: %s", import_node->script->reference);
     // loop through the public functions in the module
+    if (!import_node->script->ast_root) { log_error("missing ast root");  return; }
     AstNode *node = import_node->script->ast_root;
-        log_debug("misssing root node");
     // Defensive check: validate node type instead of using assert
     if (node->node_type != AST_SCRIPT) {
         log_error("Error: declare_module_import expected AST_SCRIPT but got node_type %d", node->node_type);
         return;  // Defensive recovery - exit gracefully
     }
     node = ((AstScript*)node)->child;
-        log_debug("finding content node");
+    log_debug("finding content node");
     while (node) {
         if (node->node_type == AST_NODE_CONTENT) break;
         node = node->next;
     }
-        log_debug("misssing content node");
+    log_debug("misssing content node");
     node = ((AstListNode*)node)->item;
     while (node) {
         if (node->node_type == AST_NODE_FUNC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
-        log_debug("got fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
+            log_debug("got fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
                 ((TypeFunc*)func_node->type)->is_public);
             if (((TypeFunc*)func_node->type)->is_public) {
                 push_name(tp, (AstNamedNode*)func_node, import_node);
@@ -1886,7 +1886,7 @@ void declare_module_import(Transpiler* tp, AstImportNode *import_node) {
             while (declare) {
                 AstNamedNode *dec_node = (AstNamedNode*)declare;
                 push_name(tp, (AstNamedNode*)dec_node, import_node);
-        log_debug("got pub var: %.*s", (int)dec_node->name->len, dec_node->name->chars);
+                log_debug("got pub var: %.*s", (int)dec_node->name->len, dec_node->name->chars);
                 declare = declare->next;
             }
         }
@@ -1895,10 +1895,10 @@ void declare_module_import(Transpiler* tp, AstImportNode *import_node) {
 }
 
 AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
-        log_debug("build import module");
+    log_debug("build import module");
     AstImportNode* ast_node = (AstImportNode*)alloc_ast_node(
         tp, AST_NODE_IMPORT, import_node, sizeof(AstImportNode));
-        ast_node->type = &TYPE_NULL;
+    ast_node->type = &TYPE_NULL;
     TSTreeCursor cursor = ts_tree_cursor_new(import_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
     while (has_node) {
@@ -1919,8 +1919,8 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
     if (ast_node->module.length) {
         if (ast_node->module.str[0] == '.') {
             // convert relative import to path
-        log_debug("runtime: %p", tp->runtime);
-        log_debug("runtime dir: %s", tp->runtime->current_dir);
+            log_debug("runtime: %p", tp->runtime);
+            log_debug("runtime dir: %s", tp->runtime->current_dir);
             StrBuf *buf = strbuf_new();
             strbuf_append_format(buf, "%s%.*s", tp->runtime->current_dir, 
                 (int)ast_node->module.length - 1, ast_node->module.str + 1);
@@ -1930,17 +1930,22 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
             ast_node->script = load_script(tp->runtime, buf->str, NULL);
             strbuf_free(buf);
             // import names/definitions from the modules
-            declare_module_import(tp, ast_node);
+            if (ast_node->script) {
+                declare_module_import(tp, ast_node);
+            }
+            else {
+                log_error("Error: failed to load module %.*s", (int)ast_node->module.length, ast_node->module.str);
+            }
         }
         else {
-        log_debug("module type not supported yet: %.*s", (int)ast_node->module.length, ast_node->module.str);
+            log_debug("module type not supported yet: %.*s", (int)ast_node->module.length, ast_node->module.str);
         }
     }
     return (AstNode*)ast_node;
 }
 
 AstNode* build_script(Transpiler* tp, TSNode script_node) {
-        log_debug("build script");
+    log_debug("build script");
     AstScript* ast_node = (AstScript*)alloc_ast_node(tp, AST_SCRIPT, script_node, sizeof(AstScript));
     tp->current_scope = ast_node->global_vars = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
 
@@ -1962,7 +1967,7 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
             // skip comments
             break;
         default:
-        log_debug("unknown script child: %s", ts_node_type(child));
+            log_debug("unknown script child: %s", ts_node_type(child));
         }
         // AstNode* ast = symbol == SYM_CONTENT ? build_content(tp, child, true, true) : build_expr(tp, child);
         if (ast) {
@@ -1973,6 +1978,6 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
         child = ts_node_next_named_sibling(child);
     }
     if (ast_node->child) ast_node->type = ast_node->child->type;
-        log_debug("build script child: %p", ast_node->child);
+    log_debug("build script child: %p", ast_node->child);
     return (AstNode*)ast_node;
 }

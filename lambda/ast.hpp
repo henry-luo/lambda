@@ -283,9 +283,11 @@ typedef struct Transpiler : Script {
     Runtime* runtime;
 } Transpiler;
 
-void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent=" ");
-void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth=0, char* indent=" ");
-// for debugging onnly
-void log_item(Item item, char* msg="");
+void print_item(StrBuf *strbuf, Item item, int depth=0, char* indent="  ");
+void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth=0, char* indent="  ");
+void print_root_item(StrBuf *strbuf, Item item, char* indent="  ");
 // for C to access
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent);
+
+// for debugging onnly
+void log_item(Item item, const char* msg="");

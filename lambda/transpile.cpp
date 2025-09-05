@@ -353,18 +353,19 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     }
 }
 
-void push_list_items(Transpiler* tp, AstNode *item) {
+void push_list_items(Transpiler* tp, AstNode *item, bool is_elmt) {
     while (item) {
         // skip let declaration
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || 
             item->node_type == AST_NODE_FUNC) {
             item = item->next;  continue;
         }
-        strbuf_append_str(tp->code_buf, " list_push(ls,");
+        strbuf_append_format(tp->code_buf, " list_push(%s, ", is_elmt ? "el" : "ls");
         transpile_box_item(tp, item);
         strbuf_append_str(tp->code_buf, ");\n");
         item = item->next;
     }
+    strbuf_append_format(tp->code_buf, " list_end(%s);})", is_elmt ? "el" : "ls");
 }
 
 void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
@@ -871,7 +872,7 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
     }
     else {
         strbuf_append_str(tp->code_buf, "is_truthy(");
-        transpile_expr(tp, if_node->cond);
+        transpile_box_item(tp, if_node->cond);
         strbuf_append_char(tp->code_buf, ')');
     }
     strbuf_append_str(tp->code_buf, " ? ");
@@ -1205,8 +1206,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, ");})");
     } 
     else {
-        push_list_items(tp, list_node->item);
-        strbuf_append_str(tp->code_buf, " ls;})");
+        push_list_items(tp, list_node->item, false);
     }
 }
 
@@ -1232,8 +1232,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, "null;})");
         return;
     }
-    push_list_items(tp, list_node->item);
-    strbuf_append_str(tp->code_buf, " ls;})");
+    push_list_items(tp, list_node->item, false);
 }
 
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
@@ -1282,12 +1281,12 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!elmt_node) {
         log_error("Error: transpile_element called with null element node");
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        // todo: raise tranpiling error
         return;
     }
     if (!elmt_node->type) {
         log_error("Error: transpile_element missing type information");
-        strbuf_append_str(tp->code_buf, "({Element* el=elmt(0); el;})");
+        // todo: raise tranpiling error
         return;
     }
     
@@ -1295,6 +1294,8 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     TypeElmt* type = (TypeElmt*)elmt_node->type;
     strbuf_append_int(tp->code_buf, type->type_index);
     strbuf_append_str(tp->code_buf, ");");
+
+    // transpile the attributes
     AstNode *item = elmt_node->item;
     if (item) {
         strbuf_append_str(tp->code_buf, "\n elmt_fill(el,");
@@ -1315,6 +1316,8 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
         }
         strbuf_append_str(tp->code_buf, ");");
     }
+
+    // transpile the content items
     if (type->content_length) {
         if (type->content_length < 10) {
             strbuf_append_str(tp->code_buf, "\n list_fill(el,");
@@ -1325,14 +1328,23 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
             } else {
                 log_error("Error: transpile_element content missing despite content_length > 0");
             }
-            strbuf_append_str(tp->code_buf, ");");
+            strbuf_append_str(tp->code_buf, ");})");
         } else {
-            push_list_items(tp, ((AstListNode*)elmt_node->content)->item);
+            if (elmt_node->content) {
+                push_list_items(tp, ((AstListNode*)elmt_node->content)->item, true);
+            } else {
+                log_error("Error: transpile_element content missing despite content_length > 0");
+            }
         }
     }
-    // Always return the element
-    strbuf_append_str(tp->code_buf, "\n el;");
-    strbuf_append_str(tp->code_buf, "})");
+    else { // no content
+        if (elmt_node->item) {
+            strbuf_append_str(tp->code_buf, " list_end(el);})"); 
+        }
+        else { // and no attr, thus no frame_end
+            strbuf_append_str(tp->code_buf, " el;})"); 
+        }  
+    }
 }
 
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
@@ -1767,27 +1779,27 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
 }
 
 void define_module_import(Transpiler* tp, AstImportNode *import_node) {
-        log_debug("define import module");
+    log_debug("define import module");
     // import module
-        log_debug("misssing script");
-        log_debug("script reference: %s", import_node->script->reference);
+    if (!import_node->script) { log_error("Error: missing script for import");  return; }
+    log_debug("script reference: %s", import_node->script->reference);
     // loop through the public functions in the module
     AstNode *node = import_node->script->ast_root;
-        log_debug("misssing root node");
+    if (!node) { log_debug("missing root node");  return; }
     assert(node->node_type == AST_SCRIPT);
     node = ((AstScript*)node)->child;
-        log_debug("finding content node");
+    log_debug("finding content node");
     while (node) {
         if (node->node_type == AST_NODE_CONTENT) break;
         node = node->next;
     }
-        log_debug("misssing content node");
+    log_debug("missing content node");
     strbuf_append_format(tp->code_buf, "struct Mod%d {\n", import_node->script->index);
     node = ((AstListNode*)node)->item;
     while (node) {
         if (node->node_type == AST_NODE_FUNC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
-        log_debug("got fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
+            log_debug("got fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
                 ((TypeFunc*)func_node->type)->is_public);
             if (((TypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);

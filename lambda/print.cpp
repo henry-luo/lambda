@@ -236,7 +236,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             } else {
                 strbuf_append_str(strbuf, " ");
             }
-            strbuf_append_format(strbuf, "%.*s:", (int)field->name->length, field->name->str);
+            strbuf_append_format(strbuf, "%.*s: ", (int)field->name->length, field->name->str);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL:
                 strbuf_append_str(strbuf, "null");
@@ -301,19 +301,13 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 print_typeditem(strbuf, (TypedItem*)data, depth, indent);
                 break;
             default:
-                strbuf_append_format(strbuf, "[unknown]");
+                strbuf_append_str(strbuf, "[unknown]");
             }
         }
         
         advance_field:
         ShapeEntry *next_field = field->next;
         field = next_field;
-    }
-    
-    // Add closing indentation if we have nested structures
-    if (indent && !is_attrs && map_type->length > 0) {
-        strbuf_append_char(strbuf, '\n');
-        for (int i = 0; i < depth - 1; i++) strbuf_append_str(strbuf, indent);
     }
 }
 
@@ -495,7 +489,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         if (depth) strbuf_append_char(strbuf, '(');
         for (int i = 0; i < list->length; i++) {
             if (i) strbuf_append_str(strbuf, depth ? ", " : "\n");
-            print_item(strbuf, list->items[i], depth + 1, indent);
+            print_item(strbuf, list->items[i], depth, indent);
         }
         if (depth) strbuf_append_char(strbuf, ')');
         break;
@@ -545,7 +539,12 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         Map *map = item.map;
         TypeMap *map_type = (TypeMap*)map->type;
         strbuf_append_char(strbuf, '{');
-        print_named_items(strbuf, map_type, map->data, !depth ? 1: depth + 1, indent);
+        print_named_items(strbuf, map_type, map->data, depth + 1, indent);
+        // add closing indentation if we have nested structures
+        if (indent && map_type->length > 0) {
+            strbuf_append_char(strbuf, '\n');
+            for (int i = 0; i < depth; i++) strbuf_append_str(strbuf, indent);
+        }        
         strbuf_append_char(strbuf, '}');
         break;
     }
@@ -563,14 +562,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             strbuf_append_str(strbuf, indent ? "\n": (elmt_type->length ? "; ":" "));
             for (long i = 0; i < element->length; i++) {
                 if (i) strbuf_append_str(strbuf, indent ? "\n" : "; ");
-                if (indent) { for (int i=0; i<=depth; i++) strbuf_append_str(strbuf, indent); }
+                if (indent) { for (int i=0; i<depth+1; i++) strbuf_append_str(strbuf, indent); }
                 print_item(strbuf, element->items[i], depth + 1, indent);
             }
-            // if (indent) {
-            //     strbuf_append_char(strbuf, '\n');
-            //     for (int i=0; i<depth-1; i++) strbuf_append_str(strbuf, indent); 
-            // }
         }
+        // no indentation for closing '>'
         strbuf_append_char(strbuf, '>');
         break;
     }
@@ -585,6 +581,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         // printf("print type: %p, type_id: %d\n", type, type->type->type_id);
         char* type_name = type_info[type->type->type_id].name;
         if (type->type->type_id == LMD_TYPE_NULL) {
+            // print as "type.null"
             strbuf_append_format(strbuf, "type.%s", type_name);
         } else {
             strbuf_append_str(strbuf, type_name);
@@ -601,10 +598,12 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     default:
         strbuf_append_format(strbuf, "[unknown type %d!!]", type_id);
     }
+}
 
-    if (depth == 0) { // append last '\n'
-        strbuf_append_char(strbuf, '\n');
-    }
+void print_root_item(StrBuf *strbuf, Item item, char* indent) {
+    print_item(strbuf, item, 0, indent);
+    // append last '\n'
+    strbuf_append_char(strbuf, '\n');
 }
 
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent) {
@@ -681,7 +680,7 @@ char* format_type(Type *type) {
     }
 }
 
-void log_item(Item item, char* msg) {
+void log_item(Item item, const char* msg) {
     StrBuf *strbuf = strbuf_new();
     print_item(strbuf, item, 0, NULL);
     log_debug("%s: %s", msg, strbuf->str);
@@ -740,8 +739,17 @@ void print_const(Script *script, Type* type) {
 }
 
 void print_ast_node(Script *script, AstNode *node, int indent) {
+    if (!script) {
+        for (int i = 0; i < indent; i++) { printf("  "); }
+        printf("[null script]\n");  return;
+    }
+    if (!node) {
+        for (int i = 0; i < indent; i++) { printf("  "); }
+        printf("[null node]\n");  return;
+    }
     for (int i = 0; i < indent; i++) { printf("  "); }
     const char* type_name = node->type ? type_info[node->type->type_id].name : "unknown";
+    log_debug("print_ast_node: node_type=%d, name=%s", node->node_type, type_name);
     switch(node->node_type) {
     case AST_NODE_IDENT:
         printf("[ident:%.*s:%s,const:%d]\n", (int)((AstIdentNode*)node)->name->len, 
@@ -1009,11 +1017,17 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         print_ast_node(script, bt_node->right, indent + 1);        
         break;
     }
-    case AST_NODE_IMPORT:
+    case AST_NODE_IMPORT: {
+        AstImportNode* import_node = (AstImportNode*)node;
+        if (!import_node->alias || !import_node->module.str) {
+            printf("[import: invalid!!]\n");
+            break;
+        }
         printf("[import %.*s:%.*s]\n", 
-            (int)((AstImportNode*)node)->alias->len, ((AstImportNode*)node)->alias->chars, 
-            (int)((AstImportNode*)node)->module.length, ((AstImportNode*)node)->module.str);
+            (int)import_node->alias->len, import_node->alias->chars, 
+            (int)import_node->module.length, import_node->module.str);
         break;
+    }
     case AST_SCRIPT: {
         printf("[script:%s]\n", type_name);
         AstNode* child = ((AstScript*)node)->child;

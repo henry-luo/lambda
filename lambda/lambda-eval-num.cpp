@@ -403,21 +403,21 @@ Item fn_div(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         if (item_b.int_val == 0) {
-        log_error("integer division by zero error");
+        log_error("division by zero error");
             return ItemError;
         }
         return push_d((double)item_a.int_val / (double)item_b.int_val);
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {
         if (*(long*)item_b.pointer == 0) {
-        log_error("integer division by zero error");
+        log_error("division by zero error");
             return ItemError;
         }
         return push_d((double)*(long*)item_a.pointer / (double)*(long*)item_b.pointer);
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
         if (*(double*)item_b.pointer == 0.0) {
-        log_error("float division by zero error");
+        log_error("division by zero error");
             return ItemError;
         }
         log_debug("div float: %g / %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
@@ -425,18 +425,48 @@ Item fn_div(Item item_a, Item item_b) {
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
         if (*(double*)item_b.pointer == 0.0) {
-            log_error("float division by zero error");
+            log_error("division by zero error");
             return ItemError;
         }
         return push_d((double)item_a.int_val / *(double*)item_b.pointer);
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
         if (item_b.int_val == 0) {
-        log_error("integer division by zero error");
+        log_error("division by zero error");
             return ItemError;
         }
         return push_d(*(double*)item_a.pointer / (double)item_b.int_val);
     }
+    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_FLOAT) {
+        long a_val = *(long*)item_a.pointer;
+        if (*(double*)item_b.pointer == 0.0) {
+            log_error("float division by zero error");
+            return ItemError;
+        }
+        return push_d((double)a_val / *(double*)item_b.pointer);
+    }
+    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT64) {
+        long b_val = *(long*)item_b.pointer;
+        if (b_val == 0) {
+            log_error("division by zero error");
+            return ItemError;
+        }
+        return push_d(*(double*)item_a.pointer / (double)b_val);
+    }
+    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT64) {
+        if (*(long*)item_b.pointer == 0) {
+            log_error("division by zero error");
+            return ItemError;
+        }
+        return push_d((double)item_a.int_val / *(long*)item_b.pointer);
+    }
+    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
+        if (item_b.int_val == 0) {
+        log_error("division by zero error");
+            return ItemError;
+        }
+        return push_d(*(long*)item_a.pointer / (double)item_b.int_val);
+    }    
     // Add libmpdec decimal support
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
         mpd_t* a_dec = convert_to_decimal(item_a, context->decimal_ctx);
@@ -1225,6 +1255,7 @@ Item fn_sum(Item item) {
         return push_l(sum);
     }
     else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        log_debug("fn_sum of LMD_TYPE_ARRAY_FLOAT");
         ArrayFloat* arr = item.array_float;  // Use the correct field
         if (arr->length == 0) {
             return push_d(0.0);  // Empty array sums to 0.0
@@ -1233,6 +1264,7 @@ Item fn_sum(Item item) {
         for (size_t i = 0; i < arr->length; i++) {
             sum += arr->items[i];
         }
+        log_debug("fn_sum result: %f", sum);
         return push_d(sum);
     }
     else if (type_id == LMD_TYPE_LIST) {

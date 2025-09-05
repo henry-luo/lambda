@@ -56,6 +56,7 @@ Array* array_fill(Array* arr, int count, ...) {
         }
         va_end(args);
     }
+    log_debug("array_filled");
     frame_end();
     log_item({.list = arr}, "array_filled");
     return arr;
@@ -114,6 +115,7 @@ ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
         }       
         va_end(args);
     }
+    log_debug("array_int_filled");
     frame_end();
     return arr;
 }
@@ -157,6 +159,7 @@ ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
         }       
         va_end(args);
     }
+    log_debug("array_int64_filled");
     frame_end();
     return arr;
 }
@@ -172,25 +175,26 @@ Item array_int64_get(ArrayInt64* array, int index) {
 ArrayFloat* array_float() {
     ArrayFloat *arr = (ArrayFloat*)heap_calloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
     arr->type_id = LMD_TYPE_ARRAY_FLOAT;
+    log_debug("array_float_start");
     frame_start();
     return arr;
 }
 
-ArrayFloat* array_float(int count, ...) {
-    if (count <= 0) { return NULL; }
-    va_list args;
-    va_start(args, count);
-    ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
-    arr->type_id = LMD_TYPE_ARRAY_FLOAT;
-    arr->capacity = count;
-    arr->items = (double*)malloc(count * sizeof(double));
-    arr->length = count;
-    for (int i = 0; i < count; i++) {
-        arr->items[i] = va_arg(args, double);
-    }       
-    va_end(args);
-    return arr;
-}
+// ArrayFloat* array_float(int count, ...) {
+//     if (count <= 0) { return NULL; }
+//     va_list args;
+//     va_start(args, count);
+//     ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
+//     arr->type_id = LMD_TYPE_ARRAY_FLOAT;
+//     arr->capacity = count;
+//     arr->items = (double*)malloc(count * sizeof(double));
+//     arr->length = count;
+//     for (int i = 0; i < count; i++) {
+//         arr->items[i] = va_arg(args, double);
+//     }       
+//     va_end(args);
+//     return arr;
+// }
 
 // used when there's no interleaving with transpiled code
 ArrayFloat* array_float_new(int length) {
@@ -213,6 +217,7 @@ ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
         }       
         va_end(args);
     }
+    log_debug("array_float_filled");
     frame_end();
     return arr;
 }
@@ -301,10 +306,33 @@ void array_float_set_item(ArrayFloat *arr, int index, Item value) {
 }
 
 List* list() {
+    log_enter();
     List *list = (List *)heap_calloc(sizeof(List), LMD_TYPE_LIST);
     list->type_id = LMD_TYPE_LIST;
     frame_start();
     return list;
+}
+
+Item list_end(List *list) {
+    frame_end();  log_leave();
+    if (list->type_id == LMD_TYPE_ELEMENT) {
+        log_debug("elmt_end!");
+        log_item({.list = list}, "elmt_end");
+        return {.list = list};        
+    }
+    else {
+        log_debug("list_ended");
+        if (list->length == 0) {
+            return ItemNull;
+        } 
+        // flatten list, not element
+        else if (list->length == 1) {
+            return list->items[0];
+        } else {
+            log_item({.list = list}, "list_end");
+            return {.list = list};
+        }        
+    }
 }
 
 Item list_fill(List *list, int count, ...) {
@@ -315,16 +343,7 @@ Item list_fill(List *list, int count, ...) {
         list_push(list, {.item = va_arg(args, uint64_t)});
     }
     va_end(args);
-    frame_end();
-    // printf("list_filled: %ld items\n", list->length);
-    if (list->length == 0) {
-        return ItemNull;
-    } else if (list->length == 1 && list->type_id != LMD_TYPE_ELEMENT) {
-        return list->items[0];
-    } else {
-        log_item({.list = list}, "list_filled");
-        return {.list = list};
-    }
+    return list_end(list);
 }
 
 Item list_get(List *list, int index) {
@@ -365,6 +384,7 @@ Map* map_fill(Map* map, ...) {
     va_start(args, map_type->length);
     set_fields(map_type, map->data, args);
     va_end(args);
+    log_debug("map_filled");
     frame_end();
     log_debug("map filled with type: %d, length: %ld", map_type->type_id, map_type->length);
     return map;
@@ -460,7 +480,7 @@ Item map_get(Map* map, Item key) {
 }
 
 Element* elmt(int type_index) {
-        log_debug("elmt with type %d", type_index);
+    log_debug("elmt with type index: %d", type_index);
     Element *elmt = (Element *)heap_calloc(sizeof(Element), LMD_TYPE_ELEMENT);
     elmt->type_id = LMD_TYPE_ELEMENT;
     ArrayList* type_list = (ArrayList*)context->type_list;
@@ -469,6 +489,7 @@ Element* elmt(int type_index) {
     if (elmt_type->length || elmt_type->content_length) {
         frame_start();
     }
+    // else - bare element
     return elmt;
 } 
 

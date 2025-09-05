@@ -299,10 +299,11 @@ void free_item(Item item, bool clear_entry) {
             }
         }
     }
-}
+} 
 
 void frame_start() {
-    size_t stack_pos = context->num_stack->current_position;
+    size_t stack_pos = context->num_stack->total_length;
+    log_debug("entering frame_start with num stack position: %zu", stack_pos);
     arraylist_append(context->heap->entries, (void*) (((uint64_t)LMD_CONTAINER_HEAP_START << 56) | stack_pos));
     arraylist_append(context->heap->entries, HEAP_ENTRY_START.raw_pointer);
 }

@@ -35,8 +35,8 @@ b'\xA0FE'
 [121]
 [true, 124]
 {
- a:'hello',
- b:0.5
+  a: 'hello',
+  b: 0.5
 }
 "Test unary operators:"
 127
@@ -50,17 +50,17 @@ inf
 nan
 234
 "Test element:"
-<elmt a:3
- 9
- "hello world"
- true
- true
- true>
+<elmt a: 3
+  9
+  "hello world"
+  true
+  true
+  true>
 678
 123
 456
 789
-<elmt a:12, b:34, c:56>
+<elmt a: 12, b: 34, c: 56>
 "Test range exprs:"
 error
 [12]
@@ -91,16 +91,16 @@ false
 "aaa"
 "Test TYPE_ANY support:"
 {
- a:3,
- b:3
+  a: 3,
+  b: 3
 }
 [1, ("great", "!"), 0.5]
 "Test datetime support:"
 t'2025-01-01'
 t'2025-01-02'
 {
- a:t'2025-01-03',
- b:3.14
+  a: t'2025-01-03',
+  b: 3.14
 }
 t'2025-01-03'
 [t'2025-01-04', t'2025-01-05']
