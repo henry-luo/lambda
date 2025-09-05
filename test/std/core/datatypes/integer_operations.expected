@@ -1,0 +1,19 @@
+09:15:42 [NOTICE] Start transpiling test/std/core/datatypes/integer_operations.ls...
+09:15:42 [ERROR] Syntax tree has errors.
+09:15:42 [ERROR] Syntax error at Ln 16, Col 16 - 16, Col 17: ERROR
+09:15:42 [ERROR] ERROR node at Ln 16, Col 16 - 16, Col 17
+09:15:42 [ERROR] Syntax error at Ln 23, Col 4 - 23, Col 5: ERROR
+09:15:42 [ERROR] ERROR node at Ln 23, Col 4 - 23, Col 5
+09:15:42 [ERROR] Syntax error at Ln 24, Col 4 - 24, Col 5: ERROR
+09:15:42 [ERROR] ERROR node at Ln 24, Col 4 - 24, Col 5
+09:15:42 [ERROR] Syntax error at Ln 25, Col 4 - 25, Col 5: ERROR
+09:15:42 [ERROR] ERROR node at Ln 25, Col 4 - 25, Col 5
+09:15:42 [ERROR] Syntax error at Ln 26, Col 4 - 26, Col 5: ERROR
+09:15:42 [ERROR] ERROR node at Ln 26, Col 4 - 26, Col 5
+09:15:42 [ERROR] Syntax error at Ln 27, Col 4 - 27, Col 5: ERROR
+09:15:42 [ERROR] ERROR node at Ln 27, Col 4 - 27, Col 5
+09:15:42 [ERROR] Syntax error at Ln 28, Col 4 - 28, Col 6: ERROR
+09:15:42 [ERROR] ERROR node at Ln 28, Col 4 - 28, Col 6
+09:15:42 [ERROR] Error: Failed to compile the function.
+##### Script 'test/std/core/datatypes/integer_operations.ls' executed: #####
+null
