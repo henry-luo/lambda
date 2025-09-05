@@ -81,7 +81,7 @@ void trim(std::string& str) {
 
 // Helper function to execute lambda.exe and capture output
 std::string executeLambdaScript(const std::string& file_path, int timeout_seconds = 30) {
-    std::string command = "./lambda.exe " + file_path + " 2>/dev/null";
+    std::string command = "./lambda.exe " + file_path + " 2>&1";
     
     FILE* pipe = popen(command.c_str(), "r");
     if (!pipe) {
@@ -105,12 +105,38 @@ std::string executeLambdaScript(const std::string& file_path, int timeout_second
     if (marker_pos != std::string::npos) {
         size_t result_start = full_output.find('\n', marker_pos);
         if (result_start != std::string::npos) {
-            return full_output.substr(result_start + 1);
+            // Extract everything after the marker line
+            std::string result = full_output.substr(result_start + 1);
+            
+            // Trim leading and trailing whitespace
+            auto start = result.find_first_not_of(" \n\r\t");
+            if (start != std::string::npos) {
+                auto end = result.find_last_not_of(" \n\r\t");
+                result = result.substr(start, end - start + 1);
+            }
+            
+            // Ensure the result ends with a single newline
+            if (!result.empty() && result.back() != '\n') {
+                result += '\n';
+            }
+            
+            return result;
         }
     }
     
-    // If no marker found, return the full output (fallback)
-    return full_output;
+    // If no marker found, trim and return the full output (fallback)
+    std::string result = full_output;
+    auto start = result.find_first_not_of(" \n\r\t");
+    if (start != std::string::npos) {
+        auto end = result.find_last_not_of(" \n\r\t");
+        result = result.substr(start, end - start + 1);
+    }
+    
+    if (!result.empty() && result.back() != '\n') {
+        result += '\n';
+    }
+    
+    return result;
 }
 
 // Test result structure
