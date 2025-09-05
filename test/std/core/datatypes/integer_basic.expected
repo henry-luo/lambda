@@ -1,34 +1,4 @@
-09:15:42 [NOTICE] Start transpiling test/std/core/datatypes/integer_basic.ls...
-[script:list]
-  [content:list[3]]
-    no declare
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:x:int]
-        [primary expr:int,const:1]
-          [const: int]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:y:int]
-        [primary expr:int,const:1]
-          [const: int]
-    item:
-    [binary expr +.3:int]
-      [primary expr:int,const:1]
-        [ident:x:int,const:1]
-      [primary expr:int,const:1]
-        [ident:y:int,const:1]
-09:15:42 [NOTICE] compiling C code in 'test/std/core/datatypes/integer_basic.ls' to MIR
-C2MIR init end           -- 64 usec
-test/std/core/datatypes/integer_basic.ls:1:2: warning -- unknown pragma
-    preprocessor tokens -- 2426, parse tokens -- 1458
-  C2MIR preprocessor end    -- 447 usec
-  C2MIR parser end          -- 559 usec
-  C2MIR context checker end -- 641 usec
-  C2MIR generator end       -- 692 usec
-C2MIR compiler end                -- 726 usec
-09:15:42 [NOTICE] Generating native code...
-##### Script 'test/std/core/datatypes/integer_basic.ls' executed: #####
+
+5
+10
 15
