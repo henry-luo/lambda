@@ -4,14 +4,20 @@
 
 This document outlines a comprehensive, structured testing framework for the Lambda scripting language engine. The plan addresses the current ad-hoc testing approach and proposes a systematic methodology that covers all data types, expressions, and language features with both positive and negative test cases.
 
-## Current State Analysis
+## Current Implementation
 
-### Existing Test Structure
-- **Location**: `./test/lambda/` directory
-- **Format**: Individual `.ls` test files with corresponding `.txt` expected output files
-- **Coverage**: Partial coverage with some comprehensive tests for specific areas
-- **Organization**: Ad-hoc, with tests scattered across different files
-- **Execution**: Manual execution and comparison
+### Test Structure
+- **Location**: `./test/std/` directory
+- **Format**: Individual `.ls` test files with output captured during test execution
+- **Coverage**: Comprehensive coverage of core language features
+- **Organization**: Structured into logical categories
+- **Execution**: Automated via `make test-std`
+
+### Test Categories
+1. **core/**: Core language features and basic operations
+2. **integration/**: Tests for feature interactions and complex scenarios
+3. **negative/**: Tests for error conditions and edge cases
+4. **performance/**: Performance regression tests
 
 ### Identified Gaps
 1. **Inconsistent Coverage**: Some data types and operations are well-tested, others are sparse
@@ -25,24 +31,22 @@ This document outlines a comprehensive, structured testing framework for the Lam
 ### 1. Test Organization Structure
 
 ```
-test/lambda/structured/
+test/std/
 ├── core/                    # Core language features
-│   ├── datatypes/          # Data type tests
-│   ├── expressions/        # Expression evaluation tests
-│   ├── operators/          # Operator tests
+│   ├── arithmetic/         # Basic arithmetic operations
+│   ├── comparison/         # Comparison operations
 │   ├── control_flow/       # Control flow constructs
-│   └── functions/          # Function definition and calls
+│   ├── functions/          # Function definition and calls
+│   └── variables/          # Variable declarations and scoping
 ├── integration/            # Integration tests
-│   ├── mixed_types/        # Cross-type operations
-│   ├── complex_expr/       # Complex nested expressions
-│   └── real_world/         # Real-world scenarios
+│   ├── mixed_operations/   # Cross-feature operations
+│   └── complex_expr/       # Complex nested expressions
 ├── negative/               # Error condition tests
-│   ├── syntax_errors/      # Syntax error cases
-│   ├── type_errors/        # Type mismatch errors
 │   ├── runtime_errors/     # Runtime error conditions
-│   └── boundary_errors/    # Boundary condition errors
-├── performance/            # Performance regression tests
-└── utilities/              # Test utilities and helpers
+│   └── syntax_errors/      # Syntax error cases
+└── performance/            # Performance tests
+    ├── execution_time/     # Execution time measurements
+    └── memory_usage/      # Memory usage tests
 ```
 
 ### 2. Data Type Test Categories
@@ -62,7 +66,7 @@ test/lambda/structured/
 #### 2.2 Container Types
 - **List**: `LMD_TYPE_LIST`
 - **Range**: `LMD_TYPE_RANGE`
-- **Array**: `LMD_TYPE_ARRAY`, `LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_FLOAT`
+- **Array**: `LMD_TYPE_ARRAY`, `LMD_TYPE_ARRAY_INT`, `LMD_TYPE_ARRAY_INT64`, `LMD_TYPE_ARRAY_FLOAT`
 - **Map**: `LMD_TYPE_MAP`
 - **Element**: `LMD_TYPE_ELEMENT`
 
@@ -174,7 +178,7 @@ Each test file should follow this structure:
 # test_runner.sh
 
 LAMBDA_EXEC="./lambda"
-TEST_DIR="test/lambda/structured"
+TEST_DIR="test/lambda/std"
 RESULTS_DIR="test/results"
 
 # Functions for running different test categories
@@ -439,17 +443,37 @@ The TAP format enables integration with various CI systems:
 6. **Better Error Reporting**: Detailed failure diagnostics
 7. **Build System Compatibility**: Seamless integration with existing infrastructure
 
+### 5. Test Execution
+
+#### 5.1 Running Tests
+```bash
+# Run all standard tests
+make test-std
+
+# Run a specific test file directly
+./lambda.exe test/std/core/arithmetic/integer_basic.ls
+
+# View test output
+cat test_output/integer_basic.out
+```
+
+#### 5.2 Test Runner Features
+- Automatic discovery of all `.ls` test files
+- Parallel test execution
+- Detailed test output in `test_output/` directory
+- Summary of passed/failed tests
+
 ### 11. Implementation Phases
 
-#### Phase 1: Foundation (Week 1-2) ✅ COMPLETED
-- ✅ Set up test directory structure (`test/std/`)
-- ✅ Create Custom Lambda Test Runner (`lambda_test_runner.cpp`)
-- ✅ Implement JSON and TAP output formats
-- ✅ Create sample test files with metadata system
-- ✅ Establish naming conventions and file structure
-- ✅ **Integrate with existing build system** (`build_lambda_config.json`)
-- ✅ **Update test runner scripts** (`test/test_run.sh`, `test/test_build.sh`)
-- ✅ **Add `lambda-std` test suite** with full compatibility
+#### Phase 1: Foundation (Week 1-2) 
+- Set up test directory structure (`test/std/`)
+- Create Custom Lambda Test Runner (`lambda_test_runner.cpp`)
+- Implement JSON and TAP output formats
+- Create sample test files with metadata system
+- Establish naming conventions and file structure
+- **Integrate with existing build system** (`build_lambda_config.json`)
+- **Update test runner scripts** (`test/test_run.sh`, `test/test_build.sh`)
+- **Add `lambda-std` test suite** with full compatibility
 
 #### Phase 2: Core Coverage (Week 3-4)
 - Complete all data type tests (int, float, string, bool, etc.)
