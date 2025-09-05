@@ -1,1 +1,35 @@
+09:15:42 [NOTICE] Start transpiling test/std/core/datatypes/integer_positive.ls...
+[script:list]
+  [content:list[2]]
+    no declare
+    item:
+    [let stam:null]
+      declare:
+      [assign expr:result:int]
+        [binary expr -.4:int]
+          [binary expr *.5:int]
+            [primary expr:int,const:0]
+              [binary expr +.3:int]
+                [primary expr:int,const:1]
+                  [const: int]
+                [primary expr:int,const:1]
+                  [const: int]
+            [primary expr:int,const:1]
+              [const: int]
+          [primary expr:int,const:1]
+            [const: int]
+    item:
+    [primary expr:int,const:0]
+      [ident:result:int,const:0]
+09:15:42 [NOTICE] compiling C code in 'test/std/core/datatypes/integer_positive.ls' to MIR
+C2MIR init end           -- 72 usec
+test/std/core/datatypes/integer_positive.ls:1:2: warning -- unknown pragma
+    preprocessor tokens -- 2415, parse tokens -- 1449
+  C2MIR preprocessor end    -- 666 usec
+  C2MIR parser end          -- 851 usec
+  C2MIR context checker end -- 931 usec
+  C2MIR generator end       -- 986 usec
+C2MIR compiler end                -- 1020 usec
+09:15:42 [NOTICE] Generating native code...
+##### Script 'test/std/core/datatypes/integer_positive.ls' executed: #####
 27
