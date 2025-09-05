@@ -556,8 +556,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
                 strbuf_append_char(tp->code_buf, ')');
                 return;
             }
-            else if (bi_node->left->type->type_id == LMD_TYPE_INT || 
-                bi_node->left->type->type_id == LMD_TYPE_INT64 ||
+            else if (bi_node->left->type->type_id == LMD_TYPE_INT || bi_node->left->type->type_id == LMD_TYPE_INT64 ||
                 bi_node->left->type->type_id == LMD_TYPE_FLOAT) {
                 strbuf_append_str(tp->code_buf, "(");
                 transpile_expr(tp, bi_node->left);
@@ -566,7 +565,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
                 strbuf_append_char(tp->code_buf, ')');
                 return;
             }
-            // else error
+            // else let fn_add() handle it
         }
         else if (LMD_TYPE_INT <= bi_node->left->type->type_id && bi_node->left->type->type_id <= LMD_TYPE_FLOAT &&
             LMD_TYPE_INT <= bi_node->right->type->type_id && bi_node->right->type->type_id <= LMD_TYPE_FLOAT) {
@@ -606,7 +605,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
                 strbuf_append_char(tp->code_buf, ')');
                 return;
             }
-            // else error
+            // else let fn_sub() handle it
         }
         else if (LMD_TYPE_INT <= bi_node->left->type->type_id && bi_node->left->type->type_id <= LMD_TYPE_FLOAT &&
             LMD_TYPE_INT <= bi_node->right->type->type_id && bi_node->right->type->type_id <= LMD_TYPE_FLOAT) {
@@ -679,7 +678,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
                 strbuf_append_str(tp->code_buf, ")))");
                 return;
             }
-            // else error
+            // else let fn_div() handle it
         }
         else if (LMD_TYPE_INT <= bi_node->left->type->type_id && bi_node->left->type->type_id <= LMD_TYPE_FLOAT &&
             LMD_TYPE_INT <= bi_node->right->type->type_id && bi_node->right->type->type_id <= LMD_TYPE_FLOAT) {
@@ -887,7 +886,7 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
         if (if_node->then) {
             transpile_box_item(tp, if_node->then);
         } else {
-            strbuf_append_str(tp->code_buf, "ITEM_NULL");
+            strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         }
         strbuf_append_str(tp->code_buf, " : ");
         if (if_node->otherwise) {
@@ -913,26 +912,25 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
 }
 
 void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
-        log_debug("transpile assign expr");
+    log_debug("transpile assign expr");
     // Defensive validation: ensure all required pointers and components are valid
     if (!asn_node) {
         log_error("Error: transpile_assign_expr called with null assign node");
-        strbuf_append_str(tp->code_buf, "\n /* invalid assignment */");
+        strbuf_append_str(tp->code_buf, "error");
         return;
     }
     if (!asn_node->type) {
         log_error("Error: transpile_assign_expr missing type information");
-        strbuf_append_str(tp->code_buf, "\n /* assignment missing type */");
+        strbuf_append_str(tp->code_buf, "error");
         return;
     }
     if (!asn_node->as) {
         log_error("Error: transpile_assign_expr missing assignment expression");
-        strbuf_append_str(tp->code_buf, "\n /* assignment missing expression */");
+        strbuf_append_str(tp->code_buf, "error");
         return;
     }
     
     strbuf_append_str(tp->code_buf, "\n ");
-    
     // Check if the assigned expression requires type coercion (will be boxed to Item)
     bool expression_needs_boxing = false;
     Type *expr_type = asn_node->as->type;
@@ -991,7 +989,7 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
     while (declare) {
         // Additional validation for each declaration node
         if (declare->node_type != AST_NODE_ASSIGN) {
-        log_error("Error: transpile_let_stam found non-assign node in declare chain");
+            log_error("Error: transpile_let_stam found non-assign node in declare chain");
             // Skip this node and continue - defensive recovery
             declare = declare->next;
             continue;
@@ -1026,7 +1024,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
         if (array_type && array_type->nested && (uintptr_t)array_type->nested > 0x1000) {
             item_type = array_type->nested;
         } else {
-        log_warn("Warning: Invalid nested type in array, using TYPE_ANY");
+            log_warn("Warning: Invalid nested type in array, using TYPE_ANY");
             item_type = &TYPE_ANY;
         }
     } else if (expr_type->type_id == LMD_TYPE_RANGE) {
@@ -1081,17 +1079,17 @@ void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!for_node) {
         log_error("Error: transpile_for_expr called with null for node");
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     if (!for_node->then) {
         log_error("Error: transpile_for_expr missing then expression");
-        strbuf_append_str(tp->code_buf, "({\n List* ls=list();\n ls;})");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     if (!for_node->then->type) {
         log_error("Error: transpile_for_expr then expression missing type information");
-        strbuf_append_str(tp->code_buf, "({\n List* ls=list();\n ls;})");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     
@@ -1114,10 +1112,8 @@ void transpile_items(Transpiler* tp, AstNode *item) {
             item->node_type == AST_NODE_FUNC) {
             item = item->next;  continue;
         }
-
         if (is_first) { is_first = false; } 
         else { strbuf_append_str(tp->code_buf, ", "); }
-
         transpile_box_item(tp, item);
         item = item->next;
     }
@@ -1167,12 +1163,12 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!list_node) {
         log_error("Error: transpile_list_expr called with null list node");
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     if (!list_node->type) {
         log_error("Error: transpile_list_expr missing type information");
-        strbuf_append_str(tp->code_buf, "({\n List* ls = list();\n ls;})");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     
@@ -1239,12 +1235,12 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!map_node) {
         log_error("Error: transpile_map_expr called with null map node");
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     if (!map_node->type) {
         log_error("Error: transpile_map_expr missing type information");
-        strbuf_append_str(tp->code_buf, "({Map* m = map(0); m;})");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     
@@ -1260,8 +1256,8 @@ void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
                 if (key_expr->as) {
                     transpile_expr(tp, key_expr->as);
                 } else {
-        log_error("Error: transpile_map_expr key expression missing assignment");
-                    strbuf_append_str(tp->code_buf, "ITEM_NULL");
+                    log_error("Error: transpile_map_expr key expression missing assignment");
+                    strbuf_append_str(tp->code_buf, "ITEM_ERROR");
                 }
             } else {
                 transpile_box_item(tp, item);
@@ -1281,12 +1277,12 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
     // Defensive validation: ensure all required pointers and components are valid
     if (!elmt_node) {
         log_error("Error: transpile_element called with null element node");
-        // todo: raise tranpiling error
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     if (!elmt_node->type) {
         log_error("Error: transpile_element missing type information");
-        // todo: raise tranpiling error
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     
@@ -1306,7 +1302,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
                     transpile_expr(tp, key_expr->as);
                 } else {
                     log_error("Error: transpile_element key expression missing assignment");
-                    strbuf_append_str(tp->code_buf, "ITEM_NULL");
+                    strbuf_append_str(tp->code_buf, "ITEM_ERROR");
                 }
             } else {
                 transpile_box_item(tp, item);
@@ -1327,6 +1323,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
                 transpile_items(tp, ((AstListNode*)elmt_node->content)->item);
             } else {
                 log_error("Error: transpile_element content missing despite content_length > 0");
+                strbuf_append_str(tp->code_buf, "ITEM_ERROR");
             }
             strbuf_append_str(tp->code_buf, ");})");
         } else {
@@ -1334,6 +1331,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
                 push_list_items(tp, ((AstListNode*)elmt_node->content)->item, true);
             } else {
                 log_error("Error: transpile_element content missing despite content_length > 0");
+                strbuf_append_str(tp->code_buf, "ITEM_ERROR");
             }
         }
     }
@@ -1504,17 +1502,17 @@ void transpile_index_expr(Transpiler* tp, AstFieldNode *field_node) {
     // Defensive validation: ensure all required pointers and types are valid
     if (!field_node) {
         log_error("Error: transpile_index_expr called with null field_node");
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     if (!field_node->object || !field_node->field) {
         log_error("Error: transpile_index_expr missing object or field");
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     if (!field_node->object->type || !field_node->field->type) {
         log_error("Error: transpile_index_expr missing type information");
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     
