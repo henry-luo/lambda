@@ -229,8 +229,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&end);
     print_elapsed_time("building AST", start, end);
     // print the AST for debugging
-    log_debug("AST: %s ---------\n", tp->reference);
-    print_ast_node(tp, tp->ast_root, 0);
+    log_debug("AST: %s ---------", tp->reference);
+    print_ast_root(tp);
 
     // transpile the AST to C code
     log_debug("transpiling...");
