@@ -488,23 +488,45 @@
                         "source": "test/lambda_test_runner.cpp",
                         "name": "🧪 Lambda Standard Tests",
                         "dependencies": [],
-                        "binary": "test/lambda_test_runner.exe"
+                        "binary": "test/lambda_test_runner",
+                        "libraries": ["c++fs"],
+                        "cxx_flags": ["-std=c++17", "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES", "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0"]
                     }
                 ],
                 "type": "lambda-std",
-                "special_flags": "-std=c++17",
+                "special_flags": "-std=c++17 -D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES -D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0",
                 "uses_build_config": true,
                 "requires_jq": false,
                 "requires_lambda_exe": true,
                 "parallel": true,
+                "platform_specific": {
+                    "darwin": {
+                        "libraries": ["c++fs"],
+                        "cxx_flags": ["-std=c++17", "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES", "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0"]
+                    },
+                    "linux": {
+                        "libraries": ["stdc++fs"]
+                    }
+                },
                 "test_runner": {
                     "type": "custom",
-                    "executable": "test/lambda_test_runner.exe",
+                    "executable": "test/lambda_test_runner",
                     "test_dir": "test/std",
                     "output_formats": ["json", "tap"],
                     "json_output": "test_output/lambda_test_runner_results.json",
                     "tap_output": "test_output/lambda_test_runner_results.tap",
-                    "command_args": ["--test-dir", "test/std", "--format", "both", "--json-output", "test_output/lambda_test_runner_results.json", "--tap-output", "test_output/lambda_test_runner_results.tap"]
+                    "command_args": ["--test-dir", "test/std", "--format", "both", "--json-output", "test_output/lambda_test_runner_results.json", "--tap-output", "test_output/lambda_test_runner_results.tap"],
+                    "platform_specific": {
+                        "darwin": {
+                            "executable": "./test/lambda_test_runner"
+                        },
+                        "linux": {
+                            "executable": "./test/lambda_test_runner"
+                        },
+                        "windows": {
+                            "executable": "test\\lambda_test_runner.exe"
+                        }
+                    }
                 }
             }
         ]

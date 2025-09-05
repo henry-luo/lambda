@@ -409,12 +409,11 @@ test-lambda: build
 	fi
 
 test-std: build
-	@echo "Running Lambda Standard Tests (custom test runner)..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=lambda-std; \
+	@echo "Running Lambda Standard Tests (simple runner)..."
+	@if [ -f "test/simple_test_runner.sh" ]; then \
+		./test/simple_test_runner.sh; \
 	else \
-		echo "Error: Test script not found at test/test_run.sh"; \
-		echo "Please ensure the test script exists and is executable."; \
+		echo "Error: Simple test runner script not found"; \
 		exit 1; \
 	fi
 
