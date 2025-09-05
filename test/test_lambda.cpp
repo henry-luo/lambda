@@ -257,3 +257,7 @@ Test(lambda_tests, test_complex_report_ls) {
 Test(lambda_tests, test_import_ls) {
     test_lambda_script_against_file("test/lambda/import.ls", "test/lambda/import.txt");
 }
+
+Test(lambda_tests, test_numeric_sys_func) {
+    test_lambda_script_against_file("test/lambda/numeric_sys_func.ls", "test/lambda/numeric_sys_func.txt");
+}
