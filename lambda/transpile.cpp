@@ -1348,21 +1348,21 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
 }
 
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
-        log_debug("transpile call expr");
+    log_debug("transpile call expr");
     // Defensive validation: ensure all required pointers and components are valid
     if (!call_node) {
         log_error("Error: transpile_call_expr called with null call node");
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     if (!call_node->function) {
         log_error("Error: transpile_call_expr missing function");
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     if (!call_node->function->type) {
         log_error("Error: transpile_call_expr function missing type information");
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     
@@ -1396,19 +1396,18 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 strbuf_append_str(tp->code_buf, "->ptr");
             }
         } else { // handle Item
-        log_debug("call function type is not func");
-            strbuf_append_str(tp->code_buf, "ITEM_NULL");
+            log_debug("call function type is not func");
+            strbuf_append_str(tp->code_buf, "ITEM_ERROR");
             return;
         }       
     }
 
-    // write the params
+    // transpile the params
     strbuf_append_str(tp->code_buf, "(");
     AstNode* arg = call_node->argument;  TypeParam *param_type = fn_type ? fn_type->param : NULL;
     while (arg) {
         log_debug("transpile_call_expr: processing arg type %d, node_type %d", 
             arg->type->type_id, arg->node_type);
-        
         // For system functions, box DateTime arguments
         if (call_node->function->node_type == AST_NODE_SYS_FUNC && arg->type->type_id == LMD_TYPE_DTIME) {
         log_debug("transpile_call_expr: BOXING DateTime for sys func");

@@ -232,6 +232,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
     }
 
+    // build arguments
     TSTreeCursor cursor = ts_tree_cursor_new(call_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
     AstNode *prev_argument = NULL;
@@ -1638,7 +1639,7 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
 }
 
 AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_global) {
-        log_debug("build function");
+    log_debug("build function");
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp,
         is_named ? AST_NODE_FUNC : AST_NODE_FUNC_EXPR, func_node, sizeof(AstFuncNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
