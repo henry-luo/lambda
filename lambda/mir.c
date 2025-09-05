@@ -136,7 +136,7 @@ MIR_context_t jit_init() {
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name) {
     struct c2mir_options ops = {0}; // Default options
     ops.message_file = stdout;  ops.verbose_p = 1;  ops.debug_p = 0;
-    log_notice("compiling C code in '%s' to MIR", file_name);
+    log_notice("Compiling C code in '%s' to MIR", file_name);
     jit_item_t jit_ptr = {.curr = 0, .code = code, .code_size = code_size};
     if (!c2mir_compile(ctx, &ops, getc_func, &jit_ptr, file_name, NULL)) {
         log_error("compiled '%s' with error!!", file_name);
