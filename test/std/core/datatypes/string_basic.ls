@@ -5,34 +5,37 @@
 
 // String literals
 let single_quoted = 'Hello, World!'
+single_quoted
 let double_quoted = "Hello, World!"
+double_quoted
 let multi_line = """
+multi_line
   This is a
   multi-line
   string.
 """
-
-// String concatenation
 let hello = "Hello, "
+hello
 let world = "World!"
-let greeting = hello + world  // "Hello, World!"
-
-// String length
-let len = greeting.length()  // 13
-
-// String indexing
-let first_char = greeting[0]    // 'H'
-let last_char = greeting[-1]    // '!'
-let substring = greeting[0:5]   // "Hello"
-
-// String methods
-let upper = greeting.upper()    // "HELLO, WORLD!"
-let lower = greeting.lower()    // "hello, world!"
-let trimmed = "  hello  ".trim()  // "hello"
-
-// String interpolation
+world
+let greeting = hello + world  
+greeting
+let len = greeting.length()  
+len
+let first_char = greeting[0]    
+first_char
+let last_char = greeting[-1]    
+last_char
+let substring = greeting[0:5]   
+substring
+let upper = greeting.upper()    
+upper
+let lower = greeting.lower()    
+lower
+let trimmed = "  hello  ".trim()  
+trimmed
 let name = "Alice"
-let message = `Hello, ${name}!`  // "Hello, Alice!"
-
-// Final check
+name
+let message = `Hello, ${name}!`  
+message
 1

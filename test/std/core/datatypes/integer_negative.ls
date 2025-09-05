@@ -5,5 +5,7 @@
 
 // Test negative integer operations
 let a = -10
+a
 let b = 5
+b
 a + b

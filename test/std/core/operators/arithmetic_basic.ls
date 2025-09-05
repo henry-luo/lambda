@@ -5,6 +5,9 @@
 
 // Test basic arithmetic operations
 let a = 10
+a
 let b = 5
+b
 let result = (a + b) * 2 + 2
+result
 result
