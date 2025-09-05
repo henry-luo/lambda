@@ -8,11 +8,8 @@
 "world" - "test"
 "abc" * "def"
 "hello" / 2
-
-// Invalid string indexing
 let str = "hello"
+str
 str[10]  // Index out of bounds
 str[-1]  // Negative index
-
-// Invalid method calls
 str.invalidMethod()

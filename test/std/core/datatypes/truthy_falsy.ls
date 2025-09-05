@@ -4,27 +4,38 @@
 // Expected: 1
 
 // Falsy values
-let f1 = !!false      // false
-let f2 = !!0          // false
-let f3 = !!""         // false
-let f4 = !!null       // false
-let f5 = !!undefined  // false
-let f6 = !!NaN        // false
-
-// Truthy values
-let t1 = !!true           // true
-let t2 = !!1              // true
-let t3 = !!-1             // true
-let t4 = !!"hello"        // true
-let t5 = !![]            // true
-let t6 = !!{}            // true
-let t7 = !![0]           // true
-let t8 = !!function(){}  // true
-
-// Conditional execution
-let result1 = "" || "default"     // "default"
-let result2 = 0 || 42            // 42
-let result3 = null ?? "fallback"  // "fallback"
-
-// Final check
+let f1 = !!false      
+f1
+let f2 = !!0          
+f2
+let f3 = !!""         
+f3
+let f4 = !!null       
+f4
+let f5 = !!undefined  
+f5
+let f6 = !!NaN        
+f6
+let t1 = !!true           
+t1
+let t2 = !!1              
+t2
+let t3 = !!-1             
+t3
+let t4 = !!"hello"        
+t4
+let t5 = !![]            
+t5
+let t6 = !!{}            
+t6
+let t7 = !![0]           
+t7
+let t8 = !!function(){}  
+t8
+let result1 = "" || "default"     
+result1
+let result2 = 0 || 42            
+result2
+let result3 = null ?? "fallback"  
+result3
 1

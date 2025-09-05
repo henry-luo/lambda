@@ -4,36 +4,41 @@
 // Expected: 1
 
 let str = "Hello, World! This is a test string."
-
-// Case conversion
-let upper = str.upper()        // "HELLO, WORLD! THIS IS A TEST STRING."
-let lower = str.lower()        // "hello, world! this is a test string."
-let title = str.title()        // "Hello, World! This Is A Test String."
-
-// Trimming
-let trim = "   hello   ".trim()  // "hello"
-let ltrim = "   hello".ltrim()   // "hello"
-let rtrim = "hello   ".rtrim()   // "hello"
-
-// Searching
-let contains = str.contains("World")  // true
-let starts = str.starts_with("Hello") // true
-let ends = str.ends_with("string.")   // true
-let index = str.index_of("World")     // 7
-let last_index = str.last_index_of("s") // 23
-
-// Splitting and joining
-let words = str.split()  // ["Hello,", "World!", "This", "is", "a", "test", "string."]
-let csv = "a,b,c,d".split(",")  // ["a", "b", "c", "d"]
-let joined = ["a", "b", "c"].join("-")  // "a-b-c"
-
-// Replacement
-let replaced = str.replace("World", "Universe")  // "Hello, Universe! This is a test string."
-let regex_replaced = str.replace(/\s+/, " ")  // Replace multiple spaces with one
-
-// Padding
-let padded = "42".pad_start(5, "0")  // "00042"
-let padded_end = "42".pad_end(5, "!")  // "42!!!"
-
-// Final check
+str
+let upper = str.upper()        
+upper
+let lower = str.lower()        
+lower
+let title = str.title()        
+title
+let trim = "   hello   ".trim()  
+trim
+let ltrim = "   hello".ltrim()   
+ltrim
+let rtrim = "hello   ".rtrim()   
+rtrim
+let contains = str.contains("World")  
+contains
+let starts = str.starts_with("Hello") 
+starts
+let ends = str.ends_with("string.")   
+ends
+let index = str.index_of("World")     
+index
+let last_index = str.last_index_of("s") 
+last_index
+let words = str.split()  
+words
+let csv = "a,b,c,d".split(",")  
+csv
+let joined = ["a", "b", "c"].join("-")  
+joined
+let replaced = str.replace("World", "Universe")  
+replaced
+let regex_replaced = str.replace(/\s+/, " ")  
+regex_replaced
+let padded = "42".pad_start(5, "0")  
+padded
+let padded_end = "42".pad_end(5, "!")  
+padded_end
 1

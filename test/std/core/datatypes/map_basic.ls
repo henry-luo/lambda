@@ -5,34 +5,35 @@
 
 // Map literals
 let empty_map = {}
+empty_map
 let person = {
+person
     name: "Alice",
     age: 30,
     active: true,
     scores: [95, 87, 92]
 }
-
-// Accessing values
-let name = person.name      // "Alice"
-let age = person["age"]     // 30
-let missing = person.email  // undefined
-
-// Modifying maps
+let name = person.name      
+name
+let age = person["age"]     
+age
+let missing = person.email  
+missing
 person.city = "New York"
 person["country"] = "USA"
 person.age += 1  // 31
-
-// Map methods
-let keys = Object.keys(person)    // ["name", "age", "active", "scores", "city", "country"]
-let values = Object.values(person) // ["Alice", 31, true, [95, 87, 92], "New York", "USA"]
-let entries = Object.entries(person) // [["name", "Alice"], ["age", 31], ...]
-
-// Checking existence
-let hasName = "name" in person  // true
-let hasEmail = "email" in person // false
-
-// Nested maps
+let keys = Object.keys(person)    
+keys
+let values = Object.values(person) 
+values
+let entries = Object.entries(person) 
+entries
+let hasName = "name" in person  
+hasName
+let hasEmail = "email" in person 
+hasEmail
 let company = {
+company
     name: "Tech Corp",
     employees: [
         {name: "Alice", role: "Developer"},
@@ -43,10 +44,8 @@ let company = {
         city: "San Francisco"
     }
 }
-
-// Accessing nested properties
-let first_employee = company.employees[0].name  // "Alice"
-let city = company.address.city  // "San Francisco"
-
-// Final check
+let first_employee = company.employees[0].name  
+first_employee
+let city = company.address.city  
+city
 1

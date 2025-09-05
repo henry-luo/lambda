@@ -3,23 +3,61 @@
 // Type: positive
 // Expected: 1
 
-// Test basic decimal operations
-let price = 9.99m
-let quantity = 3m
-
 // Basic arithmetic
-let subtotal = price * quantity  // 29.97
-let tax = subtotal * 0.08m      // 2.3976 (precise decimal arithmetic)
-let total = subtotal + tax      // 32.3676
-
-// Division with decimal precision
-let exact = 1.0m / 3.0m  // 0.3333333333333333333333333333
-
-// Large decimal numbers
-let big_decimal = 1234567890.1234567890m
-
-// Small decimal numbers
-let small_decimal = 0.0000000001234567890m
-
-// Final check
-1
+let a = 10.5m
+a
+a
+let b = 2.5m
+b
+b
+let sum = a + b
+sum
+sum
+let diff = a - b
+diff
+diff
+let product = a * b
+product
+product
+let quotient = a / b
+quotient
+quotient
+let remainder = a % b
+remainder
+remainder
+let neg = -a
+neg
+neg
+let pos = +a
+pos
+pos
+let gt = a > b
+gt
+gt
+let lt = a < b
+lt
+lt
+let gte = a >= b
+gte
+gte
+let lte = a <= b
+lte
+lte
+let eq = a == b
+eq
+eq
+let neq = a != b
+neq
+neq
+let zero = 0.0m
+zero
+zero
+let one = 1.0m
+one
+one
+let large = 9999999999999999999999999999.9999999999m
+large
+large
+let small = 0.0000000000000000000000000001m
+small
+small

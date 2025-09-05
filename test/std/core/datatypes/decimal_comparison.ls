@@ -5,33 +5,37 @@
 
 // Test decimal equality with exact precision
 let a = 0.1m + 0.2m
+a
 let b = 0.3m
-let exact_eq = a == b  // Should be true with decimal
-
-// Test comparison operators
+b
+let exact_eq = a == b  
+exact_eq
 let price1 = 19.99m
+price1
 let price2 = 29.99m
-
-let lt = price1 < price2   // true
+price2
+let lt = price1 < price2   
+lt
 gt = price2 > price1      // true
 lte = price1 <= price2    // true
 gte = price2 >= price1    // true
 neq = price1 != price2    // true
-
-// Test with different scales
 let scaled1 = 1.0m
+scaled1
 let scaled2 = 1.00m
-let scaled_eq = scaled1 == scaled2  // Should be true
-
-// Test with different types
-let decimal_int = 1.0m == 1      // true
-let decimal_float = 1.0m == 1.0  // true (if converted properly)
-let decimal_str = 1.0m == "1.0"  // false (type mismatch)
-
-// Edge cases
+scaled2
+let scaled_eq = scaled1 == scaled2  
+scaled_eq
+let decimal_int = 1.0m == 1      
+decimal_int
+let decimal_float = 1.0m == 1.0  
+decimal_float
+let decimal_str = 1.0m == "1.0"  
+decimal_str
 let zero = 0.0m
+zero
 let neg_zero = -0.0m
-let zero_comp = zero == neg_zero  // Should be true
-
-// Final check
+neg_zero
+let zero_comp = zero == neg_zero  
+zero_comp
 1
