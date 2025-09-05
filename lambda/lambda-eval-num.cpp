@@ -1744,10 +1744,7 @@ Item fn_binary(Item item) {
         memcpy(str->chars, sym->chars, sym->len);
         str->chars[sym->len] = '\0';
         
-        Item result;
-        result.type_id = LMD_TYPE_STRING;
-        result.pointer = str;
-        return result;
+        return (Item){.item = s2it(str)};
     }
     else if (item.type_id == LMD_TYPE_INT) {
         // Convert int to binary string representation
@@ -1768,10 +1765,7 @@ Item fn_binary(Item item) {
         memcpy(str->chars, buf, len);
         str->chars[len] = '\0';
         
-        Item result;
-        result.type_id = LMD_TYPE_STRING;
-        result.pointer = str;
-        return result;
+        return (Item){.item = s2it(str)};
     }
     else if (item.type_id == LMD_TYPE_INT64) {
         // Convert int64 to binary string representation
@@ -1793,10 +1787,7 @@ Item fn_binary(Item item) {
         memcpy(str->chars, buf, len);
         str->chars[len] = '\0';
         
-        Item result;
-        result.type_id = LMD_TYPE_STRING;
-        result.pointer = str;
-        return result;
+        return (Item){.item = s2it(str)};
     }
     else if (item.type_id == LMD_TYPE_FLOAT) {
         // Convert float to binary string representation
@@ -1818,10 +1809,7 @@ Item fn_binary(Item item) {
         memcpy(str->chars, buf, len);
         str->chars[len] = '\0';
         
-        Item result;
-        result.type_id = LMD_TYPE_STRING;
-        result.pointer = str;
-        return result;
+        return (Item){.item = s2it(str)};
     }
     else {
         log_debug("Cannot convert type %d to binary", item.type_id);
@@ -1852,10 +1840,7 @@ Item fn_symbol(Item item) {
         memcpy(sym->chars, str->chars, str->len);
         sym->chars[sym->len] = '\0';
         
-        Item result;
-        result.type_id = LMD_TYPE_SYMBOL;
-        result.pointer = sym;
-        return result;
+        return (Item){.item = y2it(sym)};
     }
     else if (item.type_id == LMD_TYPE_INT) {
         // Convert int to symbol
@@ -1876,10 +1861,7 @@ Item fn_symbol(Item item) {
         memcpy(sym->chars, buf, len);
         sym->chars[len] = '\0';
         
-        Item result;
-        result.type_id = LMD_TYPE_SYMBOL;
-        result.pointer = sym;
-        return result;
+        return (Item){.item = y2it(sym)};
     }
     else if (item.type_id == LMD_TYPE_INT64) {
         // Convert int64 to symbol
@@ -1901,10 +1883,7 @@ Item fn_symbol(Item item) {
         memcpy(sym->chars, buf, len);
         sym->chars[len] = '\0';
         
-        Item result;
-        result.type_id = LMD_TYPE_SYMBOL;
-        result.pointer = sym;
-        return result;
+        return (Item){.item = y2it(sym)};
     }
     else if (item.type_id == LMD_TYPE_FLOAT) {
         // Convert float to symbol
@@ -1926,10 +1905,7 @@ Item fn_symbol(Item item) {
         memcpy(sym->chars, buf, len);
         sym->chars[len] = '\0';
         
-        Item result;
-        result.type_id = LMD_TYPE_SYMBOL;
-        result.pointer = sym;
-        return result;
+        return (Item){.item = y2it(sym)};
     }
     else {
         log_debug("Cannot convert type %d to symbol", item.type_id);
@@ -1950,10 +1926,7 @@ Item fn_float(Item item) {
         }
         *val = (double)item.int_val;
         
-        Item result;
-        result.type_id = LMD_TYPE_FLOAT;
-        result.pointer = val;
-        return result;
+        return (Item){.item = d2it(val)};
     }
     else if (item.type_id == LMD_TYPE_INT64) {
         int64_t int_val = *(int64_t*)item.pointer;
@@ -1964,14 +1937,11 @@ Item fn_float(Item item) {
         }
         *val = (double)int_val;
         
-        Item result;
-        result.type_id = LMD_TYPE_FLOAT;
-        result.pointer = val;
-        return result;
+        return (Item){.item = d2it(val)};
     }
     else if (item.type_id == LMD_TYPE_DECIMAL) {
         mpd_t* dec_val = (mpd_t*)item.pointer;
-        char* dec_str = mpd_to_sci(dec_val, 0, context->decimal_ctx);
+        char* dec_str = mpd_to_sci(dec_val, 1);
         if (!dec_str) {
             log_debug("Failed to convert decimal to string");
             return ItemError;
@@ -1994,10 +1964,7 @@ Item fn_float(Item item) {
         }
         *val = dval;
         
-        Item result;
-        result.type_id = LMD_TYPE_FLOAT;
-        result.pointer = val;
-        return result;
+        return (Item){.item = d2it(val)};
     }
     else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
         String* str = (String*)item.pointer;
@@ -2043,10 +2010,7 @@ Item fn_float(Item item) {
         }
         *result_val = val;
         
-        Item result;
-        result.type_id = LMD_TYPE_FLOAT;
-        result.pointer = result_val;
-        return result;
+        return (Item){.item = d2it(result_val)};
     }
     else {
         log_debug("Cannot convert type %d to float", item.type_id);
