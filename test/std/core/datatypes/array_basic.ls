@@ -5,31 +5,52 @@
 
 // Array literals
 let empty = []
+empty
+
 let numbers = [1, 2, 3, 4, 5]
+numbers
+
 let mixed = [1, "two", 3.0, true, null]
+mixed
 
-// Accessing elements
-let first = numbers[0]     // 1
-let last = numbers[-1]     // 5
-let slice = numbers[1:3]   // [2, 3]
+let first = numbers[0]
+first
 
-// Array methods
-let len = numbers.length()  // 5
-let joined = numbers.join(",")  // "1,2,3,4,5"
-let mapped = numbers.map(x => x * 2)  // [2, 4, 6, 8, 10]
-let filtered = numbers.filter(x => x > 2)  // [3, 4, 5]
-let reduced = numbers.reduce((acc, x) => acc + x, 0)  // 15
+let last = numbers[-1]
+last
+let slice = numbers[1:3]
+slice
 
-// Modifying arrays
-numbers.push(6)       // [1, 2, 3, 4, 5, 6]
-let popped = numbers.pop()  // 6
-numbers.unshift(0)    // [0, 1, 2, 3, 4, 5]
-let shifted = numbers.shift()  // 0
+let len = numbers.length()
+len
 
-// Finding elements
-let hasTwo = numbers.includes(2)  // true
-let index = numbers.indexOf(3)    // 2
-let found = numbers.find(x => x > 3)  // 4
+let joined = numbers.join(",")
+joined
+let mapped = numbers.map(x => x * 2)
+mapped
 
-// Final check
-1
+let filtered = numbers.filter(x => x > 2)
+filtered
+
+let reduced = numbers.reduce((acc, x) => acc + x, 0)
+reduced
+numbers.push(6)
+numbers
+let popped = numbers.pop()
+popped
+
+numbers.unshift(0)
+numbers
+
+let shifted = numbers.shift()
+shifted
+
+numbers
+
+let hasTwo = numbers.includes(2)
+hasTwo
+
+let index = numbers.indexOf(3)
+index
+let found = numbers.find(x => x > 3)
+found

@@ -4,34 +4,28 @@
 // Expected: 1
 
 // Test bitwise operations
-let a = 0b1100  // 12
-let b = 0b1010  // 10
-
-// Bitwise AND
-let and = a & b  // 0b1000 (8)
-
-// Bitwise OR
-let or = a | b   // 0b1110 (14)
-
-// Bitwise XOR
-let xor = a ^ b   // 0b0110 (6)
-
-// Bitwise NOT
-let not_a = ~a    // Depends on integer size
-
-// Left shift
-let left_shift = a << 2  // 0b110000 (48)
-
-// Right shift
-let right_shift = a >> 1  // 0b0110 (6)
-
-// Unsigned right shift (logical shift)
-let unsigned_right = a >>> 1  // 0b0110 (6) for positive numbers
-
-// Test with negative numbers
+let a = 0b1100  
+a
+let b = 0b1010  
+b
+let and = a & b  
+and
+let or = a | b   
+or
+let xor = a ^ b   
+xor
+let not_a = ~a    
+not_a
+let left_shift = a << 2  
+left_shift
+let right_shift = a >> 1  
+right_shift
+let unsigned_right = a >>> 1  
+unsigned_right
 let neg = -1
-let neg_shift = neg >> 1  // Arithmetic shift (sign-extended)
-let neg_ushift = neg >>> 1 // Logical shift (zero-extended)
-
-// Final check
+neg
+let neg_shift = neg >> 1  
+neg_shift
+let neg_ushift = neg >>> 1 
+neg_ushift
 1

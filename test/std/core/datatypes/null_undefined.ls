@@ -5,27 +5,31 @@
 
 // Null and undefined values
 let n = null
+n
 let u = undefined
-
-// Comparison with null/undefined
-let eq_null = n == null      // true
-let eq_undefined = u == null // true (in non-strict comparison)
-let strict_eq = n === null   // true (strict equality)
-let strict_neq = n === u     // false (different types)
-
-// Type checking
-let is_null = n === null     // true
-let is_undefined = u === undefined // true
-
-// Default values with nullish coalescing
-let default1 = n ?? "default"  // "default"
-let default2 = u ?? 42         // 42
-let default3 = 0 ?? "default"  // 0 (only null/undefined are replaced)
-
-// Optional chaining
+u
+let eq_null = n == null      
+eq_null
+let eq_undefined = u == null 
+eq_undefined
+let strict_eq = n === null   
+strict_eq
+let strict_neq = n === u     
+strict_neq
+let is_null = n === null     
+is_null
+let is_undefined = u === undefined 
+is_undefined
+let default1 = n ?? "default"  
+default1
+let default2 = u ?? 42         
+default2
+let default3 = 0 ?? "default"  
+default3
 let obj = {a: {b: 42}}
-let value1 = obj?.a?.b     // 42
-let value2 = obj?.x?.y     // undefined (no error)
-
-// Final check
+obj
+let value1 = obj?.a?.b     
+value1
+let value2 = obj?.x?.y     
+value2
 1

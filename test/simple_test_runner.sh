@@ -8,6 +8,15 @@ echo "Running Lambda Standard Tests (simple runner)..."
 test_dir="test/std"
 output_dir="test_output"
 
+export LANG=C.UTF-8
+export LC_ALL=C.UTF-8
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
 # Create output directory if it doesn't exist
 mkdir -p "$output_dir"
 
@@ -16,35 +25,57 @@ total_tests=0
 passed_tests=0
 failed_tests=0
 
-# Create a temporary file to store results
-temp_file=$(mktemp)
-
 # Find all .ls test files
 while IFS= read -r test_file; do
     test_name=$(basename "$test_file" .ls)
-    echo "Running test: $test_name"
+    test_path=$(dirname "$test_file")
+    expected_file="${test_file%.ls}.expected"
     
-    # Run the test with lambda.exe
-    if ./lambda.exe "$test_file" > "$output_dir/${test_name}.out" 2>&1; then
-        echo "  ✓ PASS: $test_name"
-        ((passed_tests++))
-    else
-        echo "  ✗ FAIL: $test_name (see $output_dir/${test_name}.out)"
+    echo -n "Running test: $test_name"
+    
+    # Run the test with lambda.exe and capture output
+    ./lambda.exe "$test_file" > "$output_dir/${test_name}.out" 2>&1
+    test_status=$?
+    
+    if [ $test_status -ne 0 ]; then
+        echo -e "  ${RED}✗ FAIL${NC} (exit code: $test_status)"
+        echo "  See $output_dir/${test_name}.out for details"
         ((failed_tests++))
+    else
+        # Check if there's an expected file
+        if [ -f "$expected_file" ]; then
+            # Compare output with expected
+            if diff -u "$expected_file" "$output_dir/${test_name}.out" > /dev/null 2>&1; then
+                echo -e "  ${GREEN}✓ PASS${NC}"
+                ((passed_tests++))
+            else
+                echo -e "  ${RED}✗ FAIL${NC} (output mismatch)"
+                echo "  Expected output in: $expected_file"
+                echo "  Actual output in:   $output_dir/${test_name}.out"
+                echo "  Diff:"
+                diff -u "$expected_file" "$output_dir/${test_name}.out" | sed 's/^/    /'
+                ((failed_tests++))
+            fi
+        else
+            # No expected file, just check exit status
+            echo -e "  ${YELLOW}? PASS (no .expected file)${NC}"
+            ((passed_tests++))
+        fi
     fi
     
     ((total_tests++))
 done < <(find "$test_dir" -name "*.ls" | sort)
 
-# Clean up
-rm -f "$temp_file"
-
 # Print summary
-echo ""
-echo "Test Summary:"
-echo "  Total:  $total_tests"
-echo "  Passed: $passed_tests"
-echo "  Failed: $failed_tests"
+echo -e "\nTest Summary:"
+echo -e "  Total:  $total_tests"
+echo -e "  ${GREEN}Passed: $passed_tests${NC}"
+
+if [ $failed_tests -gt 0 ]; then
+    echo -e "  ${RED}Failed: $failed_tests${NC}"
+else
+    echo -e "  ${GREEN}All tests passed!${NC}"
+fi
 
 # Exit with non-zero status if any tests failed
 if [ $failed_tests -gt 0 ]; then

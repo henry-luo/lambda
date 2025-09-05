@@ -6,5 +6,7 @@
 // Test mixed operations: 10 + 2 * 5 - 3 / 3 = 10 + 10 - 1 = 19
 // Actually: 5 * 2 + 10 + 3 = 10 + 10 + 3 = 23
 let a = 5
+a
 let b = 2
+b
 a * b + 10 + 3
