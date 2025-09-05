@@ -10,7 +10,7 @@ let from_int = 42 as decimal
 from_int
 let from_float = 3.14 as decimal
 from_float
-let price = 19.99m
+let price = 19.99n
 price
 let price_str = price as string
 price_str
