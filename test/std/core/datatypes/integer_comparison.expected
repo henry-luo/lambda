@@ -1,154 +1,18 @@
-09:15:42 [NOTICE] Start transpiling test/std/core/datatypes/integer_comparison.ls...
-[script:list]
-  [content:list[17]]
-    no declare
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:a:int]
-        [primary expr:int,const:1]
-          [const: int]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:b:int]
-        [primary expr:int,const:1]
-          [const: int]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:c:int]
-        [primary expr:int,const:1]
-          [const: int]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:eq1:bool]
-        [binary expr ==.12:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:int,const:1]
-            [ident:b:int,const:1]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:eq2:bool]
-        [binary expr ==.12:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:int,const:1]
-            [ident:c:int,const:1]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:neq1:bool]
-        [binary expr !=.13:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:int,const:1]
-            [ident:b:int,const:1]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:neq2:bool]
-        [binary expr !=.13:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:int,const:1]
-            [ident:c:int,const:1]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:lt:bool]
-        [binary expr <.14:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:int,const:1]
-            [ident:b:int,const:1]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:gt:bool]
-        [binary expr >.16:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:int,const:1]
-            [ident:b:int,const:1]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:lte1:bool]
-        [binary expr <=.15:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:int,const:1]
-            [ident:b:int,const:1]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:lte2:bool]
-        [binary expr <=.15:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:int,const:1]
-            [ident:c:int,const:1]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:gte1:bool]
-        [binary expr >=.17:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:int,const:1]
-            [ident:b:int,const:1]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:gte2:bool]
-        [binary expr >=.17:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:int,const:1]
-            [ident:c:int,const:1]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:str_comp:bool]
-        [binary expr ==.12:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:string,const:1]
-            [const@0, string, 0x14000d378, '5']
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:bool_comp:bool]
-        [binary expr ==.12:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:bool,const:1]
-            [const: bool]
-    item:
-    [let stam:null]
-      declare:
-      [assign expr:null_comp:bool]
-        [binary expr ==.12:bool]
-          [primary expr:int,const:1]
-            [ident:a:int,const:1]
-          [primary expr:null,const:1]
-            [const: null]
-    item:
-    [primary expr:int,const:1]
-      [const: int]
-09:15:42 [NOTICE] compiling C code in 'test/std/core/datatypes/integer_comparison.ls' to MIR
-C2MIR init end           -- 73 usec
-test/std/core/datatypes/integer_comparison.ls:1:2: warning -- unknown pragma
-    preprocessor tokens -- 4043, parse tokens -- 2627
-  C2MIR preprocessor end    -- 622 usec
-  C2MIR parser end          -- 762 usec
-  C2MIR context checker end -- 866 usec
-  C2MIR generator end       -- 1012 usec
-C2MIR compiler end                -- 1041 usec
-09:15:42 [NOTICE] Generating native code...
-##### Script 'test/std/core/datatypes/integer_comparison.ls' executed: #####
+
+5
+10
+5
+false
+true
+true
+false
+true
+false
+true
+true
+false
+true
+false
+false
+false
 1
