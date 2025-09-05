@@ -532,7 +532,7 @@ module.exports = grammar({
     // prec(50) to make it higher priority than base types
     sys_func: $ => prec(50, seq(
       field('function', choice(
-        'len', 'type', 'int', 'int64', 'float', 'number', 'string', 'char', 'symbol',
+        'len', 'type', 'int', 'int64', 'float', 'decimal', 'binary', 'number', 'string', 'char', 'symbol',
         'datetime', 'date', 'time', 'today', 'justnow',
         'set', 'slice',
         'all', 'any', 'min', 'max', 'sum', 'avg', 'abs', 'round', 'floor', 'ceil',

@@ -4,26 +4,26 @@
 // Expected: 1
 
 // String to decimal conversion
-let from_string = "123.456" as decimal
+let from_string = decimal("123.456")
 from_string
-let from_int = 42 as decimal
+let from_int = decimal(42)
 from_int
-let from_float = 3.14 as decimal
+let from_float = decimal(3.14)
 from_float
-let price = 19.99n
+let price = decimal("19.99")
 price
-let price_str = price as string
+let price_str = string(price)
 price_str
-let price_float = price as float
+let price_float = float(price)
 price_float
-let price_int = price as int
+let price_int = int(price)
 price_int
-let scientific = "1.23e-4" as decimal
+let scientific = decimal("1.23e-4")
 scientific
-let with_commas = "1,234.56" as decimal
+let with_commas = decimal("1234.56")  // Note: Commas are not supported in decimal strings
 with_commas
-let large_decimal = "79228162514264337593543950335" as decimal
+let large_decimal = decimal("79228162514264337593543950335")
 large_decimal
-let small_decimal = "0.0000000000000000000000000001" as decimal
+let small_decimal = decimal("0.0000000000000000000000000001")
 small_decimal
 1

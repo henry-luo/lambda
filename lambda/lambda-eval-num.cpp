@@ -1642,3 +1642,414 @@ int64_t fn_int64(Item item) {
         log_debug("Cannot convert type %d to int64", item.type_id);
     return INT_ERROR;
 }
+
+// Constructor functions for type conversion
+
+Item fn_decimal(Item item) {
+    // Convert item to decimal type
+    if (item.type_id == LMD_TYPE_DECIMAL) {
+        return item;  // Already a decimal
+    }
+    else if (item.type_id == LMD_TYPE_INT) {
+        mpd_t* dec_val = mpd_new(context->decimal_ctx);
+        if (!dec_val) {
+            log_debug("Failed to allocate decimal");
+            return ItemError;
+        }
+        mpd_set_i32(dec_val, item.int_val, context->decimal_ctx);
+        return push_decimal(dec_val);
+    }
+    else if (item.type_id == LMD_TYPE_INT64) {
+        mpd_t* dec_val = mpd_new(context->decimal_ctx);
+        if (!dec_val) {
+            log_debug("Failed to allocate decimal");
+            return ItemError;
+        }
+        int64_t val = *(int64_t*)item.pointer;
+        mpd_set_i64(dec_val, val, context->decimal_ctx);
+        return push_decimal(dec_val);
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        mpd_t* dec_val = mpd_new(context->decimal_ctx);
+        if (!dec_val) {
+            log_debug("Failed to allocate decimal");
+            return ItemError;
+        }
+        double val = *(double*)item.pointer;
+        char str_buf[64];
+        snprintf(str_buf, sizeof(str_buf), "%.17g", val);
+        mpd_set_string(dec_val, str_buf, context->decimal_ctx);
+        return push_decimal(dec_val);
+    }
+    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+        String* str = (String*)item.pointer;
+        if (!str || str->len == 0) {
+            log_debug("Cannot convert empty string/symbol to decimal");
+            return ItemError;
+        }
+        
+        mpd_t* dec_val = mpd_new(context->decimal_ctx);
+        if (!dec_val) {
+            log_debug("Failed to allocate decimal");
+            return ItemError;
+        }
+        
+        // Create null-terminated string for mpd_set_string
+        char* null_term_str = (char*)malloc(str->len + 1);
+        if (!null_term_str) {
+            mpd_del(dec_val);
+            log_debug("Failed to allocate string buffer");
+            return ItemError;
+        }
+        memcpy(null_term_str, str->chars, str->len);
+        null_term_str[str->len] = '\0';
+        
+        mpd_set_string(dec_val, null_term_str, context->decimal_ctx);
+        free(null_term_str);
+        
+        if (mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
+            log_debug("Cannot convert string '%.*s' to decimal", (int)str->len, str->chars);
+            mpd_del(dec_val);
+            return ItemError;
+        }
+        
+        return push_decimal(dec_val);
+    }
+    else {
+        log_debug("Cannot convert type %d to decimal", item.type_id);
+        return ItemError;
+    }
+}
+
+Item fn_binary(Item item) {
+    // Convert item to binary (string) type
+    if (item.type_id == LMD_TYPE_STRING) {
+        return item;  // Already a string (binary is stored as string)
+    }
+    else if (item.type_id == LMD_TYPE_SYMBOL) {
+        // Convert symbol to string
+        String* sym = (String*)item.pointer;
+        if (!sym) {
+            log_debug("Cannot convert null symbol to binary");
+            return ItemError;
+        }
+        
+        String* str = (String*)heap_alloc(sizeof(String) + sym->len + 1, LMD_TYPE_STRING);
+        if (!str) {
+            log_debug("Failed to allocate string for binary conversion");
+            return ItemError;
+        }
+        
+        str->len = sym->len;
+        memcpy(str->chars, sym->chars, sym->len);
+        str->chars[sym->len] = '\0';
+        
+        Item result;
+        result.type_id = LMD_TYPE_STRING;
+        result.pointer = str;
+        return result;
+    }
+    else if (item.type_id == LMD_TYPE_INT) {
+        // Convert int to binary string representation
+        char buf[32];
+        int len = snprintf(buf, sizeof(buf), "%d", item.int_val);
+        if (len < 0 || len >= (int)sizeof(buf)) {
+            log_debug("Failed to convert int to string");
+            return ItemError;
+        }
+        
+        String* str = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+        if (!str) {
+            log_debug("Failed to allocate string for binary conversion");
+            return ItemError;
+        }
+        
+        str->len = len;
+        memcpy(str->chars, buf, len);
+        str->chars[len] = '\0';
+        
+        Item result;
+        result.type_id = LMD_TYPE_STRING;
+        result.pointer = str;
+        return result;
+    }
+    else if (item.type_id == LMD_TYPE_INT64) {
+        // Convert int64 to binary string representation
+        int64_t val = *(int64_t*)item.pointer;
+        char buf[32];
+        int len = snprintf(buf, sizeof(buf), "%lld", (long long)val);
+        if (len < 0 || len >= (int)sizeof(buf)) {
+            log_debug("Failed to convert int64 to string");
+            return ItemError;
+        }
+        
+        String* str = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+        if (!str) {
+            log_debug("Failed to allocate string for binary conversion");
+            return ItemError;
+        }
+        
+        str->len = len;
+        memcpy(str->chars, buf, len);
+        str->chars[len] = '\0';
+        
+        Item result;
+        result.type_id = LMD_TYPE_STRING;
+        result.pointer = str;
+        return result;
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        // Convert float to binary string representation
+        double val = *(double*)item.pointer;
+        char buf[64];
+        int len = snprintf(buf, sizeof(buf), "%.17g", val);
+        if (len < 0 || len >= (int)sizeof(buf)) {
+            log_debug("Failed to convert float to string");
+            return ItemError;
+        }
+        
+        String* str = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+        if (!str) {
+            log_debug("Failed to allocate string for binary conversion");
+            return ItemError;
+        }
+        
+        str->len = len;
+        memcpy(str->chars, buf, len);
+        str->chars[len] = '\0';
+        
+        Item result;
+        result.type_id = LMD_TYPE_STRING;
+        result.pointer = str;
+        return result;
+    }
+    else {
+        log_debug("Cannot convert type %d to binary", item.type_id);
+        return ItemError;
+    }
+}
+
+Item fn_symbol(Item item) {
+    // Convert item to symbol type
+    if (item.type_id == LMD_TYPE_SYMBOL) {
+        return item;  // Already a symbol
+    }
+    else if (item.type_id == LMD_TYPE_STRING) {
+        // Convert string to symbol
+        String* str = (String*)item.pointer;
+        if (!str) {
+            log_debug("Cannot convert null string to symbol");
+            return ItemError;
+        }
+        
+        String* sym = (String*)heap_alloc(sizeof(String) + str->len + 1, LMD_TYPE_SYMBOL);
+        if (!sym) {
+            log_debug("Failed to allocate symbol");
+            return ItemError;
+        }
+        
+        sym->len = str->len;
+        memcpy(sym->chars, str->chars, str->len);
+        sym->chars[sym->len] = '\0';
+        
+        Item result;
+        result.type_id = LMD_TYPE_SYMBOL;
+        result.pointer = sym;
+        return result;
+    }
+    else if (item.type_id == LMD_TYPE_INT) {
+        // Convert int to symbol
+        char buf[32];
+        int len = snprintf(buf, sizeof(buf), "%d", item.int_val);
+        if (len < 0 || len >= (int)sizeof(buf)) {
+            log_debug("Failed to convert int to symbol");
+            return ItemError;
+        }
+        
+        String* sym = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_SYMBOL);
+        if (!sym) {
+            log_debug("Failed to allocate symbol");
+            return ItemError;
+        }
+        
+        sym->len = len;
+        memcpy(sym->chars, buf, len);
+        sym->chars[len] = '\0';
+        
+        Item result;
+        result.type_id = LMD_TYPE_SYMBOL;
+        result.pointer = sym;
+        return result;
+    }
+    else if (item.type_id == LMD_TYPE_INT64) {
+        // Convert int64 to symbol
+        int64_t val = *(int64_t*)item.pointer;
+        char buf[32];
+        int len = snprintf(buf, sizeof(buf), "%lld", (long long)val);
+        if (len < 0 || len >= (int)sizeof(buf)) {
+            log_debug("Failed to convert int64 to symbol");
+            return ItemError;
+        }
+        
+        String* sym = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_SYMBOL);
+        if (!sym) {
+            log_debug("Failed to allocate symbol");
+            return ItemError;
+        }
+        
+        sym->len = len;
+        memcpy(sym->chars, buf, len);
+        sym->chars[len] = '\0';
+        
+        Item result;
+        result.type_id = LMD_TYPE_SYMBOL;
+        result.pointer = sym;
+        return result;
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        // Convert float to symbol
+        double val = *(double*)item.pointer;
+        char buf[64];
+        int len = snprintf(buf, sizeof(buf), "%.17g", val);
+        if (len < 0 || len >= (int)sizeof(buf)) {
+            log_debug("Failed to convert float to symbol");
+            return ItemError;
+        }
+        
+        String* sym = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_SYMBOL);
+        if (!sym) {
+            log_debug("Failed to allocate symbol");
+            return ItemError;
+        }
+        
+        sym->len = len;
+        memcpy(sym->chars, buf, len);
+        sym->chars[len] = '\0';
+        
+        Item result;
+        result.type_id = LMD_TYPE_SYMBOL;
+        result.pointer = sym;
+        return result;
+    }
+    else {
+        log_debug("Cannot convert type %d to symbol", item.type_id);
+        return ItemError;
+    }
+}
+
+Item fn_float(Item item) {
+    // Convert item to float type
+    if (item.type_id == LMD_TYPE_FLOAT) {
+        return item;  // Already a float
+    }
+    else if (item.type_id == LMD_TYPE_INT) {
+        double* val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        if (!val) {
+            log_debug("Failed to allocate float");
+            return ItemError;
+        }
+        *val = (double)item.int_val;
+        
+        Item result;
+        result.type_id = LMD_TYPE_FLOAT;
+        result.pointer = val;
+        return result;
+    }
+    else if (item.type_id == LMD_TYPE_INT64) {
+        int64_t int_val = *(int64_t*)item.pointer;
+        double* val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        if (!val) {
+            log_debug("Failed to allocate float");
+            return ItemError;
+        }
+        *val = (double)int_val;
+        
+        Item result;
+        result.type_id = LMD_TYPE_FLOAT;
+        result.pointer = val;
+        return result;
+    }
+    else if (item.type_id == LMD_TYPE_DECIMAL) {
+        mpd_t* dec_val = (mpd_t*)item.pointer;
+        char* dec_str = mpd_to_sci(dec_val, 0, context->decimal_ctx);
+        if (!dec_str) {
+            log_debug("Failed to convert decimal to string");
+            return ItemError;
+        }
+        
+        char* endptr;
+        errno = 0;
+        double dval = strtod(dec_str, &endptr);
+        mpd_free(dec_str);
+        
+        if (errno != 0 || *endptr != '\0') {
+            log_debug("Failed to convert decimal to float");
+            return ItemError;
+        }
+        
+        double* val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        if (!val) {
+            log_debug("Failed to allocate float");
+            return ItemError;
+        }
+        *val = dval;
+        
+        Item result;
+        result.type_id = LMD_TYPE_FLOAT;
+        result.pointer = val;
+        return result;
+    }
+    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+        String* str = (String*)item.pointer;
+        if (!str || str->len == 0) {
+            log_debug("Empty string/symbol cannot be converted to float");
+            return ItemError;
+        }
+        
+        // Create a null-terminated copy of the string
+        char* buf = (char*)malloc(str->len + 1);
+        if (!buf) {
+            log_debug("Failed to allocate buffer for string conversion");
+            return ItemError;
+        }
+        memcpy(buf, str->chars, str->len);
+        buf[str->len] = '\0';
+        
+        // Remove any commas from the string
+        char* p = buf;
+        char* q = buf;
+        while (*p) {
+            if (*p != ',') {
+                *q++ = *p;
+            }
+            p++;
+        }
+        *q = '\0';
+        
+        char* endptr;
+        errno = 0;
+        double val = strtod(buf, &endptr);
+        free(buf);
+        
+        if (errno != 0 || *endptr != '\0') {
+            log_debug("Cannot convert string to float: %.*s", (int)str->len, str->chars);
+            return ItemError;
+        }
+        
+        double* result_val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        if (!result_val) {
+            log_debug("Failed to allocate float");
+            return ItemError;
+        }
+        *result_val = val;
+        
+        Item result;
+        result.type_id = LMD_TYPE_FLOAT;
+        result.pointer = result_val;
+        return result;
+    }
+    else {
+        log_debug("Cannot convert type %d to float", item.type_id);
+        return ItemError;
+    }
+}
