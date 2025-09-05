@@ -253,3 +253,7 @@ Test(lambda_tests, test_input_dir_ls) {
 Test(lambda_tests, test_complex_report_ls) {
     test_lambda_script_against_file("test/lambda/complex_report.ls", "test/lambda/complex_report.txt");
 }
+
+Test(lambda_tests, test_import_ls) {
+    test_lambda_script_against_file("test/lambda/import.ls", "test/lambda/import.txt");
+}

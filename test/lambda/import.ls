@@ -26,10 +26,12 @@ dval
 
 3.14159265358n
 
-// imported functions and vars
-// add(10, 2.5)
-// mul(0.5, 7)
+"imported vars:"
 PI
 pi
 (PI >= pi)
 pi is float
+
+"imported functions:"
+addition(10, 2.5)
+mul(0.5, 7)
