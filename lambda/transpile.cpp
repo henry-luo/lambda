@@ -1785,7 +1785,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
     log_debug("script reference: %s", import_node->script->reference);
     // loop through the public functions in the module
     AstNode *node = import_node->script->ast_root;
-    if (!node) { log_debug("missing root node in module_import");  return; }
+    if (!node) { log_error("Error: Missing root node in module_import");  return; }
     assert(node->node_type == AST_SCRIPT);
     node = ((AstScript*)node)->child;
     log_debug("finding content node");
@@ -1793,13 +1793,13 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
         if (node->node_type == AST_NODE_CONTENT) break;
         node = node->next;
     }
-    log_debug("missing content node");
+    if (!node) { log_error("Error: Missing content node");  return; }
     strbuf_append_format(tp->code_buf, "struct Mod%d {\n", import_node->script->index);
     node = ((AstListNode*)node)->item;
     while (node) {
         if (node->node_type == AST_NODE_FUNC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
-            log_debug("got fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
+            log_debug("got imported fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
                 ((TypeFunc*)func_node->type)->is_public);
             if (((TypeFunc*)func_node->type)->is_public) {
                 define_func(tp, func_node, true);
@@ -1990,12 +1990,13 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     }    
 
     // global evaluation, wrapped inside main()
-        log_debug("transpile_ast_node...");
+    log_debug("transpile_ast_node...");
     strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime){\n rt = runtime;\n return ");
     child = script->child;
     bool has_content = false;
     while (child) {
         switch (child->node_type) {
+        case AST_NODE_IMPORT:
         case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:
         case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:
             break;  // skip defintion nodes
