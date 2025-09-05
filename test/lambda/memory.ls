@@ -26,8 +26,9 @@ dval
 
 3.14159265358n
 
-add(10, 2.5)
-mul(0.5, 7)
+// imported functions and vars
+// add(10, 2.5)
+// mul(0.5, 7)
 PI
 pi
 (PI >= pi)

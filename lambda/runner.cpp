@@ -120,8 +120,9 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                 if (node->node_type == AST_NODE_CONTENT) break;
                 node = node->next;
             }
-            log_error("missing content node");
-            node = ((AstListNode*)node)->item;
+            if (!node) {
+                log_error("Error: Missing content node");  return;
+            }
             while (node) {
                 if (node->node_type == AST_NODE_FUNC) {
                     AstFuncNode *func_node = (AstFuncNode*)node;
@@ -131,7 +132,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                         write_fn_name(func_name, func_node, NULL);
                         log_debug("loading fn addr: %s from script: %s", func_name->str, import->script->reference);
                         void* fn_ptr = find_func(import->script->jit_context, func_name->str);
-                        log_debug("got fn: %s, func_ptr: %p", func_name->str, fn_ptr);
+                        log_debug("got imported fn: %s, func_ptr: %p", func_name->str, fn_ptr);
                         strbuf_free(func_name);
                         *(main_func_t*) mod_def = (main_func_t)fn_ptr;
                         mod_def += sizeof(main_func_t);
