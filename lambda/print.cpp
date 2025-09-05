@@ -688,7 +688,7 @@ void log_item(Item item, const char* msg) {
 }
 
 void print_label(int indent, const char *label) {
-    log_debug("%s", label);
+    log_debug("  %s", label);
 }
 
 void print_const(Script *script, Type* type) {
@@ -1015,13 +1015,14 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
     }
     case AST_NODE_IMPORT: {
         AstImportNode* import_node = (AstImportNode*)node;
-        if (!import_node->alias || !import_node->module.str) {
-            log_debug("[import: invalid!!]");
-            break;
+        if (!import_node->module.str) {
+            log_debug("[import: missing module!!]");
+        } else {
+            log_debug("[import %.*s%s%.*s]",
+                (int)import_node->module.length, import_node->module.str,
+                (import_node->alias ? ":" : ""),
+                (int)(import_node->alias ? import_node->alias->len:0), (import_node->alias ? import_node->alias->chars : ""));
         }
-        log_debug("[import %.*s:%.*s]",
-            (int)import_node->alias->len, import_node->alias->chars,
-            (int)import_node->module.length, import_node->module.str);
         break;
     }
     case AST_SCRIPT: {

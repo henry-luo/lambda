@@ -22,7 +22,7 @@ static void print_elapsed_time(const char* label, win_timer start, win_timer end
     QueryPerformanceFrequency(&frequency);
     
     double elapsed_ms = ((double)(end.counter.QuadPart - start.counter.QuadPart) * 1000.0) / frequency.QuadPart;
-        log_debug("%s took %.3f ms", label, elapsed_ms);
+    log_debug("%s took %.3f ms", label, elapsed_ms);
 }
 
 #else
@@ -95,6 +95,7 @@ void find_errors(TSNode node) {
 
 void init_module_import(Transpiler *tp, AstScript *script) {
     log_debug("init imports of script");
+    log_enter();
     AstNode* child = script->child;
     while (child) {
         if (child->node_type == AST_NODE_IMPORT) {
@@ -108,7 +109,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             if (!imp) {
                 log_error("Error: Failed to find import item for module %.*s", 
                     (int)(import->module.length), import->module.str);
-                return;
+                goto RETURN;
             }
             uint8_t* mod_def = (uint8_t*)imp->addr;
             // loop through the public functions in the module
@@ -120,10 +121,10 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                 if (node->node_type == AST_NODE_CONTENT) break;
                 node = node->next;
             }
-            if (!node) {
-                log_error("Error: Missing content node");  return;
-            }
+            if (!node) { log_error("Error: Missing content node");  goto RETURN; }
+            node = ((AstListNode*)node)->item; 
             while (node) {
+                log_debug("checking content node: %d", node->node_type);
                 if (node->node_type == AST_NODE_FUNC) {
                     AstFuncNode *func_node = (AstFuncNode*)node;
                     if (((TypeFunc*)func_node->type)->is_public) {
@@ -162,7 +163,9 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             }
         }
         child = child->next;
-    }    
+    }
+    RETURN:
+    log_leave();
 }
 
 extern unsigned int lambda_lambda_h_len;
@@ -265,7 +268,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     memcpy(script, tp, sizeof(Script));
     script->main_func = tp->main_func;
 
-    print_elapsed_time(":", start, end);
+    print_elapsed_time("JIT compiling", start, end);
 }
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source) {
@@ -357,7 +360,7 @@ Item run_script(Runtime *runtime, const char* source, char* script_path, bool tr
         log_error("Error: Failed to compile the function."); 
         result = ItemNull;
     } else {
-        log_debug("Executing JIT compiled code...");
+        log_notice("Executing JIT compiled code...");
         runner_setup_context(&runner);
         log_debug("exec main func");
         result = context->result = runner.script->main_func(context);

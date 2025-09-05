@@ -1853,10 +1853,10 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
 void declare_module_import(Transpiler* tp, AstImportNode *import_node) {
     log_debug("declare_module_import");
     // import module
-    if (!import_node->script) { log_error("missing script");  return; }
+    if (!import_node->script) { log_error("Missing script");  return; }
     log_debug("script reference: %s", import_node->script->reference);
     // loop through the public functions in the module
-    if (!import_node->script->ast_root) { log_error("missing ast root");  return; }
+    if (!import_node->script->ast_root) { log_error("Missing AST root");  return; }
     AstNode *node = import_node->script->ast_root;
     // Defensive check: validate node type instead of using assert
     if (node->node_type != AST_SCRIPT) {
@@ -1869,7 +1869,7 @@ void declare_module_import(Transpiler* tp, AstImportNode *import_node) {
         if (node->node_type == AST_NODE_CONTENT) break;
         node = node->next;
     }
-    log_debug("misssing content node");
+    if (!node) { log_error("Error: missing content node");  return; }
     node = ((AstListNode*)node)->item;
     while (node) {
         if (node->node_type == AST_NODE_FUNC) {
