@@ -981,8 +981,12 @@ Item fn_min(Item item_a, Item item_b) {
                 return (Item){.item = i2it((long)min_val)};
             }
         }
+        else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
+            // single numeric value, return as-is
+            return item_a;
+        }        
         else {
-        log_debug("min not supported for single argument type: %d", type_id);
+            log_debug("min not supported for single argument type: %d", type_id);
             return ItemError;
         }
     }
@@ -1134,8 +1138,12 @@ Item fn_max(Item item_a, Item item_b) {
                 return (Item){.item = i2it((long)max_val)};
             }
         }
+        else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
+            // single numeric value, return as-is
+            return item_a;
+        }
         else {
-        log_debug("max not supported for single argument type: %d", type_id);
+            log_debug("max not supported for single argument type: %d", type_id);
             return ItemError;
         }
     }
@@ -1272,7 +1280,7 @@ Item fn_sum(Item item) {
         List* list = item.list;
         log_debug("DEBUG fn_sum: List pointer: %p, length: %ld", list, list ? list->length : -1);
         if (!list || list->length == 0) {
-        log_debug("DEBUG fn_sum: Empty list, returning 0");
+            log_debug("DEBUG fn_sum: Empty list, returning 0");
             return (Item){.item = i2it(0)};  // Empty list sums to 0
         }
         double sum = 0.0;
@@ -1281,32 +1289,36 @@ Item fn_sum(Item item) {
             Item elem_item = list_get(list, i);
             if (elem_item.type_id == LMD_TYPE_INT) {
                 long val = elem_item.int_val;
-        log_debug("DEBUG fn_sum: Adding int value: %ld", val);
+                log_debug("DEBUG fn_sum: Adding int value: %ld", val);
                 sum += (double)val;
             }
             else if (elem_item.type_id == LMD_TYPE_INT64) {
                 long val = *(long*)elem_item.pointer;
-        log_debug("DEBUG fn_sum: Adding int64 value: %ld", val);
+                log_debug("DEBUG fn_sum: Adding int64 value: %ld", val);
                 sum += (double)val;
             }
             else if (elem_item.type_id == LMD_TYPE_FLOAT) {
                 double val = *(double*)elem_item.pointer;
-        log_debug("DEBUG fn_sum: Adding float value: %f", val);
+                log_debug("DEBUG fn_sum: Adding float value: %f", val);
                 sum += val;
                 has_float = true;
             }
             else {
-        log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
+                log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
                 return ItemError;
             }
         }
         if (has_float) {
-        log_debug("DEBUG fn_sum: Returning sum as double: %f", sum);
+            log_debug("DEBUG fn_sum: Returning sum as double: %f", sum);
             return push_d(sum);
         } else {
-        log_error("DEBUG fn_sum: Returning sum as long: %ld", (long)sum);
+            log_error("DEBUG fn_sum: Returning sum as long: %ld", (long)sum);
             return push_l((long)sum);
         }
+    }
+    else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
+        // single numeric value, return as-is
+        return item;
     }
     else {
         log_debug("DEBUG fn_sum: sum not supported for type: %d", type_id);
@@ -1336,7 +1348,7 @@ Item fn_avg(Item item) {
                 sum += *(double*)elem_item.pointer;
             }
             else {
-        log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
+                log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
                 return ItemError;
             }
         }
@@ -1394,12 +1406,16 @@ Item fn_avg(Item item) {
                 sum += *(double*)elem_item.pointer;
             }
             else {
-        log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
+                log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
                 return ItemError;
             }
         }
         return push_d(sum / (double)list->length);
     }
+    else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
+        // single numeric value, return as-is
+        return item;
+    }    
     else {
         log_debug("avg not supported for type: %d", type_id);
         return ItemError;
