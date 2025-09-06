@@ -580,10 +580,11 @@ if [ "$DEBUG" = "true" ]; then
     FLAGS="$FLAGS -g"
 fi
 
-# Add AddressSanitizer flags for debug builds (DISABLED for testing)
+# Add AddressSanitizer flags for debug builds
 if [ "$DEBUG_BUILD" = true ]; then
     FLAGS="$FLAGS -DDEBUG -O0 -g3"
-    # LINKER_FLAGS="$LINKER_FLAGS -fsanitize=address -fsanitize=undefined"
+    # Note: AddressSanitizer flags are now loaded from JSON config platform-specific settings
+    # No need to add them here as they come from the debug platform configuration
 fi
 
 # Initialize header file cache for faster incremental builds (fallback for files without .d files)

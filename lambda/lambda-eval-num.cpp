@@ -394,7 +394,7 @@ Item fn_sub(Item item_a, Item item_b) {
         return {.array_float = result};
     }
     else {
-        log_error("unknown sub type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown sub type: %d, %d", item_a.type_id, item_b.type_id);
     }
     return ItemError;
 }
