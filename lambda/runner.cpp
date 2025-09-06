@@ -190,12 +190,11 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&end);
     print_elapsed_time("parsing", start, end);
 
-    // print the syntax tree as an s-expr.
-    // printf("Syntax tree: ---------\n");
-    TSNode root_node = ts_tree_root_node(tp->syntax_tree);
-    // print_ts_node(tp->source, root_node, 0);
+    // print the syntax tree as an s-expr
+    print_ts_root(tp->source, tp->syntax_tree);
     
     // check if the syntax tree is valid
+    TSNode root_node = ts_tree_root_node(tp->syntax_tree);
     if (ts_node_has_error(root_node)) {
         log_error("Syntax tree has errors.");
         log_debug("Root node type: %s", ts_node_type(root_node));

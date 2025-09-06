@@ -55,7 +55,7 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node);
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 void print_ast_root(Script *script);
-void print_ts_node(const char *source, TSNode node, uint32_t indent);
+void print_ts_root(const char *source, TSTree* syntax_tree);
 void find_errors(TSNode node);
 void write_node_source(Transpiler* tp, TSNode node);
 void write_type(StrBuf* code_buf, Type *type);

@@ -239,7 +239,8 @@
                 "fcolor-diagnostics",
                 "fsanitize=address",
                 "fno-omit-frame-pointer",
-                "g",
+                "g3",
+                "gline-tables-only",
                 "O0"
             ],
             "linker_flags": [

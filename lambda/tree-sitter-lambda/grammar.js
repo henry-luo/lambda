@@ -465,8 +465,8 @@ module.exports = grammar({
     ),
     
     member_expr: $ => seq(
-      field('object',$.primary_expr), ".", 
-      field('field', choice($.identifier, $.index))
+      field('object', $.primary_expr), ".", 
+      field('field', choice($.identifier, $.symbol, $.index))
     ),
 
     binary_expr: $ => choice(
