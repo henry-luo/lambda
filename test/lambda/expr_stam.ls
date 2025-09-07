@@ -238,11 +238,11 @@ if (base_value > 50) {
 let final_test = {
     data: (for (i in 1 to 3) {value: i, squared: i * i}),
     process: (let threshold = 2,
-              for (item in (for (j in 1 to 3) {value: j, squared: j * j}))
-                  if (item.value > threshold) 
-                      {result: item.squared * 10, status: "high"}
-                  else 
-                      {result: item.squared, status: "low"})
+        for (item in (for (j in 1 to 3) {value: j, squared: j * j}))
+            if (item.value > threshold) 
+                {result: item.squared * 10, status: "high"}
+            else 
+                {result: item.squared, status: "low"})
 };
 
 final_test.process

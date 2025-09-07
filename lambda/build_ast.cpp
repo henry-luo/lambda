@@ -1584,15 +1584,17 @@ AstNode* build_for_expr(Transpiler* tp, TSNode for_node) {
 
     TSNode then_node = ts_node_child_by_field_id(for_node, FIELD_THEN);
     ast_node->then = build_expr(tp, then_node);
+
+    // determine for-expr type
     if (!ast_node->then) { 
         log_debug("missing for then");
-        ast_node->type = &LIT_TYPE_ERROR;  // fallback
+        ast_node->type = &TYPE_ERROR;  // fallback
     } else { 
         log_debug("got for then type %d", ast_node->then->node_type);
         // For expression type should be Item | List containing the element type
         // TypeList* type_list = (TypeList*)alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
         // type_list->nested = ast_node->then->type;
-        ast_node->type = &LIT_TYPE_ANY;
+        ast_node->type = &TYPE_ANY;
     }
 
     tp->current_scope = ast_node->vars->parent;
