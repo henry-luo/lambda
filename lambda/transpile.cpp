@@ -336,9 +336,14 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
         }
         break;
     }
-    case LMD_TYPE_LIST:  case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:
+    case LMD_TYPE_LIST:
+        transpile_expr(tp, item);  // list_end() -> Item 
+        break;
+    case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  case LMD_TYPE_TYPE:
-        transpile_expr(tp, item);  // raw pointer
+        strbuf_append_str(tp->code_buf, "(Item)(");
+        transpile_expr(tp, item);  // raw pointer treated as Item
+        strbuf_append_char(tp->code_buf, ')');
         break;
     case LMD_TYPE_FUNC:
         strbuf_append_str(tp->code_buf, "to_fn(");
@@ -878,7 +883,7 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
 
     // Determine if branches have incompatible types that need coercion
     bool need_boxing = true;
-    if (then_type && else_type && (then_type->type_id == else_type->type_id)) {
+    if (then_type && else_type && (then_type->type_id == else_type->type_id) && then_type->type_id != LMD_TYPE_ANY) {
         need_boxing = false;
     }
     if (need_boxing) {
@@ -892,6 +897,7 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
         if (if_node->otherwise) {
             transpile_box_item(tp, if_node->otherwise);
         } else {
+            // otherwise is optional
             strbuf_append_str(tp->code_buf, "ITEM_NULL");
         }
         strbuf_append_str(tp->code_buf, ")");

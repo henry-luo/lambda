@@ -181,6 +181,7 @@ void expand_list(List *list) {
         }
     }
     log_item({.list = list}, "list_expanded");
+    log_debug("list expanded: %d, capacity: %ld", list->type_id, list->capacity);
 }
 
 Array* array_pooled(VariableMemPool *pool) {
@@ -263,7 +264,7 @@ void list_push(List *list, Item item) {
     }
     
     // store the value in the list (and we may need two slots for long/double)
-    log_debug("list push item: type: %d, length: %ld", item.type_id, list->length);
+    log_debug("list pushing item: type: %d, length: %ld", type_id, list->length);
     if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
     list->items[list->length++] = item;
     switch (item.type_id) {
@@ -309,6 +310,7 @@ void list_push(List *list, Item item) {
         break;
     }
     }
+    log_item({.list = list}, "list_after_push");
 }
 
 TypedItem list_get_typed(List* list, int index) {
@@ -401,6 +403,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 log_error("expected a map, got type %d", itm.type_id );
             }
         } else {
+            log_debug("map set field: %.*s, type: %d", (int)field->name->length, field->name->str, field->type->type_id);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL: {
                 *(bool*)field_ptr = va_arg(args, bool);
@@ -451,9 +454,10 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             }
             case LMD_TYPE_ANY: { // a special case
                 Item item = va_arg(args, Item);
-                log_debug("set field of ANY type to: %d", item.type_id);
-                TypedItem titem = {.type_id = static_cast<TypeId>(item.type_id), .pointer = item.raw_pointer};
-                switch (item.type_id) {
+                TypeId type_id = get_type_id(item);
+                log_debug("set field of ANY type to: %d", type_id);
+                TypedItem titem = {.type_id =type_id, .pointer = item.raw_pointer};
+                switch (type_id) {
                 case LMD_TYPE_NULL: ; 
                     break; // no extra work needed
                 case LMD_TYPE_BOOL:
@@ -481,7 +485,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                     titem.pointer = item.raw_pointer;  // just a pointer
                     break;
                 default:
-                    log_error("unknown type %d in set_fields", item.type_id);
+                    log_error("unknown type %d in set_fields", type_id);
                     // set as ERROR
                     titem = {.type_id = LMD_TYPE_ERROR};
                 }
