@@ -51,7 +51,7 @@ AstNode* build_array(Transpiler* tp, TSNode array_node) {
                 log_debug("DEBUG: Array item type_id: %d, nested_type_id: %d", 
                     item->type ? item->type->type_id : -1, nested_type ? nested_type->type_id : -1);
                 if (nested_type && item->type->type_id != nested_type->type_id) {
-                    log_error("DEBUG: Type mismatch, resetting nested_type to NULL");
+                    log_debug("DEBUG: Type mismatch, resetting nested_type to NULL");
                     nested_type = NULL;  // type mismatch, reset the nested type to NULL
                 }
             }
