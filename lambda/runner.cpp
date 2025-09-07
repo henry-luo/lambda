@@ -327,6 +327,7 @@ void runner_setup_context(Runner* runner) {
 
 void runner_cleanup(Runner* runner) {
     log_debug("runner cleanup");
+    frame_end();
     // free final result
     if (runner->context.heap) {
         print_heap_entries();
@@ -364,7 +365,8 @@ Item run_script(Runtime *runtime, const char* source, char* script_path, bool tr
         log_debug("exec main func");
         result = context->result = runner.script->main_func(context);
         log_debug("after main func");
-        // runner_cleanup() later
+        // for the time being, we need to keep the context for result item printing
+        // todo: runner_cleanup(&runner);
     }
     return result;
 }

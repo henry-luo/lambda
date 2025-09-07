@@ -130,9 +130,11 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
     }
     
     printf("##### Script '%s' executed: #####\n", script_path);
+    log_debug("Script '%s' executed", script_path);
     StrBuf *output = strbuf_new_cap(256);
     print_root_item(output, result);
     printf("%s", output->str);
+    log_debug("%s", output->str);
     strbuf_free(output);
     // todo: should have return value
 }

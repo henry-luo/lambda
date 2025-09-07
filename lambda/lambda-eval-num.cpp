@@ -313,7 +313,7 @@ Item fn_sub(Item item_a, Item item_b) {
         return push_l(*(long*)item_a.pointer - *(long*)item_b.pointer);
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
-        log_debug("sub float: %g - %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
+        log_debug("sub float: %g - %g", *(double*)item_a.pointer, *(double*)item_b.pointer);
         return push_d(*(double*)item_a.pointer - *(double*)item_b.pointer);
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
