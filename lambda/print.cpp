@@ -475,7 +475,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_RANGE: {
         Range *range = item.range;
-        log_debug("print range: %p, start: %ld, end: %ld\n", range, range->start, range->end);
+        log_debug("print range: %p, start: %ld, end: %ld", range, range->start, range->end);
         strbuf_append_char(strbuf, '[');
         for (int i = range->start; i <= range->end; i++) {
             if (i > range->start) strbuf_append_str(strbuf, ", ");

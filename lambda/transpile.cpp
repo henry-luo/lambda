@@ -1101,7 +1101,7 @@ void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
         transpile_loop_expr(tp, (AstNamedNode*)loop, for_node->then);
     }
     // return the list
-    strbuf_append_str(tp->code_buf, " ls;})");
+    strbuf_append_str(tp->code_buf, " list_end(ls);})");
 }
 
 void transpile_items(Transpiler* tp, AstNode *item) {
@@ -1191,7 +1191,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
     }
     if (type->length == 0) {
         log_debug("transpile_list_expr: type->length is 0, outputting null");
-        strbuf_append_str(tp->code_buf, "null;})");
+        strbuf_append_str(tp->code_buf, "list_end(ls);})");
         return;
     }
     if (type->length < 10) {
@@ -1225,7 +1225,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
         item = item->next;
     }
     if (type->length == 0) {
-        strbuf_append_str(tp->code_buf, "null;})");
+        strbuf_append_str(tp->code_buf, "list_end(ls);})");
         return;
     }
     push_list_items(tp, list_node->item, false);
