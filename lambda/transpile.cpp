@@ -1077,7 +1077,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
     } 
     else { // loop body
         Type *then_type = then->type;
-        // assuming we are in some list context
+        // assuming we are in a list context
         strbuf_append_str(tp->code_buf, " list_push(ls,");
         transpile_box_item(tp, then);
         strbuf_append_str(tp->code_buf, ");");
@@ -1086,24 +1086,14 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
     strbuf_append_str(tp->code_buf, " }\n");
 }
 
-void transpile_for_expr(Transpiler* tp, AstForNode *for_node) {
+// both for_expr and for_stam
+void transpile_for(Transpiler* tp, AstForNode *for_node) {
     // Defensive validation: ensure all required pointers and components are valid
-    if (!for_node) {
-        log_error("Error: transpile_for_expr called with null for node");
+    if (!for_node || !for_node->then || !for_node->then->type) {
+        log_error("Error: invalid for_node");
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
-    if (!for_node->then) {
-        log_error("Error: transpile_for_expr missing then expression");
-        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
-        return;
-    }
-    if (!for_node->then->type) {
-        log_error("Error: transpile_for_expr then expression missing type information");
-        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
-        return;
-    }
-    
     Type *then_type = for_node->then->type;
     // init a list
     strbuf_append_str(tp->code_buf, "({\n List* ls=list(); \n");
@@ -1703,10 +1693,10 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
         transpile_if(tp, (AstIfNode*)expr_node);
         break;
     case AST_NODE_FOR_EXPR:
-        transpile_for_expr(tp, (AstForNode*)expr_node);
+        transpile_for(tp, (AstForNode*)expr_node);
         break;        
     case AST_NODE_FOR_STAM:
-        transpile_for_expr(tp, (AstForNode*)expr_node);
+        transpile_for(tp, (AstForNode*)expr_node);
         break;        
     case AST_NODE_ASSIGN:
         transpile_assign_expr(tp, (AstNamedNode*)expr_node);
