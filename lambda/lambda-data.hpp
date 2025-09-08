@@ -268,7 +268,13 @@ void pack_free(Pack* pack);
 
 // get type_id from an Item
 static inline TypeId get_type_id(Item value) {
-    return value.type_id ? value.type_id : *((TypeId*)value.raw_pointer);
+    if (value.type_id) {
+        return value.type_id;
+    }
+    if (value.raw_pointer) {
+        return *((TypeId*)value.raw_pointer);
+    }
+    return LMD_TYPE_NULL; // fallback for null items
 }
 
 extern Type TYPE_NULL;
