@@ -5,6 +5,7 @@
 
 // This test should hang and be killed by timeout
 let x = 0
+x
 while true {
     x = x + 1
 }

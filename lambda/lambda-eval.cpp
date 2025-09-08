@@ -21,6 +21,7 @@ extern __thread Context* context;
 Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
 
 Bool is_truthy(Item item) {
+    log_debug("is_truthy: item type %d", item.type_id);
     switch (item.type_id) {
     case LMD_TYPE_NULL:
         return BOOL_FALSE;
@@ -29,7 +30,7 @@ Bool is_truthy(Item item) {
     case LMD_TYPE_BOOL:
         return item.bool_val ? BOOL_TRUE : BOOL_FALSE;
     default: // all other value considered truthy
-        return BOOL_TRUE;
+        return item.item ? BOOL_TRUE : BOOL_FALSE;  // should null be considered ERROR?
     }
 }
 
@@ -598,11 +599,8 @@ String* fn_string(Item itm) {
                     break;
                 }
             }
-            
-            String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
-            strcpy(str->chars, buf);
-            str->len = len;  str->ref_cnt = 0;
-            return str;
+
+            return heap_string(buf, len);
         } else {
             return &STR_NULL;
         }
@@ -612,32 +610,23 @@ String* fn_string(Item itm) {
         int int_val = itm.int_val;
         snprintf(buf, sizeof(buf), "%d", int_val);
         int len = strlen(buf);
-        String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
-        strcpy(str->chars, buf);
-        str->len = len;  str->ref_cnt = 0;
-        return (String*)str;
+        return heap_string(buf, len);
     }
     else if (itm.type_id == LMD_TYPE_INT64) {
         char buf[32];
         long long_val = *(long*)itm.pointer;
         snprintf(buf, sizeof(buf), "%ld", long_val);
         int len = strlen(buf);
-        String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
-        strcpy(str->chars, buf);
-        str->len = len;  str->ref_cnt = 0;
-        return (String*)str;
+        return heap_string(buf, len);
     }
     else if (itm.type_id == LMD_TYPE_FLOAT) {
         char buf[32];
         double dval = *(double*)itm.pointer;
         snprintf(buf, sizeof(buf), "%g", dval);
         int len = strlen(buf);
-        String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
-        strcpy(str->chars, buf);
-        str->len = len;  str->ref_cnt = 0;
-        return (String*)str;
+        return heap_string(buf, len);
     }
-        log_debug("unhandled type %d", itm.type_id);
+    log_debug("unhandled type %d", itm.type_id);
     return NULL;
 }
 
@@ -808,7 +797,7 @@ String* fn_format(Item item, Item type) {
                 type_str = (String*)format_type.pointer;
             }
             else {
-        log_debug("format type must be a string or symbol, got type %d", type_value_type);
+                log_debug("format type must be a string or symbol, got type %d", type_value_type);
                 // todo: push error
                 type_str = NULL;  // format type ignored
             }
@@ -824,7 +813,7 @@ String* fn_format(Item item, Item type) {
                 flavor_str = (String*)format_flavor.pointer;
             }
             else {
-        log_debug("format flavor must be a string or symbol, got type %d", flavor_value_type);
+                log_debug("format flavor must be a string or symbol, got type %d", flavor_value_type);
                 // todo: push error
                 flavor_str = NULL;  // format flavor ignored
             }
@@ -835,7 +824,7 @@ String* fn_format(Item item, Item type) {
         return NULL;  // todo: push error
     }
     
-        log_debug("format item type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
+    log_debug("format item type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
     String* result = format_data(item, type_str, flavor_str, context->heap->pool);
     if (result) {
          arraylist_append(context->heap->entries, (void*)s2it(result));
@@ -874,39 +863,8 @@ Item fn_index(Item item, Item index_item) {
         return ItemNull;
     }
 
-        log_debug("fn_index item index: %ld", index);
-    TypeId type_id = get_type_id(item);
-    switch (type_id) {
-    case LMD_TYPE_RANGE: {
-        Range *range = item.range;
-        if (index < range->start || index > range->end) { return ItemNull; }
-        long value = range->start + index;
-        return {.item = i2it(value)};
-    }
-    case LMD_TYPE_ARRAY:
-        return array_get(item.array, (int)index);
-    case LMD_TYPE_ARRAY_INT: {
-        ArrayInt *arr = item.array_int;
-        if (index < 0 || index >= arr->length) { return ItemNull; }
-        return {.item = i2it(arr->items[index])};
-    }
-    case LMD_TYPE_ARRAY_FLOAT: {
-        ArrayFloat *arr = item.array_float;
-        if (index < 0 || index >= arr->length) { return ItemNull; }
-        return push_d(arr->items[index]);
-    }
-    case LMD_TYPE_LIST:
-        return list_get(item.list, (int)index);
-    case LMD_TYPE_ELEMENT:
-        // treat element as list for index access
-        return list_get(item.list, (int)index);
-    case LMD_TYPE_MAP:
-        // to consider: should we return ITEM_NULL or ITEM_ERROR? 
-        return ItemNull;
-    // todo: string, symbol, dtime, binary, etc.
-    default:
-        return ItemNull;
-    }
+    log_debug("fn_index item index: %ld", index);
+    return item_at(item, index);
 }
 
 Item fn_member(Item item, Item key) {
@@ -940,7 +898,7 @@ Item fn_member(Item item, Item key) {
 // length of an item's content, relates to indexed access, i.e. item[index] 
 int64_t fn_len(Item item) {
     TypeId type_id = get_type_id(item);
-        log_debug("fn_len item: %d", type_id);
+    log_debug("fn_len item: %d", type_id);
     int64_t size = 0;
     switch (type_id) {
     case LMD_TYPE_LIST:

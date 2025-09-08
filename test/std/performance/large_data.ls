@@ -3,5 +3,5 @@
 // Type: positive
 // Expected: 5050
 
-// Test large computation - sum of 1 to 100 (direct calculation)
+// Simple calculation that should result in 5050
 10100 / 2

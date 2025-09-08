@@ -46,6 +46,13 @@ Array* parse_flow_array(Input *input, const char* str);
 // Unified markup parsing functions (from input-markup.cpp)
 Item input_markup(Input *input, const char* content);
 
+// JSX parsing functions (from input-jsx.cpp)
+Item input_jsx(Input* input, const char* jsx_string);
+void parse_jsx(Input* input, const char* jsx_string);
+
+// MDX parsing functions (from input-mdx.cpp)
+Item input_mdx(Input* input, const char* mdx_string);
+
 // Directory listing functions (from input_dir.cpp)
 Input* input_from_directory(const char* directory_path, bool recursive, int max_depth);
 

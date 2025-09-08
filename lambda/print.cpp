@@ -18,36 +18,37 @@ static void init_datetime_format_pool() {
 
 // print the syntax tree as an s-expr
 void print_ts_node(const char *source, TSNode node, uint32_t indent) {
-    for (uint32_t i = 0; i < indent; i++) {
-        log_debug("  ");
-    }
+    if (indent > 0) log_enter();
     const char *type = ts_node_type(node);
     if (isalpha(*type)) {
         log_debug("(%s", type);
     } else if (*type == '\'') {
-        printf("(\"%s\"", type);
+        log_debug("(\"%s\"", type);
     } else { // special char
         log_debug("('%s'", type);
     }
-  
+    // print children if any
     uint32_t child_count = ts_node_child_count(node);
     if (child_count > 0) {
-        log_debug("");
         for (uint32_t i = 0; i < child_count; i++) {
             TSNode child = ts_node_child(node, i);
             print_ts_node(source, child, indent + 1);
         }
-        for (uint32_t i = 0; i < indent; i++) {
-        log_debug("  ");
-        }
     }
     else if (isalpha(*type)) {
-      int start_byte = ts_node_start_byte(node);
-      int end_byte = ts_node_end_byte(node);
-      const char* start = source + start_byte;
+        int start_byte = ts_node_start_byte(node);
+        int end_byte = ts_node_end_byte(node);
+        const char* start = source + start_byte;
         log_debug(" '%.*s'", end_byte - start_byte, start);
     }
-        log_debug(")");
+    log_debug(")");
+    if (indent > 0) log_leave();
+}
+
+void print_ts_root(const char *source, TSTree* syntax_tree) {
+    log_debug("Syntax tree: ---------");
+    TSNode root_node = ts_tree_root_node(syntax_tree);
+    print_ts_node(source, root_node, 0);
 }
 
 // write the native C type for the lambda type
@@ -236,7 +237,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             } else {
                 strbuf_append_str(strbuf, " ");
             }
-            strbuf_append_format(strbuf, "%.*s:", (int)field->name->length, field->name->str);
+            strbuf_append_format(strbuf, "%.*s: ", (int)field->name->length, field->name->str);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL:
                 strbuf_append_str(strbuf, "null");
@@ -301,19 +302,13 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 print_typeditem(strbuf, (TypedItem*)data, depth, indent);
                 break;
             default:
-                strbuf_append_format(strbuf, "[unknown]");
+                strbuf_append_str(strbuf, "[unknown]");
             }
         }
         
         advance_field:
         ShapeEntry *next_field = field->next;
         field = next_field;
-    }
-    
-    // Add closing indentation if we have nested structures
-    if (indent && !is_attrs && map_type->length > 0) {
-        strbuf_append_char(strbuf, '\n');
-        for (int i = 0; i < depth - 1; i++) strbuf_append_str(strbuf, indent);
     }
 }
 
@@ -430,7 +425,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             // Safety check: validate string length before assertion
             size_t actual_len = strlen(string->chars);
             if (actual_len != string->len) {
-                printf("WARNING: String length mismatch. Expected: %u, Actual: %zu\n", string->len, actual_len);
+                log_warn("WARNING: String length mismatch. Expected: %u, Actual: %zu\n", string->len, actual_len);
                 // Use the actual length to prevent crashes
                 strbuf_append_format(strbuf, "\"%.*s\"", (int)actual_len, string->chars);
             } else {
@@ -448,7 +443,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             // Safety check: validate string length before assertion
             size_t actual_len = strlen(string->chars);
             if (actual_len != string->len) {
-                printf("WARNING: Symbol length mismatch. Expected: %u, Actual: %zu\n", string->len, actual_len);
+                log_warn("WARNING: Symbol length mismatch. Expected: %u, Actual: %zu\n", string->len, actual_len);
                 // Use the actual length to prevent crashes
                 strbuf_append_format(strbuf, "'%.*s'", (int)actual_len, string->chars);
             } else {
@@ -480,7 +475,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     }
     case LMD_TYPE_RANGE: {
         Range *range = item.range;
-        log_debug("print range: %p, start: %ld, end: %ld\n", range, range->start, range->end);
+        log_debug("print range: %p, start: %ld, end: %ld", range, range->start, range->end);
         strbuf_append_char(strbuf, '[');
         for (int i = range->start; i <= range->end; i++) {
             if (i > range->start) strbuf_append_str(strbuf, ", ");
@@ -495,7 +490,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         if (depth) strbuf_append_char(strbuf, '(');
         for (int i = 0; i < list->length; i++) {
             if (i) strbuf_append_str(strbuf, depth ? ", " : "\n");
-            print_item(strbuf, list->items[i], depth + 1, indent);
+            print_item(strbuf, list->items[i], depth, indent);
         }
         if (depth) strbuf_append_char(strbuf, ')');
         break;
@@ -545,7 +540,12 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         Map *map = item.map;
         TypeMap *map_type = (TypeMap*)map->type;
         strbuf_append_char(strbuf, '{');
-        print_named_items(strbuf, map_type, map->data, !depth ? 1: depth + 1, indent);
+        print_named_items(strbuf, map_type, map->data, depth + 1, indent);
+        // add closing indentation if we have nested structures
+        if (indent && map_type->length > 0) {
+            strbuf_append_char(strbuf, '\n');
+            for (int i = 0; i < depth; i++) strbuf_append_str(strbuf, indent);
+        }        
         strbuf_append_char(strbuf, '}');
         break;
     }
@@ -563,14 +563,11 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             strbuf_append_str(strbuf, indent ? "\n": (elmt_type->length ? "; ":" "));
             for (long i = 0; i < element->length; i++) {
                 if (i) strbuf_append_str(strbuf, indent ? "\n" : "; ");
-                if (indent) { for (int i=0; i<=depth; i++) strbuf_append_str(strbuf, indent); }
+                if (indent) { for (int i=0; i<depth+1; i++) strbuf_append_str(strbuf, indent); }
                 print_item(strbuf, element->items[i], depth + 1, indent);
             }
-            // if (indent) {
-            //     strbuf_append_char(strbuf, '\n');
-            //     for (int i=0; i<depth-1; i++) strbuf_append_str(strbuf, indent); 
-            // }
         }
+        // no indentation for closing '>'
         strbuf_append_char(strbuf, '>');
         break;
     }
@@ -585,6 +582,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         // printf("print type: %p, type_id: %d\n", type, type->type->type_id);
         char* type_name = type_info[type->type->type_id].name;
         if (type->type->type_id == LMD_TYPE_NULL) {
+            // print as "type.null"
             strbuf_append_format(strbuf, "type.%s", type_name);
         } else {
             strbuf_append_str(strbuf, type_name);
@@ -601,10 +599,12 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     default:
         strbuf_append_format(strbuf, "[unknown type %d!!]", type_id);
     }
+}
 
-    if (depth == 0) { // append last '\n'
-        strbuf_append_char(strbuf, '\n');
-    }
+void print_root_item(StrBuf *strbuf, Item item, char* indent) {
+    print_item(strbuf, item, 0, indent);
+    // append last '\n'
+    strbuf_append_char(strbuf, '\n');
 }
 
 extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent) {
@@ -681,7 +681,7 @@ char* format_type(Type *type) {
     }
 }
 
-void log_item(Item item, char* msg) {
+void log_item(Item item, const char* msg) {
     StrBuf *strbuf = strbuf_new();
     print_item(strbuf, item, 0, NULL);
     log_debug("%s: %s", msg, strbuf->str);
@@ -689,26 +689,25 @@ void log_item(Item item, char* msg) {
 }
 
 void print_label(int indent, const char *label) {
-    for (int i = 0; i < indent; i++) { printf("  "); }
-    printf("%s\n", label);
+    log_debug("  %s", label);
 }
 
 void print_const(Script *script, Type* type) {
     char* type_name = type_info[type->type_id].name;
     if (type->type_id == LMD_TYPE_NULL || type->type_id == LMD_TYPE_BOOL || type->type_id == LMD_TYPE_INT) {
-        printf("[const: %s]\n", type_name);  return;
+        log_debug("[const: %s]", type_name);  return;
     }
     TypeConst *const_type = (TypeConst*)type;
     void* data = script->const_list->data[const_type->const_index];
     switch (type->type_id) {
     case LMD_TYPE_FLOAT: {
         double num = *(double*)data;
-        printf("[const@%d, %s, %g]\n", const_type->const_index, type_name, num);
+        log_debug("[const@%d, %s, %g]", const_type->const_index, type_name, num);
         break;
     }
     case LMD_TYPE_INT64: {
         int64_t num = *(int64_t*)data;
-        printf("[const@%d, %s, %lld]\n", const_type->const_index, type_name, num);
+        log_debug("[const@%d, %s, %lld]", const_type->const_index, type_name, num);
         break;
     }
     case LMD_TYPE_DTIME: {
@@ -721,7 +720,7 @@ void print_const(Script *script, Type* type) {
     }
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
         String* string = (String*)data;
-        printf("[const@%d, %s, %p, '%.*s']\n", const_type->const_index, 
+        log_debug("[const@%d, %s, %p, '%.*s']", const_type->const_index, 
             type_name, string, (int)string->len, string->chars);
         break;
     }    
@@ -729,51 +728,57 @@ void print_const(Script *script, Type* type) {
         Decimal *decimal = (Decimal*)data;
         StrBuf *strbuf = strbuf_new();
         print_decimal(strbuf, decimal);
-        printf("[const@%d, %s, %s]\n", const_type->const_index, type_name, strbuf->str);
+        log_debug("[const@%d, %s, %s]", const_type->const_index, type_name, strbuf->str);
         strbuf_free(strbuf);
         break;
     }
-
     default:  // LMD_TYPE_BOOL, LMD_TYPE_INT should not be in const pool
-        printf("[const: %s, unexpected!!]\n", type_name);
+        log_debug("[const: %s, unexpected!!]", type_name);
     }
 }
 
 void print_ast_node(Script *script, AstNode *node, int indent) {
-    for (int i = 0; i < indent; i++) { printf("  "); }
+    if (!script) {
+        log_debug("[null script]");  return;
+    }
+    if (!node) {
+        log_debug("[null node]");  return;
+    }
+    if (indent > 0) log_enter();
     const char* type_name = node->type ? type_info[node->type->type_id].name : "unknown";
+    // log_debug("print_ast_node: node_type=%d, name=%s", node->node_type, type_name);
     switch(node->node_type) {
     case AST_NODE_IDENT:
-        printf("[ident:%.*s:%s,const:%d]\n", (int)((AstIdentNode*)node)->name->len, 
+        log_debug("[ident:%.*s:%s,const:%d]", (int)((AstIdentNode*)node)->name->len,
             ((AstIdentNode*)node)->name->chars, type_name, node->type ? node->type->is_const : -1);
         break;
     case AST_NODE_PRIMARY:
-        printf("[primary expr:%s,const:%d]\n", type_name, node->type ? node->type->is_const : -1);
+        log_debug("[primary expr:%s,const:%d]", type_name, node->type ? node->type->is_const : -1);
         if (((AstPrimaryNode*)node)->expr) {
             print_ast_node(script, ((AstPrimaryNode*)node)->expr, indent + 1);
         } else {
-            for (int i = 0; i < indent+1; i++) { printf("  "); }
+            // for (int i = 0; i < indent+1; i++) { log_debug("  "); }
             if (node->type && node->type->is_const) {
                 print_const(script, node->type);
             }
-            else { printf("(%s)\n", ts_node_type(node->node)); }
+            else { log_debug("(%s)", ts_node_type(node->node)); }
         }
         break;
     case AST_NODE_UNARY:
-        printf("[unary expr %.*s:%s]\n", (int)((AstUnaryNode*)node)->op_str.length, 
+        log_debug("[unary expr %.*s:%s]", (int)((AstUnaryNode*)node)->op_str.length, 
             ((AstUnaryNode*)node)->op_str.str, type_name);
         print_ast_node(script, ((AstUnaryNode*)node)->operand, indent + 1);
         break;
     case AST_NODE_BINARY: {
         AstBinaryNode* bnode = (AstBinaryNode*)node;
-        printf("[binary expr %.*s.%d:%s]\n", (int)bnode->op_str.length, bnode->op_str.str, 
+        log_debug("[binary expr %.*s.%d:%s]", (int)bnode->op_str.length, bnode->op_str.str, 
             bnode->op, type_name);
         print_ast_node(script, bnode->left, indent + 1);
         print_ast_node(script, bnode->right, indent + 1);
         break;
     }
     case AST_NODE_IF_EXPR: {
-        printf("[if expr:%s]\n", type_name);
+        log_debug("[if expr:%s]", type_name);
         AstIfNode* if_node = (AstIfNode*)node;
         print_ast_node(script, if_node->cond, indent + 1);
         print_label(indent + 1, "then:");
@@ -785,7 +790,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_IF_STAM: {
-        printf("[if stam:%s]\n", type_name);
+        log_debug("[if stam:%s]", type_name);
         AstIfNode* if_node = (AstIfNode*)node;
         print_ast_node(script, if_node->cond, indent + 1);
         print_label(indent + 1, "then:");
@@ -797,7 +802,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM: {
-        printf("[%s stam:%s]\n", node->node_type == AST_NODE_PUB_STAM ? "pub" : "let", type_name);
+        log_debug("[%s stam:%s]", node->node_type == AST_NODE_PUB_STAM ? "pub" : "let", type_name);
         AstNode *declare = ((AstLetNode*)node)->declare;
         while (declare) {
             print_label(indent + 1, "declare:");
@@ -807,7 +812,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_FOR_EXPR: {
-        printf("[for expr:%s]\n", type_name);
+        log_debug("[for expr:%s]", type_name);
         AstNode *loop = ((AstForNode*)node)->loop;
         while (loop) {
             print_label(indent + 1, "loop:");
@@ -819,7 +824,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_FOR_STAM: {
-        printf("[for stam:%s]\n", type_name);
+        log_debug("[for stam:%s]", type_name);
         AstNode *loop = ((AstForNode*)node)->loop;
         while (loop) {
             print_label(indent + 1, "loop:");
@@ -832,22 +837,22 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
     }
     case AST_NODE_ASSIGN: {
         AstNamedNode* assign = (AstNamedNode*)node;
-        printf("[assign expr:%.*s:%s]\n", (int)assign->name->len, assign->name->chars, type_name);
+        log_debug("[assign expr:%.*s:%s]", (int)assign->name->len, assign->name->chars, type_name);
         print_ast_node(script, assign->as, indent + 1);
         break;
     }
     case AST_NODE_KEY_EXPR: {
         AstNamedNode* key = (AstNamedNode*)node;
-        printf("[key expr:%.*s:%s]\n", (int)key->name->len, key->name->chars, type_name);
+        log_debug("[key expr:%.*s:%s]", (int)key->name->len, key->name->chars, type_name);
         print_ast_node(script, key->as, indent + 1);
         break;
     }
     case AST_NODE_LOOP:
-        printf("[loop expr:%s]\n", type_name);
+        log_debug("[loop expr:%s]", type_name);
         print_ast_node(script, ((AstNamedNode*)node)->as, indent + 1);
         break;
     case AST_NODE_ARRAY: {
-        printf("[array expr:%s]\n", type_name);
+        log_debug("[array expr:%s]", type_name);
         AstNode *item = ((AstArrayNode*)node)->item;
         while (item) {
             print_label(indent + 1, "item:");
@@ -857,7 +862,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_LIST:  case AST_NODE_CONTENT:  case AST_NODE_CONTENT_TYPE: {
-        printf("[%s:%s[%ld]]\n", node->node_type == 
+        log_debug("[%s:%s[%ld]]", node->node_type == 
             AST_NODE_CONTENT_TYPE ? "content_type" : AST_NODE_CONTENT ? "content" : "list", 
             type_name, ((TypeList*)node->type)->length);
         AstNode *ld = ((AstListNode*)node)->declare;
@@ -878,7 +883,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break; 
     }
     case AST_NODE_MAP: {
-        printf("[map expr:%s]\n", type_name);
+        log_debug("[map expr:%s]", type_name);
         AstNode *nm_item = ((AstMapNode*)node)->item;
         while (nm_item) {
             print_label(indent + 1, "map item:");
@@ -888,7 +893,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_ELEMENT: {
-        printf("[elmt expr:%s]\n", type_name);
+        log_debug("[elmt expr:%s]", type_name);
         AstElementNode* elmt_node = (AstElementNode*)node;
         AstNode *elmt_item = elmt_node->item;
         while (elmt_item) {
@@ -901,18 +906,18 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
     }
     case AST_NODE_PARAM: {
         AstNamedNode* param = (AstNamedNode*)node;
-        printf("[param: %.*s:%s]\n", (int)param->name->len, param->name->chars, type_name);
+        log_debug("[param: %.*s:%s]", (int)param->name->len, param->name->chars, type_name);
         break;
     }
     case AST_NODE_MEMBER_EXPR:  case AST_NODE_INDEX_EXPR:
-        printf("[%s expr:%s]\n", node->node_type == AST_NODE_MEMBER_EXPR ? "member" : "index", type_name);
+        log_debug("[%s expr:%s]", node->node_type == AST_NODE_MEMBER_EXPR ? "member" : "index", type_name);
         print_label(indent + 1, "object:");
         print_ast_node(script, ((AstFieldNode*)node)->object, indent + 1);
         print_label(indent + 1, "field:");     
         print_ast_node(script, ((AstFieldNode*)node)->field, indent + 1);
         break;
     case AST_NODE_CALL_EXPR: {
-        printf("[call expr:%s]\n", type_name);
+        log_debug("[call expr:%s]", type_name);
         print_ast_node(script, ((AstCallNode*)node)->function, indent + 1);
         print_label(indent + 1, "args:"); 
         AstNode* arg = ((AstCallNode*)node)->argument;
@@ -923,14 +928,14 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_SYS_FUNC:
-        printf("[sys func:%d:%s]\n", ((AstSysFuncNode*)node)->fn, type_name);
+        log_debug("[sys func:%d:%s]", ((AstSysFuncNode*)node)->fn, type_name);
         break;
     case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR: {
         AstFuncNode* func = (AstFuncNode*)node;
         if (node->node_type == AST_NODE_FUNC_EXPR) {
-            printf("[function expr:%s]\n", type_name);
+            log_debug("[function expr:%s]", type_name);
         } else {
-            printf("[function: %.*s:%s]\n", (int)func->name->len, func->name->chars, type_name);
+            log_debug("[function: %.*s:%s]", (int)func->name->len, func->name->chars, type_name);
         }
         print_label(indent + 1, "params:"); 
         AstNode* fn_param = (AstNode*)func->param;
@@ -945,11 +950,11 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         TypeType* actual_type = (TypeType*)node->type;
         assert(node->type->type_id == LMD_TYPE_TYPE && actual_type->type);
         char* actual_type_name = type_info[actual_type->type->type_id].name;
-        printf("[%s: %s]\n", type_name, actual_type_name);
+        log_debug("[%s: %s]", type_name, actual_type_name);
         break;
     }
     case AST_NODE_LIST_TYPE: {
-        printf("[list type:%s]\n", type_name);
+        log_debug("[list type:%s]", type_name);
         AstNode *ls_item = ((AstListNode*)node)->item;
         while (ls_item) {
             print_label(indent + 1, "item:");
@@ -959,7 +964,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }        
     case AST_NODE_ARRAY_TYPE: {
-        printf("[array type:%s]\n", type_name);
+        log_debug("[array type:%s]", type_name);
         AstNode *arr_item = ((AstArrayNode*)node)->item;
         while (arr_item) {
             print_label(indent + 1, "item:");
@@ -969,7 +974,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_MAP_TYPE: {
-        printf("[map type:%s]\n", type_name);
+        log_debug("[map type:%s]", type_name);
         AstNode *mt_item = ((AstMapNode*)node)->item;
         while (mt_item) {
             print_label(indent + 1, "map item:");
@@ -979,7 +984,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_ELMT_TYPE: {
-        printf("[elmt type:%s]\n", type_name);
+        log_debug("[elmt type:%s]", type_name);
         AstElementNode* et_node = (AstElementNode*)node;
         AstNode *et_item = et_node->item;
         while (et_item) {
@@ -991,7 +996,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_FUNC_TYPE: {
-        printf("[func type:%s]\n", type_name);
+        log_debug("[func type:%s]", type_name);
         AstFuncNode* ft = (AstFuncNode*)node;
         print_label(indent + 1, "params:"); 
         AstNode* ft_param = (AstNode*)ft->param;
@@ -1003,19 +1008,26 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
     }
     case AST_NODE_BINARY_TYPE: {
         AstBinaryNode* bt_node = (AstBinaryNode*)node;
-        printf("[binary type %.*s.%d:%s]\n", (int)bt_node->op_str.length, bt_node->op_str.str, 
+        log_debug("[binary type %.*s.%d:%s]", (int)bt_node->op_str.length, bt_node->op_str.str, 
             bt_node->op, type_name);
         print_ast_node(script, bt_node->left, indent + 1);
         print_ast_node(script, bt_node->right, indent + 1);        
         break;
     }
-    case AST_NODE_IMPORT:
-        printf("[import %.*s:%.*s]\n", 
-            (int)((AstImportNode*)node)->alias->len, ((AstImportNode*)node)->alias->chars, 
-            (int)((AstImportNode*)node)->module.length, ((AstImportNode*)node)->module.str);
+    case AST_NODE_IMPORT: {
+        AstImportNode* import_node = (AstImportNode*)node;
+        if (!import_node->module.str) {
+            log_debug("[import: missing module!!]");
+        } else {
+            log_debug("[import %.*s%s%.*s]",
+                (int)import_node->module.length, import_node->module.str,
+                (import_node->alias ? ":" : ""),
+                (int)(import_node->alias ? import_node->alias->len:0), (import_node->alias ? import_node->alias->chars : ""));
+        }
         break;
+    }
     case AST_SCRIPT: {
-        printf("[script:%s]\n", type_name);
+        log_debug("[script:%s]", type_name);
         AstNode* child = ((AstScript*)node)->child;
         while (child) {
             print_ast_node(script, child, indent + 1);
@@ -1024,8 +1036,13 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     default:
-        printf("unknown expression type!\n");
+        log_debug("[unknown expression type!]");
         break;
     }
+    if (indent > 0) log_leave();
 }
 
+void print_ast_root(Script *script) {
+    AstNode *node = script->ast_root;
+    print_ast_node(script, node, 0);
+}

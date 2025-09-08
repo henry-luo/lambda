@@ -154,6 +154,7 @@ MimeGlob glob_patterns[] = {
     {"*.props", "text/x-java-properties"},
     {"*.md", "text/markdown"},
     {"*.markdown", "text/markdown"},
+    {"*.mdx", "text/mdx"},
     {"*.rst", "text/x-rst"},
     {"*.tex", "application/x-tex"},
     {"*.latex", "application/x-latex"},

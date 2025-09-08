@@ -14,38 +14,39 @@
 "Statistical Functions Tests"
 "Test 10: Sum function on various arrays"
 15
-16.11555
+16.59955
 42
 0
 "Test 11: Average function on various arrays"
-5
-15
-2
+3
+3.31991
+42
 "Test 12: Minimum function on various arrays"
-20
-20
-40
+1
+1.1
+42
 "Test 13: Maximum function on various arrays"
-40
-40
-30
+5
+5.55555
+42
 "Edge Cases and Error Handling:"
 error
 error
+55
+5.5
+1
+10
+"Test 16: Negative numbers"
+1
+0.2
+-4
 5
-4
-30
-20
-2
-2
-2
-2
 "Advanced Mathematical Operations:"
-2
+0.6
 3
-4
-4
-4
+0.6
+0
+2
 1
 5
 15
@@ -54,3 +55,8 @@ error
 50
 150
 30
+"For loop with ArrayFloat:"
+0
+0.7
+0.2
+0.9

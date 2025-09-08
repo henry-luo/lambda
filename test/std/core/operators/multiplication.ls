@@ -5,5 +5,7 @@
 
 // Test multiplication with variables
 let x = 10
+x
 let y = 5
+y
 x * y

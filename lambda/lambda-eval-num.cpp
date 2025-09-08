@@ -313,7 +313,7 @@ Item fn_sub(Item item_a, Item item_b) {
         return push_l(*(long*)item_a.pointer - *(long*)item_b.pointer);
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
-        log_debug("sub float: %g - %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
+        log_debug("sub float: %g - %g", *(double*)item_a.pointer, *(double*)item_b.pointer);
         return push_d(*(double*)item_a.pointer - *(double*)item_b.pointer);
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
@@ -394,7 +394,7 @@ Item fn_sub(Item item_a, Item item_b) {
         return {.array_float = result};
     }
     else {
-        log_error("unknown sub type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown sub type: %d, %d", item_a.type_id, item_b.type_id);
     }
     return ItemError;
 }
@@ -403,21 +403,21 @@ Item fn_div(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
     if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         if (item_b.int_val == 0) {
-        log_error("integer division by zero error");
+        log_error("division by zero error");
             return ItemError;
         }
         return push_d((double)item_a.int_val / (double)item_b.int_val);
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {
         if (*(long*)item_b.pointer == 0) {
-        log_error("integer division by zero error");
+        log_error("division by zero error");
             return ItemError;
         }
         return push_d((double)*(long*)item_a.pointer / (double)*(long*)item_b.pointer);
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
         if (*(double*)item_b.pointer == 0.0) {
-        log_error("float division by zero error");
+        log_error("division by zero error");
             return ItemError;
         }
         log_debug("div float: %g / %g\n", *(double*)item_a.pointer, *(double*)item_b.pointer);
@@ -425,18 +425,48 @@ Item fn_div(Item item_a, Item item_b) {
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
         if (*(double*)item_b.pointer == 0.0) {
-            log_error("float division by zero error");
+            log_error("division by zero error");
             return ItemError;
         }
         return push_d((double)item_a.int_val / *(double*)item_b.pointer);
     }
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
         if (item_b.int_val == 0) {
-        log_error("integer division by zero error");
+        log_error("division by zero error");
             return ItemError;
         }
         return push_d(*(double*)item_a.pointer / (double)item_b.int_val);
     }
+    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_FLOAT) {
+        long a_val = *(long*)item_a.pointer;
+        if (*(double*)item_b.pointer == 0.0) {
+            log_error("float division by zero error");
+            return ItemError;
+        }
+        return push_d((double)a_val / *(double*)item_b.pointer);
+    }
+    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT64) {
+        long b_val = *(long*)item_b.pointer;
+        if (b_val == 0) {
+            log_error("division by zero error");
+            return ItemError;
+        }
+        return push_d(*(double*)item_a.pointer / (double)b_val);
+    }
+    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT64) {
+        if (*(long*)item_b.pointer == 0) {
+            log_error("division by zero error");
+            return ItemError;
+        }
+        return push_d((double)item_a.int_val / *(long*)item_b.pointer);
+    }
+    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
+        if (item_b.int_val == 0) {
+        log_error("division by zero error");
+            return ItemError;
+        }
+        return push_d(*(long*)item_a.pointer / (double)item_b.int_val);
+    }    
     // Add libmpdec decimal support
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
         mpd_t* a_dec = convert_to_decimal(item_a, context->decimal_ctx);
@@ -852,25 +882,13 @@ Item fn_ceil(Item item) {
 }
 
 Item fn_min(Item item_a, Item item_b) {
+    log_debug("fn_min called with types: %d, %d", item_a.type_id, item_b.type_id);
     // Check if we're being called with array min (single array argument)
     // This happens when the second argument is ITEM_NULL or has type LMD_TYPE_NULL
     if (item_b.type_id == LMD_TYPE_NULL || item_b.raw_pointer == NULL) {
         // Single argument array min case
         TypeId type_id = get_type_id(item_a);
-        if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-            ArrayFloat* arr = item_a.array_float;
-            if (arr->length == 0) {
-                return ItemError; // Empty array has no minimum
-            }
-            double min_val = arr->items[0];
-            for (size_t i = 1; i < arr->length; i++) {
-                if (arr->items[i] < min_val) {
-                    min_val = arr->items[i];
-                }
-            }
-            return push_d(min_val);
-        }
-        else if (type_id == LMD_TYPE_ARRAY_INT) {
+        if (type_id == LMD_TYPE_ARRAY_INT) {
             ArrayInt* arr = item_a.array_int;
             if (arr->length == 0) {
                 return ItemError; // Empty array has no minimum
@@ -897,12 +915,25 @@ Item fn_min(Item item_a, Item item_b) {
             log_debug("min value (int64): %ld", min_val);
             return push_l(min_val);
         }
-        else if (type_id == LMD_TYPE_ARRAY) {
-            Array* arr = item_a.array;
+        else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+            ArrayFloat* arr = item_a.array_float;
+            if (arr->length == 0) {
+                return ItemError; // Empty array has no minimum
+            }
+            double min_val = arr->items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->items[i] < min_val) {
+                    min_val = arr->items[i];
+                }
+            }
+            return push_d(min_val);
+        }        
+        else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_LIST) {
+            List* arr = item_a.list;
             if (!arr || arr->length == 0) {
                 return ItemError; // Empty array has no minimum
             }
-            Item min_item = array_get(arr, 0);
+            Item min_item = type_id == LMD_TYPE_LIST ? list_get(arr, 0) : array_get(arr, 0);
             double min_val = 0.0;
             bool is_float = false;
             
@@ -917,13 +948,18 @@ Item fn_min(Item item_a, Item item_b) {
                 min_val = *(double*)min_item.pointer;
                 is_float = true;
             }
+            else if (min_item.type_id == LMD_TYPE_DECIMAL) {
+                log_error("decimal not supported yet in fn_min");
+                return ItemError;
+            }
             else {
+                log_error("non-numeric array element type: %d", min_item.type_id);
                 return ItemError;
             }
             
-            // Find minimum
+            // find minimum
             for (size_t i = 1; i < arr->length; i++) {
-                Item elem_item = array_get(arr, i);
+                Item elem_item = type_id == LMD_TYPE_LIST ? list_get(arr, i) : array_get(arr, i);
                 double elem_val = 0.0;
                 
                 if (elem_item.type_id == LMD_TYPE_INT) {
@@ -936,23 +972,29 @@ Item fn_min(Item item_a, Item item_b) {
                     elem_val = *(double*)elem_item.pointer;
                     is_float = true;
                 }
+                else if (elem_item.type_id == LMD_TYPE_DECIMAL) {
+                    log_error("decimal not supported yet in fn_min");
+                    return ItemError;
+                }                
                 else {
                     return ItemError;
                 }
-                
                 if (elem_val < min_val) {
                     min_val = elem_val;
                 }
             }
-            
             if (is_float) {
                 return push_d(min_val);
             } else {
                 return (Item){.item = i2it((long)min_val)};
             }
         }
+        else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
+            // single numeric value, return as-is
+            return item_a;
+        }        
         else {
-        log_debug("min not supported for single argument type: %d", type_id);
+            log_debug("min not supported for single argument type: %d", type_id);
             return ItemError;
         }
     }
@@ -972,12 +1014,16 @@ Item fn_min(Item item_a, Item item_b) {
         a_val = *(double*)item_a.pointer;
         is_float = true;
     }
+    else if (item_a.type_id == LMD_TYPE_DECIMAL) {
+        log_error("decimal not supported yet in fn_min");
+        return ItemError;
+    }  
     else {
         log_debug("min not supported for type: %d", item_a.type_id);
         return ItemError;
     }
     
-    // Convert second argument
+    // convert second argument
     if (item_b.type_id == LMD_TYPE_INT) {
         b_val = item_b.int_val;
     }
@@ -988,6 +1034,10 @@ Item fn_min(Item item_a, Item item_b) {
         b_val = *(double*)item_b.pointer;
         is_float = true;
     }
+    else if (item_a.type_id == LMD_TYPE_DECIMAL) {
+        log_error("decimal not supported yet in fn_min");
+        return ItemError;
+    }    
     else {
         log_debug("min not supported for type: %d", item_b.type_id);
         return ItemError;
@@ -1050,12 +1100,12 @@ Item fn_max(Item item_a, Item item_b) {
             log_debug("max value (int64): %ld", max_val);
             return push_l(max_val);
         }
-        else if (type_id == LMD_TYPE_ARRAY) {
+        else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_LIST) {
             Array* arr = item_a.array;
             if (!arr || arr->length == 0) {
                 return ItemError; // Empty array has no maximum
             }
-            Item max_item = array_get(arr, 0);
+            Item max_item = type_id == LMD_TYPE_LIST ? list_get(arr, 0) : array_get(arr, 0);
             double max_val = 0.0;
             bool is_float = false;
             
@@ -1076,7 +1126,7 @@ Item fn_max(Item item_a, Item item_b) {
             
             // Find maximum
             for (size_t i = 1; i < arr->length; i++) {
-                Item elem_item = array_get(arr, i);
+                Item elem_item = type_id == LMD_TYPE_LIST ? list_get(arr, i) : array_get(arr, i);
                 double elem_val = 0.0;
                 
                 if (elem_item.type_id == LMD_TYPE_INT) {
@@ -1104,8 +1154,12 @@ Item fn_max(Item item_a, Item item_b) {
                 return (Item){.item = i2it((long)max_val)};
             }
         }
+        else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
+            // single numeric value, return as-is
+            return item_a;
+        }
         else {
-        log_debug("max not supported for single argument type: %d", type_id);
+            log_debug("max not supported for single argument type: %d", type_id);
             return ItemError;
         }
     }
@@ -1225,6 +1279,7 @@ Item fn_sum(Item item) {
         return push_l(sum);
     }
     else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+        log_debug("fn_sum of LMD_TYPE_ARRAY_FLOAT");
         ArrayFloat* arr = item.array_float;  // Use the correct field
         if (arr->length == 0) {
             return push_d(0.0);  // Empty array sums to 0.0
@@ -1233,6 +1288,7 @@ Item fn_sum(Item item) {
         for (size_t i = 0; i < arr->length; i++) {
             sum += arr->items[i];
         }
+        log_debug("fn_sum result: %f", sum);
         return push_d(sum);
     }
     else if (type_id == LMD_TYPE_LIST) {
@@ -1240,7 +1296,7 @@ Item fn_sum(Item item) {
         List* list = item.list;
         log_debug("DEBUG fn_sum: List pointer: %p, length: %ld", list, list ? list->length : -1);
         if (!list || list->length == 0) {
-        log_debug("DEBUG fn_sum: Empty list, returning 0");
+            log_debug("DEBUG fn_sum: Empty list, returning 0");
             return (Item){.item = i2it(0)};  // Empty list sums to 0
         }
         double sum = 0.0;
@@ -1249,32 +1305,36 @@ Item fn_sum(Item item) {
             Item elem_item = list_get(list, i);
             if (elem_item.type_id == LMD_TYPE_INT) {
                 long val = elem_item.int_val;
-        log_debug("DEBUG fn_sum: Adding int value: %ld", val);
+                log_debug("DEBUG fn_sum: Adding int value: %ld", val);
                 sum += (double)val;
             }
             else if (elem_item.type_id == LMD_TYPE_INT64) {
                 long val = *(long*)elem_item.pointer;
-        log_debug("DEBUG fn_sum: Adding int64 value: %ld", val);
+                log_debug("DEBUG fn_sum: Adding int64 value: %ld", val);
                 sum += (double)val;
             }
             else if (elem_item.type_id == LMD_TYPE_FLOAT) {
                 double val = *(double*)elem_item.pointer;
-        log_debug("DEBUG fn_sum: Adding float value: %f", val);
+                log_debug("DEBUG fn_sum: Adding float value: %f", val);
                 sum += val;
                 has_float = true;
             }
             else {
-        log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
+                log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
                 return ItemError;
             }
         }
         if (has_float) {
-        log_debug("DEBUG fn_sum: Returning sum as double: %f", sum);
+            log_debug("DEBUG fn_sum: Returning sum as double: %f", sum);
             return push_d(sum);
         } else {
-        log_error("DEBUG fn_sum: Returning sum as long: %ld", (long)sum);
+            log_error("DEBUG fn_sum: Returning sum as long: %ld", (long)sum);
             return push_l((long)sum);
         }
+    }
+    else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
+        // single numeric value, return as-is
+        return item;
     }
     else {
         log_debug("DEBUG fn_sum: sum not supported for type: %d", type_id);
@@ -1304,7 +1364,7 @@ Item fn_avg(Item item) {
                 sum += *(double*)elem_item.pointer;
             }
             else {
-        log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
+                log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
                 return ItemError;
             }
         }
@@ -1362,12 +1422,16 @@ Item fn_avg(Item item) {
                 sum += *(double*)elem_item.pointer;
             }
             else {
-        log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
+                log_debug("avg: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
                 return ItemError;
             }
         }
         return push_d(sum / (double)list->length);
     }
+    else if (LMD_TYPE_INT <= type_id && type_id <= LMD_TYPE_NUMBER) {
+        // single numeric value, return as-is
+        return item;
+    }    
     else {
         log_debug("avg not supported for type: %d", type_id);
         return ItemError;
@@ -1609,4 +1673,379 @@ int64_t fn_int64(Item item) {
     }
         log_debug("Cannot convert type %d to int64", item.type_id);
     return INT_ERROR;
+}
+
+// Constructor functions for type conversion
+
+Item fn_decimal(Item item) {
+    // Convert item to decimal type
+    if (item.type_id == LMD_TYPE_DECIMAL) {
+        return item;  // Already a decimal
+    }
+    else if (item.type_id == LMD_TYPE_INT) {
+        mpd_t* dec_val = mpd_new(context->decimal_ctx);
+        if (!dec_val) {
+            log_debug("Failed to allocate decimal");
+            return ItemError;
+        }
+        mpd_set_i32(dec_val, item.int_val, context->decimal_ctx);
+        return push_decimal(dec_val);
+    }
+    else if (item.type_id == LMD_TYPE_INT64) {
+        mpd_t* dec_val = mpd_new(context->decimal_ctx);
+        if (!dec_val) {
+            log_debug("Failed to allocate decimal");
+            return ItemError;
+        }
+        int64_t val = *(int64_t*)item.pointer;
+        mpd_set_i64(dec_val, val, context->decimal_ctx);
+        return push_decimal(dec_val);
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        mpd_t* dec_val = mpd_new(context->decimal_ctx);
+        if (!dec_val) {
+            log_debug("Failed to allocate decimal");
+            return ItemError;
+        }
+        double val = *(double*)item.pointer;
+        char str_buf[64];
+        snprintf(str_buf, sizeof(str_buf), "%.17g", val);
+        mpd_set_string(dec_val, str_buf, context->decimal_ctx);
+        return push_decimal(dec_val);
+    }
+    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+        String* str = (String*)item.pointer;
+        if (!str || str->len == 0) {
+            log_debug("Cannot convert empty string/symbol to decimal");
+            return ItemError;
+        }
+        
+        mpd_t* dec_val = mpd_new(context->decimal_ctx);
+        if (!dec_val) {
+            log_debug("Failed to allocate decimal");
+            return ItemError;
+        }
+        
+        // Create null-terminated string for mpd_set_string
+        char* null_term_str = (char*)malloc(str->len + 1);
+        if (!null_term_str) {
+            mpd_del(dec_val);
+            log_debug("Failed to allocate string buffer");
+            return ItemError;
+        }
+        memcpy(null_term_str, str->chars, str->len);
+        null_term_str[str->len] = '\0';
+        
+        mpd_set_string(dec_val, null_term_str, context->decimal_ctx);
+        free(null_term_str);
+        
+        if (mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
+            log_debug("Cannot convert string '%.*s' to decimal", (int)str->len, str->chars);
+            mpd_del(dec_val);
+            return ItemError;
+        }
+        
+        return push_decimal(dec_val);
+    }
+    else {
+        log_debug("Cannot convert type %d to decimal", item.type_id);
+        return ItemError;
+    }
+}
+
+Item fn_binary(Item item) {
+    // Convert item to binary (string) type
+    if (item.type_id == LMD_TYPE_STRING) {
+        return item;  // Already a string (binary is stored as string)
+    }
+    else if (item.type_id == LMD_TYPE_SYMBOL) {
+        // Convert symbol to string
+        String* sym = (String*)item.pointer;
+        if (!sym) {
+            log_debug("Cannot convert null symbol to binary");
+            return ItemError;
+        }
+        
+        String* str = (String*)heap_alloc(sizeof(String) + sym->len + 1, LMD_TYPE_STRING);
+        if (!str) {
+            log_debug("Failed to allocate string for binary conversion");
+            return ItemError;
+        }
+        
+        str->len = sym->len;
+        memcpy(str->chars, sym->chars, sym->len);
+        str->chars[sym->len] = '\0';
+        
+        return (Item){.item = s2it(str)};
+    }
+    else if (item.type_id == LMD_TYPE_INT) {
+        // Convert int to binary string representation
+        char buf[32];
+        int len = snprintf(buf, sizeof(buf), "%d", item.int_val);
+        if (len < 0 || len >= (int)sizeof(buf)) {
+            log_debug("Failed to convert int to string");
+            return ItemError;
+        }
+        
+        String* str = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+        if (!str) {
+            log_debug("Failed to allocate string for binary conversion");
+            return ItemError;
+        }
+        
+        str->len = len;
+        memcpy(str->chars, buf, len);
+        str->chars[len] = '\0';
+        
+        return (Item){.item = s2it(str)};
+    }
+    else if (item.type_id == LMD_TYPE_INT64) {
+        // Convert int64 to binary string representation
+        int64_t val = *(int64_t*)item.pointer;
+        char buf[32];
+        int len = snprintf(buf, sizeof(buf), "%lld", (long long)val);
+        if (len < 0 || len >= (int)sizeof(buf)) {
+            log_debug("Failed to convert int64 to string");
+            return ItemError;
+        }
+        
+        String* str = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+        if (!str) {
+            log_debug("Failed to allocate string for binary conversion");
+            return ItemError;
+        }
+        
+        str->len = len;
+        memcpy(str->chars, buf, len);
+        str->chars[len] = '\0';
+        
+        return (Item){.item = s2it(str)};
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        // Convert float to binary string representation
+        double val = *(double*)item.pointer;
+        char buf[64];
+        int len = snprintf(buf, sizeof(buf), "%.17g", val);
+        if (len < 0 || len >= (int)sizeof(buf)) {
+            log_debug("Failed to convert float to string");
+            return ItemError;
+        }
+        
+        String* str = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_STRING);
+        if (!str) {
+            log_debug("Failed to allocate string for binary conversion");
+            return ItemError;
+        }
+        
+        str->len = len;
+        memcpy(str->chars, buf, len);
+        str->chars[len] = '\0';
+        
+        return (Item){.item = s2it(str)};
+    }
+    else {
+        log_debug("Cannot convert type %d to binary", item.type_id);
+        return ItemError;
+    }
+}
+
+Item fn_symbol(Item item) {
+    // Convert item to symbol type
+    if (item.type_id == LMD_TYPE_SYMBOL) {
+        return item;  // Already a symbol
+    }
+    else if (item.type_id == LMD_TYPE_STRING) {
+        // Convert string to symbol
+        String* str = (String*)item.pointer;
+        if (!str) {
+            log_debug("Cannot convert null string to symbol");
+            return ItemError;
+        }
+        
+        String* sym = (String*)heap_alloc(sizeof(String) + str->len + 1, LMD_TYPE_SYMBOL);
+        if (!sym) {
+            log_debug("Failed to allocate symbol");
+            return ItemError;
+        }
+        
+        sym->len = str->len;
+        memcpy(sym->chars, str->chars, str->len);
+        sym->chars[sym->len] = '\0';
+        
+        return (Item){.item = y2it(sym)};
+    }
+    else if (item.type_id == LMD_TYPE_INT) {
+        // Convert int to symbol
+        char buf[32];
+        int len = snprintf(buf, sizeof(buf), "%d", item.int_val);
+        if (len < 0 || len >= (int)sizeof(buf)) {
+            log_debug("Failed to convert int to symbol");
+            return ItemError;
+        }
+        
+        String* sym = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_SYMBOL);
+        if (!sym) {
+            log_debug("Failed to allocate symbol");
+            return ItemError;
+        }
+        
+        sym->len = len;
+        memcpy(sym->chars, buf, len);
+        sym->chars[len] = '\0';
+        
+        return (Item){.item = y2it(sym)};
+    }
+    else if (item.type_id == LMD_TYPE_INT64) {
+        // Convert int64 to symbol
+        int64_t val = *(int64_t*)item.pointer;
+        char buf[32];
+        int len = snprintf(buf, sizeof(buf), "%lld", (long long)val);
+        if (len < 0 || len >= (int)sizeof(buf)) {
+            log_debug("Failed to convert int64 to symbol");
+            return ItemError;
+        }
+        
+        String* sym = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_SYMBOL);
+        if (!sym) {
+            log_debug("Failed to allocate symbol");
+            return ItemError;
+        }
+        
+        sym->len = len;
+        memcpy(sym->chars, buf, len);
+        sym->chars[len] = '\0';
+        
+        return (Item){.item = y2it(sym)};
+    }
+    else if (item.type_id == LMD_TYPE_FLOAT) {
+        // Convert float to symbol
+        double val = *(double*)item.pointer;
+        char buf[64];
+        int len = snprintf(buf, sizeof(buf), "%.17g", val);
+        if (len < 0 || len >= (int)sizeof(buf)) {
+            log_debug("Failed to convert float to symbol");
+            return ItemError;
+        }
+        
+        String* sym = (String*)heap_alloc(sizeof(String) + len + 1, LMD_TYPE_SYMBOL);
+        if (!sym) {
+            log_debug("Failed to allocate symbol");
+            return ItemError;
+        }
+        
+        sym->len = len;
+        memcpy(sym->chars, buf, len);
+        sym->chars[len] = '\0';
+        
+        return (Item){.item = y2it(sym)};
+    }
+    else {
+        log_debug("Cannot convert type %d to symbol", item.type_id);
+        return ItemError;
+    }
+}
+
+Item fn_float(Item item) {
+    // Convert item to float type
+    if (item.type_id == LMD_TYPE_FLOAT) {
+        return item;  // Already a float
+    }
+    else if (item.type_id == LMD_TYPE_INT) {
+        double* val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        if (!val) {
+            log_debug("Failed to allocate float");
+            return ItemError;
+        }
+        *val = (double)item.int_val;
+        
+        return (Item){.item = d2it(val)};
+    }
+    else if (item.type_id == LMD_TYPE_INT64) {
+        int64_t int_val = *(int64_t*)item.pointer;
+        double* val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        if (!val) {
+            log_debug("Failed to allocate float");
+            return ItemError;
+        }
+        *val = (double)int_val;
+        
+        return (Item){.item = d2it(val)};
+    }
+    else if (item.type_id == LMD_TYPE_DECIMAL) {
+        mpd_t* dec_val = (mpd_t*)item.pointer;
+        char* dec_str = mpd_to_sci(dec_val, 1);
+        if (!dec_str) {
+            log_debug("Failed to convert decimal to string");
+            return ItemError;
+        }
+        
+        char* endptr;
+        errno = 0;
+        double dval = strtod(dec_str, &endptr);
+        mpd_free(dec_str);
+        
+        if (errno != 0 || *endptr != '\0') {
+            log_debug("Failed to convert decimal to float");
+            return ItemError;
+        }
+        
+        double* val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        if (!val) {
+            log_debug("Failed to allocate float");
+            return ItemError;
+        }
+        *val = dval;
+        
+        return (Item){.item = d2it(val)};
+    }
+    else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
+        String* str = (String*)item.pointer;
+        if (!str || str->len == 0) {
+            log_debug("Empty string/symbol cannot be converted to float");
+            return ItemError;
+        }
+        
+        // Create a null-terminated copy of the string
+        char* buf = (char*)malloc(str->len + 1);
+        if (!buf) {
+            log_debug("Failed to allocate buffer for string conversion");
+            return ItemError;
+        }
+        memcpy(buf, str->chars, str->len);
+        buf[str->len] = '\0';
+        
+        // Remove any commas from the string
+        char* p = buf;
+        char* q = buf;
+        while (*p) {
+            if (*p != ',') {
+                *q++ = *p;
+            }
+            p++;
+        }
+        *q = '\0';
+        
+        char* endptr;
+        errno = 0;
+        double val = strtod(buf, &endptr);
+        free(buf);
+        
+        if (errno != 0 || *endptr != '\0') {
+            log_debug("Cannot convert string to float: %.*s", (int)str->len, str->chars);
+            return ItemError;
+        }
+        
+        double* result_val = (double*)heap_alloc(sizeof(double), LMD_TYPE_FLOAT);
+        if (!result_val) {
+            log_debug("Failed to allocate float");
+            return ItemError;
+        }
+        *result_val = val;
+        
+        return (Item){.item = d2it(result_val)};
+    }
+    else {
+        log_debug("Cannot convert type %d to float", item.type_id);
+        return ItemError;
+    }
 }

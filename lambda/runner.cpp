@@ -22,7 +22,7 @@ static void print_elapsed_time(const char* label, win_timer start, win_timer end
     QueryPerformanceFrequency(&frequency);
     
     double elapsed_ms = ((double)(end.counter.QuadPart - start.counter.QuadPart) * 1000.0) / frequency.QuadPart;
-        log_debug("%s took %.3f ms", label, elapsed_ms);
+    log_debug("%s took %.3f ms", label, elapsed_ms);
 }
 
 #else
@@ -95,6 +95,7 @@ void find_errors(TSNode node) {
 
 void init_module_import(Transpiler *tp, AstScript *script) {
     log_debug("init imports of script");
+    log_enter();
     AstNode* child = script->child;
     while (child) {
         if (child->node_type == AST_NODE_IMPORT) {
@@ -108,7 +109,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             if (!imp) {
                 log_error("Error: Failed to find import item for module %.*s", 
                     (int)(import->module.length), import->module.str);
-                return;
+                goto RETURN;
             }
             uint8_t* mod_def = (uint8_t*)imp->addr;
             // loop through the public functions in the module
@@ -120,9 +121,10 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                 if (node->node_type == AST_NODE_CONTENT) break;
                 node = node->next;
             }
-            log_error("missing content node");
-            node = ((AstListNode*)node)->item;
+            if (!node) { log_error("Error: Missing content node");  goto RETURN; }
+            node = ((AstListNode*)node)->item; 
             while (node) {
+                log_debug("checking content node: %d", node->node_type);
                 if (node->node_type == AST_NODE_FUNC) {
                     AstFuncNode *func_node = (AstFuncNode*)node;
                     if (((TypeFunc*)func_node->type)->is_public) {
@@ -131,7 +133,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
                         write_fn_name(func_name, func_node, NULL);
                         log_debug("loading fn addr: %s from script: %s", func_name->str, import->script->reference);
                         void* fn_ptr = find_func(import->script->jit_context, func_name->str);
-                        log_debug("got fn: %s, func_ptr: %p", func_name->str, fn_ptr);
+                        log_debug("got imported fn: %s, func_ptr: %p", func_name->str, fn_ptr);
                         strbuf_free(func_name);
                         *(main_func_t*) mod_def = (main_func_t)fn_ptr;
                         mod_def += sizeof(main_func_t);
@@ -161,7 +163,9 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             }
         }
         child = child->next;
-    }    
+    }
+    RETURN:
+    log_leave();
 }
 
 extern unsigned int lambda_lambda_h_len;
@@ -186,12 +190,11 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&end);
     print_elapsed_time("parsing", start, end);
 
-    // print the syntax tree as an s-expr.
-    // printf("Syntax tree: ---------\n");
-    TSNode root_node = ts_tree_root_node(tp->syntax_tree);
-    // print_ts_node(tp->source, root_node, 0);
+    // print the syntax tree as an s-expr
+    print_ts_root(tp->source, tp->syntax_tree);
     
     // check if the syntax tree is valid
+    TSNode root_node = ts_tree_root_node(tp->syntax_tree);
     if (ts_node_has_error(root_node)) {
         log_error("Syntax tree has errors.");
         log_debug("Root node type: %s", ts_node_type(root_node));
@@ -229,8 +232,8 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&end);
     print_elapsed_time("building AST", start, end);
     // print the AST for debugging
-    log_debug("AST: %s ---------\n", tp->reference);
-    print_ast_node(tp, tp->ast_root, 0);
+    log_debug("AST: %s ---------", tp->reference);
+    print_ast_root(tp);
 
     // transpile the AST to C code
     log_debug("transpiling...");
@@ -264,11 +267,11 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     memcpy(script, tp, sizeof(Script));
     script->main_func = tp->main_func;
 
-    print_elapsed_time(":", start, end);
+    print_elapsed_time("JIT compiling", start, end);
 }
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source) {
-    // printf("loading script: %s\n", script_path);
+    log_info("loading script: %s", script_path);
     // find the script in the list of scripts
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script *script = (Script*)runtime->scripts->data[i];
@@ -293,7 +296,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     memcpy(&transpiler, new_script, sizeof(Script));
     transpiler.parser = runtime->parser;  transpiler.runtime = runtime;
     transpile_script(&transpiler, new_script, script_path);
-    log_debug("loaded main func: %p", new_script->main_func);
+    log_debug("loaded script main func: %s, %p", script_path, new_script->main_func);
     return new_script;
 }
 
@@ -324,6 +327,7 @@ void runner_setup_context(Runner* runner) {
 
 void runner_cleanup(Runner* runner) {
     log_debug("runner cleanup");
+    frame_end();
     // free final result
     if (runner->context.heap) {
         print_heap_entries();
@@ -356,12 +360,13 @@ Item run_script(Runtime *runtime, const char* source, char* script_path, bool tr
         log_error("Error: Failed to compile the function."); 
         result = ItemNull;
     } else {
-        log_debug("Executing JIT compiled code...");
+        log_notice("Executing JIT compiled code...");
         runner_setup_context(&runner);
         log_debug("exec main func");
         result = context->result = runner.script->main_func(context);
         log_debug("after main func");
-        // runner_cleanup() later
+        // for the time being, we need to keep the context for result item printing
+        // todo: runner_cleanup(&runner);
     }
     return result;
 }

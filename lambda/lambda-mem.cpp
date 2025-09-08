@@ -44,6 +44,13 @@ void* heap_calloc(size_t size, TypeId type_id) {
     return ptr;
 }
 
+String* heap_string(char* src, int len) {
+    String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
+    strcpy(str->chars, src);
+    str->len = len;  str->ref_cnt = 0;    
+    return str;
+}
+
 Item push_d(double dval) {
     log_debug("push_d: %g", dval);
     // Safety check: if context is num_stack is NULL
@@ -192,7 +199,7 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
 }
 
 void free_container(Container* cont, bool clear_entry) {
-    if (!cont) return;  // Add null pointer check
+    if (!cont) return;
     log_debug("free container: %p", cont);
     assert(cont->ref_cnt == 0);
     TypeId type_id = cont->type_id;
@@ -299,10 +306,11 @@ void free_item(Item item, bool clear_entry) {
             }
         }
     }
-}
+} 
 
 void frame_start() {
-    size_t stack_pos = context->num_stack->current_position;
+    size_t stack_pos = context->num_stack->total_length;
+    log_debug("entering frame_start with num stack position: %zu", stack_pos);
     arraylist_append(context->heap->entries, (void*) (((uint64_t)LMD_CONTAINER_HEAP_START << 56) | stack_pos));
     arraylist_append(context->heap->entries, HEAP_ENTRY_START.raw_pointer);
 }

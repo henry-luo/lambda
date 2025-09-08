@@ -10,7 +10,6 @@
 #include <string.h>
 
 // External functions from Lambda runtime
-extern void print_item(StrBuf *strbuf, Item item);
 extern StrBuf* strbuf_create(void);
 extern void strbuf_destroy(StrBuf* buf);
 extern void heap_init(void);
@@ -80,7 +79,7 @@ int main() {
     
     // Use Lambda's print function to display the element tree
     StrBuf* output_buf = strbuf_create();
-    print_item(output_buf, doc_item);
+    print_root_item(output_buf, doc_item);
     printf("Document structure: %s\n", output_buf->str);
     strbuf_destroy(output_buf);
     

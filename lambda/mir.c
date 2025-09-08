@@ -42,6 +42,7 @@ func_obj_t func_list[] = {
     {"list_fill", (fn_ptr) list_fill},
     {"list_push", (fn_ptr) list_push},
     {"list_get", (fn_ptr) list_get},
+    {"list_end", (fn_ptr) list_end},
     {"map", (fn_ptr) map},
     {"map_fill", (fn_ptr) map_fill},
     {"map_get", (fn_ptr) map_get},
@@ -54,10 +55,10 @@ func_obj_t func_list[] = {
     {"push_l", (fn_ptr) push_l},
     {"push_k", (fn_ptr) push_k},
     {"push_c", (fn_ptr) push_c},
-    
+    {"item_at", (fn_ptr) item_at},
+
     {"fn_int", (fn_ptr) fn_int},
     {"fn_int64", (fn_ptr) fn_int64},
-
     {"fn_add", (fn_ptr) fn_add},
     {"fn_sub", (fn_ptr) fn_sub},
     {"fn_mul", (fn_ptr) fn_mul},
@@ -135,7 +136,7 @@ MIR_context_t jit_init() {
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name) {
     struct c2mir_options ops = {0}; // Default options
     ops.message_file = stdout;  ops.verbose_p = 1;  ops.debug_p = 0;
-    log_notice("compiling C code in '%s' to MIR", file_name);
+    log_notice("Compiling C code in '%s' to MIR", file_name);
     jit_item_t jit_ptr = {.curr = 0, .code = code, .code_size = code_size};
     if (!c2mir_compile(ctx, &ops, getc_func, &jit_ptr, file_name, NULL)) {
         log_error("compiled '%s' with error!!", file_name);
@@ -209,7 +210,7 @@ void* jit_gen_func(MIR_context_t ctx, char *func_name) {
 }
 
 MIR_item_t find_import(MIR_context_t ctx, const char *mod_name) {
-    log_debug("finding import module: %s, %p", mod_name, ctx);
+    log_debug("finding import module:: %s, %p", mod_name, ctx);
     for (MIR_module_t module = DLIST_HEAD (MIR_module_t, *MIR_get_module_list(ctx)); module != NULL;
         module = DLIST_NEXT (MIR_module_t, module)) {
         MIR_item_t mitem = DLIST_HEAD (MIR_item_t, module->items);

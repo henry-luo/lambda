@@ -4,7 +4,7 @@ pub fn factorial(n: float) :float {
     else n * factorial(n - 1.0)
 }
 
-pub fn add(a, b) {
+pub fn addition(a, b) {
     a + b
 }
 

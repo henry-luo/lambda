@@ -3678,6 +3678,10 @@
               },
               {
                 "type": "SYMBOL",
+                "name": "symbol"
+              },
+              {
+                "type": "SYMBOL",
                 "name": "index"
               }
             ]
@@ -4902,6 +4906,14 @@
                 {
                   "type": "STRING",
                   "value": "float"
+                },
+                {
+                  "type": "STRING",
+                  "value": "decimal"
+                },
+                {
+                  "type": "STRING",
+                  "value": "binary"
                 },
                 {
                   "type": "STRING",

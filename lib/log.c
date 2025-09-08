@@ -103,13 +103,14 @@ static const char* get_level_color(int level) {
 /* Convert log level to string */
 const char* log_level_to_string(int level) {
     switch (level) {
-        case LOG_LEVEL_FATAL: return "FATAL";
-        case LOG_LEVEL_ERROR: return "ERROR";
+        // set all categories to 4-letter codes, so that log lines align better
+        case LOG_LEVEL_FATAL: return "FATL";
+        case LOG_LEVEL_ERROR: return "ERR!";
         case LOG_LEVEL_WARN:  return "WARN";
-        case LOG_LEVEL_NOTICE: return "NOTICE";
+        case LOG_LEVEL_NOTICE: return "NOTE";
         case LOG_LEVEL_INFO:  return "INFO";
-        case LOG_LEVEL_DEBUG: return "DEBUG";
-        default: return "UNKNOWN";
+        case LOG_LEVEL_DEBUG: return "DEBG";
+        default: return "????";
     }
 }
 

@@ -2,7 +2,6 @@
 #include <fstream>
 #include <string>
 #include <vector>
-#include <filesystem>
 #include <chrono>
 #include <algorithm>
 #include <map>
@@ -14,6 +13,59 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <cstdlib>
+#include <dirent.h>
+#include <sys/stat.h>
+
+// Simple directory listing functions
+std::vector<std::string> listFilesInDir(const std::string& path) {
+    std::vector<std::string> files;
+    DIR *dir;
+    struct dirent *ent;
+    struct stat st;
+    
+    if ((dir = opendir(path.c_str())) != NULL) {
+        while ((ent = readdir(dir)) != NULL) {
+            std::string filename = ent->d_name;
+            if (filename == "." || filename == "..") continue;
+            
+            std::string fullpath = path + "/" + filename;
+            if (stat(fullpath.c_str(), &st) == -1) continue;
+            
+            if (S_ISDIR(st.st_mode)) {
+                // Recursively add files from subdirectories
+                auto subfiles = listFilesInDir(fullpath);
+                files.insert(files.end(), subfiles.begin(), subfiles.end());
+            } else if (S_ISREG(st.st_mode)) {
+                files.push_back(fullpath);
+            }
+        }
+        closedir(dir);
+    }
+    return files;
+}
+
+// Get file extension
+std::string getFileExtension(const std::string& filename) {
+    size_t dot_pos = filename.find_last_of('.');
+    if (dot_pos != std::string::npos) {
+        return filename.substr(dot_pos);
+    }
+    return "";
+}
+
+// Get filename without path and extension
+std::string getStem(const std::string& path) {
+    size_t last_slash = path.find_last_of("/\\");
+    size_t last_dot = path.find_last_of('.');
+    
+    if (last_slash == std::string::npos) last_slash = 0;
+    else last_slash++;  // skip the slash
+    
+    if (last_dot == std::string::npos || last_dot < last_slash) {
+        return path.substr(last_slash);
+    }
+    return path.substr(last_slash, last_dot - last_slash);
+}
 
 // Helper function to trim whitespace
 void trim(std::string& str) {
@@ -29,7 +81,7 @@ void trim(std::string& str) {
 
 // Helper function to execute lambda.exe and capture output
 std::string executeLambdaScript(const std::string& file_path, int timeout_seconds = 30) {
-    std::string command = "./lambda.exe " + file_path + " 2>/dev/null";
+    std::string command = "./lambda.exe " + file_path + " 2>&1";
     
     FILE* pipe = popen(command.c_str(), "r");
     if (!pipe) {
@@ -53,12 +105,38 @@ std::string executeLambdaScript(const std::string& file_path, int timeout_second
     if (marker_pos != std::string::npos) {
         size_t result_start = full_output.find('\n', marker_pos);
         if (result_start != std::string::npos) {
-            return full_output.substr(result_start + 1);
+            // Extract everything after the marker line
+            std::string result = full_output.substr(result_start + 1);
+            
+            // Trim leading and trailing whitespace
+            auto start = result.find_first_not_of(" \n\r\t");
+            if (start != std::string::npos) {
+                auto end = result.find_last_not_of(" \n\r\t");
+                result = result.substr(start, end - start + 1);
+            }
+            
+            // Ensure the result ends with a single newline
+            if (!result.empty() && result.back() != '\n') {
+                result += '\n';
+            }
+            
+            return result;
         }
     }
     
-    // If no marker found, return the full output (fallback)
-    return full_output;
+    // If no marker found, trim and return the full output (fallback)
+    std::string result = full_output;
+    auto start = result.find_first_not_of(" \n\r\t");
+    if (start != std::string::npos) {
+        auto end = result.find_last_not_of(" \n\r\t");
+        result = result.substr(start, end - start + 1);
+    }
+    
+    if (!result.empty() && result.back() != '\n') {
+        result += '\n';
+    }
+    
+    return result;
 }
 
 // Test result structure
@@ -118,7 +196,7 @@ public:
         std::string line;
         
         // Default values
-        meta.name = std::filesystem::path(file_path).stem().string();
+        meta.name = getStem(file_path);
         meta.category = "unknown";
         meta.type = "positive";
         meta.should_fail = false;
@@ -215,10 +293,11 @@ public:
     void runTestSuite(const std::string& test_dir) {
         std::vector<std::string> test_files;
         
-        // Recursively find all .ls files
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(test_dir)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".ls") {
-                test_files.push_back(entry.path().string());
+        // Find all .ls files recursively
+        auto all_files = listFilesInDir(test_dir);
+        for (const auto& file : all_files) {
+            if (getFileExtension(file) == ".ls") {
+                test_files.push_back(file);
             }
         }
         
