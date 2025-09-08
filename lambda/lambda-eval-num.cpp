@@ -1234,13 +1234,15 @@ Item fn_sum(Item item) {
             return (Item){.item = i2it(0)};  // Empty array sums to 0
         }
         double sum = 0.0;
-        bool has_float = false;
+        bool is_float = false;
         for (size_t i = 0; i < arr->length; i++) {
             Item elem_item = array_get(arr, i);
             if (elem_item.type_id == LMD_TYPE_INT) {
                 long val = elem_item.int_val;
                 log_debug("DEBUG fn_sum: Adding int value: %ld", val);
                 sum += (double)val;
+                is_float = true;
+                // todo: keep as int if within range
             }
             else if (elem_item.type_id == LMD_TYPE_INT64) {
                 long val = *(long*)elem_item.pointer;
@@ -1251,14 +1253,14 @@ Item fn_sum(Item item) {
                 double val = *(double*)elem_item.pointer;
                 log_error("DEBUG fn_sum: Adding float value: %f", val);
                 sum += val;
-                has_float = true;
+                is_float = true;
             }
             else {
                 log_debug("DEBUG fn_sum: sum: non-numeric element at index %zu, type: %d", i, elem_item.type_id);
                 return ItemError;
             }
         }
-        if (has_float) {
+        if (is_float) {
             return push_d(sum);
         } else {
             return push_l((long)sum);
@@ -1552,7 +1554,7 @@ Item fn_neg(Item item) {
 }
 
 Item fn_int(Item item) {
-    double dval;
+    double dval;  int64_t ival;
     if (item.type_id == LMD_TYPE_INT) {
         return item;
     }
@@ -1563,19 +1565,12 @@ Item fn_int(Item item) {
     else if (item.type_id == LMD_TYPE_FLOAT) {
         // cast down to int
         dval = *(double*)item.pointer;
+        ival = (int64_t)dval;
+        dval = (double)ival;  // truncate any fractional part
         CHECK_DVAL:
         if (dval > INT32_MAX || dval < INT32_MIN) {
-            // Promote to decimal if out of int32 range
-        log_debug("promote float to decimal: %g", dval);
-            mpd_t* dec_val = mpd_new(context->decimal_ctx);
-            if (!dec_val) {
-        log_debug("Failed to allocate decimal for float conversion");
-                return ItemError;
-            }
-            char str_buf[64];
-            snprintf(str_buf, sizeof(str_buf), "%.17g", dval);
-            mpd_set_string(dec_val, str_buf, context->decimal_ctx);
-            return push_decimal(dec_val);
+            // keep as double
+            return push_d(dval);
         }
         return {._type= LMD_TYPE_INT, .int_val = (int32_t)dval};
     }
@@ -1592,7 +1587,7 @@ Item fn_int(Item item) {
         errno = 0;  // clear errno before calling strtoll
         int32_t val = strtol(str->chars, &endptr, 10);
         if (endptr == str->chars) {
-        log_debug("Cannot convert string '%s' to int", str->chars);
+            log_debug("Cannot convert string '%s' to int", str->chars);
             return ItemError;
         }
         // check for overflow - if errno is set or we couldn't parse the full string
@@ -1600,16 +1595,16 @@ Item fn_int(Item item) {
             // try to parse as decimal
             mpd_t* dec_val = mpd_new(context->decimal_ctx);
             if (!dec_val) {
-        log_debug("Failed to allocate decimal for string conversion");
+                log_debug("Failed to allocate decimal for string conversion");
                 return ItemError;
             }
             mpd_set_string(dec_val, str->chars, context->decimal_ctx);
             if (mpd_isnan(dec_val) || mpd_isinfinite(dec_val)) {
-        log_debug("Cannot convert string '%s' to decimal", str->chars);
+                log_debug("Cannot convert string '%s' to decimal", str->chars);
                 mpd_del(dec_val);
                 return ItemError;
             }
-        log_debug("promote string to decimal: %s", str->chars);
+            log_debug("promote string to decimal: %s", str->chars);
             return push_decimal(dec_val);
         }
         return {._type= LMD_TYPE_INT, .int_val = val};
@@ -1621,7 +1616,7 @@ Item fn_int(Item item) {
 }
 
 int64_t fn_int64(Item item) {
-    // Convert item to int64
+    // convert item to int64
     int64_t val;
     if (item.type_id == LMD_TYPE_INT) {
         log_debug("convert int to int64: %d", item.int_val);
@@ -1632,11 +1627,12 @@ int64_t fn_int64(Item item) {
     }
     else if (item.type_id == LMD_TYPE_FLOAT) {
         double dval = *(double*)item.pointer;
-        if (dval > LAMBDA_INT64_MAX || dval < INT64_MIN) {
-        log_debug("float value %g out of int64 range", dval);
+        double truncated = (double)(int64_t)dval;
+        if (truncated > LAMBDA_INT64_MAX || truncated < INT64_MIN) {
+            log_debug("float value %g out of int64 range", dval);
             return INT_ERROR;
         }
-        return (int64_t)dval;
+        return truncated;
     }
     else if (item.type_id == LMD_TYPE_DECIMAL) {
         // Convert decimal to int64

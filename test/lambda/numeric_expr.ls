@@ -222,7 +222,7 @@ true _/ false
 
 "Large Numbers:"
 9223372036854775807 + 1
--9223372036854775808 - 1
+-9223302036854775808 - 1
 
 "Concatenation:"
 "hello" + "world"
