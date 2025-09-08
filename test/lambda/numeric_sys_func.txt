@@ -1,0 +1,143 @@
+"abs() function tests"
+5
+true
+5
+true
+3.14
+true
+3.14
+true
+0
+true
+"round() function tests"
+3
+true
+4
+true
+-3
+true
+-4
+true
+5
+true
+"floor() function tests"
+3
+true
+3
+true
+-4
+true
+-4
+true
+5
+true
+"ceil() function tests"
+4
+true
+4
+true
+-3
+true
+-3
+true
+5
+true
+"min() function tests"
+3
+true
+3
+true
+-5
+true
+2.71
+true
+3.14
+true
+"max() function tests"
+5
+true
+5
+true
+-3
+true
+3.14
+true
+5
+true
+"sum() function tests - arrays"
+15
+true
+6.6
+true
+0
+true
+-6
+true
+"sum() function tests - lists"
+15
+true
+6.6
+true
+-6
+true
+"avg() function tests - arrays"
+3
+true
+4
+true
+2.5
+true
+0
+true
+"avg() function tests - lists"
+3
+true
+4
+true
+2.5
+true
+0
+true
+"Mixed integer and float operations - arrays"
+3.14
+true
+5
+true
+6.5
+true
+2
+true
+"Mixed integer and float operations - lists"
+6.5
+true
+2
+true
+"Edge cases - arrays"
+0
+true
+0
+true
+0
+true
+0
+true
+5
+true
+"Edge cases - lists"
+0
+true
+5
+true
+"Complex expressions - arrays and lists"
+5
+true
+7
+true
+6
+true
+3
+true
+6
+true
+3
+true

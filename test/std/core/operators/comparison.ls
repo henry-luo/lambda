@@ -5,7 +5,7 @@
 
 // Simple arithmetic comparison test (since < operator not supported)
 let a = 10
+a
 let b = 20
-
-// Test arithmetic instead of comparison
+b
 a + b

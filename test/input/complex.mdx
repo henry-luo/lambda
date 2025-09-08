@@ -1,0 +1,66 @@
+# Complex MDX Example
+
+This document demonstrates advanced MDX features with nested components and mixed content.
+
+## Interactive Components
+
+<Card title="User Profile">
+  <Avatar src="/user.jpg" alt="User" />
+  <div>
+    <h3>John Doe</h3>
+    <p>Software Engineer</p>
+    <Button onClick={() => alert('Hello!')}>Say Hello</Button>
+  </div>
+</Card>
+
+## Code Examples
+
+Here's a React component example:
+
+```jsx
+function Welcome({ name }) {
+  return <h1>Hello, {name}!</h1>;
+}
+```
+
+<CodeBlock language="javascript" showLineNumbers>
+{`
+const data = [1, 2, 3, 4, 5];
+const doubled = data.map(x => x * 2);
+console.log(doubled);
+`}
+</CodeBlock>
+
+## Data Visualization
+
+<Chart type="bar" data={salesData} />
+
+## Nested JSX
+
+<Container>
+  <Row>
+    <Column span={6}>
+      ### Left Column
+      This is markdown content in a JSX column.
+    </Column>
+    <Column span={6}>
+      ### Right Column
+      <List>
+        <ListItem>Item 1</ListItem>
+        <ListItem>Item 2</ListItem>
+        <ListItem>Item 3</ListItem>
+      </List>
+    </Column>
+  </Row>
+</Container>
+
+## Math in MDX
+
+The quadratic formula is: <Math>x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}</Math>
+
+## Final Notes
+
+MDX allows seamless integration of:
+- **Markdown** for content
+- **JSX** for interactivity
+- **Components** for reusability

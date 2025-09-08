@@ -7,5 +7,4 @@
 let recursive_bomb = fn(n) {
     recursive_bomb(n + 1)
 }
-
 recursive_bomb(0)

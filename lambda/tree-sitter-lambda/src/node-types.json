@@ -1696,6 +1696,10 @@
           {
             "type": "index",
             "named": true
+          },
+          {
+            "type": "symbol",
+            "named": true
           }
         ]
       },
@@ -2166,6 +2170,10 @@
             "named": false
           },
           {
+            "type": "binary",
+            "named": false
+          },
+          {
             "type": "ceil",
             "named": false
           },
@@ -2183,6 +2191,10 @@
           },
           {
             "type": "datetime",
+            "named": false
+          },
+          {
+            "type": "decimal",
             "named": false
           },
           {
@@ -2576,11 +2588,11 @@
   },
   {
     "type": "decimal",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "element",

@@ -1,9 +1,9 @@
-// Test: Division by Zero Error
+// Test: Division by Zero
 // Category: negative
-// Type: positive
-// Expected: inf
+// Type: negative
+// Expected: error
 
-// Test division by zero should fail
+// This test should cause a division by zero
 let a = 10
 let b = 0
 a / b

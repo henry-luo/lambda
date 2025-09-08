@@ -465,8 +465,8 @@ module.exports = grammar({
     ),
     
     member_expr: $ => seq(
-      field('object',$.primary_expr), ".", 
-      field('field', choice($.identifier, $.index))
+      field('object', $.primary_expr), ".", 
+      field('field', choice($.identifier, $.symbol, $.index))
     ),
 
     binary_expr: $ => choice(
@@ -532,7 +532,7 @@ module.exports = grammar({
     // prec(50) to make it higher priority than base types
     sys_func: $ => prec(50, seq(
       field('function', choice(
-        'len', 'type', 'int', 'int64', 'float', 'number', 'string', 'char', 'symbol',
+        'len', 'type', 'int', 'int64', 'float', 'decimal', 'binary', 'number', 'string', 'char', 'symbol',
         'datetime', 'date', 'time', 'today', 'justnow',
         'set', 'slice',
         'all', 'any', 'min', 'max', 'sum', 'avg', 'abs', 'round', 'floor', 'ceil',

@@ -1,0 +1,38 @@
+# MDX with Fragments
+
+This document tests JSX fragments within MDX content.
+
+## React Fragments
+
+<>
+  <h2>Fragment Header</h2>
+  <p>This content is inside a React fragment.</p>
+  <Button>Fragment Button</Button>
+</>
+
+## Mixed Content
+
+Regular markdown paragraph with **bold text**.
+
+<React.Fragment>
+  <div>Fragment with explicit React.Fragment syntax</div>
+  <ul>
+    <li>Fragment list item 1</li>
+    <li>Fragment list item 2</li>
+  </ul>
+</React.Fragment>
+
+More markdown content after the fragment.
+
+## Nested Fragments
+
+<Container>
+  <>
+    <Header>Nested Fragment Header</Header>
+    <Content>
+      This is content inside a nested fragment within a container.
+    </Content>
+  </>
+</Container>
+
+Final markdown paragraph.

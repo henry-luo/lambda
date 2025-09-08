@@ -198,6 +198,7 @@ long range_get(Range *range, int index);
 List* list();  // constructs an empty list
 Item list_fill(List *list, int cnt, ...);  // fill the list with the items
 void list_push(List *list, Item item);
+Item list_end(List *list);
 
 #ifndef __cplusplus
     struct ArrayInt {
@@ -341,6 +342,7 @@ Item array_float_get(ArrayFloat* array, int index);
 Item list_get(List *list, int index);
 Item map_get(Map* map, Item key);
 Item elmt_get(Element *elmt, Item key);
+Item item_at(Item data, int index);
 
 Bool is_truthy(Item item);
 Item v2it(List *list);
