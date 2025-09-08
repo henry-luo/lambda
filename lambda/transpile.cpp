@@ -39,40 +39,6 @@ void write_var_name(StrBuf *strbuf, AstNamedNode *asn_node, AstImportNode* impor
     strbuf_append_str_n(strbuf, asn_node->name->chars, asn_node->name->len);
 }
 
-// Helper function to determine if an expression produces an Item result
-bool expr_produces_item(AstNode* node) {
-    if (!node) return false;
-    
-    if (node->node_type == AST_NODE_BINARY) {
-        AstBinaryNode* bin_node = (AstBinaryNode*)node;
-        // Division operations always produce Item results
-        if (bin_node->op == OPERATOR_DIV || bin_node->op == OPERATOR_IDIV || 
-            bin_node->op == OPERATOR_MOD || bin_node->op == OPERATOR_POW) {
-            return true;
-        }
-        // If any operand produces an Item, the whole expression needs to use runtime functions
-        if (expr_produces_item(bin_node->left) || expr_produces_item(bin_node->right)) {
-            return true;
-        }
-        // Mixed type operations often produce Items
-        if (bin_node->left->type && bin_node->right->type) {
-            bool left_numeric = (LMD_TYPE_INT <= bin_node->left->type->type_id && bin_node->left->type->type_id <= LMD_TYPE_FLOAT);
-            bool right_numeric = (LMD_TYPE_INT <= bin_node->right->type->type_id && bin_node->right->type->type_id <= LMD_TYPE_FLOAT);
-            if (left_numeric && right_numeric && bin_node->left->type->type_id != bin_node->right->type->type_id) {
-                return true; // Mixed int/float operations
-            }
-        }
-    }
-    else if (node->node_type == AST_NODE_PRIMARY) {
-        AstPrimaryNode* pri_node = (AstPrimaryNode*)node;
-        if (pri_node->expr) {
-            return expr_produces_item(pri_node->expr);
-        }
-    }
-    
-    return false;
-}
-
 void transpile_box_item(Transpiler* tp, AstNode *item) {
     if (!item->type) {
         log_debug("transpile box item: NULL type, node_type: %d", item->node_type);
