@@ -101,7 +101,7 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-input run help install uninstall \
-        lambda radiant window cross-compile format lint check docs intellisense \
+        lambda radiant window cross-compile format lint check docs intellisense analyze-size \
         build-windows build-debug build-release build-test-legacy clean-all distclean \
         build-windows build-debug build-release clean-all distclean \
         verify-windows test-windows tree-sitter-libs \
@@ -170,6 +170,7 @@ help:
 	@echo "  check         - Run basic code checks (TODO/FIXME finder)"
 	@echo "  format        - Format source code with clang-format"
 	@echo "  lint          - Run linter (cppcheck) on source files"
+	@echo "  analyze-size  - Analyze executable size breakdown by components"
 	@echo ""
 	@echo "Unicode Support:"
 	@echo "  test-unicode  - Run Unicode string comparison tests"
@@ -809,6 +810,16 @@ lint:
 		fi; \
 	else \
 		echo "cppcheck not found. Install with: brew install cppcheck"; \
+		exit 1; \
+	fi
+
+# Executable size analysis
+analyze-size: build
+	@echo "Analyzing executable size breakdown..."
+	@if [ -f "utils/analyze_size.sh" ]; then \
+		./utils/analyze_size.sh; \
+	else \
+		echo "utils/analyze_size.sh not found. Please ensure it exists in the utils directory."; \
 		exit 1; \
 	fi
 
