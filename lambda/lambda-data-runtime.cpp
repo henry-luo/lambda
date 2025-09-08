@@ -508,6 +508,7 @@ Element* elmt_fill(Element* elmt, ...) {
     return elmt;
 }
 
+// get element attribute by key
 Item elmt_get(Element* elmt, Item key) {
     if (!elmt || !key.item) { return ItemNull;}
     bool is_found;
@@ -518,4 +519,46 @@ Item elmt_get(Element* elmt, Item key) {
         return ItemNull;  // only string or symbol keys are supported
     }
     return _map_get((TypeMap*)elmt->type, elmt->data, key_str, &is_found);
+}
+
+Item item_at(Item data, int index) {
+    if (!data.item) { return ItemNull; }
+
+    // note: for out of bound access, we return null instead of error
+    TypeId type_id = get_type_id(data);
+    switch (type_id) {
+    case LMD_TYPE_ARRAY:
+        return array_get(data.array, index);
+    case LMD_TYPE_ARRAY_INT:
+        return array_int_get(data.array_int, index);
+    case LMD_TYPE_ARRAY_INT64:
+        return array_int64_get(data.array_int64, index);
+    case LMD_TYPE_ARRAY_FLOAT:
+        return array_float_get(data.array_float, index);
+    case LMD_TYPE_LIST:
+        return list_get(data.list, index);
+    case LMD_TYPE_RANGE: {
+        Range *range = data.range;
+        if (index < range->start || index > range->end) { return ItemNull; }
+        long value = range->start + index;
+        return {.item = i2it(value)};
+    }
+    case LMD_TYPE_ELEMENT: {
+        // treat element as list
+        return list_get(data.element, index);
+    }
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
+        String *str = (String*)data.pointer;
+        if (index < 0 || index >= str->len) { return ItemNull; }
+        // return a single character string
+        char buf[2] = {str->chars[index], '\0'};
+        String *ch_str = heap_string(buf, 1);
+        if (type_id == LMD_TYPE_SYMBOL) return {.item = y2it(ch_str)};
+        else return {.item = s2it(ch_str)};
+    }
+    // case LMD_TYPE_BINARY: todo - proper binary data access
+    default:
+        log_error("item_at: unsupported item_at type: %d", type_id);
+        return ItemNull;
+    }
 }

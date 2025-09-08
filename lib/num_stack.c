@@ -71,7 +71,7 @@ static num_chunk_t* allocate_new_chunk(num_chunk_t *prev_chunk) {
     new_chunk->next = NULL;
     new_chunk->prev = prev_chunk;
     new_chunk->index = prev_chunk->index + 1;
-    log_debug("Allocated new chunk: %p with capacity: %zu, index: %d\n", new_chunk, new_capacity, new_chunk->index);
+    log_debug("allocated new chunk: %p with capacity: %zu, index: %d", new_chunk, new_capacity, new_chunk->index);
     
     // link the chunks
     prev_chunk->next = new_chunk;

@@ -142,3 +142,5 @@ let final_avg2 = avg(test_result_arr2)
 final_min1; final_max1; final_sum1; final_avg1;
 final_min2; final_max2; final_sum2; final_avg2
 
+"For loop with ArrayFloat:"
+for (val in [null, 0.7, 0.2, 0.9]) if (val != null) val else 0.0

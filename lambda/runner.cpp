@@ -271,7 +271,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 }
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source) {
-    log_info("loading script: %s\n", script_path);
+    log_info("loading script: %s", script_path);
     // find the script in the list of scripts
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script *script = (Script*)runtime->scripts->data[i];
