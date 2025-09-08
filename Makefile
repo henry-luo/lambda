@@ -10,6 +10,7 @@ RADIANT_CONFIG = build_radiant_config.json
 # Build configurations
 BUILD_DIR = build
 BUILD_DEBUG_DIR = build_debug
+BUILD_RELEASE_DIR = build_release
 BUILD_WINDOWS_DIR = build_windows
 TYPESET_DIR = typeset
 
@@ -111,10 +112,10 @@ help:
 	@echo "$(PROJECT_NAME) - Available Make Targets:"
 	@echo ""
 	@echo "Build Targets:"
-	@echo "  build         - Build lambda project with Unicode support (incremental, default)"
+	@echo "  build         - Build lambda project with -O2 optimization (incremental, default)"
 	@echo "  build-ascii   - Build lambda project with ASCII-only support (no Unicode)"
-	@echo "  debug         - Build with debug symbols"
-	@echo "  release       - Build optimized release version"
+	@echo "  debug         - Build with debug symbols, AddressSanitizer, and -O0"
+	@echo "  release       - Build optimized release version with -O3, LTO, and stripped symbols"
 	@echo "  rebuild       - Force complete rebuild"
 	@echo "  lambda        - Build lambda project specifically"
 	@echo "  radiant       - Build radiant project"
@@ -205,7 +206,7 @@ release: build-release
 
 build-release:
 	@echo "Building release version..."
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
+	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --platform=release --jobs=$(JOBS)
 
 # Force rebuild (clean + build)
 rebuild:
@@ -252,14 +253,18 @@ clean:
 	@echo "Cleaning build artifacts..."
 	@rm -rf $(BUILD_DIR)/*.o
 	@rm -rf $(BUILD_DEBUG_DIR)/*.o
+	@rm -rf $(BUILD_RELEASE_DIR)/*.o
 	@rm -rf $(BUILD_WINDOWS_DIR)/*.o
 	@rm -f $(BUILD_DIR)/*.d
 	@rm -f $(BUILD_DEBUG_DIR)/*.d
+	@rm -f $(BUILD_RELEASE_DIR)/*.d
 	@rm -f $(BUILD_WINDOWS_DIR)/*.d
 	@rm -f $(BUILD_DIR)/*.compile_log
 	@rm -f $(BUILD_DIR)/*.compile_status
 	@rm -f $(BUILD_DEBUG_DIR)/*.compile_log
 	@rm -f $(BUILD_DEBUG_DIR)/*.compile_status
+	@rm -f $(BUILD_RELEASE_DIR)/*.compile_log
+	@rm -f $(BUILD_RELEASE_DIR)/*.compile_status
 	@rm -f $(BUILD_WINDOWS_DIR)/*.compile_log
 	@rm -f $(BUILD_WINDOWS_DIR)/*.compile_status
 	@echo "Build artifacts cleaned."
@@ -297,12 +302,15 @@ clean-all:
 	@echo "Removing all build directories..."
 	@rm -rf $(BUILD_DIR)
 	@rm -rf $(BUILD_DEBUG_DIR)
+	@rm -rf $(BUILD_RELEASE_DIR)
 	@rm -rf $(BUILD_WINDOWS_DIR)
 	@echo "All build directories removed."
 
 distclean: clean-all clean-grammar clean-test
 	@echo "Complete cleanup..."
 	@rm -f $(LAMBDA_EXE)
+	@rm -f lambda_debug.exe
+	@rm -f lambda_release.exe
 	@rm -f lambda-windows.exe
 	@rm -f $(WINDOW_EXE)
 	@rm -f _transpiled.c
