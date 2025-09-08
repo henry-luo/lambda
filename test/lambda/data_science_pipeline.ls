@@ -2,7 +2,7 @@
 // Demonstrates comprehensive data processing, statistical analysis, and ML preprocessing
 
 // Statistical analysis functions
-pub fn descriptive_stats(data: [float]) {
+pub fn descriptive_stats(data) {
     let sorted_data = for (x in data, _ in 1 to len(data)) min(data);  // simplified sort
     let n = len(data);
     let mean_val = avg(data);
@@ -29,7 +29,7 @@ pub fn descriptive_stats(data: [float]) {
 }
 
 // Correlation coefficient calculation
-pub fn correlation(x_vals: [float], y_vals: [float]) {
+pub fn correlation(x_vals, y_vals) {
     if len(x_vals) != len(y_vals) { null } // error("Arrays must be same length");
     
     let n = len(x_vals);
