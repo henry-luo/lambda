@@ -225,11 +225,30 @@
         "fcolor-diagnostics",
         "fno-omit-frame-pointer",
         "g",
-        "O0"
+        "O2"
     ],
     "build_dir": "build",
     "cross_compile": false,
     "platforms": {
+        "release": {
+            "output": "lambda_release.exe",
+            "flags": [
+                "std=c++17",
+                "fms-extensions",
+                "DNDEBUG",
+                "fcolor-diagnostics",
+                "fno-omit-frame-pointer",
+                "O3",
+                "flto"
+            ],
+            "linker_flags": [
+                "O3",
+                "flto",
+                "s"
+            ],
+            "build_dir": "build_release",
+            "debug": false
+        },
         "debug": {
             "output": "lambda_debug.exe",
             "flags": [
