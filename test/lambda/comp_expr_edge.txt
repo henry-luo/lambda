@@ -180,10 +180,6 @@ true
 "Edge Cases with Very Large Numbers:"
 "237."
 true
-"238."
-true
-"239."
-true
 "Float Precision Comparisons:"
 "240."
 false

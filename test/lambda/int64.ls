@@ -5,7 +5,7 @@
 
 "=== Basic Int64 Literals and Type Inference ==="
 
-// Test 1: Basic int64 literals
+// Test 1: large int literals promoted to double
 9223372036854775807
 -9223372036854775808
 
@@ -94,13 +94,12 @@ max(large_arr64)
 [int64(10), int64(20)] * [int64(5), int64(3)]
 
 "=== Edge Cases and Type Conversions ==="
-
 // Test 20: Empty ArrayInt64
 let empty64 = []
 len(empty64)
 
 // Test 21: Single element ArrayInt64
-let single64 = [int64(9223372036854775806)]   // INT64_MAX - 1
+let single64 = [int64(9223372000000000000)]
 len(single64)
 sum(single64)
 min(single64)

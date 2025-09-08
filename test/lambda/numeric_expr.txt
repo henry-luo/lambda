@@ -134,8 +134,8 @@ error
 error
 "Edge Cases:"
 1e-15
-1000000000000000000
--1000000000000000000
+1e+18
+-1e+18
 "More Edge Cases:"
 1
 1e+20
@@ -146,7 +146,7 @@ inf
 -inf
 nan
 -inf
-1000000000000000000000000000000000000
+1e+36
 "Power Operations:"
 1
 0
@@ -178,8 +178,8 @@ nan
 0.2
 1
 "Large Numbers:"
-9223372036854775808
--9223372036854775809
+9.22337e+18
+-9.2233e+18
 "Concatenation:"
 "helloworld"
 'foobarbaz'

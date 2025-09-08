@@ -434,10 +434,10 @@ Type* build_lit_int64(Transpiler* tp, TSNode node) {
     return (Type *)item_type;
 }
 
-Type* build_lit_float(Transpiler* tp, TSNode node, TSSymbol symbol) {
+Type* build_lit_float(Transpiler* tp, TSNode node) {
     TypeFloat *item_type = (TypeFloat *)alloc_type(tp->ast_pool, LMD_TYPE_FLOAT, sizeof(TypeFloat));
     // C supports inf and nan
-    log_debug("build lit float: normal");
+    log_debug("build lit float");
     const char* num_str = tp->source + ts_node_start_byte(node);
     // check if there's sign
     bool has_sign = false;
@@ -523,8 +523,9 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         log_debug("build_primary_expr SYM_INT: parsed value %lld", value);
         // Check if the value fits in 32-bit signed integer range
         if (errno == ERANGE || value < INT32_MIN || value > INT32_MAX) {
-            // treat as decimal
-            ast_node->type = build_lit_decimal(tp, child);
+            // promote to float
+            log_debug("promote int to float");
+            ast_node->type = build_lit_float(tp, child);
         } else {
             ast_node->type = &LIT_INT;
         }
@@ -533,7 +534,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = build_lit_decimal(tp, child);
     }
     else if (symbol == SYM_FLOAT) {
-        ast_node->type = build_lit_float(tp, child, symbol);
+        ast_node->type = build_lit_float(tp, child);
     }
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_BINARY) {
         TSNode str_node = ts_node_named_child(child, 0);
@@ -1836,19 +1837,18 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         
         log_debug("SYM_INT: parsed value %lld, checking range", value);
         // Check if the value fits in 32-bit signed integer range
-        if (value >= INT32_MIN && value <= INT32_MAX) {
+        if (INT32_MIN <= value && value <= INT32_MAX) {
             log_debug("Using LIT_INT for value %lld", value);
             i_node->type = &LIT_INT;
-        } else {
-        log_debug("Using LIT_INT64 for value %lld", value);
-            i_node->type = build_lit_int64(tp, expr_node);
+        } else { // promote to float
+            log_debug("Using float for value %lld", value);
+            i_node->type = build_lit_float(tp, expr_node);
         }
-        
         return (AstNode*)i_node;
     }
     case SYM_FLOAT: {
         AstPrimaryNode* f_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, expr_node, sizeof(AstPrimaryNode));
-        f_node->type = build_lit_float(tp, expr_node, symbol);
+        f_node->type = build_lit_float(tp, expr_node);
         return (AstNode*)f_node;
     }
     case SYM_BASE_TYPE:

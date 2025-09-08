@@ -363,6 +363,12 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
                 write_node_source(tp, pri_node->node);
                 strbuf_append_char(tp->code_buf, 'L');  // add 'L' to ensure it is a long
             }
+            else if (pri_node->type->type_id == LMD_TYPE_FLOAT) {
+                // we have large int that is promoted to float, thus needs the casting to double
+                strbuf_append_str(tp->code_buf, "((double)(");
+                write_node_source(tp, pri_node->node);
+                strbuf_append_str(tp->code_buf, "))");
+            }
             else if (pri_node->type->type_id == LMD_TYPE_DECIMAL) {
                 // loads the const decimal without boxing
                 strbuf_append_str(tp->code_buf, "const_c2it(");

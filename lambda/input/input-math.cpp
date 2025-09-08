@@ -763,11 +763,12 @@ static Item parse_math_number(Input *input, const char **math) {
         if (value >= INT32_MIN && value <= INT32_MAX) {
             result = {.item = (ITEM_INT | ((int64_t)(value) & 0x00FFFFFFFFFFFFFF))};
         } else {
-            long *lval;
-            MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval);
+            // promote to double
+            double *dval;
+            MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
             if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
-            *lval = value;
-            result = {.item = l2it(lval)};
+            *dval = value;
+            result = {.item = d2it(dval)};
         }
     }
     
