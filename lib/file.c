@@ -5,12 +5,25 @@
 #include <string.h>
 #include <stdbool.h>
 #include "file.h"
+#include "log.h"
 
 // Function to read and display the content of a text file
 char* read_text_file(const char *filename) {
     FILE *file = fopen(filename, "r"); // open the file in read mode
     if (file == NULL) { // handle error when file cannot be opened
-        perror("Error opening file"); 
+        log_error("Error opening file: %s", filename);
+        return NULL;
+    }
+    // ensure it is a regular file
+    struct stat sb;
+    if (fstat(fileno(file), &sb) == -1) {
+        log_error("Error getting file status: %s", filename);
+        fclose(file);
+        return NULL;
+    }
+    if (!S_ISREG(sb.st_mode)) {
+        log_error("Not regular file: %s", filename);
+        fclose(file);
         return NULL;
     }
 

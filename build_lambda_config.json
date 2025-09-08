@@ -495,7 +495,7 @@
                     }
                 ],
                 "type": "lambda",
-                "special_flags": "-fms-extensions -lstdc++",
+                "special_flags": "-lstdc++",
                 "uses_build_config": true,
                 "requires_lambda_exe": true,
                 "parallel": true
