@@ -78,6 +78,7 @@ bool decimal_is_zero(mpd_t* dec_val) {
 
 Item fn_add(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
+    log_debug("fn_add called with types: %d and %d", type_a, type_b);
     if (type_a == LMD_TYPE_STRING && type_b == LMD_TYPE_STRING) {
         String *str_a = (String*)item_a.pointer;  String *str_b = (String*)item_b.pointer;
         String *result = fn_strcat(str_a, str_b);
@@ -105,6 +106,58 @@ Item fn_add(Item item_a, Item item_b) {
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT) {
         return push_l(*(int64_t*)item_a.pointer + (int64_t)item_b.int_val);
     }
+    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
+        log_debug("add float: %g + %g", *(double*)item_a.pointer, *(double*)item_b.pointer);
+        return push_d(*(double*)item_a.pointer + *(double*)item_b.pointer);
+    }
+    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
+        log_debug("add int + float: %d + %g", item_a.int_val, *(double*)item_b.pointer);
+        return push_d((double)item_a.int_val + *(double*)item_b.pointer);
+    }
+    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
+        return push_d(*(double*)item_a.pointer + (double)item_b.int_val);
+    }
+    else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_FLOAT) {
+        return push_d((double)*(int64_t*)item_a.pointer + *(double*)item_b.pointer);
+    }
+    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT64) {
+        return push_d(*(double*)item_a.pointer + (double)*(int64_t*)item_b.pointer);
+    }
+    // decimal support
+    else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
+        log_debug("fn_add: decimal addition");
+        mpd_t* a_dec = convert_to_decimal(item_a, context->decimal_ctx);
+        mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
+        
+        if (!a_dec || !b_dec) {
+            if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
+            if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
+            log_error("decimal conversion failed in fn_add");
+            return ItemError;
+        }
+        
+        mpd_t* result = mpd_new(context->decimal_ctx);
+        if (!result) {
+            cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
+            cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+            return ItemError;
+        }
+        
+        mpd_add(result, a_dec, b_dec, context->decimal_ctx);
+        
+        cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
+        cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
+        
+        if (mpd_isnan(result) || mpd_isinfinite(result)) {
+            mpd_del(result);
+            log_error("decimal addition failed");
+            return ItemError;
+        }
+        return push_decimal(result);
+    }
+
+    // vectorized addition for Arrays
+    // todo: array + number
     // ArrayInt and ArrayInt64 support
     else if (type_a == LMD_TYPE_ARRAY_INT && type_b == LMD_TYPE_ARRAY_INT) {
         ArrayInt* arr_a = item_a.array_int;
@@ -150,49 +203,6 @@ Item fn_add(Item item_a, Item item_b) {
         return {.array_float = result};
     }
     // todo: mixed array types
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_FLOAT) {
-        log_debug("add float: %g + %g", *(double*)item_a.pointer, *(double*)item_b.pointer);
-        return push_d(*(double*)item_a.pointer + *(double*)item_b.pointer);
-    }
-    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_FLOAT) {
-        return push_d((double)item_a.int_val + *(double*)item_b.pointer);
-    }
-    else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
-        return push_d(*(double*)item_a.pointer + (double)item_b.int_val);
-    }
-    // libmpdec decimal support
-    else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
-        log_debug("fn_add: decimal addition");
-        mpd_t* a_dec = convert_to_decimal(item_a, context->decimal_ctx);
-        mpd_t* b_dec = convert_to_decimal(item_b, context->decimal_ctx);
-        
-        if (!a_dec || !b_dec) {
-            if (a_dec) cleanup_temp_decimal(a_dec, item_a.type_id);
-            if (b_dec) cleanup_temp_decimal(b_dec, item_b.type_id);
-            log_error("decimal conversion failed in fn_add");
-            return ItemError;
-        }
-        
-        mpd_t* result = mpd_new(context->decimal_ctx);
-        if (!result) {
-            cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
-            cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
-            return ItemError;
-        }
-        
-        mpd_add(result, a_dec, b_dec, context->decimal_ctx);
-        
-        cleanup_temp_decimal(a_dec, item_a.type_id == LMD_TYPE_DECIMAL);
-        cleanup_temp_decimal(b_dec, item_b.type_id == LMD_TYPE_DECIMAL);
-        
-        if (mpd_isnan(result) || mpd_isinfinite(result)) {
-            mpd_del(result);
-            log_error("decimal addition failed");
-            return ItemError;
-        }
-        
-        return push_decimal(result);
-    }
     else {
         log_error("unknown add type: %d, %d", item_a.type_id, item_b.type_id);
     }

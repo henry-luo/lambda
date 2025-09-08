@@ -504,16 +504,6 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
         strbuf_append_char(tp->code_buf, ')');
     }
     else if (bi_node->op == OPERATOR_ADD) {
-        // Check if any operand produces an Item result - if so, use runtime function
-        if (expr_produces_item(bi_node->left) || expr_produces_item(bi_node->right)) {
-            strbuf_append_str(tp->code_buf, "fn_add(");
-            transpile_box_item(tp, bi_node->left);
-            strbuf_append_char(tp->code_buf, ',');
-            transpile_box_item(tp, bi_node->right);
-            strbuf_append_char(tp->code_buf, ')');
-            return;
-        }
-
         if (left_type == right_type) {
             if (left_type == LMD_TYPE_STRING) {
                 strbuf_append_str(tp->code_buf, "fn_strcat(");

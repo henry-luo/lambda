@@ -271,7 +271,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 }
 
 Script* load_script(Runtime *runtime, const char* script_path, const char* source) {
-    log_info("loading script: %s", script_path);
+    log_info("Loading script: %s", script_path);
     // find the script in the list of scripts
     for (int i = 0; i < runtime->scripts->length; i++) {
         Script *script = (Script*)runtime->scripts->data[i];
@@ -281,10 +281,15 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
         }
     }
     // script not found, create a new one
-    // printf("Loading %s ...\n", script_path);
+    const char* script_source =  source ? source : read_text_file(script_path);
+    if (!script_source) {
+        log_error("Error: Failed to read source code from %s", script_path);
+        return NULL;
+    }
     Script *new_script = (Script*)calloc(1, sizeof(Script));
     new_script->reference = strdup(script_path);
-    new_script->source = source ? source : read_text_file(script_path);
+    new_script->source = script_source;
+    log_debug("script source length: %d", (int)strlen(new_script->source));
     arraylist_append(runtime->scripts, new_script);
     new_script->index = runtime->scripts->length - 1;
     

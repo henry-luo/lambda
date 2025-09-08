@@ -714,14 +714,14 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
             left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_LIST)) {
             type_id = left_type;
         } 
-        else if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_NUMBER) {
+        else if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
+            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
             // If either operand is decimal, result is decimal
-            if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
-                type_id = LMD_TYPE_DECIMAL;
-            } else {
+            // if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
+            //     type_id = LMD_TYPE_DECIMAL;
+            // } else {
                 type_id = max(left_type, right_type);
-            }
+            // }
         }
         else {
             type_id = LMD_TYPE_ANY;
