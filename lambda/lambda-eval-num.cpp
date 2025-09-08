@@ -882,25 +882,13 @@ Item fn_ceil(Item item) {
 }
 
 Item fn_min(Item item_a, Item item_b) {
+    log_debug("fn_min called with types: %d, %d", item_a.type_id, item_b.type_id);
     // Check if we're being called with array min (single array argument)
     // This happens when the second argument is ITEM_NULL or has type LMD_TYPE_NULL
     if (item_b.type_id == LMD_TYPE_NULL || item_b.raw_pointer == NULL) {
         // Single argument array min case
         TypeId type_id = get_type_id(item_a);
-        if (type_id == LMD_TYPE_ARRAY_FLOAT) {
-            ArrayFloat* arr = item_a.array_float;
-            if (arr->length == 0) {
-                return ItemError; // Empty array has no minimum
-            }
-            double min_val = arr->items[0];
-            for (size_t i = 1; i < arr->length; i++) {
-                if (arr->items[i] < min_val) {
-                    min_val = arr->items[i];
-                }
-            }
-            return push_d(min_val);
-        }
-        else if (type_id == LMD_TYPE_ARRAY_INT) {
+        if (type_id == LMD_TYPE_ARRAY_INT) {
             ArrayInt* arr = item_a.array_int;
             if (arr->length == 0) {
                 return ItemError; // Empty array has no minimum
@@ -927,12 +915,25 @@ Item fn_min(Item item_a, Item item_b) {
             log_debug("min value (int64): %ld", min_val);
             return push_l(min_val);
         }
-        else if (type_id == LMD_TYPE_ARRAY) {
-            Array* arr = item_a.array;
+        else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
+            ArrayFloat* arr = item_a.array_float;
+            if (arr->length == 0) {
+                return ItemError; // Empty array has no minimum
+            }
+            double min_val = arr->items[0];
+            for (size_t i = 1; i < arr->length; i++) {
+                if (arr->items[i] < min_val) {
+                    min_val = arr->items[i];
+                }
+            }
+            return push_d(min_val);
+        }        
+        else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_LIST) {
+            List* arr = item_a.list;
             if (!arr || arr->length == 0) {
                 return ItemError; // Empty array has no minimum
             }
-            Item min_item = array_get(arr, 0);
+            Item min_item = type_id == LMD_TYPE_LIST ? list_get(arr, 0) : array_get(arr, 0);
             double min_val = 0.0;
             bool is_float = false;
             
@@ -947,13 +948,18 @@ Item fn_min(Item item_a, Item item_b) {
                 min_val = *(double*)min_item.pointer;
                 is_float = true;
             }
+            else if (min_item.type_id == LMD_TYPE_DECIMAL) {
+                log_error("decimal not supported yet in fn_min");
+                return ItemError;
+            }
             else {
+                log_error("non-numeric array element type: %d", min_item.type_id);
                 return ItemError;
             }
             
-            // Find minimum
+            // find minimum
             for (size_t i = 1; i < arr->length; i++) {
-                Item elem_item = array_get(arr, i);
+                Item elem_item = type_id == LMD_TYPE_LIST ? list_get(arr, i) : array_get(arr, i);
                 double elem_val = 0.0;
                 
                 if (elem_item.type_id == LMD_TYPE_INT) {
@@ -966,15 +972,17 @@ Item fn_min(Item item_a, Item item_b) {
                     elem_val = *(double*)elem_item.pointer;
                     is_float = true;
                 }
+                else if (elem_item.type_id == LMD_TYPE_DECIMAL) {
+                    log_error("decimal not supported yet in fn_min");
+                    return ItemError;
+                }                
                 else {
                     return ItemError;
                 }
-                
                 if (elem_val < min_val) {
                     min_val = elem_val;
                 }
             }
-            
             if (is_float) {
                 return push_d(min_val);
             } else {
@@ -1006,12 +1014,16 @@ Item fn_min(Item item_a, Item item_b) {
         a_val = *(double*)item_a.pointer;
         is_float = true;
     }
+    else if (item_a.type_id == LMD_TYPE_DECIMAL) {
+        log_error("decimal not supported yet in fn_min");
+        return ItemError;
+    }  
     else {
         log_debug("min not supported for type: %d", item_a.type_id);
         return ItemError;
     }
     
-    // Convert second argument
+    // convert second argument
     if (item_b.type_id == LMD_TYPE_INT) {
         b_val = item_b.int_val;
     }
@@ -1022,6 +1034,10 @@ Item fn_min(Item item_a, Item item_b) {
         b_val = *(double*)item_b.pointer;
         is_float = true;
     }
+    else if (item_a.type_id == LMD_TYPE_DECIMAL) {
+        log_error("decimal not supported yet in fn_min");
+        return ItemError;
+    }    
     else {
         log_debug("min not supported for type: %d", item_b.type_id);
         return ItemError;
@@ -1084,12 +1100,12 @@ Item fn_max(Item item_a, Item item_b) {
             log_debug("max value (int64): %ld", max_val);
             return push_l(max_val);
         }
-        else if (type_id == LMD_TYPE_ARRAY) {
+        else if (type_id == LMD_TYPE_ARRAY || type_id == LMD_TYPE_LIST) {
             Array* arr = item_a.array;
             if (!arr || arr->length == 0) {
                 return ItemError; // Empty array has no maximum
             }
-            Item max_item = array_get(arr, 0);
+            Item max_item = type_id == LMD_TYPE_LIST ? list_get(arr, 0) : array_get(arr, 0);
             double max_val = 0.0;
             bool is_float = false;
             
@@ -1110,7 +1126,7 @@ Item fn_max(Item item_a, Item item_b) {
             
             // Find maximum
             for (size_t i = 1; i < arr->length; i++) {
-                Item elem_item = array_get(arr, i);
+                Item elem_item = type_id == LMD_TYPE_LIST ? list_get(arr, i) : array_get(arr, i);
                 double elem_val = 0.0;
                 
                 if (elem_item.type_id == LMD_TYPE_INT) {
