@@ -694,15 +694,15 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     TypeId left_type = ast_node->left->type->type_id, right_type = ast_node->right->type->type_id;
     log_debug("left type: %d, right type: %d", left_type, right_type);
     TypeId type_id;
-    if (ast_node->op == OPERATOR_DIV || ast_node->op == OPERATOR_POW) {
-        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_NUMBER) {
+    if (ast_node->op == OPERATOR_DIV) {
+        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
+            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
             // If either operand is decimal, result is decimal
-            if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
-                type_id = LMD_TYPE_DECIMAL;
-            } else {
-                type_id = LMD_TYPE_FLOAT;  // Division and power produce float results for non-decimals
-            }
+            // if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
+            //     type_id = LMD_TYPE_DECIMAL;
+            // } else {
+                type_id = LMD_TYPE_FLOAT;  // division and power produce float results for non-decimals
+            // }
         }
         else {
             type_id = LMD_TYPE_ANY;
@@ -727,15 +727,15 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
             type_id = LMD_TYPE_ANY;
         }
     } 
-    else if (ast_node->op == OPERATOR_SUB || ast_node->op == OPERATOR_MUL || ast_node->op == OPERATOR_MOD) {
-        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_NUMBER &&
-            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_NUMBER) {
+    else if (ast_node->op == OPERATOR_SUB || ast_node->op == OPERATOR_MUL) {
+        if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
+            LMD_TYPE_INT <= right_type && right_type <= LMD_TYPE_FLOAT) {
             // If either operand is decimal, result is decimal
-            if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
-                type_id = LMD_TYPE_DECIMAL;
-            } else {
+            // if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
+            //     type_id = LMD_TYPE_DECIMAL;
+            // } else {
                 type_id = max(left_type, right_type);
-            }
+            //}
         }
         else {
             type_id = LMD_TYPE_ANY;
