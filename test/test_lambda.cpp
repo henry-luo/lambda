@@ -242,7 +242,7 @@ Test(lambda_tests, test_int64_ls) {
     test_lambda_script_against_file("test/lambda/int64.ls", "test/lambda/int64.txt");
 }
 
-Test(lambda_tests, test_csv_ls) {
+Test(lambda_tests, test_input_csv_ls) {
     test_lambda_script_against_file("test/lambda/input_csv.ls", "test/lambda/input_csv.txt");
 }
 

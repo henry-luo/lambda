@@ -55,3 +55,8 @@ error
 50
 150
 30
+"For loop with ArrayFloat:"
+0
+0.7
+0.2
+0.9

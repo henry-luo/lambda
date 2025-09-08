@@ -55,10 +55,10 @@ func_obj_t func_list[] = {
     {"push_l", (fn_ptr) push_l},
     {"push_k", (fn_ptr) push_k},
     {"push_c", (fn_ptr) push_c},
-    
+    {"item_at", (fn_ptr) item_at},
+
     {"fn_int", (fn_ptr) fn_int},
     {"fn_int64", (fn_ptr) fn_int64},
-
     {"fn_add", (fn_ptr) fn_add},
     {"fn_sub", (fn_ptr) fn_sub},
     {"fn_mul", (fn_ptr) fn_mul},
