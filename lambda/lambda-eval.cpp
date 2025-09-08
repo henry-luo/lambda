@@ -507,17 +507,15 @@ String STR_TRUE = {.len = 4, .ref_cnt = 0, .chars = "true"};
 String STR_FALSE = {.len = 5, .ref_cnt = 0, .chars = "false"};
 
 String* fn_string(Item itm) {
-    if (itm.type_id == LMD_TYPE_NULL) {
+    TypeId type_id = get_type_id(itm);
+    switch (type_id) {
+    case LMD_TYPE_NULL:
         return &STR_NULL;
-    }
-    else if (itm.type_id == LMD_TYPE_BOOL) {
+    case LMD_TYPE_BOOL:
         return itm.bool_val ? &STR_TRUE : &STR_FALSE;
-    }    
-    else if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
-        itm.type_id == LMD_TYPE_BINARY) {
+    case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY:
         return (String*)itm.pointer;
-    }
-    else if (itm.type_id == LMD_TYPE_DTIME) {
+    case LMD_TYPE_DTIME: {
         DateTime *dt = (DateTime*)itm.pointer;
         if (dt) {
             // Debug: Print the datetime precision and basic info
@@ -605,29 +603,43 @@ String* fn_string(Item itm) {
             return &STR_NULL;
         }
     }
-    else if (itm.type_id == LMD_TYPE_INT) {
+    case LMD_TYPE_INT: {
         char buf[32];
         int int_val = itm.int_val;
         snprintf(buf, sizeof(buf), "%d", int_val);
         int len = strlen(buf);
         return heap_string(buf, len);
     }
-    else if (itm.type_id == LMD_TYPE_INT64) {
+    case LMD_TYPE_INT64: {
         char buf[32];
         long long_val = *(long*)itm.pointer;
         snprintf(buf, sizeof(buf), "%ld", long_val);
         int len = strlen(buf);
         return heap_string(buf, len);
     }
-    else if (itm.type_id == LMD_TYPE_FLOAT) {
+    case LMD_TYPE_FLOAT: {
         char buf[32];
         double dval = *(double*)itm.pointer;
         snprintf(buf, sizeof(buf), "%g", dval);
         int len = strlen(buf);
         return heap_string(buf, len);
     }
-    log_debug("unhandled type %d", itm.type_id);
-    return NULL;
+    case LMD_TYPE_DECIMAL:  case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:  
+    case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
+    case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
+        StrBuf* sb = strbuf_new();
+        print_item(sb, itm, 1, null);  // make list print as list, instead of beaking onto multiple lines
+        String* result = heap_string(sb->str, sb->length);
+        strbuf_free(sb);
+        return result;
+    }
+    case LMD_TYPE_ERROR:
+        return NULL;
+    default:
+        // for other types
+        log_error("fn_string unhandled type %d", itm.type_id);
+        return &STR_NULL;
+    }
 }
 
 Type* base_type(TypeId type_id) {
