@@ -105,6 +105,15 @@ Test(css_parser, parse_multiple_declarations, .init = setup, .fini = teardown) {
     // Check third declaration
     css_declaration_t* decl3 = style_rule->declarations[2];
     cr_expect_str_eq(decl3->property, "margin", "Third property should be 'margin'");
+    
+    // Debug: print what we actually get
+    fprintf(stderr, "DEBUG: Third declaration has %d tokens\n", decl3->token_count);
+    for (int i = 0; i < decl3->token_count; i++) {
+        fprintf(stderr, "DEBUG: Token %d: type=%d, value='%s'\n", 
+                i, decl3->value_tokens[i].type, 
+                decl3->value_tokens[i].value ? decl3->value_tokens[i].value : "NULL");
+    }
+    
     cr_expect_str_eq(decl3->value_tokens[0].value, "10", "Third value first token should be '10'");
     cr_expect_str_eq(decl3->value_tokens[1].value, "px", "Third value second token should be 'px'");
 }

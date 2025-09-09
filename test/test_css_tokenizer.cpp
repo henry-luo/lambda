@@ -91,14 +91,24 @@ Test(css_tokenizer, dimensions, .init = setup, .fini = teardown) {
     
     cr_assert_neq(tokens, NULL, "Tokenizer should return tokens");
     
-    // Simple test - just check if we get the right number of tokens
-    cr_expect_gt(count, 0, "Should have at least one token");
-    
-    // Check first token - adjust expectations based on what we actually get
-    if (count > 0) {
-        // For now, just pass the test to see what we're getting
-        cr_expect(true, "Placeholder test - tokenizer produces tokens");
+    // Debug: print what we actually get
+    for (size_t i = 0; i < count; i++) {
+        printf("Token %zu: type=%d (%s), text='%.*s'\n", 
+               i, tokens[i].type, css_token_type_to_str(tokens[i].type),
+               (int)tokens[i].length, tokens[i].start);
     }
+    
+    // Look for dimension token
+    bool found_dimension = false;
+    for (size_t i = 0; i < count; i++) {
+        if (tokens[i].type == CSS_TOKEN_DIMENSION && !found_dimension) {
+            expectToken(&tokens[i], CSS_TOKEN_DIMENSION, "10px");
+            cr_expect_float_eq(tokens[i].data.number_value, 10.0, 0.001, "Number value should be 10.0");
+            found_dimension = true;
+        }
+    }
+    
+    cr_expect(found_dimension, "Should find dimension token");
 }
 
 Test(css_tokenizer, strings, .init = setup, .fini = teardown) {

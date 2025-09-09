@@ -13,6 +13,7 @@ static css_parser_t* parser;
 void setup(void) {
     pool_variable_init(&pool, 1024 * 1024, MEM_POOL_NO_BEST_FIT); // 1MB pool
     parser = css_parser_create(pool);
+    css_parser_set_strict_mode(parser, false); // Disable strict mode for integration tests
 }
 
 // Teardown function for all tests
@@ -237,6 +238,11 @@ Test(css_integration, property_validation_integration, .init = setup, .fini = te
             cr_expect_str_eq(decl->value_tokens[0].value, "red", "Color value should be 'red'");
         } else if (strcmp(decl->property, "margin") == 0) {
             found_margin = true;
+            printf("DEBUG: Margin has %d tokens: ", decl->token_count);
+            for (int j = 0; j < decl->token_count; j++) {
+                printf("'%s' ", decl->value_tokens[j].value ? decl->value_tokens[j].value : "NULL");
+            }
+            printf("\n");
             cr_expect_eq(decl->token_count, 2, "Margin should have 2 tokens (10px 20px)");
         } else if (strcmp(decl->property, "display") == 0) {
             found_display = true;

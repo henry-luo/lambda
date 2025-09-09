@@ -922,39 +922,11 @@ static Item parse_css_measure(Input *input, const char **css) {
         }
     }
     
-    // If we have a unit, treat as symbol (measure), otherwise as number
-    String* measure_str = stringbuf_to_string(sb);
+    // If we have a unit, return the complete dimension token as a single string
     if (*css > unit_start) {
-        // Validate common CSS3 units
-        const char* unit = unit_start;
-        size_t unit_len = *css - unit_start;
-        
-        // CSS3 length units
-        if ((unit_len == 2 && (strncmp(unit, "px", 2) == 0 || strncmp(unit, "em", 2) == 0 ||
-                              strncmp(unit, "ex", 2) == 0 || strncmp(unit, "ch", 2) == 0 ||
-                              strncmp(unit, "rem", 3) == 0 || strncmp(unit, "vw", 2) == 0 ||
-                              strncmp(unit, "vh", 2) == 0 || strncmp(unit, "cm", 2) == 0 ||
-                              strncmp(unit, "mm", 2) == 0 || strncmp(unit, "in", 2) == 0 ||
-                              strncmp(unit, "pt", 2) == 0 || strncmp(unit, "pc", 2) == 0)) ||
-            (unit_len == 3 && (strncmp(unit, "rem", 3) == 0)) ||
-            (unit_len == 4 && (strncmp(unit, "vmin", 4) == 0 || strncmp(unit, "vmax", 4) == 0)) ||
-            // CSS3 angle units
-            (unit_len == 3 && (strncmp(unit, "deg", 3) == 0 || strncmp(unit, "rad", 3) == 0)) ||
-            (unit_len == 4 && (strncmp(unit, "grad", 4) == 0 || strncmp(unit, "turn", 4) == 0)) ||
-            // CSS3 time units
-            (unit_len == 1 && strncmp(unit, "s", 1) == 0) ||
-            (unit_len == 2 && strncmp(unit, "ms", 2) == 0) ||
-            // CSS3 frequency units
-            (unit_len == 2 && (strncmp(unit, "Hz", 2) == 0)) ||
-            (unit_len == 3 && (strncmp(unit, "kHz", 3) == 0)) ||
-            // CSS3 resolution units
-            (unit_len == 3 && (strncmp(unit, "dpi", 3) == 0 || strncmp(unit, "dpcm", 4) == 0)) ||
-            (unit_len == 4 && (strncmp(unit, "dpcm", 4) == 0 || strncmp(unit, "dppx", 4) == 0))) {
-            return measure_str ? (Item){.item = s2it(measure_str)} : (Item){.item = ITEM_ERROR};
-        } else {
-            // Unknown unit, but still return as measure
-            return measure_str ? (Item){.item = s2it(measure_str)} : (Item){.item = ITEM_ERROR};
-        }
+        // Create the complete dimension string (e.g., "10px")
+        String* dimension_str = stringbuf_to_string(sb);
+        return (Item){.item = s2it(dimension_str)};
     } else {
         // Reset and parse as number only
         *css = start;

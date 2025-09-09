@@ -288,10 +288,11 @@ static void css_tokenizer_consume_number(CSSTokenizer* tokenizer) {
         tokenizer->current++;
         css_tokenizer_add_token_with_data(tokenizer, CSS_TOKEN_PERCENTAGE, start, tokenizer->current - start, value);
     } else if (css_tokenizer_would_start_identifier(tokenizer)) {
-        // Dimension token - consume the unit identifier manually
+        // Consume the unit part
         while (tokenizer->current < tokenizer->end && css_is_name_char(*tokenizer->current)) {
             tokenizer->current++;
         }
+        // Generate dimension token for the entire "10px" string
         css_tokenizer_add_token_with_data(tokenizer, CSS_TOKEN_DIMENSION, start, tokenizer->current - start, value);
     } else {
         // Plain number
