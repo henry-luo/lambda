@@ -251,7 +251,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     write_text_file("_transpiled.c", tp->code_buf->str);
     char* code = tp->code_buf->str + lambda_lambda_h_len;
     // printf("code len: %d\n", (int)strlen(code));
-    log_debug("transpiled code (first 500 chars):\n---------\n%.500s", code);
+    log_debug("transpiled code (first 500 chars):\n---------%.500s", code);
     fflush(NULL);  // force flush all open streams for large log
     jit_compile_to_mir(tp->jit_context, tp->code_buf->str, tp->code_buf->length, script_path);
     strbuf_free(tp->code_buf);  tp->code_buf = NULL;

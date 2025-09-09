@@ -3479,10 +3479,6 @@
           },
           {
             "type": "SYMBOL",
-            "name": "sys_func"
-          },
-          {
-            "type": "SYMBOL",
             "name": "_parenthesized_expr"
           }
         ]
@@ -4875,168 +4871,6 @@
         }
       ]
     },
-    "sys_func": {
-      "type": "PREC",
-      "value": 50,
-      "content": {
-        "type": "SEQ",
-        "members": [
-          {
-            "type": "FIELD",
-            "name": "function",
-            "content": {
-              "type": "CHOICE",
-              "members": [
-                {
-                  "type": "STRING",
-                  "value": "len"
-                },
-                {
-                  "type": "STRING",
-                  "value": "type"
-                },
-                {
-                  "type": "STRING",
-                  "value": "int"
-                },
-                {
-                  "type": "STRING",
-                  "value": "int64"
-                },
-                {
-                  "type": "STRING",
-                  "value": "float"
-                },
-                {
-                  "type": "STRING",
-                  "value": "decimal"
-                },
-                {
-                  "type": "STRING",
-                  "value": "binary"
-                },
-                {
-                  "type": "STRING",
-                  "value": "number"
-                },
-                {
-                  "type": "STRING",
-                  "value": "string"
-                },
-                {
-                  "type": "STRING",
-                  "value": "char"
-                },
-                {
-                  "type": "STRING",
-                  "value": "symbol"
-                },
-                {
-                  "type": "STRING",
-                  "value": "datetime"
-                },
-                {
-                  "type": "STRING",
-                  "value": "date"
-                },
-                {
-                  "type": "STRING",
-                  "value": "time"
-                },
-                {
-                  "type": "STRING",
-                  "value": "today"
-                },
-                {
-                  "type": "STRING",
-                  "value": "justnow"
-                },
-                {
-                  "type": "STRING",
-                  "value": "set"
-                },
-                {
-                  "type": "STRING",
-                  "value": "slice"
-                },
-                {
-                  "type": "STRING",
-                  "value": "all"
-                },
-                {
-                  "type": "STRING",
-                  "value": "any"
-                },
-                {
-                  "type": "STRING",
-                  "value": "min"
-                },
-                {
-                  "type": "STRING",
-                  "value": "max"
-                },
-                {
-                  "type": "STRING",
-                  "value": "sum"
-                },
-                {
-                  "type": "STRING",
-                  "value": "avg"
-                },
-                {
-                  "type": "STRING",
-                  "value": "abs"
-                },
-                {
-                  "type": "STRING",
-                  "value": "round"
-                },
-                {
-                  "type": "STRING",
-                  "value": "floor"
-                },
-                {
-                  "type": "STRING",
-                  "value": "ceil"
-                },
-                {
-                  "type": "STRING",
-                  "value": "input"
-                },
-                {
-                  "type": "STRING",
-                  "value": "print"
-                },
-                {
-                  "type": "STRING",
-                  "value": "format"
-                },
-                {
-                  "type": "STRING",
-                  "value": "error"
-                },
-                {
-                  "type": "STRING",
-                  "value": "normalize"
-                },
-                {
-                  "type": "STRING",
-                  "value": "substring"
-                },
-                {
-                  "type": "STRING",
-                  "value": "contains"
-                }
-              ]
-            }
-          },
-          {
-            "type": "SYMBOL",
-            "name": "_arguments"
-          }
-        ]
-      }
-    },
     "assign_expr": {
       "type": "SEQ",
       "members": [
@@ -6046,7 +5880,7 @@
         },
         {
           "type": "STRING",
-          "value": "=>"
+          "value": "->"
         },
         {
           "type": "FIELD",
@@ -6688,10 +6522,6 @@
       {
         "type": "SYMBOL",
         "name": "fn_expr_stam"
-      },
-      {
-        "type": "SYMBOL",
-        "name": "sys_func"
       },
       {
         "type": "SYMBOL",

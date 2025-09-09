@@ -60,7 +60,7 @@ extern "C" {
 #define SYM_FUNC_STAM sym_fn_stam
 #define SYM_FUNC_EXPR_STAM sym_fn_expr_stam
 #define SYM_FUNC_EXPR sym_fn_expr
-#define SYM_SYS_FUNC sym_sys_func
+// #define SYM_SYS_FUNC sym_sys_func
 #define SYM_IMPORT_MODULE sym_import_module
 
 #define SYM_COMMENT sym_comment
@@ -228,6 +228,7 @@ typedef struct AstArrayNode : AstNode {
 typedef struct AstListNode : AstArrayNode {
     AstNode *declare;  // declarations in the list
     NameScope *vars;  // scope for the variables in the list
+    TypeList* list_type;
 } AstListNode;
 
 typedef struct AstMapNode : AstNode {
