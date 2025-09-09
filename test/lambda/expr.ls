@@ -65,3 +65,7 @@ mp.a
 let arr = [t'2025-01-04', t'2025-01-05']
 arr
 arr[0]
+
+"Test array:"
+let test_array = [2.8, 1.2, 1.9, 1.5, 2.1]
+for (x in test_array) x

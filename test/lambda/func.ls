@@ -30,6 +30,7 @@ t2;  "abc" is t2;  123 is t2;
 let str = string(123)
 str; str is string;
 
+"types :"
 type("string");  type(123);  type(true);  type(0.5);  type(null);  
 type([123]);  type({a:123});  type(t);  type(factorial);
 type(1 to 3);
@@ -37,3 +38,8 @@ type(1 to 3);
 1 in [1, 2, 3];  5 in [1, 2.5, 3, 5.0];  "abc" in ["abc", "def"];
 0 in [1, 2, 3];  6 in [1, 2.5, 3, 5.0];  "ab" in ["abc", "def"];
 "a" in "abc";  "d" in "abc"; 
+
+fn const_fn(x_var, y_var) {
+    "const_str"
+}
+const_fn(1, 2)
