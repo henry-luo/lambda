@@ -150,11 +150,12 @@ Item fn_normalize(Item str_item, Item type_item) {
 }
 
 Range* fn_to(Item item_a, Item item_b) {
-    // todo: join binary, list, array, map
-    if ((item_a.type_id == LMD_TYPE_INT || item_a.type_id == LMD_TYPE_INT64) && 
-        (item_b.type_id == LMD_TYPE_INT || item_b.type_id == LMD_TYPE_INT64)) {
-        long start = item_a.type_id == LMD_TYPE_INT ? item_a.int_val : *(long*)item_a.pointer;
-        long end = item_b.type_id == LMD_TYPE_INT ? item_b.int_val : *(long*)item_b.pointer;
+    if ((item_a.type_id == LMD_TYPE_INT || item_a.type_id == LMD_TYPE_INT64 || item_a.type_id == LMD_TYPE_FLOAT) && 
+        (item_b.type_id == LMD_TYPE_INT || item_b.type_id == LMD_TYPE_INT64 || item_b.type_id == LMD_TYPE_FLOAT)) {
+        long start = item_a.type_id == LMD_TYPE_INT ? item_a.int_val : 
+            item_a.type_id == LMD_TYPE_INT64 ? *(long*)item_a.pointer : (long)*(double*)item_a.pointer;
+        long end = item_b.type_id == LMD_TYPE_INT ? item_b.int_val : 
+            item_b.type_id == LMD_TYPE_INT64 ? *(long*)item_b.pointer : (long)*(double*)item_b.pointer;
         if (start > end) {
             // todo: should raise error
             log_debug("Error: start of range is greater than end: %ld > %ld", start, end);
