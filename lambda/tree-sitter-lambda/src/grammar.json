@@ -6046,7 +6046,7 @@
         },
         {
           "type": "STRING",
-          "value": "=>"
+          "value": "->"
         },
         {
           "type": "FIELD",
@@ -6691,11 +6691,11 @@
       },
       {
         "type": "SYMBOL",
-        "name": "sys_func"
+        "name": "primary_expr"
       },
       {
         "type": "SYMBOL",
-        "name": "primary_expr"
+        "name": "sys_func"
       },
       {
         "type": "SYMBOL",

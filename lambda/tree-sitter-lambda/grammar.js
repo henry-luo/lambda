@@ -172,8 +172,8 @@ module.exports = grammar({
 
   precedences: $ => [[
     $.fn_expr_stam,
-    $.sys_func,
     $.primary_expr,
+    $.sys_func,
     $.unary_expr,
     // binary operators
     'binary_pow',
@@ -360,7 +360,7 @@ module.exports = grammar({
     ),
 
     map: $ => seq(
-      // $._expression for dynamic map items
+      // $._expression for dynamic map item
       '{', comma_sep(choice($.map_item, $._expression)), '}',
     ),
 
@@ -627,7 +627,7 @@ module.exports = grammar({
 
     fn_type: $ => seq(
       '(', optional(field('declare', $.fn_param)), repeat(seq(',', field('declare', $.fn_param))), ')', 
-      '=>', field('type', $._type_expr),      
+      '->', field('type', $._type_expr),      
     ),
 
     primary_type: $ => choice(

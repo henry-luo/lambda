@@ -1417,7 +1417,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         if (symbol == SYM_COMMENT) {  // skip comments
             child = ts_node_next_named_sibling(child);  continue;
         }
-        // named map item, or dynamic expr
+        // named map item, or dynamic map expr
         AstNode* item = (symbol == SYM_MAP_ITEM) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
         if (!item) { log_error("build_map: null expr item");  break; }
         if (!prev_item) { ast_node->item = item; } 
@@ -1426,7 +1426,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
 
         ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->ast_pool, sizeof(ShapeEntry));
         if (symbol == SYM_MAP_ITEM) {
-            // Convert pooled String* to StrView* for shape entry
+            // convert pooled String* to StrView* for shape entry
             String* pooled_name = ((AstNamedNode*)item)->name;
             StrView* name_view = (StrView*)pool_calloc(tp->ast_pool, sizeof(StrView));
             name_view->str = pooled_name->chars;
