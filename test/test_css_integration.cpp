@@ -1,30 +1,32 @@
-#include <gtest/gtest.h>
+#include <criterion/criterion.h>
+#include <string>
 #include "../lambda/input/css_parser.h"
 #include "../lambda/input/css_tokenizer.h"
 #include "../lambda/input/css_properties.h"
 #include "../lib/mem-pool/include/mem_pool.h"
 
-class CSSIntegrationTest : public ::testing::Test {
-protected:
-    void SetUp() override {
-        pool = variable_mem_pool_create();
-        parser = css_parser_create(pool);
-        tokenizer = css_tokenizer_create(pool);
-    }
+// Global test variables
+static VariableMemPool* pool;
+static css_parser_t* parser;
 
-    void TearDown() override {
+// Setup function for all tests
+void setup(void) {
+    pool_variable_init(&pool, 1024 * 1024, MEM_POOL_NO_BEST_FIT); // 1MB pool
+    parser = css_parser_create(pool);
+}
+
+// Teardown function for all tests
+void teardown(void) {
+    if (parser) {
         css_parser_destroy(parser);
-        css_tokenizer_destroy(tokenizer);
-        variable_mem_pool_destroy(pool);
     }
-
-    VariableMemPool* pool;
-    css_parser_t* parser;
-    css_tokenizer_t* tokenizer;
-};
+    if (pool) {
+        pool_variable_destroy(pool);
+    }
+}
 
 // Test end-to-end parsing of a complete CSS stylesheet
-TEST_F(CSSIntegrationTest, EndToEndStylesheetParsing) {
+Test(css_integration, end_to_end_stylesheet_parsing, .init = setup, .fini = teardown) {
     const char* css = R"(
         /* Reset styles */
         * {
@@ -92,9 +94,9 @@ TEST_F(CSSIntegrationTest, EndToEndStylesheetParsing) {
     // Parse the complete stylesheet
     css_stylesheet_t* stylesheet = css_parse_stylesheet(parser, css);
     
-    ASSERT_NE(stylesheet, nullptr);
-    EXPECT_EQ(stylesheet->error_count, 0);
-    EXPECT_GT(stylesheet->rule_count, 8); // Should have multiple rules
+    cr_assert_neq(stylesheet, NULL, "Stylesheet should not be NULL");
+    cr_expect_eq(stylesheet->error_count, 0, "Should have 0 errors");
+    cr_expect_gt(stylesheet->rule_count, 8, "Should have more than 8 rules");
     
     // Verify we have different types of rules
     bool has_style_rule = false;
@@ -120,13 +122,13 @@ TEST_F(CSSIntegrationTest, EndToEndStylesheetParsing) {
         rule = rule->next;
     }
     
-    EXPECT_TRUE(has_style_rule);
-    EXPECT_TRUE(has_media_rule);
-    EXPECT_TRUE(has_keyframes_rule);
+    cr_expect(has_style_rule, "Should have style rules");
+    cr_expect(has_media_rule, "Should have media rules");
+    cr_expect(has_keyframes_rule, "Should have keyframes rules");
 }
 
 // Test tokenizer and parser integration with complex selectors
-TEST_F(CSSIntegrationTest, ComplexSelectorParsing) {
+Test(css_integration, complex_selector_parsing, .init = setup, .fini = teardown) {
     const char* css = R"(
         /* Complex selectors test */
         div.container > .item:nth-child(2n+1) {
@@ -152,17 +154,17 @@ TEST_F(CSSIntegrationTest, ComplexSelectorParsing) {
     
     css_stylesheet_t* stylesheet = css_parse_stylesheet(parser, css);
     
-    ASSERT_NE(stylesheet, nullptr);
-    EXPECT_EQ(stylesheet->error_count, 0);
-    EXPECT_EQ(stylesheet->rule_count, 4);
+    cr_assert_neq(stylesheet, NULL, "Stylesheet should not be NULL");
+    cr_expect_eq(stylesheet->error_count, 0, "Should have 0 errors");
+    cr_expect_eq(stylesheet->rule_count, 4, "Should have 4 rules");
     
     // Check first rule has complex selector
     css_rule_t* rule = stylesheet->rules;
-    ASSERT_EQ(rule->type, CSS_RULE_STYLE);
+    cr_assert_eq(rule->type, CSS_RULE_STYLE, "First rule should be style rule");
     
     css_style_rule_t* style_rule = rule->data.style_rule;
     css_selector_t* selector = style_rule->selectors;
-    ASSERT_NE(selector, nullptr);
+    cr_assert_neq(selector, NULL, "Selector should not be NULL");
     
     // Should have multiple components in the selector
     int component_count = 0;
@@ -171,22 +173,22 @@ TEST_F(CSSIntegrationTest, ComplexSelectorParsing) {
         component_count++;
         component = component->next;
     }
-    EXPECT_GT(component_count, 1);
+    cr_expect_gt(component_count, 1, "Complex selector should have multiple components");
     
     // Check selector list in second rule
     rule = rule->next;
-    ASSERT_EQ(rule->type, CSS_RULE_STYLE);
+    cr_assert_eq(rule->type, CSS_RULE_STYLE, "Second rule should be style rule");
     style_rule = rule->data.style_rule;
     
     // Should have two selectors in the list
     selector = style_rule->selectors;
-    ASSERT_NE(selector, nullptr);
-    ASSERT_NE(selector->next, nullptr);
-    EXPECT_EQ(selector->next->next, nullptr); // Only two selectors
+    cr_assert_neq(selector, NULL, "First selector should not be NULL");
+    cr_assert_neq(selector->next, NULL, "Second selector should not be NULL");
+    cr_expect_eq(selector->next->next, NULL, "Should have only two selectors");
 }
 
 // Test property validation integration
-TEST_F(CSSIntegrationTest, PropertyValidationIntegration) {
+Test(css_integration, property_validation_integration, .init = setup, .fini = teardown) {
     const char* css = R"(
         .valid-properties {
             color: red;
@@ -215,13 +217,13 @@ TEST_F(CSSIntegrationTest, PropertyValidationIntegration) {
     
     css_stylesheet_t* stylesheet = css_parse_stylesheet(parser, css);
     
-    ASSERT_NE(stylesheet, nullptr);
-    EXPECT_EQ(stylesheet->rule_count, 2);
+    cr_assert_neq(stylesheet, NULL, "Stylesheet should not be NULL");
+    cr_expect_eq(stylesheet->rule_count, 2, "Should have 2 rules");
     
     // Check first rule declarations
     css_rule_t* rule = stylesheet->rules;
     css_style_rule_t* style_rule = rule->data.style_rule;
-    EXPECT_EQ(style_rule->declaration_count, 9);
+    cr_expect_eq(style_rule->declaration_count, 9, "First rule should have 9 declarations");
     
     // Verify some declarations are properly parsed
     bool found_color = false;
@@ -232,19 +234,19 @@ TEST_F(CSSIntegrationTest, PropertyValidationIntegration) {
         css_declaration_t* decl = style_rule->declarations[i];
         if (strcmp(decl->property, "color") == 0) {
             found_color = true;
-            EXPECT_STREQ(decl->value_tokens[0].value, "red");
+            cr_expect_str_eq(decl->value_tokens[0].value, "red", "Color value should be 'red'");
         } else if (strcmp(decl->property, "margin") == 0) {
             found_margin = true;
-            EXPECT_EQ(decl->token_count, 2); // "10px 20px"
+            cr_expect_eq(decl->token_count, 2, "Margin should have 2 tokens (10px 20px)");
         } else if (strcmp(decl->property, "display") == 0) {
             found_display = true;
-            EXPECT_STREQ(decl->value_tokens[0].value, "flex");
+            cr_expect_str_eq(decl->value_tokens[0].value, "flex", "Display value should be 'flex'");
         }
     }
     
-    EXPECT_TRUE(found_color);
-    EXPECT_TRUE(found_margin);
-    EXPECT_TRUE(found_display);
+    cr_expect(found_color, "Should find color declaration");
+    cr_expect(found_margin, "Should find margin declaration");
+    cr_expect(found_display, "Should find display declaration");
     
     // Check second rule has !important declaration
     rule = rule->next;
@@ -255,15 +257,15 @@ TEST_F(CSSIntegrationTest, PropertyValidationIntegration) {
         css_declaration_t* decl = style_rule->declarations[i];
         if (decl->importance == CSS_IMPORTANCE_IMPORTANT) {
             found_important = true;
-            EXPECT_STREQ(decl->property, "color");
-            EXPECT_STREQ(decl->value_tokens[0].value, "blue");
+            cr_expect_str_eq(decl->property, "color", "Important property should be 'color'");
+            cr_expect_str_eq(decl->value_tokens[0].value, "blue", "Important color value should be 'blue'");
         }
     }
-    EXPECT_TRUE(found_important);
+    cr_expect(found_important, "Should find !important declaration");
 }
 
 // Test error recovery and reporting
-TEST_F(CSSIntegrationTest, ErrorRecoveryIntegration) {
+Test(css_integration, error_recovery_integration, .init = setup, .fini = teardown) {
     const char* css = R"(
         /* Valid rule */
         .good-rule {
@@ -285,22 +287,22 @@ TEST_F(CSSIntegrationTest, ErrorRecoveryIntegration) {
     
     css_stylesheet_t* stylesheet = css_parse_stylesheet(parser, css);
     
-    ASSERT_NE(stylesheet, nullptr);
+    cr_assert_neq(stylesheet, NULL, "Stylesheet should not be NULL");
     
     // Should have some errors but still parse what it can
-    EXPECT_GT(stylesheet->error_count, 0);
-    EXPECT_GT(stylesheet->rule_count, 0);
+    cr_expect_gt(stylesheet->error_count, 0, "Should have errors for invalid syntax");
+    cr_expect_gt(stylesheet->rule_count, 0, "Should still parse valid rules");
     
     // First rule should be valid
     css_rule_t* rule = stylesheet->rules;
     if (rule && rule->type == CSS_RULE_STYLE) {
         css_style_rule_t* style_rule = rule->data.style_rule;
-        EXPECT_GT(style_rule->declaration_count, 0);
+        cr_expect_gt(style_rule->declaration_count, 0, "Valid rule should have declarations");
     }
 }
 
 // Test memory management integration
-TEST_F(CSSIntegrationTest, MemoryManagementIntegration) {
+Test(css_integration, memory_management_integration, .init = setup, .fini = teardown) {
     const char* css = R"(
         .memory-test {
             color: red;
@@ -320,22 +322,22 @@ TEST_F(CSSIntegrationTest, MemoryManagementIntegration) {
     for (int i = 0; i < 10; i++) {
         css_stylesheet_t* stylesheet = css_parse_stylesheet(parser, css);
         
-        ASSERT_NE(stylesheet, nullptr);
-        EXPECT_EQ(stylesheet->error_count, 0);
-        EXPECT_EQ(stylesheet->rule_count, 1);
+        cr_assert_neq(stylesheet, NULL, "Stylesheet should not be NULL");
+        cr_expect_eq(stylesheet->error_count, 0, "Should have 0 errors");
+        cr_expect_eq(stylesheet->rule_count, 1, "Should have 1 rule");
         
         css_rule_t* rule = stylesheet->rules;
-        ASSERT_EQ(rule->type, CSS_RULE_STYLE);
+        cr_assert_eq(rule->type, CSS_RULE_STYLE, "Rule should be style rule");
         
         css_style_rule_t* style_rule = rule->data.style_rule;
-        EXPECT_EQ(style_rule->declaration_count, 10);
+        cr_expect_eq(style_rule->declaration_count, 10, "Should have 10 declarations");
         
         // Memory is managed by the pool, so no explicit cleanup needed
     }
 }
 
 // Test tokenizer-parser integration with edge cases
-TEST_F(CSSIntegrationTest, EdgeCaseIntegration) {
+Test(css_integration, edge_case_integration, .init = setup, .fini = teardown) {
     const char* css = R"(
         /* Edge cases */
         
@@ -373,23 +375,23 @@ TEST_F(CSSIntegrationTest, EdgeCaseIntegration) {
     
     css_stylesheet_t* stylesheet = css_parse_stylesheet(parser, css);
     
-    ASSERT_NE(stylesheet, nullptr);
-    EXPECT_EQ(stylesheet->error_count, 0);
-    EXPECT_EQ(stylesheet->rule_count, 5);
+    cr_assert_neq(stylesheet, NULL, "Stylesheet should not be NULL");
+    cr_expect_eq(stylesheet->error_count, 0, "Should have 0 errors");
+    cr_expect_eq(stylesheet->rule_count, 5, "Should have 5 rules");
     
     // Verify all rules parsed correctly
     css_rule_t* rule = stylesheet->rules;
     int rule_count = 0;
     while (rule) {
-        EXPECT_EQ(rule->type, CSS_RULE_STYLE);
+        cr_expect_eq(rule->type, CSS_RULE_STYLE, "All rules should be style rules");
         rule_count++;
         rule = rule->next;
     }
-    EXPECT_EQ(rule_count, 5);
+    cr_expect_eq(rule_count, 5, "Should count 5 rules");
 }
 
 // Test performance with larger CSS
-TEST_F(CSSIntegrationTest, PerformanceIntegration) {
+Test(css_integration, performance_integration, .init = setup, .fini = teardown) {
     // Generate a larger CSS string
     std::string large_css;
     for (int i = 0; i < 100; i++) {
@@ -403,24 +405,21 @@ TEST_F(CSSIntegrationTest, PerformanceIntegration) {
     
     css_stylesheet_t* stylesheet = css_parse_stylesheet(parser, large_css.c_str());
     
-    ASSERT_NE(stylesheet, nullptr);
-    EXPECT_EQ(stylesheet->error_count, 0);
-    EXPECT_EQ(stylesheet->rule_count, 100);
+    cr_assert_neq(stylesheet, NULL, "Stylesheet should not be NULL");
+    cr_expect_eq(stylesheet->error_count, 0, "Should have 0 errors");
+    cr_expect_eq(stylesheet->rule_count, 100, "Should have 100 rules");
     
     // Verify structure is correct
     css_rule_t* rule = stylesheet->rules;
     int count = 0;
     while (rule) {
-        EXPECT_EQ(rule->type, CSS_RULE_STYLE);
+        cr_expect_eq(rule->type, CSS_RULE_STYLE, "All rules should be style rules");
         css_style_rule_t* style_rule = rule->data.style_rule;
-        EXPECT_EQ(style_rule->declaration_count, 4);
+        cr_expect_eq(style_rule->declaration_count, 4, "Each rule should have 4 declarations");
         count++;
         rule = rule->next;
     }
-    EXPECT_EQ(count, 100);
+    cr_expect_eq(count, 100, "Should count 100 rules");
 }
 
-int main(int argc, char** argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}
+// Criterion tests don't need a main function

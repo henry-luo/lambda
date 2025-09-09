@@ -288,9 +288,10 @@ static void css_tokenizer_consume_number(CSSTokenizer* tokenizer) {
         tokenizer->current++;
         css_tokenizer_add_token_with_data(tokenizer, CSS_TOKEN_PERCENTAGE, start, tokenizer->current - start, value);
     } else if (css_tokenizer_would_start_identifier(tokenizer)) {
-        // Dimension token
-        const char* unit_start = tokenizer->current;
-        css_tokenizer_consume_ident(tokenizer);
+        // Dimension token - consume the unit identifier manually
+        while (tokenizer->current < tokenizer->end && css_is_name_char(*tokenizer->current)) {
+            tokenizer->current++;
+        }
         css_tokenizer_add_token_with_data(tokenizer, CSS_TOKEN_DIMENSION, start, tokenizer->current - start, value);
     } else {
         // Plain number
@@ -332,6 +333,7 @@ static void css_tokenizer_consume_ident(CSSTokenizer* tokenizer) {
     // Check if this is a function
     if (tokenizer->current < tokenizer->end && *tokenizer->current == '(') {
         css_tokenizer_add_token(tokenizer, CSS_TOKEN_FUNCTION, start, tokenizer->current - start);
+        // Don't consume the '(' here - it will be tokenized separately
     } else {
         css_tokenizer_add_token(tokenizer, CSS_TOKEN_IDENT, start, tokenizer->current - start);
     }
