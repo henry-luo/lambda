@@ -686,55 +686,8 @@ css_declaration_t* css_parse_declaration(css_parser_t* parser) {
         return NULL;
     }
     
-    // For margin properties, merge adjacent number+unit pairs into single tokens
+    // Use tokens as-is without special margin handling
     printf("DEBUG: Property name is '%s'\n", property_name ? property_name : "NULL");
-    if (property_name && strcmp(property_name, "margin") == 0) {
-        printf("DEBUG: Original margin tokens before merging: ");
-        for (int i = 0; i < token_count; i++) {
-            printf("'%s'(type:%d) ", value_tokens[i].value ? value_tokens[i].value : "NULL", value_tokens[i].type);
-        }
-        printf("\n");
-        
-        css_token_t* merged_tokens = (css_token_t*)pool_calloc(parser->pool, sizeof(css_token_t) * token_count);
-        int merged_count = 0;
-        
-        for (int i = 0; i < token_count; i++) {
-            // Check if current token is a number and next token is an identifier (unit)
-            // CSS_TOKEN_NUMBER = 6, CSS_TOKEN_IDENT = 0
-            if (i + 1 < token_count && 
-                value_tokens[i].type == 6 && 
-                value_tokens[i + 1].type == 0) {
-                
-                // Merge number and unit into a single token
-                const char* number_str = value_tokens[i].value ? value_tokens[i].value : "";
-                const char* unit_str = value_tokens[i + 1].value ? value_tokens[i + 1].value : "";
-                
-                size_t merged_len = strlen(number_str) + strlen(unit_str) + 1;
-                char* merged_value = (char*)pool_calloc(parser->pool, merged_len);
-                snprintf(merged_value, merged_len, "%s%s", number_str, unit_str);
-                
-                merged_tokens[merged_count].type = 7; // CSS_TOKEN_DIMENSION
-                merged_tokens[merged_count].value = merged_value;
-                merged_count++;
-                
-                printf("DEBUG: Merged '%s' + '%s' = '%s'\n", number_str, unit_str, merged_value);
-                i++; // Skip the unit token since we merged it
-            } else {
-                // Copy token as-is
-                merged_tokens[merged_count] = value_tokens[i];
-                merged_count++;
-            }
-        }
-        
-        value_tokens = merged_tokens;
-        token_count = merged_count;
-        
-        printf("DEBUG: Final margin tokens after merging: ");
-        for (int i = 0; i < token_count; i++) {
-            printf("'%s'(type:%d) ", value_tokens[i].value ? value_tokens[i].value : "NULL", value_tokens[i].type);
-        }
-        printf("\n");
-    }
     
     // Check for !important - comprehensive pattern matching
     css_importance_t importance = CSS_IMPORTANCE_NORMAL;
@@ -967,27 +920,9 @@ css_token_t* css_parse_declaration_value(css_parser_t* parser, const char* prope
             continue;
         }
         
-        // Handle dimension tokens (e.g., "10px") - preserve as single tokens for margin properties
+        // Handle dimension tokens (e.g., "10px") - split into number and unit tokens
         // Use numeric value 7 for CSS_TOKEN_DIMENSION to match tokenizer output
         if (token->type == 7) {
-            // For margin properties, preserve dimension tokens as single tokens
-            if (property && strcmp(property, "margin") == 0) {
-                printf("DEBUG: Preserving dimension token for margin: %s\n", token->value ? token->value : "NULL");
-                // Add dimension token as-is
-                if (count >= capacity) {
-                    capacity *= 2;
-                    css_token_t* new_tokens = (css_token_t*)pool_calloc(parser->pool, sizeof(css_token_t) * capacity);
-                    if (!new_tokens) {
-                        *token_count = count;
-                        return tokens;
-                    }
-                    memcpy(new_tokens, tokens, sizeof(css_token_t) * count);
-                    tokens = new_tokens;
-                }
-                tokens[count++] = *token;
-                css_parser_advance(parser);
-                continue;
-            }
             const char* dim_value = token->value;
             if (!dim_value) {
                 // Fallback: extract value from start/length if value is NULL

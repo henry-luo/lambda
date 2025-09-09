@@ -653,56 +653,9 @@ css_declaration_t* css_declaration_create(const char* property, css_token_t* tok
     // Additional safety checks
     if (token_count < 0 || token_count > 1000) return NULL;
     
-    // For margin properties, merge adjacent number+unit pairs into single tokens
+    // Use tokens as-is without special margin handling
     css_token_t* final_tokens = tokens;
     int final_token_count = token_count;
-    
-    if (property && strcmp(property, "margin") == 0) {
-        printf("DEBUG: Processing margin declaration with %d tokens\n", token_count);
-        for (int i = 0; i < token_count; i++) {
-            printf("  Token %d: '%s' (type: %d)\n", i, tokens[i].value ? tokens[i].value : "NULL", tokens[i].type);
-        }
-        
-        // Create new token array for merged tokens
-        css_token_t* merged_tokens = (css_token_t*)pool_calloc(pool, sizeof(css_token_t) * token_count);
-        int merged_count = 0;
-        
-        for (int i = 0; i < token_count; i++) {
-            // Check if current token is a number and next token is an identifier (unit)
-            // CSS_TOKEN_NUMBER = 6, CSS_TOKEN_IDENT = 0
-            if (i + 1 < token_count && 
-                tokens[i].type == 6 && 
-                tokens[i + 1].type == 0) {
-                
-                // Merge number and unit into a single token
-                const char* number_str = tokens[i].value ? tokens[i].value : "";
-                const char* unit_str = tokens[i + 1].value ? tokens[i + 1].value : "";
-                
-                size_t merged_len = strlen(number_str) + strlen(unit_str) + 1;
-                char* merged_value = (char*)pool_calloc(pool, merged_len);
-                snprintf(merged_value, merged_len, "%s%s", number_str, unit_str);
-                
-                merged_tokens[merged_count].type = 7; // CSS_TOKEN_DIMENSION
-                merged_tokens[merged_count].value = merged_value;
-                merged_count++;
-                
-                printf("DEBUG: Merged '%s' + '%s' = '%s'\n", number_str, unit_str, merged_value);
-                i++; // Skip the unit token since we merged it
-            } else {
-                // Copy token as-is
-                merged_tokens[merged_count] = tokens[i];
-                merged_count++;
-            }
-        }
-        
-        final_tokens = merged_tokens;
-        final_token_count = merged_count;
-        
-        printf("DEBUG: Final margin tokens after merging: %d tokens\n", final_token_count);
-        for (int i = 0; i < final_token_count; i++) {
-            printf("  Final token %d: '%s' (type: %d)\n", i, final_tokens[i].value ? final_tokens[i].value : "NULL", final_tokens[i].type);
-        }
-    }
     
     css_declaration_t* decl = (css_declaration_t*)pool_calloc(pool, sizeof(css_declaration_t));
     if (!decl) return NULL;
