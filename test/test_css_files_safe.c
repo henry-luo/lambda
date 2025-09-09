@@ -120,3 +120,42 @@ Test(css_files_safe, parse_css_functions) {
     cr_assert_not_null(stylesheet, "Failed to parse CSS functions");
     cr_assert_geq(stylesheet->rule_count, 0, "Should have parsed rules");
 }
+
+// Test complete_css_grammar.css file
+Test(css_files_safe, parse_complete_css_grammar_file) {
+    char* css_content = read_css_file_safe("test/input/complete_css_grammar.css");
+    cr_assert_not_null(css_content, "Failed to read complete_css_grammar.css");
+    
+    // Parse the CSS
+    css_stylesheet_t* stylesheet = css_parse_stylesheet(parser, css_content);
+    cr_assert_not_null(stylesheet, "Failed to parse complete_css_grammar.css");
+    cr_assert_geq(stylesheet->rule_count, 0, "Stylesheet should be valid");
+    
+    free(css_content);
+}
+
+// Test css_functions_sample.css file
+Test(css_files_safe, parse_css_functions_sample_file) {
+    char* css_content = read_css_file_safe("test/input/css_functions_sample.css");
+    cr_assert_not_null(css_content, "Failed to read css_functions_sample.css");
+    
+    // Parse the CSS
+    css_stylesheet_t* stylesheet = css_parse_stylesheet(parser, css_content);
+    cr_assert_not_null(stylesheet, "Failed to parse css_functions_sample.css");
+    cr_assert_geq(stylesheet->rule_count, 0, "Stylesheet should be valid");
+    
+    free(css_content);
+}
+
+// Test stylesheet_3_0.css file
+Test(css_files_safe, parse_stylesheet_3_0_file) {
+    char* css_content = read_css_file_safe("test/input/stylesheet_3_0.css");
+    cr_assert_not_null(css_content, "Failed to read stylesheet_3_0.css");
+    
+    // Parse the CSS
+    css_stylesheet_t* stylesheet = css_parse_stylesheet(parser, css_content);
+    cr_assert_not_null(stylesheet, "Failed to parse stylesheet_3_0.css");
+    cr_assert_geq(stylesheet->rule_count, 0, "Stylesheet should be valid");
+    
+    free(css_content);
+}
