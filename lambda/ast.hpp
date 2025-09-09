@@ -228,6 +228,7 @@ typedef struct AstArrayNode : AstNode {
 typedef struct AstListNode : AstArrayNode {
     AstNode *declare;  // declarations in the list
     NameScope *vars;  // scope for the variables in the list
+    TypeList* list_type;
 } AstListNode;
 
 typedef struct AstMapNode : AstNode {
