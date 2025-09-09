@@ -1031,18 +1031,13 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
 void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
     log_debug("transpile list expr: dec - %p, itm - %p", list_node->declare, list_node->item);
     // Defensive validation: ensure all required pointers and components are valid
-    if (!list_node) {
-        log_error("Error: transpile_list_expr called with null list node");
-        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
-        return;
-    }
-    if (!list_node->type) {
-        log_error("Error: transpile_list_expr missing type information");
+    if (!list_node || !list_node->type || !list_node->list_type) {
+        log_error("Error: invalid list_node");
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     
-    TypeArray *type = (TypeArray*)list_node->type;
+    TypeArray *type = list_node->list_type;
     log_debug("transpile_list_expr: type->length = %ld", type->length);
     // create list before the declarations, to contain all the allocations
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();\n");

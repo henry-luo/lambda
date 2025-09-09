@@ -888,8 +888,9 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
 AstNode* build_list(Transpiler* tp, TSNode list_node) {
     log_debug("build list");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
-    TypeList *type = (TypeList*)ast_node->type;
+    TypeList *type = (TypeList*)alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
+    ast_node->list_type = type;
+    ast_node->type = &TYPE_ANY;  // list returns Item
 
     ast_node->vars = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
