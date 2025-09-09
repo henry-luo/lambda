@@ -2,7 +2,7 @@
 "hello world"
 6
 function
-error
+3
 string
 true
 false
@@ -12,6 +12,7 @@ true
 false
 "123"
 true
+"types :"
 string
 int
 bool
@@ -30,3 +31,4 @@ false
 false
 true
 false
+"const_str"
