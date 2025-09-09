@@ -483,6 +483,12 @@
                         "name": "🎨 CSS Minimal Tests (Safe)",
                         "dependencies": ["lambda-input-full"],
                         "binary": "test_css_minimal.exe"
+                    },
+                    {
+                        "source": "test/test_css_frameworks.cpp",
+                        "name": "🎨 CSS Framework Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_css_frameworks.exe"
                     }
                 ],
                 "type": "input",
