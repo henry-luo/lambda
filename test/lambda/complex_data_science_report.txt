@@ -1,0 +1,47 @@
+"=== Data Science Pipeline Results ==="
+"Preprocessing completed for 8 samples"
+"Feature engineering completed with 10 polynomial features"
+{
+  dataset_summary: {
+    original_samples: 8,
+    processed_samples: 8,
+    feature_count: 4
+  },
+  statistical_analysis: {
+    target_stats: {
+        count: 8,
+        mean: 1.9428571429,
+        median: 1.9,
+        std_dev: 0.4551294949,
+        variance: 0.2071428571,
+        min: 1.2,
+        max: 2.8,
+        q1: 1.2,
+        q3: 2.3,
+        range: 1.6
+      },
+    correlation_matrix: {
+        feature_correlation: -0.22307932,
+        feature_1_target_corr: 0.1936297774,
+        feature_2_target_corr: -0.0506202831
+      }
+  },
+  preprocessing_metadata: {
+      mins: (0, 0.1, 0.1, 0.1),
+      maxs: (0.9, 0.9, 0.9, 0.9),
+      ranges: (0.9, 0.8, 0.8, 0.8)
+    },
+  timeseries_insights: {
+    trend_strength: 0.6666666667,
+    average_value: 106.06,
+    volatility: 3.8764244694,
+    data_points: 10
+  },
+  feature_engineering_sample: {
+      poly_features: (0.7901234568, 0.2222222222, 0.6666666667, 0.1111111111, 0.0625, 0.1875, 0.03125, 0.5625, 0.09375, 0.015625),
+      interactions: (0.2222222222, 0.1875, 0.09375),
+      feature_sum: 2.0138888889,
+      feature_mean: 0.5034722222,
+      feature_std: 0.3228046401
+    }
+}
