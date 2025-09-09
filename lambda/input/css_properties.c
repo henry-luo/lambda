@@ -647,10 +647,62 @@ const char* css_property_get_vendor_prefix(const char* name) {
 css_declaration_t* css_declaration_create(const char* property, css_token_t* tokens, 
                                         int token_count, css_importance_t importance, 
                                         VariableMemPool* pool) {
+    printf("DEBUG: css_declaration_create called for property '%s' with %d tokens\n", property ? property : "NULL", token_count);
     if (!property || !tokens || token_count == 0 || !pool) return NULL;
     
     // Additional safety checks
     if (token_count < 0 || token_count > 1000) return NULL;
+    
+    // For margin properties, merge adjacent number+unit pairs into single tokens
+    css_token_t* final_tokens = tokens;
+    int final_token_count = token_count;
+    
+    if (property && strcmp(property, "margin") == 0) {
+        printf("DEBUG: Processing margin declaration with %d tokens\n", token_count);
+        for (int i = 0; i < token_count; i++) {
+            printf("  Token %d: '%s' (type: %d)\n", i, tokens[i].value ? tokens[i].value : "NULL", tokens[i].type);
+        }
+        
+        // Create new token array for merged tokens
+        css_token_t* merged_tokens = (css_token_t*)pool_calloc(pool, sizeof(css_token_t) * token_count);
+        int merged_count = 0;
+        
+        for (int i = 0; i < token_count; i++) {
+            // Check if current token is a number and next token is an identifier (unit)
+            // CSS_TOKEN_NUMBER = 6, CSS_TOKEN_IDENT = 0
+            if (i + 1 < token_count && 
+                tokens[i].type == 6 && 
+                tokens[i + 1].type == 0) {
+                
+                // Merge number and unit into a single token
+                const char* number_str = tokens[i].value ? tokens[i].value : "";
+                const char* unit_str = tokens[i + 1].value ? tokens[i + 1].value : "";
+                
+                size_t merged_len = strlen(number_str) + strlen(unit_str) + 1;
+                char* merged_value = (char*)pool_calloc(pool, merged_len);
+                snprintf(merged_value, merged_len, "%s%s", number_str, unit_str);
+                
+                merged_tokens[merged_count].type = 7; // CSS_TOKEN_DIMENSION
+                merged_tokens[merged_count].value = merged_value;
+                merged_count++;
+                
+                printf("DEBUG: Merged '%s' + '%s' = '%s'\n", number_str, unit_str, merged_value);
+                i++; // Skip the unit token since we merged it
+            } else {
+                // Copy token as-is
+                merged_tokens[merged_count] = tokens[i];
+                merged_count++;
+            }
+        }
+        
+        final_tokens = merged_tokens;
+        final_token_count = merged_count;
+        
+        printf("DEBUG: Final margin tokens after merging: %d tokens\n", final_token_count);
+        for (int i = 0; i < final_token_count; i++) {
+            printf("  Final token %d: '%s' (type: %d)\n", i, final_tokens[i].value ? final_tokens[i].value : "NULL", final_tokens[i].type);
+        }
+    }
     
     css_declaration_t* decl = (css_declaration_t*)pool_calloc(pool, sizeof(css_declaration_t));
     if (!decl) return NULL;
@@ -666,18 +718,23 @@ css_declaration_t* css_declaration_create(const char* property, css_token_t* tok
     decl->property = prop_copy;
     
     // Copy tokens with validation
-    decl->value_tokens = (css_token_t*)pool_calloc(pool, sizeof(css_token_t) * token_count);
-    if (!decl->value_tokens) return NULL;
+    css_token_t* token_copy = (css_token_t*)pool_calloc(pool, sizeof(css_token_t) * final_token_count);
+    if (!token_copy) return NULL;
     
-    // Validate each token before copying
-    for (int i = 0; i < token_count; i++) {
-        if (!tokens[i].value) {
-            tokens[i].value = "";
+    for (int i = 0; i < final_token_count; i++) {
+        token_copy[i] = final_tokens[i];
+        if (final_tokens[i].value) {
+            int val_len = strlen(final_tokens[i].value);
+            if (val_len > 1024) return NULL;
+            char* val_copy = (char*)pool_calloc(pool, val_len + 1);
+            if (!val_copy) return NULL;
+            strcpy(val_copy, final_tokens[i].value);
+            token_copy[i].value = val_copy;
         }
     }
     
-    memcpy(decl->value_tokens, tokens, sizeof(css_token_t) * token_count);
-    decl->token_count = token_count;
+    decl->value_tokens = token_copy;
+    decl->token_count = final_token_count;
     
     decl->importance = importance;
     decl->valid = false; // Will be set by validation

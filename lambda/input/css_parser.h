@@ -161,7 +161,7 @@ css_selector_component_t* css_parse_selector_component(css_parser_t* parser);
 
 // Declaration parsing
 css_declaration_t* css_parse_declaration(css_parser_t* parser);
-css_token_t* css_parse_declaration_value(css_parser_t* parser, int* token_count);
+css_token_t* css_parse_declaration_value(css_parser_t* parser, const char* property, int* token_count);
 css_token_t* css_parse_function(css_parser_t* parser, const char* function_name, int* token_count);
 
 // At-rule specific parsing
