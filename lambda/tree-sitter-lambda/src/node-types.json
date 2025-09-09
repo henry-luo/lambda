@@ -1902,10 +1902,6 @@
           "named": true
         },
         {
-          "type": "sys_func",
-          "named": true
-        },
-        {
           "type": "time",
           "named": true
         },
@@ -2105,196 +2101,6 @@
           "named": true
         }
       ]
-    }
-  },
-  {
-    "type": "sys_func",
-    "named": true,
-    "fields": {
-      "argument": {
-        "multiple": true,
-        "required": false,
-        "types": [
-          {
-            "type": "binary_expr",
-            "named": true
-          },
-          {
-            "type": "fn_expr",
-            "named": true
-          },
-          {
-            "type": "for_expr",
-            "named": true
-          },
-          {
-            "type": "if_expr",
-            "named": true
-          },
-          {
-            "type": "let_expr",
-            "named": true
-          },
-          {
-            "type": "primary_expr",
-            "named": true
-          },
-          {
-            "type": "spread_argument",
-            "named": true
-          },
-          {
-            "type": "unary_expr",
-            "named": true
-          }
-        ]
-      },
-      "function": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "abs",
-            "named": false
-          },
-          {
-            "type": "all",
-            "named": false
-          },
-          {
-            "type": "any",
-            "named": false
-          },
-          {
-            "type": "avg",
-            "named": false
-          },
-          {
-            "type": "binary",
-            "named": false
-          },
-          {
-            "type": "ceil",
-            "named": false
-          },
-          {
-            "type": "char",
-            "named": false
-          },
-          {
-            "type": "contains",
-            "named": false
-          },
-          {
-            "type": "date",
-            "named": false
-          },
-          {
-            "type": "datetime",
-            "named": false
-          },
-          {
-            "type": "decimal",
-            "named": false
-          },
-          {
-            "type": "error",
-            "named": false
-          },
-          {
-            "type": "float",
-            "named": false
-          },
-          {
-            "type": "floor",
-            "named": false
-          },
-          {
-            "type": "format",
-            "named": false
-          },
-          {
-            "type": "input",
-            "named": false
-          },
-          {
-            "type": "int",
-            "named": false
-          },
-          {
-            "type": "int64",
-            "named": false
-          },
-          {
-            "type": "justnow",
-            "named": false
-          },
-          {
-            "type": "len",
-            "named": false
-          },
-          {
-            "type": "max",
-            "named": false
-          },
-          {
-            "type": "min",
-            "named": false
-          },
-          {
-            "type": "normalize",
-            "named": false
-          },
-          {
-            "type": "number",
-            "named": false
-          },
-          {
-            "type": "print",
-            "named": false
-          },
-          {
-            "type": "round",
-            "named": false
-          },
-          {
-            "type": "set",
-            "named": false
-          },
-          {
-            "type": "slice",
-            "named": false
-          },
-          {
-            "type": "string",
-            "named": false
-          },
-          {
-            "type": "substring",
-            "named": false
-          },
-          {
-            "type": "sum",
-            "named": false
-          },
-          {
-            "type": "symbol",
-            "named": false
-          },
-          {
-            "type": "time",
-            "named": false
-          },
-          {
-            "type": "today",
-            "named": false
-          },
-          {
-            "type": "type",
-            "named": false
-          }
-        ]
-      }
     }
   },
   {
@@ -2523,14 +2329,6 @@
     "named": false
   },
   {
-    "type": "abs",
-    "named": false
-  },
-  {
-    "type": "all",
-    "named": false
-  },
-  {
     "type": "and",
     "named": false
   },
@@ -2540,10 +2338,6 @@
   },
   {
     "type": "array",
-    "named": false
-  },
-  {
-    "type": "avg",
     "named": false
   },
   {
@@ -2563,20 +2357,8 @@
     "named": false
   },
   {
-    "type": "ceil",
-    "named": false
-  },
-  {
-    "type": "char",
-    "named": false
-  },
-  {
     "type": "comment",
     "named": true
-  },
-  {
-    "type": "contains",
-    "named": false
   },
   {
     "type": "date",
@@ -2584,19 +2366,19 @@
   },
   {
     "type": "datetime",
-    "named": false
+    "named": true
   },
   {
     "type": "datetime",
-    "named": true
-  },
-  {
-    "type": "decimal",
     "named": false
   },
   {
     "type": "decimal",
     "named": true
+  },
+  {
+    "type": "decimal",
+    "named": false
   },
   {
     "type": "element",
@@ -2631,19 +2413,11 @@
     "named": false
   },
   {
-    "type": "floor",
-    "named": false
-  },
-  {
     "type": "fn",
     "named": false
   },
   {
     "type": "for",
-    "named": false
-  },
-  {
-    "type": "format",
     "named": false
   },
   {
@@ -2679,10 +2453,6 @@
     "named": true
   },
   {
-    "type": "input",
-    "named": false
-  },
-  {
     "type": "int",
     "named": false
   },
@@ -2699,14 +2469,6 @@
     "named": false
   },
   {
-    "type": "justnow",
-    "named": false
-  },
-  {
-    "type": "len",
-    "named": false
-  },
-  {
     "type": "let",
     "named": false
   },
@@ -2719,20 +2481,8 @@
     "named": false
   },
   {
-    "type": "max",
-    "named": false
-  },
-  {
-    "type": "min",
-    "named": false
-  },
-  {
     "type": "nan",
     "named": true
-  },
-  {
-    "type": "normalize",
-    "named": false
   },
   {
     "type": "not",
@@ -2755,23 +2505,7 @@
     "named": false
   },
   {
-    "type": "print",
-    "named": false
-  },
-  {
     "type": "pub",
-    "named": false
-  },
-  {
-    "type": "round",
-    "named": false
-  },
-  {
-    "type": "set",
-    "named": false
-  },
-  {
-    "type": "slice",
     "named": false
   },
   {
@@ -2781,14 +2515,6 @@
   {
     "type": "string_content",
     "named": true
-  },
-  {
-    "type": "substring",
-    "named": false
-  },
-  {
-    "type": "sum",
-    "named": false
   },
   {
     "type": "symbol",
@@ -2812,10 +2538,6 @@
   },
   {
     "type": "to",
-    "named": false
-  },
-  {
-    "type": "today",
     "named": false
   },
   {
