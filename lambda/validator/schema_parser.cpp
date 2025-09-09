@@ -222,9 +222,9 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
             result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_BOOL);
             break;
             
-        case anon_sym_char:
-            result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_STRING);  // Char is represented as string
-            break;
+        // case anon_sym_char:
+        //     result = build_primitive_schema(parser, type_expr_node, LMD_TYPE_STRING);  // Char is represented as string
+        //     break;
             
         case anon_sym_symbol:
         case sym_symbol:

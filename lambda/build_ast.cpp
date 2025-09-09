@@ -8,6 +8,61 @@
 
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 
+struct SysFuncInfo {
+    SysFunc fn;
+    const char* name;
+    int arg_count;  // -1 for variable args
+    Type* return_type;
+};
+
+SysFuncInfo sys_funcs[] = {
+    {SYSFUNC_LEN, "len", 1, &TYPE_INT64},
+    {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE},
+    {SYSFUNC_INT, "int", 1, &TYPE_ANY},
+    {SYSFUNC_INT64, "int64", 1, &TYPE_INT64},
+    {SYSFUNC_FLOAT, "float", 1, &TYPE_FLOAT},
+    {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_DECIMAL},
+    {SYSFUNC_BINARY, "binary", 1, &TYPE_BINARY},
+    {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY},
+    {SYSFUNC_STRING, "string", 1, &TYPE_STRING},
+    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL},
+    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME},
+    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME},
+    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME},
+    {SYSFUNC_TODAY, "today", 0, &TYPE_DTIME},
+    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME},
+    {SYSFUNC_SET, "set", -1, &TYPE_ANY},
+    {SYSFUNC_SLICE, "slice", -1, &TYPE_ANY},
+    {SYSFUNC_ALL, "all", 1, &TYPE_BOOL},
+    {SYSFUNC_ANY, "any", 1, &TYPE_BOOL},
+    {SYSFUNC_MIN, "min", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_MAX, "max", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_ABS, "abs", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_ROUND, "round", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_INPUT, "input", 2, &TYPE_ANY},
+    {SYSFUNC_PRINT, "print", 1, &TYPE_NULL},
+    {SYSFUNC_FORMAT, "format", 2, &TYPE_STRING},
+    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR},
+    {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING},
+    // {SYSFUNC_SUBSTRING, "substring", 2, &TYPE_ANY},
+    // {SYSFUNC_CONTAINS, "contains", 2, &TYPE_ANY},    
+};
+
+SysFuncInfo* get_sys_func_info(StrView *name) {
+    for (size_t i = 0; i < sizeof(sys_funcs)/sizeof(sys_funcs[0]); i++) {
+        if (strview_equal(name, sys_funcs[i].name)) {
+            log_debug("is sys func: %.*s", (int)name->length, name->str);
+            return &sys_funcs[i];
+        }
+    }
+    log_debug("not sys func: %.*s", (int)name->length, name->str);
+    return NULL;
+}
+
 AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
     AstNode* ast_node;
     pool_variable_alloc(tp->ast_pool, size, (void**)&ast_node);
@@ -122,111 +177,14 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp, 
         AST_NODE_CALL_EXPR, call_node, sizeof(AstCallNode));
     TSNode function_node = ts_node_child_by_field_id(call_node, FIELD_FUNCTION);
-    if (symbol == SYM_SYS_FUNC) {
+    StrView func_name = ts_node_source(tp, function_node);
+    SysFuncInfo* sys_func_info = get_sys_func_info(&func_name);
+    if (sys_func_info) {
         log_debug("build sys call");
         AstSysFuncNode* fn_node = (AstSysFuncNode*)alloc_ast_node(tp, 
             AST_NODE_SYS_FUNC, function_node, sizeof(AstSysFuncNode));
-        StrView func_name = ts_node_source(tp, function_node);
-        if (strview_equal(&func_name, "len")) {
-            fn_node->fn = SYSFUNC_LEN;
-            fn_node->type = &TYPE_INT64;  // int64 is preferred over any, as it is more specific
-        }
-        else if (strview_equal(&func_name, "type")) {
-            fn_node->fn = SYSFUNC_TYPE;
-            fn_node->type = &TYPE_TYPE;
-        }
-        else if (strview_equal(&func_name, "int")) {
-            fn_node->fn = SYSFUNC_INT;
-            fn_node->type = &TYPE_ANY;
-        }
-        else if (strview_equal(&func_name, "int64")) {
-            fn_node->fn = SYSFUNC_INT64;
-            fn_node->type = &TYPE_INT64;
-        }
-        else if (strview_equal(&func_name, "float")) {
-            fn_node->fn = SYSFUNC_FLOAT;
-            fn_node->type = &TYPE_FLOAT;
-        }
-        else if (strview_equal(&func_name, "number")) {
-            fn_node->fn = SYSFUNC_NUMBER;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "string")) {
-            fn_node->fn = SYSFUNC_STRING;
-            fn_node->type = &TYPE_STRING;
-        }
-        else if (strview_equal(&func_name, "symbol")) {
-            fn_node->fn = SYSFUNC_SYMBOL;
-            fn_node->type = &TYPE_SYMBOL;
-        }
-        else if (strview_equal(&func_name, "datetime")) {
-            fn_node->fn = SYSFUNC_DATETIME;
-            fn_node->type = &TYPE_DTIME;
-        }
-        else if (strview_equal(&func_name, "date")) {
-            fn_node->fn = SYSFUNC_DATE;
-            fn_node->type = &TYPE_DTIME;
-        }
-        else if (strview_equal(&func_name, "time")) {
-            fn_node->fn = SYSFUNC_TIME;
-            fn_node->type = &TYPE_DTIME;
-        }
-        else if (strview_equal(&func_name, "input")) {
-            fn_node->fn = SYSFUNC_INPUT;
-            fn_node->type = &TYPE_ANY;
-        }        
-        else if (strview_equal(&func_name, "print")) {
-            fn_node->fn = SYSFUNC_PRINT;
-            fn_node->type = &TYPE_NULL;
-        }
-        else if (strview_equal(&func_name, "format")) {
-            fn_node->fn = SYSFUNC_FORMAT;
-            fn_node->type = &TYPE_STRING;
-        }
-        else if (strview_equal(&func_name, "error")) {
-            fn_node->fn = SYSFUNC_ERROR;
-            fn_node->type = &TYPE_ERROR;
-        }
-        else if (strview_equal(&func_name, "abs")) {
-            fn_node->fn = SYSFUNC_ABS;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "round")) {
-            fn_node->fn = SYSFUNC_ROUND;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "floor")) {
-            fn_node->fn = SYSFUNC_FLOOR;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "ceil")) {
-            fn_node->fn = SYSFUNC_CEIL;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "min")) {
-            fn_node->fn = SYSFUNC_MIN;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "max")) {
-            fn_node->fn = SYSFUNC_MAX;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "sum")) {
-            fn_node->fn = SYSFUNC_SUM;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "avg")) {
-            fn_node->fn = SYSFUNC_AVG;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "normalize")) {
-            fn_node->fn = SYSFUNC_NORMALIZE;
-            fn_node->type = &TYPE_STRING;
-        }
-        else {
-            log_debug("unknown system function: %.*s", (int)func_name.length, func_name.str);
-            return NULL;
-        }
+        fn_node->fn = sys_func_info->fn;
+        fn_node->type = sys_func_info->return_type;
         ast_node->function = (AstNode*)fn_node;
         ast_node->type = fn_node->type;
     }
@@ -567,7 +525,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = build_field_expr(tp, child, AST_NODE_INDEX_EXPR);
         ast_node->type = ast_node->expr->type;
     }
-    else if (symbol == SYM_CALL_EXPR || symbol == SYM_SYS_FUNC) {
+    else if (symbol == SYM_CALL_EXPR) { // || symbol == SYM_SYS_FUNC
         ast_node->expr = build_call_expr(tp, child, symbol);
         ast_node->type = ast_node->expr->type;
     }
