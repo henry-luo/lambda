@@ -20,11 +20,11 @@ pub fn descriptive_stats(data) {
         median: sorted_data[q2_idx],
         std_dev: std_dev,
         variance: variance,
-        _min: min(data),
-        _max: max(data),
+        min: min(data),
+        max: max(data),
         q1: if (q1_idx < n) sorted_data[q1_idx] else min(data),
         q3: if (q3_idx < n) sorted_data[q3_idx] else max(data),
-        _range: max(data) - min(data)
+        range: max(data) - min(data)
     }
 }
 
