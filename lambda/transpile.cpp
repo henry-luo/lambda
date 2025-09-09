@@ -286,7 +286,7 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     }
 }
 
-void push_list_items(Transpiler* tp, AstNode *item, bool is_elmt) {
+void transpile_push_items(Transpiler* tp, AstNode *item, bool is_elmt) {
     while (item) {
         // skip let declaration
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || 
@@ -1031,18 +1031,13 @@ void transpile_array_expr(Transpiler* tp, AstArrayNode *array_node) {
 void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
     log_debug("transpile list expr: dec - %p, itm - %p", list_node->declare, list_node->item);
     // Defensive validation: ensure all required pointers and components are valid
-    if (!list_node) {
-        log_error("Error: transpile_list_expr called with null list node");
-        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
-        return;
-    }
-    if (!list_node->type) {
-        log_error("Error: transpile_list_expr missing type information");
+    if (!list_node || !list_node->type || !list_node->list_type) {
+        log_error("Error: invalid list_node");
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
     
-    TypeArray *type = (TypeArray*)list_node->type;
+    TypeArray *type = list_node->list_type;
     log_debug("transpile_list_expr: type->length = %ld", type->length);
     // create list before the declarations, to contain all the allocations
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();\n");
@@ -1072,33 +1067,34 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
         strbuf_append_str(tp->code_buf, ");})");
     } 
     else {
-        push_list_items(tp, list_node->item, false);
+        transpile_push_items(tp, list_node->item, false);
     }
 }
 
 void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
     log_debug("transpile content expr");
-    TypeArray *type = (TypeArray*)list_node->type;
+    TypeArray *type = list_node->list_type;
     // create list before the declarations, to contain all the allocations
     strbuf_append_str(tp->code_buf, "({\n List* ls = list();");
     // let declare first
     AstNode *item = list_node->item;
+    int effective_length = type->length;
     while (item) {
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM) {
-            type->length--;
+            effective_length--;
             transpile_let_stam(tp, (AstLetNode*)item);
         }
         else if (item->node_type == AST_NODE_FUNC) {
-            type->length--;
+            effective_length--;
             // already transpiled
         }
         item = item->next;
     }
-    if (type->length == 0) {
+    if (effective_length == 0) {
         strbuf_append_str(tp->code_buf, "list_end(ls);})");
         return;
     }
-    push_list_items(tp, list_node->item, false);
+    transpile_push_items(tp, list_node->item, false);
 }
 
 void transpile_map_expr(Transpiler* tp, AstMapNode *map_node) {
@@ -1198,7 +1194,7 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
             strbuf_append_str(tp->code_buf, ");})");
         } else {
             if (elmt_node->content) {
-                push_list_items(tp, ((AstListNode*)elmt_node->content)->item, true);
+                transpile_push_items(tp, ((AstListNode*)elmt_node->content)->item, true);
             } else {
                 log_error("Error: transpile_element content missing despite content_length > 0");
                 strbuf_append_str(tp->code_buf, "ITEM_ERROR");
@@ -1218,22 +1214,12 @@ void transpile_element(Transpiler* tp, AstElementNode *elmt_node) {
 void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     log_debug("transpile call expr");
     // Defensive validation: ensure all required pointers and components are valid
-    if (!call_node) {
-        log_error("Error: transpile_call_expr called with null call node");
+    if (!call_node || !call_node->function || !call_node->function->type) {
+        log_error("Error: invalid call_node");
         strbuf_append_str(tp->code_buf, "ITEM_ERROR");
         return;
     }
-    if (!call_node->function) {
-        log_error("Error: transpile_call_expr missing function");
-        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
-        return;
-    }
-    if (!call_node->function->type) {
-        log_error("Error: transpile_call_expr function missing type information");
-        strbuf_append_str(tp->code_buf, "ITEM_ERROR");
-        return;
-    }
-    
+
     // write the function name/ptr
     TypeFunc *fn_type = NULL;
     if (call_node->function->node_type == AST_NODE_SYS_FUNC) {
@@ -1274,11 +1260,10 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     strbuf_append_str(tp->code_buf, "(");
     AstNode* arg = call_node->argument;  TypeParam *param_type = fn_type ? fn_type->param : NULL;
     while (arg) {
-        log_debug("transpile_call_expr: processing arg type %d, node_type %d", 
-            arg->type->type_id, arg->node_type);
+        log_debug("transpile arg: %p, &t: %p, type %d, node_type %d", arg, arg->type, arg->type ? arg->type->type_id : -1, arg->node_type);
         // For system functions, box DateTime arguments
         if (call_node->function->node_type == AST_NODE_SYS_FUNC && arg->type->type_id == LMD_TYPE_DTIME) {
-        log_debug("transpile_call_expr: BOXING DateTime for sys func");
+            log_debug("transpile_call_expr: BOXING DateTime for sys func");
             strbuf_append_str(tp->code_buf, "k2it(");
             transpile_expr(tp, arg);
             strbuf_append_str(tp->code_buf, ")");
@@ -1333,38 +1318,21 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     
     // Special handling for format function - add default second argument if only one provided
     if (call_node->function->node_type == AST_NODE_SYS_FUNC) {
-        StrView fn = ts_node_source(tp, call_node->function->node);
-        if (fn.length == 6 && strncmp(fn.str, "format", 6) == 0) {
-            // Count arguments
+        AstSysFuncNode* sys_fn_node = (AstSysFuncNode*)call_node->function;
+        if (sys_fn_node->fn == SYSFUNC_FORMAT || sys_fn_node->fn == SYSFUNC_MIN || sys_fn_node->fn == SYSFUNC_MAX) {
+            // count arguments
             int arg_count = 0;
             AstNode* count_arg = call_node->argument;
             while (count_arg) {
                 arg_count++;
                 count_arg = count_arg->next;
             }
-            
-            // If only one argument, add default null second argument
-            if (arg_count == 1) {
-                strbuf_append_str(tp->code_buf, ", ITEM_NULL");
-            }
-        }
-        // Special handling for min/max functions - add default second argument for array operations
-        else if ((fn.length == 3 && (strncmp(fn.str, "min", 3) == 0 || strncmp(fn.str, "max", 3) == 0))) {
-            // Count arguments
-            int arg_count = 0;
-            AstNode* count_arg = call_node->argument;
-            while (count_arg) {
-                arg_count++;
-                count_arg = count_arg->next;
-            }
-            
-            // If only one argument (array case), add null second argument
+            // if only one argument, add default null second argument
             if (arg_count == 1) {
                 strbuf_append_str(tp->code_buf, ", ITEM_NULL");
             }
         }
     }
-    
     strbuf_append_char(tp->code_buf, ')');
 }
 
@@ -1849,13 +1817,13 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
 void transpile_ast(Transpiler* tp, AstScript *script) {
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
     // all (nested) function definitions need to be hoisted to global level
-        log_debug("define_ast_node...");
-    strbuf_append_str(tp->code_buf, "\n\nContext *rt;\n");  // defines global runtime context
+    log_debug("define_ast_node...");
+    strbuf_append_str(tp->code_buf, "\nContext *rt;\n");  // defines global runtime context
     AstNode* child = script->child;
     while (child) {
         define_ast_node(tp, child);
         child = child->next;
-    }    
+    }
 
     // global evaluation, wrapped inside main()
     log_debug("transpile_ast_node...");

@@ -8,6 +8,61 @@
 
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 
+struct SysFuncInfo {
+    SysFunc fn;
+    const char* name;
+    int arg_count;  // -1 for variable args
+    Type* return_type;
+};
+
+SysFuncInfo sys_funcs[] = {
+    {SYSFUNC_LEN, "len", 1, &TYPE_INT64},
+    {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE},
+    {SYSFUNC_INT, "int", 1, &TYPE_ANY},
+    {SYSFUNC_INT64, "int64", 1, &TYPE_INT64},
+    {SYSFUNC_FLOAT, "float", 1, &TYPE_FLOAT},
+    {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_DECIMAL},
+    {SYSFUNC_BINARY, "binary", 1, &TYPE_BINARY},
+    {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY},
+    {SYSFUNC_STRING, "string", 1, &TYPE_STRING},
+    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL},
+    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME},
+    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME},
+    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME},
+    {SYSFUNC_TODAY, "today", 0, &TYPE_DTIME},
+    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME},
+    {SYSFUNC_SET, "set", -1, &TYPE_ANY},
+    {SYSFUNC_SLICE, "slice", -1, &TYPE_ANY},
+    {SYSFUNC_ALL, "all", 1, &TYPE_BOOL},
+    {SYSFUNC_ANY, "any", 1, &TYPE_BOOL},
+    {SYSFUNC_MIN, "min", 2, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_MAX, "max", 2, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_ABS, "abs", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_ROUND, "round", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY}, // TYPE_NUMBER;
+    {SYSFUNC_INPUT, "input", 2, &TYPE_ANY},
+    {SYSFUNC_PRINT, "print", 1, &TYPE_NULL},
+    {SYSFUNC_FORMAT, "format", 2, &TYPE_STRING},
+    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR},
+    {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING},
+    // {SYSFUNC_SUBSTRING, "substring", 2, &TYPE_ANY},
+    // {SYSFUNC_CONTAINS, "contains", 2, &TYPE_ANY},    
+};
+
+SysFuncInfo* get_sys_func_info(StrView *name) {
+    for (size_t i = 0; i < sizeof(sys_funcs)/sizeof(sys_funcs[0]); i++) {
+        if (strview_equal(name, sys_funcs[i].name)) {
+            log_debug("is sys func: %.*s", (int)name->length, name->str);
+            return &sys_funcs[i];
+        }
+    }
+    log_debug("not sys func: %.*s", (int)name->length, name->str);
+    return NULL;
+}
+
 AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
     AstNode* ast_node;
     pool_variable_alloc(tp->ast_pool, size, (void**)&ast_node);
@@ -122,111 +177,14 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp, 
         AST_NODE_CALL_EXPR, call_node, sizeof(AstCallNode));
     TSNode function_node = ts_node_child_by_field_id(call_node, FIELD_FUNCTION);
-    if (symbol == SYM_SYS_FUNC) {
+    StrView func_name = ts_node_source(tp, function_node);
+    SysFuncInfo* sys_func_info = get_sys_func_info(&func_name);
+    if (sys_func_info) {
         log_debug("build sys call");
         AstSysFuncNode* fn_node = (AstSysFuncNode*)alloc_ast_node(tp, 
             AST_NODE_SYS_FUNC, function_node, sizeof(AstSysFuncNode));
-        StrView func_name = ts_node_source(tp, function_node);
-        if (strview_equal(&func_name, "len")) {
-            fn_node->fn = SYSFUNC_LEN;
-            fn_node->type = &TYPE_INT64;  // int64 is preferred over any, as it is more specific
-        }
-        else if (strview_equal(&func_name, "type")) {
-            fn_node->fn = SYSFUNC_TYPE;
-            fn_node->type = &TYPE_TYPE;
-        }
-        else if (strview_equal(&func_name, "int")) {
-            fn_node->fn = SYSFUNC_INT;
-            fn_node->type = &TYPE_ANY;
-        }
-        else if (strview_equal(&func_name, "int64")) {
-            fn_node->fn = SYSFUNC_INT64;
-            fn_node->type = &TYPE_INT64;
-        }
-        else if (strview_equal(&func_name, "float")) {
-            fn_node->fn = SYSFUNC_FLOAT;
-            fn_node->type = &TYPE_FLOAT;
-        }
-        else if (strview_equal(&func_name, "number")) {
-            fn_node->fn = SYSFUNC_NUMBER;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "string")) {
-            fn_node->fn = SYSFUNC_STRING;
-            fn_node->type = &TYPE_STRING;
-        }
-        else if (strview_equal(&func_name, "symbol")) {
-            fn_node->fn = SYSFUNC_SYMBOL;
-            fn_node->type = &TYPE_SYMBOL;
-        }
-        else if (strview_equal(&func_name, "datetime")) {
-            fn_node->fn = SYSFUNC_DATETIME;
-            fn_node->type = &TYPE_DTIME;
-        }
-        else if (strview_equal(&func_name, "date")) {
-            fn_node->fn = SYSFUNC_DATE;
-            fn_node->type = &TYPE_DTIME;
-        }
-        else if (strview_equal(&func_name, "time")) {
-            fn_node->fn = SYSFUNC_TIME;
-            fn_node->type = &TYPE_DTIME;
-        }
-        else if (strview_equal(&func_name, "input")) {
-            fn_node->fn = SYSFUNC_INPUT;
-            fn_node->type = &TYPE_ANY;
-        }        
-        else if (strview_equal(&func_name, "print")) {
-            fn_node->fn = SYSFUNC_PRINT;
-            fn_node->type = &TYPE_NULL;
-        }
-        else if (strview_equal(&func_name, "format")) {
-            fn_node->fn = SYSFUNC_FORMAT;
-            fn_node->type = &TYPE_STRING;
-        }
-        else if (strview_equal(&func_name, "error")) {
-            fn_node->fn = SYSFUNC_ERROR;
-            fn_node->type = &TYPE_ERROR;
-        }
-        else if (strview_equal(&func_name, "abs")) {
-            fn_node->fn = SYSFUNC_ABS;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "round")) {
-            fn_node->fn = SYSFUNC_ROUND;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "floor")) {
-            fn_node->fn = SYSFUNC_FLOOR;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "ceil")) {
-            fn_node->fn = SYSFUNC_CEIL;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "min")) {
-            fn_node->fn = SYSFUNC_MIN;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "max")) {
-            fn_node->fn = SYSFUNC_MAX;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "sum")) {
-            fn_node->fn = SYSFUNC_SUM;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "avg")) {
-            fn_node->fn = SYSFUNC_AVG;
-            fn_node->type = &TYPE_ANY; // TYPE_NUMBER;
-        }
-        else if (strview_equal(&func_name, "normalize")) {
-            fn_node->fn = SYSFUNC_NORMALIZE;
-            fn_node->type = &TYPE_STRING;
-        }
-        else {
-            log_debug("unknown system function: %.*s", (int)func_name.length, func_name.str);
-            return NULL;
-        }
+        fn_node->fn = sys_func_info->fn;
+        fn_node->type = sys_func_info->return_type;
         ast_node->function = (AstNode*)fn_node;
         ast_node->type = fn_node->type;
     }
@@ -236,6 +194,10 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
             ast_node->type = ((TypeFunc*)ast_node->function->type)->returned;
             if (!ast_node->type) { // e.g. recursive fn
                 ast_node->type = &TYPE_ANY;
+            }
+            if (ast_node->type && ast_node->type->is_const) {
+                // replicate the type to remove is_const flag - todo: fast path for const fn
+                ast_node->type = alloc_type(tp->ast_pool, ast_node->type->type_id, sizeof(Type));
             }
         } else {
             ast_node->type = &TYPE_ANY;
@@ -252,7 +214,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         if (field_id == FIELD_ARGUMENT) {
             TSNode child = ts_tree_cursor_current_node(&cursor);
             AstNode *argument = build_expr(tp, child);
-            log_debug("got argument type %d", argument->node_type);
+            log_debug("got argument: %p, &t: %p, node_type %d, type: %d", argument, argument->type, argument->node_type, argument->type->type_id);
             if (prev_argument == NULL) {
                 ast_node->argument = argument;
             } else {
@@ -263,7 +225,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         has_node = ts_tree_cursor_goto_next_sibling(&cursor);
     }
     ts_tree_cursor_delete(&cursor);
-    log_debug("end building call expr type: %p", ast_node->type);
+    log_debug("end building call expr type: %p, %d, is_const:%d", ast_node->type, ast_node->type->type_id, ast_node->type->is_const);
     return (AstNode*)ast_node;
 }
 
@@ -567,7 +529,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->expr = build_field_expr(tp, child, AST_NODE_INDEX_EXPR);
         ast_node->type = ast_node->expr->type;
     }
-    else if (symbol == SYM_CALL_EXPR || symbol == SYM_SYS_FUNC) {
+    else if (symbol == SYM_CALL_EXPR) { // || symbol == SYM_SYS_FUNC
         ast_node->expr = build_call_expr(tp, child, symbol);
         ast_node->type = ast_node->expr->type;
     }
@@ -888,8 +850,9 @@ AstNode* build_if_stam(Transpiler* tp, TSNode if_node) {
 AstNode* build_list(Transpiler* tp, TSNode list_node) {
     log_debug("build list");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
-    TypeList *type = (TypeList*)ast_node->type;
+    TypeList *type = (TypeList*)alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
+    ast_node->list_type = type;
+    ast_node->type = &TYPE_ANY;  // list returns Item, not List
 
     ast_node->vars = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
@@ -1125,9 +1088,10 @@ AstNode* build_base_type(Transpiler* tp, TSNode type_node) {
 AstNode* build_list_type(Transpiler* tp, TSNode list_node) {
     log_debug("build list type");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_LIST_TYPE, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeType* node_type = (TypeType*)alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    ast_node->type = node_type;
     TypeList *type = (TypeList*)alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
-    ((TypeType*)ast_node->type)->type = (Type*)type;
+    node_type->type = (Type*)type;  ast_node->list_type = type;
 
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode *prev_declare = NULL, *prev_item = NULL;
@@ -1226,8 +1190,9 @@ AstNode* build_map_type(Transpiler* tp, TSNode map_node) {
 AstNode* build_content_type(Transpiler* tp, TSNode list_node) {
     log_debug("build content type");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT_TYPE, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
-    TypeList *type = (TypeList*)ast_node->type;
+    TypeList *type = (TypeList *)alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
+    ast_node->type = ast_node->list_type = type;
+
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode* prev_item = NULL;
     while (!ts_node_is_null(child)) {
@@ -1243,7 +1208,7 @@ AstNode* build_content_type(Transpiler* tp, TSNode list_node) {
         child = ts_node_next_named_sibling(child);
     }
     log_debug("end building content type: %ld", type->length);
-    return (AstNode*)ast_node;
+    return ast_node;
 }
 
 AstNode* build_element_type(Transpiler* tp, TSNode elmt_node) {
@@ -1416,7 +1381,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
         if (symbol == SYM_COMMENT) {  // skip comments
             child = ts_node_next_named_sibling(child);  continue;
         }
-        // named map item, or dynamic expr
+        // named map item, or dynamic map expr
         AstNode* item = (symbol == SYM_MAP_ITEM) ? (AstNode*)build_key_expr(tp, child) : build_expr(tp, child);
         if (!item) { log_error("build_map: null expr item");  break; }
         if (!prev_item) { ast_node->item = item; } 
@@ -1425,7 +1390,7 @@ AstNode* build_map(Transpiler* tp, TSNode map_node) {
 
         ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(tp->ast_pool, sizeof(ShapeEntry));
         if (symbol == SYM_MAP_ITEM) {
-            // Convert pooled String* to StrView* for shape entry
+            // convert pooled String* to StrView* for shape entry
             String* pooled_name = ((AstNamedNode*)item)->name;
             StrView* name_view = (StrView*)pool_calloc(tp->ast_pool, sizeof(StrView));
             name_view->str = pooled_name->chars;
@@ -1511,7 +1476,8 @@ AstNode* build_elmt(Transpiler* tp, TSNode elmt_node) {
     arraylist_append(tp->type_list, type);
     type->type_index = tp->type_list->length - 1;
     type->byte_size = byte_offset;
-    type->content_length = ast_node->content ? ((TypeList*)ast_node->content->type)->length : 0;
+    type->content_length = ast_node->content ? 
+        (ast_node->content->node_type == AST_NODE_CONTENT ? ((AstListNode*)ast_node->content)->list_type->length : 1) : 0;
     return (AstNode*)ast_node;
 }
 
@@ -1723,6 +1689,8 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     // tp->current_scope = ast_node->locals;
     TSNode fn_body_node = ts_node_child_by_field_id(func_node, FIELD_BODY);
     ast_node->body = build_expr(tp, fn_body_node);
+
+    // determine the function return type
     if (!fn_type->returned) fn_type->returned = ast_node->body->type;
 
     // restore parent namescope
@@ -1734,8 +1702,11 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
 AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_global) {
     log_debug("build content");
     AstListNode* ast_node = (AstListNode*)alloc_ast_node(tp, AST_NODE_CONTENT, list_node, sizeof(AstListNode));
-    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
-    TypeList *type = (TypeList*)ast_node->type;
+    TypeList *type = (TypeList*)alloc_type(tp->ast_pool, LMD_TYPE_LIST, sizeof(TypeList));
+    ast_node->list_type = type;
+    ast_node->type = &TYPE_ANY;  // content() returns Item, not List
+
+    // build body content
     TSNode child = ts_node_named_child(list_node, 0);
     AstNode* prev_item = NULL;
     while (!ts_node_is_null(child)) {
@@ -1755,8 +1726,8 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
         child = ts_node_next_named_sibling(child);
     }
     log_debug("end building content item: %p, %ld", ast_node->item, type->length);
-    if (flattern && type->length == 1) { return ast_node->item;}
-    return (AstNode*)ast_node;
+    if (flattern && type->length == 1) { return ast_node->item; }
+    return ast_node;
 }
 
 AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSymbol symbol) {
@@ -1995,7 +1966,6 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
         default:
             log_debug("unknown script child: %s", ts_node_type(child));
         }
-        // AstNode* ast = symbol == SYM_CONTENT ? build_content(tp, child, true, true) : build_expr(tp, child);
         if (ast) {
             if (!prev) ast_node->child = ast;
             else { prev->next = ast; }

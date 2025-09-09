@@ -309,7 +309,7 @@ Item fn_mul(Item item_a, Item item_b) {
         return {.array_float = result};
     }
     else {
-        log_error("unknown mul type: %d, %d\n", item_a.type_id, item_b.type_id);
+        log_error("unknown mul type: %d, %d", item_a.type_id, item_b.type_id);
     }
     return ItemError;
 }
@@ -638,7 +638,7 @@ Item fn_idiv(Item item_a, Item item_b) {
 }
 
 Item fn_pow(Item item_a, Item item_b) {
-    // Handle decimal types first
+    log_debug("fn_pow called with types: %d and %d", item_a.type_id, item_b.type_id);
     if (item_a.type_id == LMD_TYPE_DECIMAL || item_b.type_id == LMD_TYPE_DECIMAL) {
         // For now, convert decimals to double for power operations
         // This is a limitation of libmpdec - it doesn't have general power operations
@@ -659,7 +659,7 @@ Item fn_pow(Item item_a, Item item_b) {
             } else if (item_a.type_id == LMD_TYPE_FLOAT) {
                 base = *(double*)item_a.pointer;
             } else {
-                log_error("unsupported pow base type with decimal: %d\n", item_a.type_id);
+                log_error("unsupported pow base type with decimal: %d", item_a.type_id);
                 return ItemError;
             }
         }
@@ -678,7 +678,7 @@ Item fn_pow(Item item_a, Item item_b) {
             } else if (item_b.type_id == LMD_TYPE_FLOAT) {
                 exponent = *(double*)item_b.pointer;
             } else {
-                log_error("unsupported pow exponent type with decimal: %d\n", item_b.type_id);
+                log_error("unsupported pow exponent type with decimal: %d", item_b.type_id);
                 return ItemError;
             }
         }
@@ -695,17 +695,16 @@ Item fn_pow(Item item_a, Item item_b) {
         
         if (mpd_isnan(result) || mpd_isinfinite(result)) {
             mpd_del(result);
-        log_debug("decimal power operation failed");
+            log_debug("decimal power operation failed");
             return ItemError;
         }
-        
         return push_decimal(result);
     }
     
-    // Original non-decimal logic
+    // non-decimal logic
     double base = 0.0, exponent = 0.0;
     
-    // Convert first argument to double
+    // convert first argument to double
     if (item_a.type_id == LMD_TYPE_INT) {
         base = item_a.int_val;
     }
@@ -716,11 +715,11 @@ Item fn_pow(Item item_a, Item item_b) {
         base = *(double*)item_a.pointer;
     }
     else {
-        log_error("unknown pow base type: %d\n", item_a.type_id);
+        log_error("unknown pow base type: %d", item_a.type_id);
         return ItemError;
     }
     
-    // Convert second argument to double
+    // convert second argument to double
     if (item_b.type_id == LMD_TYPE_INT) {
         exponent = item_b.int_val;
     }
@@ -731,9 +730,10 @@ Item fn_pow(Item item_a, Item item_b) {
         exponent = *(double*)item_b.pointer;
     }
     else {
-        log_error("unknown pow exponent type: %d\n", item_b.type_id);
+        log_error("unknown pow exponent type: %d", item_b.type_id);
         return ItemError;
     }
+    log_debug("calculating pow base=%g, exponent=%g", base, exponent);
     return push_d(pow(base, exponent));
 }
 

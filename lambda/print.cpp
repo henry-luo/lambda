@@ -758,10 +758,12 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
             print_ast_node(script, ((AstPrimaryNode*)node)->expr, indent + 1);
         } else {
             // for (int i = 0; i < indent+1; i++) { log_debug("  "); }
+            log_enter();
             if (node->type && node->type->is_const) {
                 print_const(script, node->type);
             }
             else { log_debug("(%s)", ts_node_type(node->node)); }
+            log_leave();
         }
         break;
     case AST_NODE_UNARY:
@@ -862,10 +864,11 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_LIST:  case AST_NODE_CONTENT:  case AST_NODE_CONTENT_TYPE: {
+        AstListNode* list_node = (AstListNode*)node;
         log_debug("[%s:%s[%ld]]", node->node_type == 
             AST_NODE_CONTENT_TYPE ? "content_type" : AST_NODE_CONTENT ? "content" : "list", 
-            type_name, ((TypeList*)node->type)->length);
-        AstNode *ld = ((AstListNode*)node)->declare;
+            type_name, list_node->list_type->length);
+        AstNode *ld = list_node->declare;
         if (!ld) {
             print_label(indent + 1, "no declare");
         }
@@ -874,7 +877,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
             print_ast_node(script, ld, indent + 1);
             ld = ld->next;
         }        
-        AstNode *li = ((AstListNode*)node)->item;
+        AstNode *li = list_node->item;
         while (li) {
             print_label(indent + 1, "item:");
             print_ast_node(script, li, indent + 1);
@@ -917,11 +920,13 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         print_ast_node(script, ((AstFieldNode*)node)->field, indent + 1);
         break;
     case AST_NODE_CALL_EXPR: {
-        log_debug("[call expr:%s]", type_name);
+        Type *type = node->type;
+        log_debug("[call expr:%s,const:%d]", type_name, type->is_const);
         print_ast_node(script, ((AstCallNode*)node)->function, indent + 1);
         print_label(indent + 1, "args:"); 
         AstNode* arg = ((AstCallNode*)node)->argument;
         while (arg) {
+            log_debug("  (arg:%s)", arg->type ? type_info[arg->type->type_id].name : "unknown");
             print_ast_node(script, arg, indent + 1);
             arg = arg->next;
         }
@@ -931,11 +936,12 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         log_debug("[sys func:%d:%s]", ((AstSysFuncNode*)node)->fn, type_name);
         break;
     case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR: {
+        // function definition
         AstFuncNode* func = (AstFuncNode*)node;
         if (node->node_type == AST_NODE_FUNC_EXPR) {
-            log_debug("[function expr:%s]", type_name);
+            log_debug("[fn expr:%s]", type_name);
         } else {
-            log_debug("[function: %.*s:%s]", (int)func->name->len, func->name->chars, type_name);
+            log_debug("[fn: %.*s:%s]", (int)func->name->len, func->name->chars, type_name);
         }
         print_label(indent + 1, "params:"); 
         AstNode* fn_param = (AstNode*)func->param;

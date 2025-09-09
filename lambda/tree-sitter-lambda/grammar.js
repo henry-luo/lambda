@@ -172,7 +172,6 @@ module.exports = grammar({
 
   precedences: $ => [[
     $.fn_expr_stam,
-    $.sys_func,
     $.primary_expr,
     $.unary_expr,
     // binary operators
@@ -360,7 +359,7 @@ module.exports = grammar({
     ),
 
     map: $ => seq(
-      // $._expression for dynamic map items
+      // $._expression for dynamic map item
       '{', comma_sep(choice($.map_item, $._expression)), '}',
     ),
 
@@ -441,7 +440,6 @@ module.exports = grammar({
       $.index_expr,  // like Go
       $.member_expr,
       $.call_expr,
-      $.sys_func,
       $._parenthesized_expr,
     )),
 
@@ -527,18 +525,6 @@ module.exports = grammar({
         '=>', field('body', $._expression)
       ),      
     ),
-
-    // system function call
-    // prec(50) to make it higher priority than base types
-    sys_func: $ => prec(50, seq(
-      field('function', choice(
-        'len', 'type', 'int', 'int64', 'float', 'decimal', 'binary', 'number', 'string', 'char', 'symbol',
-        'datetime', 'date', 'time', 'today', 'justnow',
-        'set', 'slice',
-        'all', 'any', 'min', 'max', 'sum', 'avg', 'abs', 'round', 'floor', 'ceil',
-        'input', 'print', 'format', 'error', 'normalize', 'substring', 'contains',
-      )), $._arguments,
-    )),
 
     assign_expr: $ => seq(
       field('name', $.identifier), 
@@ -627,7 +613,7 @@ module.exports = grammar({
 
     fn_type: $ => seq(
       '(', optional(field('declare', $.fn_param)), repeat(seq(',', field('declare', $.fn_param))), ')', 
-      '=>', field('type', $._type_expr),      
+      '->', field('type', $._type_expr),      
     ),
 
     primary_type: $ => choice(
