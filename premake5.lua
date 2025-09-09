@@ -79,6 +79,9 @@ project "lambda-input-full-c"
     
     files {
         "lambda/parse.c",
+        "lambda/input/css_tokenizer.c",
+        "lambda/input/css_parser.c",
+        "lambda/input/css_properties.c",
         "lib/arraylist.c",
         "lib/hashmap.c",
         "lib/file.c",

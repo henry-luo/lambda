@@ -5,6 +5,10 @@
 #include <stdbool.h>
 #include "../../lib/mem-pool/include/mem_pool.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // CSS Token Types based on CSS Syntax Module Level 3
 typedef enum {
     CSS_TOKEN_IDENT,           // identifiers, keywords
@@ -100,5 +104,9 @@ bool css_is_newline(int c);
 bool css_is_whitespace(int c);
 bool css_is_digit(int c);
 bool css_is_hex_digit(int c);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // CSS_TOKENIZER_H

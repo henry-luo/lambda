@@ -58,7 +58,7 @@ typedef struct css_selector_component {
     css_selector_type_t type;
     const char* name;           // Element name, class name, id, etc.
     const char* value;          // For attribute selectors
-    const char* operator;       // For attribute selectors (=, ~=, |=, etc.)
+    const char* attr_operator;  // For attribute selectors (=, ~=, |=, etc.)
     struct css_selector_component* next;
 } css_selector_component_t;
 
