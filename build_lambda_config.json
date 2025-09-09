@@ -41,6 +41,9 @@
         "lambda/validator/validate.cpp",
         "lambda/validator/validator.cpp",
         "lambda/validator/schema_parser.cpp",
+        "lambda/input/css_tokenizer.c",
+        "lambda/input/css_properties.c",
+        "lambda/input/css_parser.c",
         "lambda/main-repl.cpp",
         "lambda/main.cpp"
     ],
@@ -447,6 +450,36 @@
                         "name": "📝 MDX Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
                         "binary": "test_mdx_roundtrip.exe"
+                    },
+                    {
+                        "source": "test/test_css_tokenizer.cpp",
+                        "name": "🎨 CSS Tokenizer Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_css_tokenizer.exe"
+                    },
+                    {
+                        "source": "test/test_css_parser.cpp",
+                        "name": "🎨 CSS Parser Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_css_parser.exe"
+                    },
+                    {
+                        "source": "test/test_css_integration.cpp",
+                        "name": "🎨 CSS Integration Tests",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_css_integration.exe"
+                    },
+                    {
+                        "source": "test/test_input_css.c",
+                        "name": "🎨 CSS Input Tests (Criterion)",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_input_css.exe"
+                    },
+                    {
+                        "source": "test/test_css_minimal.c",
+                        "name": "🎨 CSS Minimal Tests (Safe)",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test_css_minimal.exe"
                     }
                 ],
                 "type": "input",
