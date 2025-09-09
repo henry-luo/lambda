@@ -3,7 +3,7 @@
 
 // Statistical analysis functions
 pub fn descriptive_stats(data) {
-    let sorted_data = for (x in data, _ in 1 to len(data)) min(data);  // simplified sort
+    let sorted_data = data; // for (x in data, _ in 1 to len(data)) min(data);  // simplified sort
     let n = len(data);
     let mean_val = avg(data);
     let variance = avg(for (x in data) (x - mean_val) ^ 2);
@@ -51,7 +51,7 @@ pub fn preprocess_dataset(raw_data) {
         {
             id: row.id,
             features: for (val in row.features) if (val != null) val else 0.0,
-            target: if (row.target != null) row.target else avg(for (r in raw_data) if (r.target != null) r.target else 0.0)
+            target: if (row.target != null) row.target else avg(for (r in raw_data) r.target)
         }
     };
     

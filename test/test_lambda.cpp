@@ -178,11 +178,11 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     free(actual_output);
 }
 
-Test(lambda_tests, test_single_ls) {
+Test(lambda_tests, test_single) {
     test_lambda_script_against_file("test/lambda/single.ls", "test/lambda/single.txt");
 }
 
-Test(lambda_tests, test_value_ls) {
+Test(lambda_tests, test_value) {
     test_lambda_script_against_file("test/lambda/value.ls", "test/lambda/value.txt");
 }
 
@@ -194,27 +194,27 @@ Test(lambda_tests, test_expr_ls) {
     test_lambda_script_against_file("test/lambda/expr.ls", "test/lambda/expr.txt");
 }
 
-Test(lambda_tests, test_decimal_ls) {
+Test(lambda_tests, test_decimal) {
     test_lambda_script_against_file("test/lambda/decimal.ls", "test/lambda/decimal.txt");
 }
 
-Test(lambda_tests, test_box_unbox_ls) {
+Test(lambda_tests, test_box_unbox) {
     test_lambda_script_against_file("test/lambda/box_unbox.ls", "test/lambda/box_unbox.txt");
 }
 
-Test(lambda_tests, test_sys_fn_ls) {
+Test(lambda_tests, test_sys_fn) {
     test_lambda_script_against_file("test/lambda/sys_fn.ls", "test/lambda/sys_fn.txt");
 }
 
-Test(lambda_tests, test_expr_stam_ls) {
+Test(lambda_tests, test_expr_stam) {
     test_lambda_script_against_file("test/lambda/expr_stam.ls", "test/lambda/expr_stam.txt");
 }
 
-Test(lambda_tests, test_numeric_expr_ls) {
+Test(lambda_tests, test_numeric_expr) {
     test_lambda_script_against_file("test/lambda/numeric_expr.ls", "test/lambda/numeric_expr.txt");
 }
 
-Test(lambda_tests, test_array_float_ls) {
+Test(lambda_tests, test_array_float) {
     test_lambda_script_against_file("test/lambda/array_float.ls", "test/lambda/array_float.txt");
 }
 
@@ -230,15 +230,15 @@ Test(lambda_tests, test_comp_expr_edge_ls) {
 //     test_lambda_script_against_file("test/lambda/unicode.ls", "test/lambda/unicode.txt");
 // }
 
-Test(lambda_tests, test_type_ls) {
+Test(lambda_tests, test_type) {
     test_lambda_script_against_file("test/lambda/type.ls", "test/lambda/type.txt");
 }
 
-Test(lambda_tests, test_func_ls) {
+Test(lambda_tests, test_func) {
     test_lambda_script_against_file("test/lambda/func.ls", "test/lambda/func.txt");
 }
 
-Test(lambda_tests, test_int64_ls) {
+Test(lambda_tests, test_int64) {
     test_lambda_script_against_file("test/lambda/int64.ls", "test/lambda/int64.txt");
 }
 
@@ -250,14 +250,18 @@ Test(lambda_tests, test_input_dir_ls) {
     test_lambda_script_against_file("test/lambda/input_dir.ls", "test/lambda/input_dir.txt");
 }
 
-Test(lambda_tests, test_complex_report_ls) {
+Test(lambda_tests, test_complex_report) {
     test_lambda_script_against_file("test/lambda/complex_report.ls", "test/lambda/complex_report.txt");
 }
 
-Test(lambda_tests, test_import_ls) {
+Test(lambda_tests, test_import) {
     test_lambda_script_against_file("test/lambda/import.ls", "test/lambda/import.txt");
 }
 
 Test(lambda_tests, test_numeric_sys_func) {
     test_lambda_script_against_file("test/lambda/numeric_sys_func.ls", "test/lambda/numeric_sys_func.txt");
+}
+
+Test(lambda_tests, test_complex_data_science_report) {
+    test_lambda_script_against_file("test/lambda/complex_data_science_report.ls", "test/lambda/complex_data_science_report.txt");
 }

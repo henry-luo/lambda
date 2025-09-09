@@ -507,7 +507,12 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
     }    
     else if (symbol == SYM_IDENT) {
         ast_node->expr = build_identifier(tp, child);
-        ast_node->type = ast_node->expr->type;
+        if (ast_node->expr->type->is_const) {
+            // replicate the type to remove is_const flag - todo: fast path for const ident
+            ast_node->type = alloc_type(tp->ast_pool, ast_node->expr->type->type_id, sizeof(Type));
+        } else {
+            ast_node->type = ast_node->expr->type;
+        }
     }
     else if (symbol == SYM_ARRAY) {
         ast_node->expr = build_array(tp, child);
