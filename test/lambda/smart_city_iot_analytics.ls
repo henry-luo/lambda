@@ -1,34 +1,38 @@
 // Smart City IoT Data Processing and Urban Analytics Platform
 // Demonstrates IoT data aggregation, environmental monitoring, and predictive urban planning
 
-import 'datetime', 'geospatial'
+// import 'datetime', 'geospatial'
+
+fn set_data(data) { data }
+fn slice_data(data, start, end) { for (i in start to end-1) data[i] }
+fn float_val(val) { val }
 
 // Environmental sensor data processing and analysis
-pub fn process_environmental_data(sensor_readings: [{sensor_id: string, location: {lat: float, lon: float, zone: string}, timestamp: datetime, measurements: {air_quality_pm25: float, air_quality_pm10: float, temperature: float, humidity: float, noise_level: float, light_intensity: float}}]) {
+pub fn process_environmental_data(sensor_readings) {  // [{sensor_id: string, location: {lat: float, lon: float, zone: string}, timestamp: datetime, measurements: {air_quality_pm25: float, air_quality_pm10: float, temperature: float, humidity: float, noise_level: float, light_intensity: float}}]
     
     // Data quality assessment and cleaning
-    let quality_assessment = for (reading in sensor_readings) {
-        let measurements = reading.measurements;
-        let quality_flags = [];
+    let quality_assessment = for (reading in sensor_readings) (
+        let measurements = reading.measurements,
+        let quality_flags = [],
         
         // Check for out-of-range values
-        let temp_flag = if (measurements.temperature < -40.0 or measurements.temperature > 60.0) "temperature_anomaly" else null;
-        let humidity_flag = if (measurements.humidity < 0.0 or measurements.humidity > 100.0) "humidity_anomaly" else null;
-        let pm25_flag = if (measurements.air_quality_pm25 < 0.0 or measurements.air_quality_pm25 > 500.0) "pm25_anomaly" else null;
-        let noise_flag = if (measurements.noise_level < 0.0 or measurements.noise_level > 120.0) "noise_anomaly" else null;
+        let temp_flag = if (measurements.temperature < -40.0 or measurements.temperature > 60.0) "temperature_anomaly" else null,
+        let humidity_flag = if (measurements.humidity < 0.0 or measurements.humidity > 100.0) "humidity_anomaly" else null,
+        let pm25_flag = if (measurements.air_quality_pm25 < 0.0 or measurements.air_quality_pm25 > 500.0) "pm25_anomaly" else null,
+        let noise_flag = if (measurements.noise_level < 0.0 or measurements.noise_level > 120.0) "noise_anomaly" else null,
         
-        let all_flags = [temp_flag, humidity_flag, pm25_flag, noise_flag];
-        let valid_flags = for (flag in all_flags) if (flag != null) flag else null;
+        let all_flags = [temp_flag, humidity_flag, pm25_flag, noise_flag],
+        let valid_flags = for (flag in all_flags) if (flag != null) flag else null,
         
         {
             sensor_id: reading.sensor_id,
             timestamp: reading.timestamp,
             quality_score: if (len(valid_flags) == 0) 1.0 
-                          else 1.0 - (float(len(valid_flags)) / 4.0),
+                          else 1.0 - (float_val(len(valid_flags)) / 4.0),
             anomalies: valid_flags,
             is_valid: len(valid_flags) <= 1  // Allow 1 anomaly maximum
         }
-    };
+    );
     
     let valid_readings = for (i in 0 to len(sensor_readings)-1) 
         if (quality_assessment[i].is_valid) sensor_readings[i] else null;
@@ -38,86 +42,83 @@ pub fn process_environmental_data(sensor_readings: [{sensor_id: string, location
         time_range: {
             start: if (len(valid_readings) > 0) valid_readings[0].timestamp else null,
             end: if (len(valid_readings) > 0) valid_readings[len(valid_readings)-1].timestamp else null,
-            duration_hours: float(len(valid_readings))  // simplified: assume hourly readings
+            duration_hours: float_val(len(valid_readings))  // simplified: assume hourly readings
         },
         
         // Air quality trends
         air_quality_trends: {
             avg_pm25: avg(for (reading in valid_readings) reading.measurements.air_quality_pm25),
             avg_pm10: avg(for (reading in valid_readings) reading.measurements.air_quality_pm10),
-            pm25_trend: {
-                let half_point = len(valid_readings) / 2;
-                let first_half = slice(valid_readings, 0, half_point);
-                let second_half = slice(valid_readings, half_point, len(valid_readings));
-                let first_avg = avg(for (reading in first_half) reading.measurements.air_quality_pm25);
-                let second_avg = avg(for (reading in second_half) reading.measurements.air_quality_pm25);
+            pm25_trend: (
+                let half_point = len(valid_readings) / 2,
+                let first_half = slice_data(valid_readings, 0, half_point),
+                let second_half = slice_data(valid_readings, half_point, len(valid_readings)),
+                let first_avg = avg(for (reading in first_half) reading.measurements.air_quality_pm25),
+                let second_avg = avg(for (reading in second_half) reading.measurements.air_quality_pm25),
                 if (second_avg > first_avg + 5.0) "deteriorating"
                 else if (second_avg < first_avg - 5.0) "improving"
                 else "stable"
-            },
+            ),
             air_quality_alerts: for (reading in valid_readings) 
                 if (reading.measurements.air_quality_pm25 > 35.0 or reading.measurements.air_quality_pm10 > 50.0) {
-                    {
-                        sensor_id: reading.sensor_id,
-                        timestamp: reading.timestamp,
-                        location: reading.location,
-                        pm25_level: reading.measurements.air_quality_pm25,
-                        severity: if (reading.measurements.air_quality_pm25 > 75.0) "hazardous"
-                                 else if (reading.measurements.air_quality_pm25 > 55.0) "unhealthy"
-                                 else "moderate"
-                    }
-                } else null
+                    sensor_id: reading.sensor_id,
+                    timestamp: reading.timestamp,
+                    location: reading.location,
+                    pm25_level: reading.measurements.air_quality_pm25,
+                    severity: if (reading.measurements.air_quality_pm25 > 75.0) "hazardous"
+                                else if (reading.measurements.air_quality_pm25 > 55.0) "unhealthy"
+                                else "moderate"
+                }
+                else null
         },
         
         // Climate and comfort analysis
         climate_analysis: {
             avg_temperature: avg(for (reading in valid_readings) reading.measurements.temperature),
             avg_humidity: avg(for (reading in valid_readings) reading.measurements.humidity),
-            heat_index_alerts: for (reading in valid_readings) {
-                let temp_f = (reading.measurements.temperature * 9.0 / 5.0) + 32.0;
-                let humidity = reading.measurements.humidity;
+            heat_index_alerts: for (reading in valid_readings) (
+                let temp_f = (reading.measurements.temperature * 9.0 / 5.0) + 32.0,
+                let humidity = reading.measurements.humidity,
                 // Simplified heat index calculation
-                let heat_index = temp_f + (humidity / 10.0);
+                let heat_index = temp_f + (humidity / 10.0),
                 if (heat_index > 90.0) {
-                    {
-                        sensor_id: reading.sensor_id,
-                        timestamp: reading.timestamp,
-                        heat_index: heat_index,
-                        risk_level: if (heat_index > 105.0) "extreme" else "caution"
-                    }
-                } else null
-            },
-            comfort_score: {
-                let ideal_temp = 22.0;  // 22°C ideal
-                let ideal_humidity = 50.0;  // 50% ideal
+                    sensor_id: reading.sensor_id,
+                    timestamp: reading.timestamp,
+                    heat_index: heat_index,
+                    risk_level: if (heat_index > 105.0) "extreme" else "caution"
+                }
+                else null
+            ),
+            comfort_score: (
+                let ideal_temp = 22.0,  // 22°C ideal
+                let ideal_humidity = 50.0,  // 50% ideal
                 let temp_scores = for (reading in valid_readings) 
-                    1.0 - (abs(reading.measurements.temperature - ideal_temp) / 20.0);
+                    1.0 - (abs(reading.measurements.temperature - ideal_temp) / 20.0),
                 let humidity_scores = for (reading in valid_readings) 
-                    1.0 - (abs(reading.measurements.humidity - ideal_humidity) / 50.0);
+                    1.0 - (abs(reading.measurements.humidity - ideal_humidity) / 50.0),
                 (avg(temp_scores) + avg(humidity_scores)) / 2.0
-            }
+            )
         },
         
         // Noise pollution analysis
         noise_analysis: {
             avg_noise_level: avg(for (reading in valid_readings) reading.measurements.noise_level),
             noise_violations: for (reading in valid_readings) 
-                if (reading.measurements.noise_level > 70.0) {
-                    {
-                        sensor_id: reading.sensor_id,
-                        timestamp: reading.timestamp,
-                        noise_level: reading.measurements.noise_level,
-                        violation_severity: if (reading.measurements.noise_level > 85.0) "severe"
-                                          else "moderate"
-                    }
-                } else null,
-            quiet_hours_compliance: {
+                if (reading.measurements.noise_level > 70.0){
+                    sensor_id: reading.sensor_id,
+                    timestamp: reading.timestamp,
+                    noise_level: reading.measurements.noise_level,
+                    violation_severity: if (reading.measurements.noise_level > 85.0) "severe"
+                                        else "moderate"
+                }
+                else null,
+            quiet_hours_compliance: (
                 // Simplified: assume readings between 22:00-06:00 are quiet hours
-                let total_readings = len(valid_readings);
+                let total_readings = len(valid_readings),
                 let quiet_violations = len(for (reading in valid_readings) 
-                    if (reading.measurements.noise_level > 55.0) reading else null);  // assuming all readings for simplicity
-                if (total_readings > 0) ((float(total_readings - quiet_violations)) / float(total_readings)) * 100.0 else 100.0
-            }
+                    if (reading.measurements.noise_level > 55.0) reading else null),  // assuming all readings for simplicity
+                if (total_readings > 0) ((float_val(total_readings - quiet_violations)) / float_val(total_readings)) * 100.0 else 100.0
+            )
         }
     };
     
@@ -141,11 +142,11 @@ pub fn process_environmental_data(sensor_readings: [{sensor_id: string, location
 }
 
 // Urban traffic flow analysis and optimization
-pub fn analyze_traffic_patterns(traffic_data: [{intersection_id: string, location: {lat: float, lon: float, zone: string}, timestamp: datetime, vehicle_count: int, avg_speed: float, congestion_level: int, incident_reports: [string]}]) {
+pub fn analyze_traffic_patterns(traffic_data) { //  [{intersection_id: string, location: {lat: float, lon: float, zone: string}, timestamp: datetime, vehicle_count: int, avg_speed: float, congestion_level: int, incident_reports: [string]}]
     
     // Traffic flow metrics
     let flow_analysis = {
-        total_intersections: len(set(for (data in traffic_data) data.intersection_id)),
+        total_intersections: len(set_data(for (data in traffic_data) data.intersection_id)),
         total_vehicle_count: sum(for (data in traffic_data) data.vehicle_count),
         avg_speed_citywide: avg(for (data in traffic_data) data.avg_speed),
         
@@ -158,18 +159,18 @@ pub fn analyze_traffic_patterns(traffic_data: [{intersection_id: string, locatio
         
         // Speed analysis by zone
         speed_by_zone: {
-            downtown_avg: {
-                let downtown_readings = for (data in traffic_data) if (data.location.zone == "downtown") data else null;
+            downtown_avg: (
+                let downtown_readings = for (data in traffic_data) if (data.location.zone == "downtown") data else null,
                 if (len(downtown_readings) > 0) avg(for (reading in downtown_readings) reading.avg_speed) else 0.0
-            },
-            residential_avg: {
-                let residential_readings = for (data in traffic_data) if (data.location.zone == "residential") data else null;
+            ),
+            residential_avg: (
+                let residential_readings = for (data in traffic_data) if (data.location.zone == "residential") data else null,
                 if (len(residential_readings) > 0) avg(for (reading in residential_readings) reading.avg_speed) else 0.0
-            },
-            industrial_avg: {
-                let industrial_readings = for (data in traffic_data) if (data.location.zone == "industrial") data else null;
+            ),
+            industrial_avg: (
+                let industrial_readings = for (data in traffic_data) if (data.location.zone == "industrial") data else null,
                 if (len(industrial_readings) > 0) avg(for (reading in industrial_readings) reading.avg_speed) else 0.0
-            }
+            )
         }
     };
     
@@ -178,30 +179,29 @@ pub fn analyze_traffic_patterns(traffic_data: [{intersection_id: string, locatio
         total_incidents: sum(for (data in traffic_data) len(data.incident_reports)),
         incident_hotspots: for (data in traffic_data) 
             if (len(data.incident_reports) >= 2) {
-                {
-                    intersection_id: data.intersection_id,
-                    location: data.location,
-                    incident_count: len(data.incident_reports),
-                    incident_types: data.incident_reports,
-                    risk_level: if (len(data.incident_reports) >= 5) "high"
-                               else if (len(data.incident_reports) >= 3) "medium"
-                               else "low"
-                }
-            } else null,
+                intersection_id: data.intersection_id,
+                location: data.location,
+                incident_count: len(data.incident_reports),
+                incident_types: data.incident_reports,
+                risk_level: if (len(data.incident_reports) >= 5) "high"
+                            else if (len(data.incident_reports) >= 3) "medium"
+                            else "low"
+            }
+            else null,
         
-        safety_score_by_zone: {
-            let zones = ["downtown", "residential", "industrial"];
-            for (zone in zones) {
-                let zone_data = for (data in traffic_data) if (data.location.zone == zone) data else null;
-                let zone_incidents = sum(for (data in zone_data) len(data.incident_reports));
-                let zone_readings = len(zone_data);
+        safety_score_by_zone: (
+            let zones = ["downtown", "residential", "industrial"],
+            for (zone in zones) (
+                let zone_data = for (data in traffic_data) if (data.location.zone == zone) data else null,
+                let zone_incidents = sum(for (data in zone_data) len(data.incident_reports)),
+                let zone_readings = len(zone_data),
                 {
                     zone: zone,
-                    incident_rate: if (zone_readings > 0) float(zone_incidents) / float(zone_readings) else 0.0,
-                    safety_score: if (zone_readings > 0) max([0.0, 1.0 - (float(zone_incidents) / float(zone_readings))]) else 1.0
+                    incident_rate: if (zone_readings > 0) float_val(zone_incidents) / float_val(zone_readings) else 0.0,
+                    safety_score: if (zone_readings > 0) max([0.0, 1.0 - (float_val(zone_incidents) / float_val(zone_readings))]) else 1.0
                 }
-            }
-        }
+            )
+        )
     };
     
     // Traffic optimization recommendations
@@ -255,7 +255,7 @@ pub fn analyze_traffic_patterns(traffic_data: [{intersection_id: string, locatio
 }
 
 // Energy consumption and smart grid analytics
-pub fn analyze_energy_consumption(energy_data: [{meter_id: string, location: {zone: string, building_type: string}, timestamp: datetime, consumption_kwh: float, peak_demand_kw: float, renewable_percentage: float, grid_stability_score: float}]) {
+pub fn analyze_energy_consumption(energy_data) { // [{meter_id: string, location: {zone: string, building_type: string}, timestamp: datetime, consumption_kwh: float, peak_demand_kw: float, renewable_percentage: float, grid_stability_score: float}]
     
     // Consumption pattern analysis
     let consumption_analysis = {
@@ -264,11 +264,11 @@ pub fn analyze_energy_consumption(energy_data: [{meter_id: string, location: {zo
         peak_demand_analysis: {
             max_peak_demand: max(for (data in energy_data) data.peak_demand_kw),
             avg_peak_demand: avg(for (data in energy_data) data.peak_demand_kw),
-            demand_variability: {
-                let mean_demand = avg(for (data in energy_data) data.peak_demand_kw);
-                let variance = avg(for (data in energy_data) (data.peak_demand_kw - mean_demand) ^ 2);
+            demand_variability: (
+                let mean_demand = avg(for (data in energy_data) data.peak_demand_kw),
+                let variance = avg(for (data in energy_data) (data.peak_demand_kw - mean_demand) ^ 2),
                 variance ^ 0.5
-            }
+            )
         },
         
         // Consumption by building type
