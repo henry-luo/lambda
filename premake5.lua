@@ -1907,7 +1907,7 @@ project "test_validator"
     }
     
 
-project "test_ast_validator_simple"
+project "test_ast_validator"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1915,7 +1915,7 @@ project "test_ast_validator_simple"
     targetextension ".exe"
     
     files {
-        "test/test_ast_validator_simple.cpp",
+        "test/test_ast_validator.cpp",
     }
     
     includedirs {

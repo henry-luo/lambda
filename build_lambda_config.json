@@ -514,11 +514,10 @@
                         "binary": "test/test_validator.exe"
                     },
                     {
-                        "source": "test/test_ast_validator_simple.cpp",
-                        "name": "🔍 AST Validator Tests (Phase 1 - Simple)",
+                        "source": "test/test_ast_validator.cpp",
+                        "name": "🔍 AST Validator Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test/test_ast_validator_simple.exe",
-                        "additional_sources": ["lambda/build_ast.cpp", "lambda/transpile.cpp"]
+                        "binary": "test/test_ast_validator.exe"
                     }
                 ],
                 "type": "validator",
