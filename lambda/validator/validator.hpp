@@ -206,6 +206,8 @@ typedef struct TypeDefinition {
 } TypeDefinition;
 
 // Schema parsing functions
+SchemaParser* schema_parser_create(VariableMemPool* pool);
+void schema_parser_destroy(SchemaParser* parser);
 TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source);
 TypeDefinition* build_type_definition(SchemaParser* parser, TSNode type_node);
 TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node);
@@ -242,6 +244,10 @@ TypeSchema* build_binary_expression_schema(SchemaParser* parser, TSNode node);
 
 // ==================== Schema Creation Functions ====================
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Schema factory functions
 TypeSchema* create_primitive_schema(TypeId primitive_type, VariableMemPool* pool);
 TypeSchema* create_array_schema(TypeSchema* element_type, long min_len, long max_len, VariableMemPool* pool);
@@ -256,6 +262,10 @@ TypeSchema* create_literal_schema(Item literal_value, VariableMemPool* pool);
 StrView strview_from_cstr(const char* str);
 bool is_compatible_type(TypeId actual, TypeId expected);
 TypeSchema* resolve_reference(TypeSchema* ref_schema, HashMap* registry);
+
+#ifdef __cplusplus
+}
+#endif
 
 // ==================== Validation Engine ====================
 
