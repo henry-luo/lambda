@@ -1,5 +1,5 @@
 /**
- * @file schema_parser.cpp
+ * @file schema_parser_new.cpp
  * @brief Lambda Schema Parser Implementation - AST Integration
  * @author Henry Luo
  * @license MIT
@@ -11,9 +11,7 @@
 #include "validator.hpp"
 #include "../transpiler.hpp"
 #include "../ast.hpp"
-#include "../name_pool.h"
 #include "../../lib/arraylist.h"
-#include "../../lib/hashmap.h"
 #include "../../lib/strview.h"
 #include <string.h>
 #include <assert.h>
@@ -21,53 +19,6 @@
 
 // Debug flag - set to 0 to disable all SCHEMA_DEBUG output
 #define ENABLE_SCHEMA_DEBUG 0
-
-// External function declarations
-extern "C" {
-    TSParser* lambda_parser(void);
-    TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
-    
-    // Forward declarations for schema creation functions defined later in this file
-    TypeSchema* create_primitive_schema(TypeId primitive_type, VariableMemPool* pool);
-    TypeSchema* create_array_schema(TypeSchema* element_type, long min_len, long max_len, VariableMemPool* pool);
-    TypeSchema* create_union_schema(List* types, VariableMemPool* pool);
-    TypeSchema* create_map_schema(TypeSchema* key_type, TypeSchema* value_type, VariableMemPool* pool);
-    TypeSchema* create_element_schema(const char* tag_name, VariableMemPool* pool);
-    TypeSchema* create_occurrence_schema(TypeSchema* base_type, long min_count, long max_count, VariableMemPool* pool);
-    TypeSchema* create_reference_schema(const char* type_name, VariableMemPool* pool);
-    TypeSchema* create_literal_schema(Item literal_value, VariableMemPool* pool);
-    
-    // Utility functions
-    StrView strview_from_cstr(const char* str);
-    bool is_compatible_type(TypeId actual, TypeId expected);
-    TypeSchema* resolve_reference(TypeSchema* ref_schema, HashMap* registry);
-}
-
-// ==================== Schema Registry Entry Structure ====================
-
-// Entry structure for the schema type registry hashmap
-typedef struct SchemaRegistryEntry {
-    StrView name;                // Type name (key)
-    TypeSchema* schema;          // Type schema (value)
-} SchemaRegistryEntry;
-
-// Hash function for SchemaRegistryEntry
-static uint64_t schema_entry_hash(const void *item, uint64_t seed0, uint64_t seed1) {
-    const SchemaRegistryEntry* entry = (const SchemaRegistryEntry*)item;
-    return hashmap_sip(entry->name.str, entry->name.length, seed0, seed1);
-}
-
-// Compare function for SchemaRegistryEntry
-static int schema_entry_compare(const void *a, const void *b, void *udata) {
-    (void)udata; // unused
-    const SchemaRegistryEntry* entry_a = (const SchemaRegistryEntry*)a;
-    const SchemaRegistryEntry* entry_b = (const SchemaRegistryEntry*)b;
-    
-    if (entry_a->name.length != entry_b->name.length) {
-        return (int)entry_a->name.length - (int)entry_b->name.length;
-    }
-    return memcmp(entry_a->name.str, entry_b->name.str, entry_a->name.length);
-}
 
 // ==================== Schema Parser Creation - Simplified ====================
 
@@ -77,21 +28,10 @@ SchemaParser* schema_parser_create(VariableMemPool* pool) {
     // Initialize memory pool
     parser->pool = pool;
     
-    // Initialize transpiler structure
-    memset(&parser->base, 0, sizeof(Transpiler));
+    // Initialize transpiler for AST building
+    transpiler_init(&parser->base, pool);
     
-    // Set up basic script/transpiler fields
-    parser->base.ast_pool = pool;
-    parser->base.name_pool = name_pool_create(pool, nullptr);
-    parser->base.type_list = arraylist_new(16);
-    parser->base.const_list = arraylist_new(16);
-    
-    // Create a new scope
-    parser->base.current_scope = (NameScope*)pool_calloc(pool, sizeof(NameScope));
-    
-    // Create schema registry hashmap with proper entry structure
-    parser->type_registry = hashmap_new(sizeof(SchemaRegistryEntry), 32,
-                                       0, 0, schema_entry_hash, schema_entry_compare, NULL, NULL);
+    parser->type_registry = hashmap_new(sizeof(TypeSchema*), 0, 0, 0, NULL, NULL, NULL, NULL);
     parser->type_definitions = arraylist_new(16);
     
     return parser;
@@ -102,22 +42,16 @@ void schema_parser_destroy(SchemaParser* parser) {
     
     // Clean up hashmap
     if (parser->type_registry) {
-        hashmap_free(parser->type_registry);
+        hashmap_destroy(parser->type_registry);
     }
     
     // Clean up arraylist
     if (parser->type_definitions) {
-        arraylist_free(parser->type_definitions);
+        arraylist_destroy(parser->type_definitions);
     }
     
-    // Clean up transpiler arrays
-    if (parser->base.type_list) {
-        arraylist_free(parser->base.type_list);
-    }
-    
-    if (parser->base.const_list) {
-        arraylist_free(parser->base.const_list);
-    }
+    // Clean up transpiler
+    transpiler_cleanup(&parser->base);
     
     // Note: memory pool cleanup handled by caller
 }
@@ -177,7 +111,7 @@ TypeSchema* ast_type_to_schema(Type* ast_type, VariableMemPool* pool) {
             break;
         }
         
-        case LMD_TYPE_ELEMENT: {
+        case LMD_TYPE_ELMT: {
             TypeElmt* elmt_type = (TypeElmt*)ast_type;
             schema->schema_type = LMD_SCHEMA_ELEMENT;
             
@@ -232,7 +166,7 @@ void extract_type_definitions_from_ast(SchemaParser* parser, AstNode* ast_node) 
     if (ast_node->node_type == AST_NODE_ASSIGN && 
         ast_node->type && ast_node->type->type_id == LMD_TYPE_TYPE) {
         
-        AstNamedNode* assign_node = (AstNamedNode*)ast_node;
+        AstAssignNode* assign_node = (AstAssignNode*)ast_node;
         if (assign_node->name) {
             TypeDefinition* def = (TypeDefinition*)pool_calloc(parser->pool, sizeof(TypeDefinition));
             
@@ -241,9 +175,9 @@ void extract_type_definitions_from_ast(SchemaParser* parser, AstNode* ast_node) 
             def->name.length = assign_node->name->len;
             
             // Extract the actual type from TypeType wrapper
-            if (assign_node->as && assign_node->as->type && 
-                assign_node->as->type->type_id == LMD_TYPE_TYPE) {
-                TypeType* type_wrapper = (TypeType*)assign_node->as->type;
+            if (assign_node->value && assign_node->value->type && 
+                assign_node->value->type->type_id == LMD_TYPE_TYPE) {
+                TypeType* type_wrapper = (TypeType*)assign_node->value->type;
                 def->schema_type = ast_type_to_schema(type_wrapper->type, parser->pool);
             } else {
                 def->schema_type = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
@@ -252,12 +186,8 @@ void extract_type_definitions_from_ast(SchemaParser* parser, AstNode* ast_node) 
             def->is_exported = true;
             arraylist_append(parser->type_definitions, def);
             
-            // Store in registry for quick lookup using structured entry
-            SchemaRegistryEntry entry = {
-                .name = def->name,
-                .schema = def->schema_type
-            };
-            hashmap_set(parser->type_registry, &entry);
+            // Store in registry for quick lookup
+            hashmap_set(parser->type_registry, &def->name, &def->schema_type);
         }
     }
     
@@ -274,53 +204,23 @@ void extract_type_definitions_from_ast(SchemaParser* parser, AstNode* ast_node) 
 TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source) {
     if (!parser || !source) return NULL;
     
-    // Set up transpiler for parsing
-    parser->base.source = source;
-    
-    // Create runtime and parser if needed
-    if (!parser->base.parser) {
-        parser->base.parser = lambda_parser();
-    }
-    
-    // Parse source to syntax tree
-    parser->base.syntax_tree = lambda_parse_source(parser->base.parser, source);
-    if (!parser->base.syntax_tree) {
+    // Use transpiler to build AST
+    AstNode* ast_root = transpiler_build_ast(&parser->base, source);
+    if (!ast_root) {
         return NULL;
     }
     
     // Store source for reference
     parser->current_source = source;
-    parser->current_tree = parser->base.syntax_tree;
-    
-    // Get root node and build AST
-    TSNode root_node = ts_tree_root_node(parser->base.syntax_tree);
-    if (ts_node_has_error(root_node)) {
-        return NULL;
-    }
-    
-    // Build AST using existing transpiler infrastructure
-    // For test builds, skip complex transpiler and just create basic schema
-    #ifdef SIMPLE_SCHEMA_PARSER
-    parser->base.ast_root = nullptr; // Skip complex transpiler for tests
-    #else
-    parser->base.ast_root = build_script(&parser->base, root_node);
-    #endif
-    
-    if (!parser->base.ast_root) {
-        // Create a simple fallback type definition for tests
-        TypeSchema* fallback_schema = create_primitive_schema(LMD_TYPE_ANY, parser->pool);
-        return fallback_schema;
-    }
     
     // Extract type definitions from AST
-    extract_type_definitions_from_ast(parser, parser->base.ast_root);
+    extract_type_definitions_from_ast(parser, ast_root);
     
     // Look for a "Document" type definition first
+    TypeSchema** document_schema = NULL;
     StrView document_name = {.str = "Document", .length = 8};
-    SchemaRegistryEntry search_entry = {.name = document_name, .schema = NULL};
-    const SchemaRegistryEntry* found = (const SchemaRegistryEntry*)hashmap_get(parser->type_registry, &search_entry);
-    if (found) {
-        return found->schema;
+    if (hashmap_get(parser->type_registry, &document_name, &document_schema) && document_schema) {
+        return *document_schema;
     }
     
     // If no Document type found, return the first type definition
@@ -332,8 +232,8 @@ TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source) {
     }
     
     // Fallback: convert the root AST type to schema
-    if (parser->base.ast_root && parser->base.ast_root->type) {
-        return ast_type_to_schema(parser->base.ast_root->type, parser->pool);
+    if (ast_root && ast_root->type) {
+        return ast_type_to_schema(ast_root->type, parser->pool);
     }
     
     return NULL;
@@ -349,10 +249,6 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
     if (!parser || ts_node_is_null(type_expr_node)) return NULL;
     
     // Build AST for this type expression
-    #ifdef SIMPLE_SCHEMA_PARSER
-    // For test builds, skip complex transpiler and just return ANY type
-    return create_primitive_schema(LMD_TYPE_ANY, parser->pool);
-    #else
     AstNode* ast_node = build_expr(&parser->base, type_expr_node);
     if (!ast_node || !ast_node->type) {
         return create_primitive_schema(LMD_TYPE_ANY, parser->pool);
@@ -360,16 +256,17 @@ TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node) {
     
     // Convert AST type to schema
     return ast_type_to_schema(ast_node->type, parser->pool);
-    #endif
 }
 
 // ==================== Helper Functions ====================
 
 void parse_all_type_definitions(SchemaParser* parser, TSNode root) {
-    // Extract type definitions from the already built AST
-    if (parser->base.ast_root) {
-        extract_type_definitions_from_ast(parser, parser->base.ast_root);
-    }
+    // Use transpiler to build complete AST
+    const char* source = parser->current_source;
+    if (!source) return;
+    
+    AstNode* ast_root = transpiler_build_ast(&parser->base, source);
+    extract_type_definitions_from_ast(parser, ast_root);
 }
 
 void parse_all_type_definitions_recursive(SchemaParser* parser, TSNode node) {
@@ -380,19 +277,16 @@ TypeSchema* find_type_definition(SchemaParser* parser, const char* type_name) {
     if (!parser || !type_name) return NULL;
     
     StrView name = {.str = type_name, .length = strlen(type_name)};
-    SchemaRegistryEntry search_entry = {.name = name, .schema = NULL};
-    const SchemaRegistryEntry* found = (const SchemaRegistryEntry*)hashmap_get(parser->type_registry, &search_entry);
+    TypeSchema** schema = NULL;
     
-    if (found) {
-        return found->schema;
+    if (hashmap_get(parser->type_registry, &name, &schema) && schema) {
+        return *schema;
     }
     
     return NULL;
 }
 
 // ==================== Schema Factory Functions (Unchanged) ====================
-
-extern "C" {
 
 TypeSchema* create_primitive_schema(TypeId primitive_type, VariableMemPool* pool) {
     TypeSchema* schema = (TypeSchema*)pool_calloc(pool, sizeof(TypeSchema));
@@ -499,11 +393,7 @@ TypeSchema* create_literal_schema(Item literal_value, VariableMemPool* pool) {
     return schema;
 }
 
-}
-
 // ==================== Utility Functions ====================
-
-extern "C" {
 
 StrView strview_from_cstr(const char* str) {
     if (!str) return (StrView){NULL, 0};
@@ -529,13 +419,10 @@ TypeSchema* resolve_reference(TypeSchema* ref_schema, HashMap* registry) {
         return ref_schema;
     }
     
-    SchemaRegistryEntry search_entry = {.name = ref_schema->name, .schema = NULL};
-    const SchemaRegistryEntry* found = (const SchemaRegistryEntry*)hashmap_get(registry, &search_entry);
-    if (found) {
-        return found->schema;
+    TypeSchema** resolved = NULL;
+    if (hashmap_get(registry, &ref_schema->name, &resolved) && resolved) {
+        return *resolved;
     }
     
     return ref_schema;  // Return unresolved reference
-}
-
 }

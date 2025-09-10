@@ -1956,7 +1956,12 @@ AstNode* build_module_import(Transpiler* tp, TSNode import_node) {
             char* ch = buf->str + buf->length - (ast_node->module.length - 1);
             while (*ch) { if (*ch == '.') *ch = '/';  ch++; }
             strbuf_append_str(buf, ".ls");
+            #ifdef SIMPLE_SCHEMA_PARSER
+            // Skip module loading in simple schema parser mode
+            ast_node->script = nullptr;
+            #else
             ast_node->script = load_script(tp->runtime, buf->str, NULL);
+            #endif
             strbuf_free(buf);
             // import names/definitions from the modules
             if (ast_node->script) {

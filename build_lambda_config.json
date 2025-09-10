@@ -40,6 +40,7 @@
         "lambda/lambda-mem.cpp",
         "lambda/validator/validate.cpp",
         "lambda/validator/validator.cpp",
+        "lambda/validator/schema_parser.cpp",
         "lambda/schema_builder.cpp",
         "lambda/input/css_tokenizer.c",
         "lambda/input/css_properties.c",
@@ -203,8 +204,11 @@
                 "lambda/utf_string.cpp",
                 "lambda/name_pool.cpp",
                 "lambda/lambda-data.cpp",
+                "lambda/build_ast.cpp",
                 "lambda/validator/validate.cpp",
                 "lambda/validator/validator.cpp",
+                "lambda/validator/schema_parser.cpp",
+                "test/test_stubs.cpp",
                 "lambda/parse.c",
                 "lambda/input/css_tokenizer.c",
                 "lambda/input/css_parser.c",
@@ -217,6 +221,7 @@
             ],
             "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "curl", "nghttp2", "ssl", "crypto", "z", "CoreFoundation", "CoreServices", "SystemConfiguration", "criterion"],
             "include": "lib/mem-pool/include",
+            "defines": ["SIMPLE_SCHEMA_PARSER"],
             "special_flags": "-lstdc++",
             "link": "static"
         }
