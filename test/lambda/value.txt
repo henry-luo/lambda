@@ -43,7 +43,7 @@ nan
 [1, -2, 0]
 [1, true, "str"]
 [false, null]
-[1, ['symbol-xyz', null], 0.5, ("great", "!")]
+[1, ['symbol-xyz', null], 0.5, "great", "!"]
 "Map ==============="
 {}
 {

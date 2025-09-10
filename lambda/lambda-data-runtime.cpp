@@ -4,6 +4,7 @@
 
 extern __thread Context* context;
 void array_set(Array* arr, int index, Item itm);
+void array_push(Array* arr, Item itm);
 void set_fields(TypeMap *map_type, void* map_data, va_list args);
 
 Item typeditem_to_item(TypedItem *titem) {
@@ -50,9 +51,7 @@ Array* array_fill(Array* arr, int count, ...) {
         arr->capacity = count;
         arr->items = (Item*)malloc(count * sizeof(Item));
         for (int i = 0; i < count; i++) {
-            if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
-            array_set(arr, i, va_arg(args, Item));
-            arr->length++;
+            array_push(arr, va_arg(args, Item));
         }
         va_end(args);
     }
@@ -179,22 +178,6 @@ ArrayFloat* array_float() {
     frame_start();
     return arr;
 }
-
-// ArrayFloat* array_float(int count, ...) {
-//     if (count <= 0) { return NULL; }
-//     va_list args;
-//     va_start(args, count);
-//     ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
-//     arr->type_id = LMD_TYPE_ARRAY_FLOAT;
-//     arr->capacity = count;
-//     arr->items = (double*)malloc(count * sizeof(double));
-//     arr->length = count;
-//     for (int i = 0; i < count; i++) {
-//         arr->items[i] = va_arg(args, double);
-//     }       
-//     va_end(args);
-//     return arr;
-// }
 
 // used when there's no interleaving with transpiled code
 ArrayFloat* array_float_new(int length) {
