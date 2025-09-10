@@ -12,12 +12,12 @@ VALIDATOR_HEADERS = $(wildcard $(VALIDATOR_DIR)/*.h)
 VALIDATOR_OBJECTS = $(VALIDATOR_SOURCES:.c=.o)
 
 # Main validator sources (excluding main.c for library)
-VALIDATOR_LIB_SOURCES = validator.cpp schema_parser.c validation_engine.c \
+VALIDATOR_LIB_SOURCES = validator.cpp validation_engine.c \
                        doc_validators.c error_reporting.c validate.cpp
 VALIDATOR_LIB_OBJECTS = $(VALIDATOR_LIB_SOURCES:.cpp=.o)
 VALIDATOR_LIB_OBJECTS := $(VALIDATOR_LIB_OBJECTS:.c=.o)
 
-# Dependencies from parent Lambda implementation
+# Dependencies from parent Lambda implementation (AST-based)
 LAMBDA_LIB = $(PARENT_DIR)/lambda.a
 REQUIRED_LIBS = $(LAMBDA_LIB) \
                $(PARENT_DIR)/lib/arraylist.o \
@@ -25,7 +25,9 @@ REQUIRED_LIBS = $(LAMBDA_LIB) \
                $(PARENT_DIR)/lib/strbuf.o \
                $(PARENT_DIR)/lib/strview.o \
                $(PARENT_DIR)/lib/mem-pool/src/variable.o \
-               $(PARENT_DIR)/lib/mem-pool/src/buffer.o
+               $(PARENT_DIR)/lib/mem-pool/src/buffer.o \
+               $(PARENT_DIR)/transpiler.o \
+               $(PARENT_DIR)/build_ast.o
 
 # External dependencies
 TREE_SITTER_LIB = $(PARENT_DIR)/lambda/tree-sitter/libtree-sitter.a
@@ -37,8 +39,9 @@ CXX = g++
 CFLAGS = -std=c11 -Wall -Wextra -O2 -g
 CXXFLAGS = -std=c++23 -Wall -Wextra -O2 -g
 INCLUDES = -I$(PARENT_DIR) -I$(PARENT_DIR)/lib -I$(PARENT_DIR)/lib/mem-pool/include \
-           -I$(PARENT_DIR)/lambda -I$(PARENT_DIR)/lambda/tree-sitter/lib/include
-DEFINES = -DLAMBDA_VALIDATOR
+           -I$(PARENT_DIR)/lambda -I$(PARENT_DIR)/lambda/tree-sitter/lib/include \
+           -I$(PARENT_DIR)/lambda/validator
+DEFINES = -DLAMBDA_VALIDATOR -DLAMBDA_AST_VALIDATOR
 
 # Debug build settings
 DEBUG_CFLAGS = -DDEBUG -O0 -g3 -fsanitize=address -fsanitize=undefined

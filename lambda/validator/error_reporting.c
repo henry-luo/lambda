@@ -5,7 +5,7 @@
  * @license MIT
  */
 
-#include "validator.h"
+#include "validator.hpp"
 #include "../../lib/strbuf.h"
 #include <string.h>
 #include <assert.h>
