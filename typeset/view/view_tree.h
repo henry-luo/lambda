@@ -13,6 +13,32 @@ typedef struct ViewStyle ViewStyle;
 typedef struct ViewFont ViewFont;
 typedef struct ViewPage ViewPage;
 typedef struct TypesetEngine TypesetEngine;
+typedef struct MathMetrics MathMetrics;
+typedef struct MathLayoutContext MathLayoutContext;
+
+// Mathematical styling and metrics
+typedef struct MathMetrics {
+    double font_size;            // Font size for this level
+    double axis_height;          // Mathematical axis position
+    double x_height;             // x-height for sizing
+    double sup_shift;            // Superscript shift
+    double sub_shift;            // Subscript shift
+    double num_shift;            // Numerator shift
+    double denom_shift;          // Denominator shift
+    double frac_line_thickness;  // Fraction line thickness
+    double radical_rule_thickness; // Radical rule thickness
+    double default_rule_thickness; // Default rule thickness
+} MathMetrics;
+
+// Mathematical layout parameters
+typedef struct MathLayoutContext {
+    enum ViewMathStyle style;    // Display, text, script, scriptscript
+    bool cramped;                // Cramped style flag
+    double scale_factor;         // Relative scaling
+    MathMetrics metrics;         // Typographic metrics
+    ViewFont* math_font;         // Math font
+    ViewFont* text_font;         // Text font
+} MathLayoutContext;
 
 // Device-independent coordinate system (typographical points, 1/72 inch)
 typedef struct ViewPoint {
@@ -92,18 +118,30 @@ typedef struct ViewTextRun {
 
 typedef struct ViewMathElement {
     enum ViewMathElementType {
-        VIEW_MATH_ATOM,
-        VIEW_MATH_FRACTION,
-        VIEW_MATH_SUPERSCRIPT,
-        VIEW_MATH_RADICAL,
-        VIEW_MATH_MATRIX,
-        VIEW_MATH_DELIMITER
+        VIEW_MATH_ATOM,          // Single symbol/variable
+        VIEW_MATH_FRACTION,      // Numerator over denominator
+        VIEW_MATH_SUPERSCRIPT,   // Exponent/power
+        VIEW_MATH_SUBSCRIPT,     // Index/subscript
+        VIEW_MATH_RADICAL,       // Square root, nth root
+        VIEW_MATH_MATRIX,        // Matrix/table layout
+        VIEW_MATH_DELIMITER,     // Parentheses, brackets
+        VIEW_MATH_FUNCTION,      // sin, cos, log, etc.
+        VIEW_MATH_OPERATOR,      // +, -, ×, ÷, ∫, ∑
+        VIEW_MATH_ACCENT,        // Hat, tilde, bar over symbols
+        VIEW_MATH_SPACING,       // Mathematical spacing
+        VIEW_MATH_GROUP,         // Grouping container
+        VIEW_MATH_UNDEROVER,     // Under/over scripts (limits)
+        VIEW_MATH_ENVIRONMENT    // Align, cases, etc.
     } type;                     // Type of math element
     
     // Mathematical properties
     double width, height, depth; // Math dimensions
     double axis_height;         // Mathematical axis
     double italic_correction;   // Italic correction
+    double sup_shift;           // Superscript shift
+    double sub_shift;           // Subscript shift
+    double num_shift;           // Numerator shift
+    double denom_shift;         // Denominator shift
     
     // Math style
     enum ViewMathStyle {
@@ -126,7 +164,61 @@ typedef struct ViewMathElement {
     } math_class;               // Math class for spacing
     
     // Content (union based on type)
-    void* math_content;         // Type-specific content
+    union {
+        struct {
+            char* symbol;       // Symbol text
+            char* unicode;      // Unicode representation
+        } atom;
+        
+        struct {
+            ViewNode* numerator;   // Fraction numerator
+            ViewNode* denominator; // Fraction denominator
+            double line_thickness; // Fraction line thickness
+        } fraction;
+        
+        struct {
+            ViewNode* base;     // Base element
+            ViewNode* script;   // Super/subscript element
+        } script;
+        
+        struct {
+            ViewNode* radicand; // Expression under radical
+            ViewNode* index;    // Root index (NULL for square root)
+        } radical;
+        
+        struct {
+            ViewNode** rows;    // Matrix rows
+            int row_count;      // Number of rows
+            int* col_counts;    // Columns per row
+            char* delim_style;  // Delimiter style
+        } matrix;
+        
+        struct {
+            char* open_delim;   // Opening delimiter
+            char* close_delim;  // Closing delimiter
+            ViewNode* content;  // Delimited content
+        } delimiter;
+        
+        struct {
+            char* function_name; // Function name
+            ViewNode* argument;  // Function argument
+        } function;
+        
+        struct {
+            char* operator_name; // Operator name
+            ViewNode* operand;   // Operand (for unary ops)
+        } operator;
+        
+        struct {
+            char* accent_type;  // Accent type
+            ViewNode* base;     // Base element
+        } accent;
+        
+        struct {
+            double amount;      // Spacing amount in points
+            char* space_type;   // Type of space
+        } spacing;
+    } content;                  // Type-specific content
 } ViewMathElement;
 
 typedef struct ViewGeometry {
