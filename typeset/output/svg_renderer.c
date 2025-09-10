@@ -4,6 +4,9 @@
 #include <string.h>
 #include <stdio.h>
 
+// Forward declarations
+bool svg_renderer_render_node(ViewRenderer* base_renderer, ViewNode* node);
+
 // SVG renderer implementation
 
 SVGRenderer* svg_renderer_create(void) {
@@ -319,21 +322,195 @@ void svg_render_line(SVGRenderer* renderer, ViewNode* node) {
 }
 
 void svg_render_math_element(SVGRenderer* renderer, ViewNode* node) {
-    // For now, render math elements as text with special styling
     if (!node->content.math_elem) return;
+    
+    ViewMathElement* math_elem = node->content.math_elem;
+    
+    // Dispatch to specific math rendering function based on type
+    switch (math_elem->type) {
+        case VIEW_MATH_ATOM:
+            svg_render_math_atom(renderer, node);
+            break;
+        case VIEW_MATH_FRACTION:
+            svg_render_math_fraction(renderer, node);
+            break;
+        case VIEW_MATH_SUPERSCRIPT:
+        case VIEW_MATH_SUBSCRIPT:
+            svg_render_math_script(renderer, node);
+            break;
+        case VIEW_MATH_RADICAL:
+            svg_render_math_radical(renderer, node);
+            break;
+        case VIEW_MATH_MATRIX:
+            svg_render_math_matrix(renderer, node);
+            break;
+        case VIEW_MATH_DELIMITER:
+            svg_render_math_delimiter(renderer, node);
+            break;
+        case VIEW_MATH_FUNCTION:
+            svg_render_math_function(renderer, node);
+            break;
+        case VIEW_MATH_OPERATOR:
+            svg_render_math_operator(renderer, node);
+            break;
+        case VIEW_MATH_SPACING:
+            svg_render_math_spacing(renderer, math_elem->content.spacing.amount);
+            break;
+        default:
+            // Fallback: render as generic math text
+            svg_render_math_atom(renderer, node);
+            break;
+    }
+}
+
+// Render mathematical atom (symbol/variable)
+void svg_render_math_atom(SVGRenderer* renderer, ViewNode* node) {
+    if (!node->content.math_elem || node->content.math_elem->type != VIEW_MATH_ATOM) return;
+    
+    ViewMathElement* math_elem = node->content.math_elem;
+    const char* symbol = math_elem->content.atom.symbol;
+    const char* unicode = math_elem->content.atom.unicode;
+    
+    if (!symbol && !unicode) return;
     
     strbuf_append_str(renderer->svg_content, "<text");
     
+    // Position
     strbuf_append_format(renderer->svg_content, " x=\"%.2f\" y=\"%.2f\"", 
                         node->position.x, node->position.y + node->size.height * 0.8);
     
+    // Font size
     strbuf_append_format(renderer->svg_content, " font-size=\"%.2f\"", node->size.height);
-    strbuf_append_str(renderer->svg_content, " class=\"math-element\"");
+    
+    // Class and styling
+    strbuf_append_str(renderer->svg_content, " class=\"math-atom\"");
     strbuf_append_str(renderer->svg_content, " fill=\"black\"");
     
     strbuf_append_str(renderer->svg_content, ">");
-    strbuf_append_str(renderer->svg_content, "[math]"); // Placeholder
+    
+    // Use Unicode if available, otherwise use symbol
+    const char* display_text = unicode ? unicode : symbol;
+    svg_escape_text(renderer, display_text);
+    
     strbuf_append_str(renderer->svg_content, "</text>\n");
+}
+
+// Render mathematical fraction
+void svg_render_math_fraction(SVGRenderer* renderer, ViewNode* node) {
+    if (!node->content.math_elem || node->content.math_elem->type != VIEW_MATH_FRACTION) return;
+    
+    ViewMathElement* math_elem = node->content.math_elem;
+    ViewNode* numerator = math_elem->content.fraction.numerator;
+    ViewNode* denominator = math_elem->content.fraction.denominator;
+    double line_thickness = math_elem->content.fraction.line_thickness;
+    
+    if (!numerator || !denominator) return;
+    
+    // Start fraction group
+    strbuf_append_str(renderer->svg_content, "<g class=\"math-fraction\">\n");
+    
+    // Render numerator
+    if (numerator->first_child) {
+        ViewNode* child = numerator->first_child;
+        while (child) {
+            svg_renderer_render_node((ViewRenderer*)renderer, child);
+            child = child->next_sibling;
+        }
+    }
+    
+    // Render fraction line
+    double line_y = node->position.y + node->size.height * 0.5;
+    svg_render_fraction_line(renderer, node->position.x, line_y, node->size.width, line_thickness);
+    
+    // Render denominator
+    if (denominator->first_child) {
+        ViewNode* child = denominator->first_child;
+        while (child) {
+            svg_renderer_render_node((ViewRenderer*)renderer, child);
+            child = child->next_sibling;
+        }
+    }
+    
+    strbuf_append_str(renderer->svg_content, "</g>\n");
+}
+
+// Render superscript/subscript
+void svg_render_math_script(SVGRenderer* renderer, ViewNode* node) {
+    if (!node->content.math_elem) return;
+    
+    ViewMathElement* math_elem = node->content.math_elem;
+    bool is_superscript = (math_elem->type == VIEW_MATH_SUPERSCRIPT);
+    
+    ViewNode* base = math_elem->content.script.base;
+    ViewNode* script = math_elem->content.script.script;
+    
+    if (!base || !script) return;
+    
+    // Start script group
+    strbuf_append_format(renderer->svg_content, "<g class=\"math-%s\">\n", 
+                        is_superscript ? "superscript" : "subscript");
+    
+    // Render base
+    if (base->first_child) {
+        ViewNode* child = base->first_child;
+        while (child) {
+            svg_renderer_render_node((ViewRenderer*)renderer, child);
+            child = child->next_sibling;
+        }
+    }
+    
+    // Render script
+    if (script->first_child) {
+        ViewNode* child = script->first_child;
+        while (child) {
+            svg_renderer_render_node((ViewRenderer*)renderer, child);
+            child = child->next_sibling;
+        }
+    }
+    
+    strbuf_append_str(renderer->svg_content, "</g>\n");
+}
+
+// Render fraction line
+void svg_render_fraction_line(SVGRenderer* renderer, double x, double y, double width, double thickness) {
+    strbuf_append_str(renderer->svg_content, "<line");
+    strbuf_append_format(renderer->svg_content, " x1=\"%.2f\" y1=\"%.2f\"", x, y);
+    strbuf_append_format(renderer->svg_content, " x2=\"%.2f\" y2=\"%.2f\"", x + width, y);
+    strbuf_append_format(renderer->svg_content, " stroke=\"black\" stroke-width=\"%.2f\"", thickness);
+    strbuf_append_str(renderer->svg_content, " class=\"fraction-line\"/>\n");
+}
+
+// Render mathematical spacing
+void svg_render_math_spacing(SVGRenderer* renderer, double amount) {
+    // Mathematical spacing is handled by positioning, so this is mostly a no-op for SVG
+    // We could add a comment for debugging
+    strbuf_append_format(renderer->svg_content, "<!-- math-spacing: %.2f -->\n", amount);
+}
+
+// Placeholder implementations for remaining math rendering functions
+void svg_render_math_radical(SVGRenderer* renderer, ViewNode* radical_node) {
+    // TODO: Implement radical (square root) rendering
+    strbuf_append_str(renderer->svg_content, "<text class=\"math-radical\">√[placeholder]</text>\n");
+}
+
+void svg_render_math_matrix(SVGRenderer* renderer, ViewNode* matrix_node) {
+    // TODO: Implement matrix rendering
+    strbuf_append_str(renderer->svg_content, "<text class=\"math-matrix\">[matrix placeholder]</text>\n");
+}
+
+void svg_render_math_delimiter(SVGRenderer* renderer, ViewNode* delimiter_node) {
+    // TODO: Implement delimiter rendering
+    strbuf_append_str(renderer->svg_content, "<text class=\"math-delimiter\">(placeholder)</text>\n");
+}
+
+void svg_render_math_function(SVGRenderer* renderer, ViewNode* function_node) {
+    // TODO: Implement function rendering
+    strbuf_append_str(renderer->svg_content, "<text class=\"math-function\">f(placeholder)</text>\n");
+}
+
+void svg_render_math_operator(SVGRenderer* renderer, ViewNode* operator_node) {
+    // TODO: Implement operator rendering
+    strbuf_append_str(renderer->svg_content, "<text class=\"math-operator\">op</text>\n");
 }
 
 void svg_escape_text(SVGRenderer* renderer, const char* text) {
