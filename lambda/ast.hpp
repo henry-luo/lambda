@@ -56,6 +56,7 @@ extern "C" {
 #define SYM_PRIMARY_TYPE sym_primary_type
 #define SYM_BINARY_TYPE sym_binary_type
 #define SYM_TYPE_DEFINE sym_type_stam
+#define SYM_TYPE_OCCURRENCE sym_type_occurrence
 
 #define SYM_FUNC_STAM sym_fn_stam
 #define SYM_FUNC_EXPR_STAM sym_fn_expr_stam
@@ -143,6 +144,7 @@ typedef enum AstNodeType {
     AST_NODE_ELMT_TYPE,
     AST_NODE_FUNC_TYPE,
     AST_NODE_BINARY_TYPE,
+    AST_NODE_OCCURRENCE_TYPE,
     AST_NODE_FUNC,
     AST_NODE_FUNC_EXPR,
     AST_NODE_IMPORT,

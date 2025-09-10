@@ -41,6 +41,7 @@
         "lambda/validator/validate.cpp",
         "lambda/validator/validator.cpp",
         "lambda/validator/schema_parser.cpp",
+        "lambda/schema_builder.cpp",
         "lambda/input/css_tokenizer.c",
         "lambda/input/css_properties.c",
         "lambda/input/css_parser.c",
