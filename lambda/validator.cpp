@@ -5,7 +5,7 @@
  * @license MIT
  */
 
-#include "validator.h"
+#include "validator.hpp"
 #include "transpiler.hpp"
 #include "ast.hpp"
 #include "lambda-data.hpp"
@@ -22,19 +22,17 @@
 extern "C" {
     TSParser* lambda_parser(void);
     TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
-    void find_errors(TSNode node);
 }
 
-// Forward declarations from build_ast.cpp
+// C++ function declarations (no extern "C" needed)
+void find_errors(TSNode node);
 AstNode* build_script(Transpiler* tp, TSNode script_node);
 ArrayList* arraylist_new(size_t initial_capacity);
 
-// External function declarations
-extern "C" {
-    Transpiler* transpiler_create(VariableMemPool* pool);
-    void transpiler_destroy(Transpiler* transpiler);
-    AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source);
-}
+// C++ function declarations (no extern "C" needed)
+Transpiler* transpiler_create(VariableMemPool* pool);
+void transpiler_destroy(Transpiler* transpiler);
+AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source);
 
 // Forward declarations for functions we need to implement
 Transpiler* transpiler_create(VariableMemPool* pool) {
@@ -148,28 +146,23 @@ AstValidator* ast_validator_create(VariableMemPool* pool) {
     // Initialize memory pool
     validator->pool = pool;
     
-    // Create transpiler for AST building
     validator->transpiler = transpiler_create(pool);
     if (!validator->transpiler) {
         return nullptr;
     }
     
-    // Create type definitions registry
-    validator->type_definitions = hashmap_new(
-        sizeof(TypeRegistryEntry), 32, 0, 0,
-        type_entry_hash, type_entry_compare, nullptr, nullptr
-    );
-    
+    // Initialize type definitions registry
+    validator->type_definitions = hashmap_new(sizeof(TypeRegistryEntry), 0, 0, 0, 
+                                   type_entry_hash, type_entry_compare, NULL, pool);
     if (!validator->type_definitions) {
         return nullptr;
     }
     
-    // Initialize default options
+    // Initialize default validation options
     validator->default_options.strict_mode = false;
     validator->default_options.allow_unknown_fields = true;
-    validator->default_options.allow_empty_elements = false;
+    validator->default_options.allow_empty_elements = true;
     validator->default_options.max_depth = 100;
-    validator->default_options.timeout_ms = 0;
     
     return validator;
 }

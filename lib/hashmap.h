@@ -9,6 +9,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // hashmap is an open addressed hash map using robinhood hashing.
 struct hashmap {
     void *(*malloc)(size_t);
@@ -78,5 +82,9 @@ void hashmap_set_load_factor(struct hashmap *map, double load_factor);
 
 // DEPRECATED: use `hashmap_new_with_allocator`
 void hashmap_set_allocator(void *(*malloc)(size_t), void (*free)(void*));
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

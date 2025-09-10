@@ -7,10 +7,6 @@
 
 #pragma once
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "../lib/mem-pool/include/mem_pool.h"
 #include "../lib/hashmap.h"
 #include "lambda-data.hpp"
@@ -186,7 +182,3 @@ bool is_item_compatible_with_type(TypedItem item, Type* type);
  * Get string representation of Type*
  */
 const char* type_to_string(Type* type);
-
-#ifdef __cplusplus
-}
-#endif

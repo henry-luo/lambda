@@ -714,13 +714,29 @@ build_link_objects() {
     
     # Determine linker
     local linker=""
-    if [ "$force_cpp" = "true" ] || [[ "$unique_objects" == *".cpp"* ]] || [[ "$link_libraries" == *".cpp"* ]]; then
+    if [ "$force_cpp" = "true" ]; then
         linker="${CXX:-clang++}"
     elif [ "$force_cpp" = "false" ]; then
         linker="${CC:-clang}"
     else
         # Auto-detect based on object files and libraries
-        if [[ "$unique_objects" == *".cpp"* ]] || [[ "$link_libraries" == *".cpp"* ]]; then
+        # Check if any object files were compiled from C++ sources by looking for common C++ object patterns
+        local has_cpp_objects=false
+        for obj in $unique_objects; do
+            # Check if corresponding source file exists and is C++
+            local base_name=$(basename "$obj" .o)
+            local dir_name=$(dirname "$obj")
+            # Look for C++ source files that would generate this object
+            if [ -f "${dir_name}/../${base_name}.cpp" ] || [ -f "${base_name}.cpp" ] || \
+               [ -f "${dir_name}/../${base_name}.cc" ] || [ -f "${base_name}.cc" ] || \
+               [ -f "${dir_name}/../${base_name}.cxx" ] || [ -f "${base_name}.cxx" ]; then
+                has_cpp_objects=true
+                break
+            fi
+        done
+        
+        # Also check if libraries contain C++ references
+        if [ "$has_cpp_objects" = "true" ] || [[ "$link_libraries" == *".cpp"* ]] || [[ "$link_libraries" == *"stdc++"* ]]; then
             linker="${CXX:-clang++}"
         else
             linker="${CC:-clang}"

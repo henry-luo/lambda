@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * @file validator.h
+ * @file validator.hpp
  * @brief Lambda Schema Validator - C/C++ Implementation
  * @author Henry Luo
  * @license MIT
@@ -10,11 +10,14 @@
  * Integrates with existing Lambda transpiler infrastructure.
  */
 
+#include <cstdint>
+#include <cstddef>
+#include "../lambda-data.hpp"
+#include "../ast.hpp"
+
 extern "C" {
 #include "../../lib/hashmap.h"
 }
-#include "../lambda-data.hpp"
-#include "../ast.hpp"
 
 // ==================== Schema Type System Extensions ====================
 

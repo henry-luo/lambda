@@ -13,7 +13,11 @@ extern "C" {
     Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
 }
 
+// Forward declaration for AST validation function
+AstValidationResult* run_ast_validation(const char* data_file, const char* schema_file, const char* input_format);
+
 // AST-based validation implementation
+/*
 ValidationResult* run_ast_validation(const char* data_file, const char* schema_file, const char* input_format) {
     printf("Lambda AST Validator v2.0\n");
     printf("Validating '%s' using AST-based validation\n", data_file);
@@ -90,6 +94,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
     
     return result;
 }
+*/
 
 ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format) {
     fprintf(stderr, "TRACE: run_validation() started - using AST validator\n");
@@ -110,7 +115,22 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
     if (is_lambda_file) {
         fprintf(stderr, "TRACE: Using AST validation for Lambda file\n");
         fflush(stderr);
-        return run_ast_validation(data_file, schema_file, input_format);
+        AstValidationResult* ast_result = run_ast_validation(data_file, schema_file, input_format);
+        if (!ast_result) {
+            return nullptr;
+        }
+        
+        // Convert AstValidationResult to ValidationResult for compatibility
+        ValidationResult* result = (ValidationResult*)malloc(sizeof(ValidationResult));
+        if (!result) {
+            return nullptr;
+        }
+        
+        result->valid = ast_result->valid;
+        result->error_count = ast_result->error_count;
+        result->errors = (ValidationError*)ast_result->errors;
+        
+        return result;
     }
     
     // Fall back to old schema-based validation for other formats
@@ -367,152 +387,5 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
     fprintf(stderr, "TRACE: run_validation() completed\n");
     fflush(stderr);
     
-    return result;
-}
-
-// Validation execution function that can be called directly by tests
-ValidationResult* exec_validation(int argc, char* argv[]) {
-    // Extract validation argument parsing logic from main() function
-    // This allows tests to call validation directly without spawning new processes
-    printf("Starting validation with arguments\n");
-    if (argc < 2) {
-        printf("Error: No file specified for validation\n");
-        printf("Usage: validate [-s <schema>] [-f <format>] <file> [files...]\n");
-        return NULL;
-    }
-    
-    const char* data_file = nullptr;
-    const char* schema_file = nullptr;  // Will be determined based on format
-    const char* input_format = nullptr;  // Auto-detect by default
-    bool schema_explicitly_set = false;
-    
-    // Parse validation arguments (skip argv[0] which would be "validate")
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
-            schema_file = argv[i + 1];
-            schema_explicitly_set = true;
-            i++; // Skip the schema filename
-        } else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) {
-            input_format = argv[i + 1];
-            i++; // Skip the format name
-        } else if (argv[i][0] != '-') {
-            // This is the input file
-            if (!data_file) {
-                data_file = argv[i];
-            } else {
-                printf("Error: Multiple input files not yet supported\n");
-                return NULL;
-            }
-        } else {
-            printf("Error: Unknown validation option '%s'\n", argv[i]);
-            printf("Usage: validate [-s <schema>] [-f <format>] <file>\n");
-            printf("Formats: auto, json, csv, ini, toml, yaml, xml, markdown, rst, html, latex, rtf, pdf, wiki, asciidoc, man, eml, vcf, ics, text\n");
-            return NULL;
-        }
-    }
-    
-    if (!data_file) {
-        printf("Error: No input file specified\n");
-        printf("Usage: validate [-s <schema>] [-f <format>] <file>\n");
-        return NULL;
-    }
-    
-    // Auto-detect format if not specified
-    if (!input_format) {
-        const char* ext = strrchr(data_file, '.');
-        if (ext) {
-            if (strcasecmp(ext, ".html") == 0 || strcasecmp(ext, ".htm") == 0) {
-                input_format = "html";
-            } else if (strcasecmp(ext, ".md") == 0 || strcasecmp(ext, ".markdown") == 0) {
-                input_format = "markdown";
-            } else if (strcasecmp(ext, ".json") == 0) {
-                input_format = "json";
-            } else if (strcasecmp(ext, ".xml") == 0) {
-                input_format = "xml";
-            } else if (strcasecmp(ext, ".yaml") == 0 || strcasecmp(ext, ".yml") == 0) {
-                input_format = "yaml";
-            } else if (strcasecmp(ext, ".csv") == 0) {
-                input_format = "csv";
-            } else if (strcasecmp(ext, ".ini") == 0) {
-                input_format = "ini";
-            } else if (strcasecmp(ext, ".toml") == 0) {
-                input_format = "toml";
-            } else if (strcasecmp(ext, ".eml") == 0) {
-                input_format = "eml";
-            } else if (strcasecmp(ext, ".ics") == 0) {
-                input_format = "ics";
-            } else if (strcasecmp(ext, ".vcf") == 0) {
-                input_format = "vcf";
-            } else if (strcasecmp(ext, ".rst") == 0) {
-                input_format = "rst";
-            } else if (strcasecmp(ext, ".wiki") == 0) {
-                input_format = "wiki";
-            } else if (strcasecmp(ext, ".adoc") == 0 || strcasecmp(ext, ".asciidoc") == 0) {
-                input_format = "asciidoc";
-            } else if (strcasecmp(ext, ".1") == 0 || strcasecmp(ext, ".2") == 0 || 
-                      strcasecmp(ext, ".3") == 0 || strcasecmp(ext, ".4") == 0 ||
-                      strcasecmp(ext, ".5") == 0 || strcasecmp(ext, ".6") == 0 ||
-                      strcasecmp(ext, ".7") == 0 || strcasecmp(ext, ".8") == 0 ||
-                      strcasecmp(ext, ".9") == 0 || strcasecmp(ext, ".man") == 0) {
-                input_format = "man";
-            } else if (strcasecmp(ext, ".textile") == 0 || strcasecmp(ext, ".txtl") == 0) {
-                input_format = "textile";
-            } else if (strcasecmp(ext, ".m") == 0 || strcasecmp(ext, ".mk") == 0 || strcasecmp(ext, ".mark") == 0) {
-                input_format = "mark";
-            }
-            // If no recognized extension, keep as nullptr for Lambda format
-        }
-    }
-    
-    // Determine schema file if not explicitly set
-    if (!schema_explicitly_set) {
-        // Check if this is a Lambda file first
-        const char* ext = strrchr(data_file, '.');
-        if (ext && strcmp(ext, ".ls") == 0) {
-            // Lambda files use AST validation - no schema needed
-            schema_file = nullptr;
-            printf("Using AST-based validation for Lambda file\n");
-        } else if (input_format && strcmp(input_format, "html") == 0) {
-            schema_file = "lambda/input/html5_schema.ls";
-            printf("Using HTML5 schema for HTML input\n");
-        } else if (input_format && strcmp(input_format, "eml") == 0) {
-            schema_file = "lambda/input/eml_schema.ls";
-            printf("Using EML schema for email input\n");
-        } else if (input_format && strcmp(input_format, "ics") == 0) {
-            schema_file = "lambda/input/ics_schema.ls";
-            printf("Using ICS schema for calendar input\n");
-        } else if (input_format && strcmp(input_format, "vcf") == 0) {
-            schema_file = "lambda/input/vcf_schema.ls";
-            printf("Using VCF schema for vCard input\n");
-        } else if (input_format && (strcmp(input_format, "asciidoc") == 0 || 
-                                 strcmp(input_format, "man") == 0 ||
-                                 strcmp(input_format, "markdown") == 0 ||
-                                 strcmp(input_format, "rst") == 0 ||
-                                 strcmp(input_format, "textile") == 0 ||
-                                 strcmp(input_format, "wiki") == 0)) {
-            schema_file = "lambda/input/doc_schema.ls";
-            printf("Using document schema for %s input\n", input_format);
-        } else if (!input_format || strcmp(input_format, "lambda") == 0) {
-            // Default to AST validation for Lambda format
-            schema_file = nullptr;
-            printf("Using AST-based validation for Lambda format\n");
-        } else {
-            // For other formats (json, xml, yaml, csv, ini, toml, latex, rtf, pdf, text), require explicit schema
-            printf("Error: Input format '%s' requires an explicit schema file. Use -s <schema_file> option.\n", input_format);
-            printf("Formats with default schemas: html, eml, ics, vcf, asciidoc, man, markdown, rst, textile, wiki\n");
-            printf("Lambda files (*.ls) use automatic AST-based validation\n");
-            return NULL;
-        }
-    }
-    
-    // Call the validation function and return the ValidationResult directly
-    if (schema_file) {
-        printf("Starting validation of '%s' using schema '%s'...\n", data_file, schema_file);
-    } else {
-        printf("Starting AST validation of '%s'...\n", data_file);
-    }
-    ValidationResult* result = run_validation(data_file, schema_file, input_format);
-    
-    // Return the ValidationResult directly to the caller
     return result;
 }

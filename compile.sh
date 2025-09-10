@@ -711,8 +711,8 @@ else
     # ===== UNIFIED BUILD SYSTEM: Linking Phase =====
     echo "🔗 Starting unified linking process..."
     
-    # Use the new unified linking function
-    if build_link_objects "$OUTPUT" "$OBJECT_FILES" "" "$LIBS $LINK_LIBS" "$LINKER_FLAGS" "auto"; then
+    # Use the new unified linking function (force C++ linking since we have C++ code)
+    if build_link_objects "$OUTPUT" "$OBJECT_FILES" "" "$LIBS $LINK_LIBS" "$LINKER_FLAGS" "true"; then
         echo "✅ Linking completed successfully"
         linking_performed=true
     else
