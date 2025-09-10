@@ -239,12 +239,24 @@ void array_append(Array* arr, Item itm, VariableMemPool *pool) {
     arr->length++;
 }
 
+void array_push(Array* arr, Item item) {
+    TypeId type_id = get_type_id(item);
+    if (type_id == LMD_TYPE_LIST) { // nest list is flattened
+        log_debug("list_push: pushing nested list: %p, type_id: %d", item.list, type_id);
+        // copy over the items
+        List *nest_list = item.list;
+        for (int i = 0; i < nest_list->length; i++) {
+            Item nest_item = nest_list->items[i];
+            array_push(arr, nest_item);
+        }
+        return;
+    }    
+    if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
+    array_set(arr, arr->length, item);
+    arr->length++;
+}
+
 void list_push(List *list, Item item) {
-    if (item.item <= 1024) {
-        // NULL or other invalid pointer
-        log_error("list_push: invalid raw pointer: %p", item.raw_pointer);
-        item = ItemError;  // convert to error
-    }
     TypeId type_id = get_type_id(item);
     // log_debug("list_push: pushing item: type_id: %d", type_id);
     if (type_id == LMD_TYPE_NULL) { return; } // skip NULL value
@@ -266,6 +278,7 @@ void list_push(List *list, Item item) {
     // store the value in the list (and we may need two slots for long/double)
     log_debug("list pushing item: type: %d, length: %ld", type_id, list->length);
     if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
+    // Note: TYPE_ERROR will be stored as it is
     list->items[list->length++] = item;
     switch (item.type_id) {
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL:  case LMD_TYPE_BINARY: {
