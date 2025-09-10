@@ -21,6 +21,8 @@ class PremakeGenerator:
     def _parse_external_libraries(self) -> Dict[str, Dict[str, str]]:
         """Parse external library definitions from JSON config"""
         libraries = {}
+        
+        # Parse regular libraries
         for lib in self.config.get('libraries', []):
             if 'lib' in lib:  # Include both static and dynamic libraries
                 libraries[lib['name']] = {
@@ -28,6 +30,16 @@ class PremakeGenerator:
                     'lib': lib.get('lib', ''),
                     'link': lib.get('link', 'static')
                 }
+        
+        # Parse dev_libraries (development/test-only libraries like ginac, cln)
+        for lib in self.config.get('dev_libraries', []):
+            if 'lib' in lib:  # Include both static and dynamic libraries
+                libraries[lib['name']] = {
+                    'include': lib.get('include', ''),
+                    'lib': lib.get('lib', ''),
+                    'link': lib.get('link', 'static')
+                }
+        
         return libraries
 
     def parse_config(self) -> Dict[str, Any]:

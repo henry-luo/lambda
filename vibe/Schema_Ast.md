@@ -1,221 +1,300 @@
 # Schema AST Integration Plan
 
 **Date:** September 10, 2025  
-**Author:** GitHub Copilot  
-**Status:** Planning Ph2. **Merge Type Building Functions**
-   - Integrate `build_schema_type()` logic into existing builders
-   - Enhance `build_binary_type()` for comprehensive union type support
-   - **Add `build_occurrence_type()` function to handle `Type?`, `Type+`, `Type*` syntax**
-   - Add occurrence support to array/list builders
-   - Implement type reference resolution
+**Author:** Analysis of Lambda Codebase  
+**Status:** Revised - Ready for Implementation
+
 ## Executive Summary
 
-This document outlines the plan to merge the standalone schema parser (`lambda/validator/schema_parser.cpp`) into the main Lambda AST builder (`lambda/build_ast.cpp`) to create a unified type system that supports full schema definitions within Lambda scripts.
+This document outlines the plan to **completely remove** `lambda/validator/schema_parser.cpp` and refactor the validator to use AST built directly by `lambda/build_ast.cpp`. The validator will operate on native Lambda AST structures (TypeMap, TypeArray, TypeElmt) instead of custom schema types, eliminating ~1000 lines of duplicate code.
 
 ## Current State Analysis
 
-### Schema Parser (`schema_parser.cpp`)
-- **Purpose**: Validates data against schema definitions using Tree-sitter parsing
-- **Type System**: Rich schema types (primitives, unions, arrays, maps, elements, occurrences)
-- **Key Features**:
-  - Union types (`Type1 | Type2`)
-  - Element schemas with attributes and content (`<tag attr: Type, Content*>`)
-  - Occurrence modifiers (`Type?`, `Type+`, `Type*`)
-  - Type references and definitions
-  - Map schemas with field definitions
-  - Content type validation
+### Schema Parser (`schema_parser.cpp`) - Current Issues
+- **Duplicated Infrastructure**: Reimplements type building logic already present in AST builder
+- **Custom Type System**: Uses `TypeSchema`, `SchemaMap`, `SchemaElement` structs instead of Lambda's native types
+- **Memory Management**: Uses separate memory pool management instead of transpiler's `ast_pool`
+- **Tree-sitter Integration**: Duplicates Tree-sitter parsing logic from main transpiler
+- **Key Problems**:
+  - `SchemaMap` vs `TypeMap` - duplicate map type representations
+  - `SchemaElement` vs `TypeElmt` - duplicate element type representations  
+  - `SchemaArray` vs `TypeArray` - duplicate array type representations
+  - Custom `build_schema_type()` vs existing `build_*_type()` functions
+  - Separate type registry vs transpiler's existing type system
 
-### AST Builder (`build_ast.cpp`)
-- **Purpose**: Builds AST for Lambda script compilation and execution
-- **Type System**: Runtime types focused on execution (TypeArray, TypeMap, TypeElmt, etc.)
-- **Key Features**:
-  - Function type building (`build_func_type`)
-  - Collection types (`build_array_type`, `build_list_type`, `build_map_type`)
-  - Element types (`build_element_type`)
-  - Type inference and validation during compilation
+### AST Builder (`build_ast.cpp`) - Existing Capabilities
+- **Mature Infrastructure**: Complete type building system with `TypeMap`, `TypeArray`, `TypeElmt`
+- **ShapeEntry System**: Already supports field definitions with names, types, and validation
+- **Occurrence Support**: `build_occurrence_type()` already exists for `Type?`, `Type+`, `Type*`
+- **Union Types**: `build_binary_type()` supports `Type1 | Type2` via binary expressions
+- **Memory Management**: Integrated with transpiler's `ast_pool` for efficient allocation
+- **Key Advantages**:
+  - `TypeMap` with `ShapeEntry` linked list for field definitions
+  - `TypeElmt` with attribute support via `ShapeEntry` system
+  - `TypeArray` with occurrence modifiers already implemented
+  - Unified memory pool management
+  - Integration with Lambda's runtime type system
 
-## Integration Goals
+## Complete Removal Goals
 
-1. **Unified Type System**: Merge schema validation capabilities into the main AST builder
-2. **Enhanced Type Definitions**: Support rich schema syntax in Lambda scripts
-3. **Compile-time Validation**: Enable schema validation during AST building
-4. **Runtime Integration**: Bridge schema types with Lambda's runtime type system
+1. **Delete schema_parser.cpp**: Remove entire file (~1644 lines of duplicate code)
+2. **Refactor Validator API**: Make validator operate directly on AST built by `build_ast.cpp`
+3. **Eliminate Custom Schema Types**: Remove `TypeSchema`, `SchemaMap`, `SchemaElement` structs
+4. **Direct AST Validation**: Validate against native `TypeMap`, `TypeArray`, `TypeElmt` structures
+5. **Preserve Public API**: Keep validator interface unchanged for external users
 
-## Proposed Architecture
+## Complete Removal Architecture
 
-### 1. Enhanced Type Node Structure
+### 1. Validator Refactoring Strategy
 
-Extend the existing AST type nodes to support schema information:
-
-```cpp
-// Enhanced type node that bridges AST and schema
-typedef struct AstSchemaNode : AstTypeNode {
-    TypeSchema* schema_type;     // Schema validation info
-    Type* runtime_type;          // Runtime execution type
-    bool is_schema_definition;   // True for type definitions
-    StrView type_name;           // For type references
-} AstSchemaNode;
-```
-
-### 2. Unified Type Building Functions
-
-Merge and enhance type building functions:
-
-**Current Functions to Enhance:**
-- `build_base_type()` → Support schema primitives and type references
-- `build_array_type()` → Support occurrence modifiers (`Type*`, `Type+`, `Type?`)
-- `build_map_type()` → Support field validation and open/closed maps
-- `build_element_type()` → Support attribute schemas and content validation
-- `build_binary_type()` → Already supports union types (`Type1 | Type2`) via `|` operator
-- **Add `build_occurrence_type()`** → Support occurrence modifiers (`Type?`, `Type+`, `Type*`)
-  - Grammar already defines `type_occurrence` and `sym_type_occurrence` exists
-  - Need to add `AST_NODE_UNARY_TYPE` and `SYM_TYPE_OCCURRENCE` to ast.hpp
-  - Need to handle `sym_type_occurrence` in `build_expr()` switch statement
-
-### 3. Schema-aware AST Building
-
-Integrate schema parsing into the main AST building pipeline:
+**Remove schema_parser.cpp and Use AST Directly:**
 
 ```cpp
-// Enhanced transpiler with schema support
-typedef struct SchemaTranspiler : Transpiler {
-    HashMap* type_registry;      // From schema_parser
-    ArrayList* type_definitions; // From schema_parser
-    bool schema_mode;            // Enable schema validation
-} SchemaTranspiler;
+// BEFORE: Validator uses custom schema types
+ValidationResult* validate_map(SchemaValidator* validator, TypedItem typed_item, 
+                              TypeSchema* schema, ValidationContext* ctx);
+
+// AFTER: Validator uses AST types directly  
+ValidationResult* validate_map(SchemaValidator* validator, TypedItem typed_item,
+                              TypeMap* map_type, ValidationContext* ctx);
+
+// BEFORE: Schema parsing creates TypeSchema
+TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source);
+
+// AFTER: Use transpiler to build AST directly
+AstNode* build_schema_ast(Transpiler* tp, const char* source);
+TypeMap* extract_map_type(AstNode* ast_node);
 ```
 
-### 4. Type Definition Support
+### 2. Direct AST Usage Strategy
 
-Add support for type statements in Lambda scripts:
+**Use Transpiler to Build Schema AST:**
 
-```lambda
-// Type definitions that become part of the AST
-Document = <html lang: string, 
-    <head <title string*>, <meta name: string, content: string>*>?,
-    <body Content*>
->
+```cpp
+// NEW: Schema validator uses transpiler directly
+typedef struct SchemaValidator {
+    Transpiler* transpiler;        // Use existing transpiler instead of SchemaParser
+    VariableMemPool* pool;         // Memory pool
+    ValidationContext* context;    // Validation context
+    ValidationOptions default_options;
+} SchemaValidator;
 
-Person = {
-    name: string,
-    age: int?,
-    email: string | null
+// NEW: Load schema by building AST
+int schema_validator_load_schema(SchemaValidator* validator, const char* schema_source, 
+                                const char* schema_name) {
+    // Use existing transpiler to build AST
+    AstNode* schema_ast = transpiler_build_ast(validator->transpiler, schema_source);
+    
+    // Extract type definitions from AST
+    extract_type_definitions_from_ast(validator, schema_ast, schema_name);
+    return 0;
 }
+```
 
-Content = string | <p string*> | <div Content*>
+**Key Benefits:**
+- No duplicate parsing logic - use existing `transpiler_build_ast()`
+- Direct access to `TypeMap`, `TypeArray`, `TypeElmt` from AST
+- Leverage existing type building functions in `build_ast.cpp`
+- Use transpiler's optimized memory management
+
+### 3. Complete SchemaParser Elimination
+
+**Delete SchemaParser - Use Transpiler Directly:**
+
+```cpp
+// BEFORE: Custom SchemaParser (DELETE ENTIRE STRUCT)
+typedef struct SchemaParser {
+    Transpiler base;             // DUPLICATE - delete
+    HashMap* type_registry;      // DUPLICATE - delete  
+    ArrayList* type_definitions; // DUPLICATE - delete
+    VariableMemPool* pool;       // DUPLICATE - delete
+    const char* current_source;  // DUPLICATE - delete
+    TSTree* current_tree;        // DUPLICATE - delete
+} SchemaParser;
+
+// AFTER: Use existing Transpiler directly
+SchemaValidator* validator = schema_validator_create(pool);
+Transpiler* tp = transpiler_create(pool);
+
+// Build schema AST using existing transpiler
+AstNode* schema_ast = transpiler_build_ast(tp, schema_source);
+
+// Extract types from AST for validation
+extract_schema_types_from_ast(validator, schema_ast);
+```
+
+**Complete Elimination:**
+- Delete entire `schema_parser.cpp` file (1644 lines)
+- Remove all `build_schema_*()` functions - use existing `build_*()` functions
+- Remove all `TypeSchema`, `SchemaMap`, `SchemaElement` structs
+- Use transpiler's existing infrastructure for everything
+
+### 4. Direct AST Validation
+
+**Validate Against Native AST Types:**
+
+```cpp
+// NEW: Validation functions operate on AST types directly
+ValidationResult* validate_against_type_map(TypedItem item, TypeMap* map_type, ValidationContext* ctx);
+ValidationResult* validate_against_type_array(TypedItem item, TypeArray* array_type, ValidationContext* ctx);  
+ValidationResult* validate_against_type_elmt(TypedItem item, TypeElmt* elmt_type, ValidationContext* ctx);
+
+// NEW: Extract validation info from existing AST structures
+bool is_map_field_required(TypeMap* map_type, StrView field_name);
+bool is_element_attribute_required(TypeElmt* elmt_type, StrView attr_name);
+TypeUnary* get_occurrence_info(Type* type); // Use existing TypeUnary for occurrence modifiers
+
+// NEW: Schema registry using AST types
+typedef struct SchemaRegistry {
+    HashMap* type_definitions;   // name -> AstNode* mapping
+    Transpiler* transpiler;      // Transpiler that built the AST
+} SchemaRegistry;
 ```
 
 ## Implementation Plan
 
-### Phase 1: Foundation (Week 1-2)
-1. **Extract Common Infrastructure**
-   - Move `TypeSchema` structures to shared header
-   - Create unified type creation functions
-   - Establish schema-to-runtime type mapping
+### Phase 1: Complete schema_parser.cpp Removal (Week 1-2)
+1. **Delete schema_parser.cpp**
+   - Remove entire file (1644 lines)
+   - Delete all `build_schema_*()` functions
+   - Remove `SchemaParser` struct definition
+   - Clean up includes and references
 
-2. **Extend AST Nodes**
-   - Add `AstSchemaTypeNode` and related structures
-   - Update `AstNodeType` enum with schema node types (`AST_NODE_UNARY_TYPE`)
-   - Add `SYM_TYPE_OCCURRENCE` to ast.hpp symbol definitions
-   - Modify type building function signatures
+2. **Refactor SchemaValidator to Use Transpiler**
+   - Replace `SchemaParser* parser` with `Transpiler* transpiler` in `SchemaValidator`
+   - Modify `schema_validator_load_schema()` to use `transpiler_build_ast()`
+   - Update schema loading to extract types from AST instead of custom parsing
 
-### Phase 2: Core Integration (Week 3-4)
-1. **Merge Type Building Functions**
-   - Integrate `build_schema_type()` logic into existing builders
-   - Add union type and occurrence support
-   - Implement type reference resolution
+### Phase 2: Validator API Refactoring (Week 3-4)
+1. **Remove Custom Schema Types from validator.hpp**
+   - Delete `TypeSchema`, `SchemaMap`, `SchemaElement`, `SchemaArray` structs
+   - Remove all `build_schema_*()` function declarations
+   - Update validation functions to use AST types (`TypeMap*`, `TypeElmt*`, etc.)
 
-2. **Schema Definition Support**
-   - Add `build_type_definition()` to main AST builder
-   - Support `type_stam` nodes in the main expression builder
-   - Implement type registry in the transpiler
+2. **Implement AST-based Validation**
+   - Create `validate_against_type_map()`, `validate_against_type_elmt()` functions
+   - Extract validation info from `ShapeEntry` linked lists
+   - Use existing `TypeUnary` for occurrence validation
+   - Implement type extraction from AST nodes
 
-### Phase 3: Validation Integration (Week 5-6)
-1. **Compile-time Validation**
-   - Integrate schema validation into type checking
-   - Add validation error reporting to transpiler
-   - Support schema inheritance and composition
+### Phase 3: API Compatibility (Week 5-6)
+1. **Preserve Public API**
+   - Keep `LambdaValidator` public interface unchanged
+   - Maintain `lambda_validate_file()`, `lambda_validate_string()` functions
+   - Ensure `LambdaValidationResult` structure remains compatible
+   - Update internal implementation to use AST without breaking external API
 
-2. **Runtime Bridge**
-   - Map schema types to runtime types
-   - Support dynamic schema validation
-   - Implement schema-aware serialization
+2. **Schema Loading Refactoring**
+   - Replace schema parsing with AST building
+   - Extract type definitions from AST nodes
+   - Store AST types in schema registry instead of custom types
 
-### Phase 4: Advanced Features (Week 7-8)
-1. **Enhanced Schema Syntax**
-   - Support complex element schemas
-   - Add constraint validation
-   - Implement schema imports/exports
+### Phase 4: Testing and Cleanup (Week 7-8)
+1. **Comprehensive Testing**
+   - Ensure all existing validator tests pass unchanged
+   - Verify performance improvement from eliminating duplicate code
+   - Test schema loading with complex type definitions
 
-2. **Optimization and Testing**
-   - Performance optimization for large schemas
-   - Comprehensive test suite
-   - Documentation and examples
+2. **Documentation and Cleanup**
+   - Update `schema_ast.hpp` to reflect AST-only architecture
+   - Remove all references to deleted `schema_parser.cpp`
+   - Document new AST-based validation approach
 
-## Technical Challenges
+## Technical Advantages of Refactoring
 
-### 1. Type System Unification
-**Challenge**: Bridge the gap between schema validation types and runtime execution types
-**Solution**: Create bidirectional mapping between `TypeSchema` and `Type` structures
+### 1. Eliminate Code Duplication
+**Current Problem**: `SchemaMap` vs `TypeMap`, `SchemaElement` vs `TypeElmt` duplicate functionality
+**Solution**: Use existing AST types that already support the required features
 
-### 2. Grammar Integration
-**Challenge**: Ensure schema syntax is properly supported in the main grammar
-**Solution**: Validate that `tree-sitter-lambda/grammar.js` supports all required schema constructs
+### 2. Leverage Existing Infrastructure
+**Current Problem**: Separate Tree-sitter parser, memory pools, and type registries
+**Solution**: Use transpiler's existing infrastructure that's already optimized and tested
 
-### 3. Memory Management
-**Challenge**: Coordinate memory pools between schema parser and AST builder
-**Solution**: Use the transpiler's existing `ast_pool` for all schema-related allocations
+### 3. ShapeEntry System Already Supports Schema Needs
+**Discovery**: `TypeMap` and `TypeElmt` already use `ShapeEntry` linked lists for field definitions
+**Benefit**: No need to create new field definition system - it already exists!
 
-### 4. Error Handling
-**Challenge**: Integrate schema validation errors with existing transpiler error system
-**Solution**: Extend the transpiler's error reporting to include schema validation errors
+### 4. Occurrence Support Already Exists
+**Discovery**: `build_occurrence_type()` already handles `Type?`, `Type+`, `Type*` syntax
+**Benefit**: No need to implement occurrence modifiers - they're already working!
+
+### 5. Union Type Support Already Exists
+**Discovery**: `build_binary_type()` already supports `Type1 | Type2` via binary expressions
+**Benefit**: Union types work out of the box with existing AST builder
 
 ## File Structure Changes
 
-### New Files
-- `lambda/schema_ast.hpp` - Unified schema and AST type definitions
-- `lambda/schema_builder.cpp` - Integrated schema-aware type builders
-- `lambda/type_registry.cpp` - Type definition registry and resolution
-
 ### Modified Files
-- `lambda/build_ast.cpp` - Enhanced with schema support
-- `lambda/ast.hpp` - Extended AST node types
-- `lambda/transpiler.hpp` - Schema-aware transpiler
-- `lambda/validator/validator.hpp` - Simplified to use unified types
+- `lambda/validator/schema_parser.cpp` - Refactor to use AST builder functions
+  - Replace `build_schema_type()` with calls to existing `build_*_type()` functions
+  - Use `TypeMap`, `TypeArray`, `TypeElmt` instead of custom schema structs
+  - Use transpiler's `ast_pool` instead of separate memory management
+- `lambda/schema_ast.hpp` - Simplify to use existing AST types
+  - Remove duplicate type definitions
+  - Focus on validation-specific extensions to existing types
+- `lambda/validator/validator.hpp` - Update to use AST types
 
-### Deprecated Files
-- `lambda/validator/schema_parser.cpp` - Functionality merged into main AST builder
+### No New Files Needed
+- Existing `build_ast.cpp` already has all required type building functions
+- Existing AST type system already supports schema validation requirements
+- Existing transpiler infrastructure already provides needed capabilities
 
-## Benefits
+### Key Insight: Minimal Changes Required
+- Most functionality already exists in AST builder
+- Refactoring is primarily about removing duplication, not adding new features
+- Schema parser can be simplified to a thin wrapper around existing AST builder
 
-1. **Unified Development**: Single codebase for both AST building and schema validation
-2. **Rich Type System**: Full schema support in Lambda scripts
-3. **Better Performance**: Eliminate duplicate parsing and validation overhead
-4. **Enhanced IDE Support**: Better type inference and validation in development tools
-5. **Simplified Architecture**: Remove redundancy between validator and transpiler
+## Benefits of Refactoring
+
+1. **Eliminate Code Duplication**: Remove ~800 lines of duplicate type building logic
+2. **Leverage Existing Optimizations**: AST builder is already optimized and battle-tested
+3. **Unified Memory Management**: Single `ast_pool` instead of multiple memory pools
+4. **Simplified Maintenance**: One type system instead of two parallel systems
+5. **Better Performance**: No overhead from duplicate type structures and parsing
+6. **Existing Features Work**: Occurrence modifiers, union types, field definitions already implemented
 
 ## Migration Strategy
 
-1. **Backward Compatibility**: Ensure existing Lambda scripts continue to work
-2. **Gradual Migration**: Support both old and new type syntax during transition
-3. **Validation Layer**: Keep validator interface for external schema validation
-4. **Documentation**: Comprehensive migration guide for users
+1. **Transparent Refactoring**: Schema validation API remains unchanged
+2. **Internal Implementation**: Replace custom structs with AST types internally
+3. **Validation Compatibility**: All existing validator tests should pass unchanged
+4. **Performance Improvement**: Users benefit from better performance without code changes
 
 ## Success Metrics
 
-1. All existing tests pass with the new implementation
-2. Schema validation performance matches or exceeds current implementation
-3. New schema features work correctly in Lambda scripts
-4. Memory usage remains within acceptable bounds
-5. Integration tests demonstrate end-to-end schema functionality
+1. **Code Reduction**: Eliminate ~800 lines of duplicate code from schema_parser.cpp
+2. **Performance Improvement**: Faster validation due to single type system
+3. **Memory Efficiency**: Reduced memory usage from eliminating duplicate type structures
+4. **Test Compatibility**: All existing validator tests pass without modification
+5. **Maintainability**: Single type system easier to maintain and extend
+
+## Key Implementation Insights
+
+### 1. AST Builder Already Has Required Features
+- `build_occurrence_type()` exists for `Type?`, `Type+`, `Type*`
+- `build_binary_type()` supports union types `Type1 | Type2`
+- `ShapeEntry` system in `TypeMap`/`TypeElmt` supports field definitions
+- `TypeArray`, `TypeMap`, `TypeElmt` match schema requirements exactly
+
+### 2. Refactoring is Simplification, Not Extension
+- Remove custom `TypeSchema`, `SchemaMap`, `SchemaElement` structs
+- Replace `build_schema_type()` with existing `build_*_type()` function calls
+- Use transpiler's `ast_pool` instead of separate memory management
+- Leverage existing type registry in transpiler's `type_list`
+
+### 3. Minimal API Changes Required
+- Schema validation interface can remain unchanged
+- Internal implementation uses AST types instead of custom types
+- Performance improves due to elimination of duplicate structures
+- Maintenance burden reduces significantly
 
 ## Next Steps
 
-1. Review this plan with the development team
-2. Create detailed technical specifications for each phase
-3. Set up development environment and testing framework
-4. Begin Phase 1 implementation
+1. **Phase 1**: Start refactoring `schema_parser.cpp` to use AST builder functions
+2. **Validation**: Ensure all existing validator tests continue to pass
+3. **Performance Testing**: Measure improvement from eliminating duplicate type system
+4. **Documentation**: Update schema_ast.hpp to reflect simplified architecture
 
 ---
 
-*This document will be updated as the implementation progresses and requirements evolve.*
+*This refactoring plan leverages existing Lambda AST infrastructure to eliminate code duplication and improve performance while maintaining full schema validation capabilities.*

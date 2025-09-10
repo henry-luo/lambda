@@ -40,7 +40,6 @@
         "lambda/lambda-mem.cpp",
         "lambda/validator/validate.cpp",
         "lambda/validator/validator.cpp",
-        "lambda/validator/schema_parser.cpp",
         "lambda/schema_builder.cpp",
         "lambda/input/css_tokenizer.c",
         "lambda/input/css_properties.c",
@@ -145,7 +144,9 @@
             "include": "",
             "lib": "-lncurses",
             "link": "dynamic"
-        },
+        }
+    ],
+    "dev_libraries": [
         {
             "name": "ginac",
             "include": "/opt/homebrew/Cellar/ginac/1.8.9/include",
@@ -203,7 +204,6 @@
                 "lambda/name_pool.cpp",
                 "lambda/lambda-data.cpp",
                 "lambda/validator/validate.cpp",
-                "lambda/validator/schema_parser.cpp",
                 "lambda/validator/validator.cpp",
                 "lambda/parse.c",
                 "lambda/input/css_tokenizer.c",
