@@ -1344,7 +1344,7 @@ AstNode* build_primary_type(Transpiler* tp, TSNode type_node) {
 }
 
 AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
-        log_debug("build binary type");
+    log_debug("build binary type");
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, 
         AST_NODE_BINARY_TYPE, bi_node, sizeof(AstBinaryNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
