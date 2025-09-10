@@ -554,7 +554,7 @@ else
         LINKER_FLAGS="-static-libgcc -static-libstdc++"
     else
         INCLUDES="-Ilambda/tree-sitter/lib/include -Ilambda/tree-sitter-lambda/bindings/c -I/usr/local/include -I/opt/homebrew/include -I."
-        LIBS="lambda/tree-sitter/libtree-sitter.a lambda/tree-sitter-lambda/libtree-sitter-lambda.a /usr/local/lib/libmir.a /usr/local/lib/liblexbor_static.a"
+        LIBS="lambda/tree-sitter/libtree-sitter.a lambda/tree-sitter-lambda/libtree-sitter-lambda.a /usr/local/lib/libmir.a"
         LINK_LIBS="-L/opt/homebrew/lib -lgmp"
         WARNINGS="-Werror=format -Werror=incompatible-pointer-types -Werror=multichar"
         FLAGS="-fms-extensions -pedantic -fcolor-diagnostics"

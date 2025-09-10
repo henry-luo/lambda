@@ -123,6 +123,24 @@ void schema_validator_destroy(SchemaValidator* validator) {
 }
 
 // ==================== Schema Loading ====================
+SchemaParser* schema_parser_create(VariableMemPool* pool) {
+    // log_debug("Creating SchemaParser");
+    return NULL;
+}
+
+void schema_parser_destroy(SchemaParser* parser) {
+    // log_debug("Destroying SchemaParser");
+    if (!parser) return;
+    // Note: memory pool cleanup handled by caller
+}
+
+void parse_all_type_definitions(SchemaParser* parser, TSNode root) {
+    if (!parser) return;
+}
+
+TypeSchema* find_type_definition(SchemaParser* parser, const char* type_name) {
+    if (!parser || !type_name) return nullptr;
+}
 
 int schema_validator_load_schema(SchemaValidator* validator, const char* schema_source, 
                                  const char* schema_name) {

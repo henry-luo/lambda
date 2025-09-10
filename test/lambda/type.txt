@@ -7,5 +7,5 @@ map
 map
 datetime
 element
-binary
+type
 function

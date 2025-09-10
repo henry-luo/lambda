@@ -206,8 +206,6 @@ typedef struct TypeDefinition {
 } TypeDefinition;
 
 // Schema parsing functions
-SchemaParser* schema_parser_create(VariableMemPool* pool);
-void schema_parser_destroy(SchemaParser* parser);
 TypeSchema* parse_schema_from_source(SchemaParser* parser, const char* source);
 TypeDefinition* build_type_definition(SchemaParser* parser, TSNode type_node);
 TypeSchema* build_schema_type(SchemaParser* parser, TSNode type_expr_node);
