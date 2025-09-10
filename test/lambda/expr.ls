@@ -8,7 +8,7 @@ if c > 10 { "great" }
   (5 <= 5.0), ((7-3.5) > 5), "hello" + "world",
   if (100>90) "great" else "not great")
 
-"test for statement:"
+"Test for statement:"
 for b in [123] { b+1 }
 for a in ["a", "b", "c"] { "ha!" }
 for a in ["a"] { "wah!" }
@@ -53,7 +53,15 @@ type(1 to 3);  1 to 3 is array;  2 in (1 to 3);  4 in (1 to 3);  "a" in (1 to 3)
 let v = sum([1, 2]);
 {a: v, b: 3}
 
+"Test array:"
+// test const array
+let test_array = [2.8, 1.2, 1.9, 1.5, 2.1]
+for (x in test_array) x
+// test list flattening in array
 [1, ("great", "!"), 0.5]
+// test for loop in array
+[for (x in test_array) x * 2]
+[if (test_array) (1, 2, "great") else 0]
 
 "Test datetime support:"
 t'2025-01-01'
@@ -65,7 +73,3 @@ mp.a
 let arr = [t'2025-01-04', t'2025-01-05']
 arr
 arr[0]
-
-"Test array:"
-let test_array = [2.8, 1.2, 1.9, 1.5, 2.1]
-for (x in test_array) x
