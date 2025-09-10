@@ -803,6 +803,16 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         }
         break;
     }
+    case AST_NODE_TYPE_STAM: {
+        log_debug("[type def:%s]", type_name);
+        AstNode *declare = ((AstLetNode*)node)->declare;
+        while (declare) {
+            print_label(indent + 1, "declare:");
+            print_ast_node(script, declare, indent + 1);
+            declare = declare->next;
+        }
+        break;
+    }    
     case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM: {
         log_debug("[%s stam:%s]", node->node_type == AST_NODE_PUB_STAM ? "pub" : "let", type_name);
         AstNode *declare = ((AstLetNode*)node)->declare;
@@ -1020,6 +1030,13 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         print_ast_node(script, bt_node->right, indent + 1);        
         break;
     }
+    case AST_NODE_UNARY_TYPE: {
+        AstUnaryNode* ut_node = (AstUnaryNode*)node;
+        log_debug("[unary type %.*s.%d:%s]", (int)ut_node->op_str.length, ut_node->op_str.str, 
+            ut_node->op, type_name);
+        print_ast_node(script, ut_node->operand, indent + 1);
+        break;
+    }
     case AST_NODE_IMPORT: {
         AstImportNode* import_node = (AstImportNode*)node;
         if (!import_node->module.str) {
@@ -1042,7 +1059,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     default:
-        log_debug("[unknown expression type!]");
+        log_debug("[unknown expression type: %d!]", node->node_type);
         break;
     }
     if (indent > 0) log_leave();

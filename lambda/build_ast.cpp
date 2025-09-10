@@ -938,6 +938,7 @@ AstNode* build_let_expr(Transpiler* tp, TSNode let_node) {
 
 AstNode* build_let_stam(Transpiler* tp, TSNode let_node, TSSymbol symbol) {
     AstLetNode* ast_node = (AstLetNode*)alloc_ast_node(tp, 
+        symbol == SYM_TYPE_DEFINE ? AST_NODE_TYPE_STAM :
         symbol == SYM_PUB_STAM ? AST_NODE_PUB_STAM : AST_NODE_LET_STAM, let_node, sizeof(AstLetNode));
 
     // 'let' can have multiple name-value declarations
@@ -1349,7 +1350,7 @@ AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
     AstBinaryNode* ast_node = (AstBinaryNode*)alloc_ast_node(tp, 
         AST_NODE_BINARY_TYPE, bi_node, sizeof(AstBinaryNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    TypeBinary *type  = (TypeBinary*)alloc_type(tp->ast_pool, LMD_TYPE_BINARY, sizeof(TypeBinary));
+    TypeBinary *type = (TypeBinary*)alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeBinary));
     ((TypeType*)ast_node->type)->type = (Type*)type;
 
     TSNode left_node = ts_node_child_by_field_id(bi_node, FIELD_LEFT);
@@ -1377,48 +1378,24 @@ AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
 
 AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node) {
     log_debug("build occurrence type");
-    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_OCCURRENCE_TYPE, occurrence_node, sizeof(AstTypeNode));
-    
-    // Parse the base type (first child)
-    TSNode base_type_node = ts_node_named_child(occurrence_node, 0);
-    if (ts_node_is_null(base_type_node)) {
-        log_error("occurrence type missing base type");
-        ast_node->type = (Type*)&LIT_TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-    
-    // Parse the occurrence modifier (second child)
-    TSNode occurrence_modifier_node = ts_node_named_child(occurrence_node, 1);
-    if (ts_node_is_null(occurrence_modifier_node)) {
-        log_error("occurrence type missing modifier");
-        ast_node->type = (Type*)&LIT_TYPE_ERROR;
-        return (AstNode*)ast_node;
-    }
-    
-    // Extract the occurrence modifier character
-    StrView modifier_str = ts_node_source(tp, occurrence_modifier_node);
-    char modifier = (modifier_str.length > 0) ? modifier_str.str[0] : '?';
-    
-    log_debug("occurrence modifier: '%c'", modifier);
-    
-    // For now, create a type that wraps the base type
-    // TODO: Enhance with proper occurrence type handling
-    TypeType* node_type = (TypeType*)alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
-    ast_node->type = (Type*)node_type;
-    
-    // Build the base type and use it as the wrapped type
-    AstNode* base_ast = build_expr(tp, base_type_node);
-    if (base_ast && base_ast->type) {
-        node_type->type = base_ast->type;
-    } else {
-        node_type->type = (Type*)&LIT_TYPE_ANY;
-    }
-    
-    // Store occurrence information in a comment for now
-    // TODO: Create proper occurrence type structure
-    log_debug("built occurrence type with modifier '%c' for base type %d", 
-              modifier, node_type->type->type_id);
-    
+    AstUnaryNode* ast_node = (AstUnaryNode*)alloc_ast_node(tp, AST_NODE_UNARY_TYPE, occurrence_node, sizeof(AstUnaryNode));
+    ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    TypeUnary *type = (TypeUnary*)alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeUnary));
+    ((TypeType*)ast_node->type)->type = (Type*)type;
+
+    TSNode op_node = ts_node_child_by_field_id(occurrence_node, FIELD_OPERATOR);
+    StrView op = ts_node_source(tp, op_node);
+    ast_node->op_str = op;
+    if (strview_equal(&op, "?")) { ast_node->op = OPERATOR_OPTIONAL; }
+    else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_ONE_MORE; }
+    else if (strview_equal(&op, "*")) { ast_node->op = OPERATOR_ZERO_MORE; }
+    log_debug("unknown operator: %.*s", (int)op.length, op.str);
+
+    TSNode operand_node = ts_node_child_by_field_id(occurrence_node, FIELD_OPERAND);
+    ast_node->operand = build_expr(tp, operand_node);
+    type->operand = ast_node->operand->type;
+
+    // log_debug("built occurrence type with modifier '%c' for base type %d", modifier, node_type->type->type_id);
     return (AstNode*)ast_node;
 }
 

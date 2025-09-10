@@ -2106,28 +2106,35 @@
   {
     "type": "type_occurrence",
     "named": true,
-    "fields": {},
-    "children": {
-      "multiple": true,
-      "required": true,
-      "types": [
-        {
-          "type": "binary_type",
-          "named": true
-        },
-        {
-          "type": "occurrence",
-          "named": true
-        },
-        {
-          "type": "primary_type",
-          "named": true
-        },
-        {
-          "type": "type_occurrence",
-          "named": true
-        }
-      ]
+    "fields": {
+      "operand": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_type",
+            "named": true
+          },
+          {
+            "type": "primary_type",
+            "named": true
+          },
+          {
+            "type": "type_occurrence",
+            "named": true
+          }
+        ]
+      },
+      "operator": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "occurrence",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {

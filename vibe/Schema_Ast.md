@@ -69,7 +69,7 @@ Merge and enhance type building functions:
 - `build_binary_type()` → Already supports union types (`Type1 | Type2`) via `|` operator
 - **Add `build_occurrence_type()`** → Support occurrence modifiers (`Type?`, `Type+`, `Type*`)
   - Grammar already defines `type_occurrence` and `sym_type_occurrence` exists
-  - Need to add `AST_NODE_OCCURRENCE_TYPE` and `SYM_TYPE_OCCURRENCE` to ast.hpp
+  - Need to add `AST_NODE_UNARY_TYPE` and `SYM_TYPE_OCCURRENCE` to ast.hpp
   - Need to handle `sym_type_occurrence` in `build_expr()` switch statement
 
 ### 3. Schema-aware AST Building
@@ -115,7 +115,7 @@ Content = string | <p string*> | <div Content*>
 
 2. **Extend AST Nodes**
    - Add `AstSchemaTypeNode` and related structures
-   - Update `AstNodeType` enum with schema node types (`AST_NODE_OCCURRENCE_TYPE`)
+   - Update `AstNodeType` enum with schema node types (`AST_NODE_UNARY_TYPE`)
    - Add `SYM_TYPE_OCCURRENCE` to ast.hpp symbol definitions
    - Modify type building function signatures
 
