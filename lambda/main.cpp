@@ -9,8 +9,9 @@
 #include <cstring>
 #include <string>
 #include "../lib/log.h"  // Add logging support
-#include "validator/validator.hpp"  // For ValidationResult
+#include "validator.hpp"  // For ValidationResult
 #include "transpiler.hpp"  // For Runtime struct definition
+#include "ast.hpp"  // For print_root_item declaration
 
 // Forward declare additional transpiler functions
 extern "C" {
@@ -19,8 +20,8 @@ extern "C" {
     TSTree* lambda_parse_source(TSParser* parser, const char* source);
 }
 
-ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format);
-ValidationResult* exec_validation(int argc, char* argv[]);
+// ValidationResult* run_ast_validation(const char *data_file, const char *schema_file, const char *input_format);
+extern "C" AstValidationResult* exec_validation(int argc, char* argv[]);
 int exec_convert(int argc, char* argv[]);
 void transpile_ast(Transpiler* tp, AstScript *script);
 
@@ -477,7 +478,7 @@ int main(int argc, char *argv[]) {
         char** validation_argv = argv + 1;  // Skip the program name, start from "validate"
         
         // Call the extracted validation function
-        ValidationResult* validation_result = exec_validation(validation_argc, validation_argv);
+        AstValidationResult* validation_result = exec_validation(validation_argc, validation_argv);
         
         // Convert ValidationResult to exit code
         int exit_code = 1; // Default to failure

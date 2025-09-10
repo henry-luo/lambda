@@ -13,7 +13,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "../lib/mem-pool/include/mem_pool.h"
-#include "../lambda/validator.h"
+#include "../lambda/validator.hpp"
 
 // Avoid INT_MAX redefinition issues
 #ifdef INT_MAX
@@ -25,19 +25,19 @@
 extern "C" {
     MemPoolError pool_variable_init(VariableMemPool **pool, size_t grow_size, uint16_t tolerance_percent);
     MemPoolError pool_variable_destroy(VariableMemPool *pool);
-    
-    // Stub implementations for missing functions required by validator
-    void find_errors(TSNode node) {
-        // Stub implementation - do nothing for tests
-        (void)node; // Suppress unused parameter warning
-    }
-    
-    AstNode* build_script(Transpiler* tp, TSNode script_node) {
-        // Stub implementation - return null for tests
-        (void)tp; // Suppress unused parameter warning
-        (void)script_node; // Suppress unused parameter warning
-        return nullptr;
-    }
+}
+
+// Stub implementations for missing functions required by validator (C++ linkage)
+void find_errors(TSNode node) {
+    // Stub implementation - do nothing for tests
+    (void)node; // Suppress unused parameter warning
+}
+
+AstNode* build_script(Transpiler* tp, TSNode script_node) {
+    // Stub implementation - return null for tests
+    (void)tp; // Suppress unused parameter warning
+    (void)script_node; // Suppress unused parameter warning
+    return nullptr;
 }
 
 // Test fixtures
