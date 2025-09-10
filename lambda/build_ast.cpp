@@ -7,6 +7,7 @@
 #include <errno.h>
 
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
+AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
 
 struct SysFuncInfo {
     SysFunc fn;
@@ -1374,6 +1375,53 @@ AstNode* build_binary_type(Transpiler* tp, TSNode bi_node) {
     return (AstNode*)ast_node;
 }
 
+AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node) {
+    log_debug("build occurrence type");
+    AstTypeNode* ast_node = (AstTypeNode*)alloc_ast_node(tp, AST_NODE_OCCURRENCE_TYPE, occurrence_node, sizeof(AstTypeNode));
+    
+    // Parse the base type (first child)
+    TSNode base_type_node = ts_node_named_child(occurrence_node, 0);
+    if (ts_node_is_null(base_type_node)) {
+        log_error("occurrence type missing base type");
+        ast_node->type = (Type*)&LIT_TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    
+    // Parse the occurrence modifier (second child)
+    TSNode occurrence_modifier_node = ts_node_named_child(occurrence_node, 1);
+    if (ts_node_is_null(occurrence_modifier_node)) {
+        log_error("occurrence type missing modifier");
+        ast_node->type = (Type*)&LIT_TYPE_ERROR;
+        return (AstNode*)ast_node;
+    }
+    
+    // Extract the occurrence modifier character
+    StrView modifier_str = ts_node_source(tp, occurrence_modifier_node);
+    char modifier = (modifier_str.length > 0) ? modifier_str.str[0] : '?';
+    
+    log_debug("occurrence modifier: '%c'", modifier);
+    
+    // For now, create a type that wraps the base type
+    // TODO: Enhance with proper occurrence type handling
+    TypeType* node_type = (TypeType*)alloc_type(tp->ast_pool, LMD_TYPE_TYPE, sizeof(TypeType));
+    ast_node->type = (Type*)node_type;
+    
+    // Build the base type and use it as the wrapped type
+    AstNode* base_ast = build_expr(tp, base_type_node);
+    if (base_ast && base_ast->type) {
+        node_type->type = base_ast->type;
+    } else {
+        node_type->type = (Type*)&LIT_TYPE_ANY;
+    }
+    
+    // Store occurrence information in a comment for now
+    // TODO: Create proper occurrence type structure
+    log_debug("built occurrence type with modifier '%c' for base type %d", 
+              modifier, node_type->type->type_id);
+    
+    return (AstNode*)ast_node;
+}
+
 AstNode* build_map(Transpiler* tp, TSNode map_node) {
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, map_node, sizeof(AstMapNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_MAP, sizeof(TypeMap));
@@ -1833,6 +1881,8 @@ AstNode* build_expr(Transpiler* tp, TSNode expr_node) {
         return build_primary_type(tp, expr_node);
     case SYM_BINARY_TYPE:
         return build_binary_type(tp, expr_node);
+    case SYM_TYPE_OCCURRENCE:
+        return build_occurrence_type(tp, expr_node);
     case SYM_TYPE_DEFINE:
         // todo: full type def support 
         return build_let_stam(tp, expr_node, symbol);
