@@ -627,7 +627,10 @@ module.exports = grammar({
       $.fn_type,
     ),
 
-    type_occurrence: $ => prec.right(seq($._type_expr, $.occurrence)),
+    type_occurrence: $ => prec.right(seq(
+      field('operand', $._type_expr),      
+      field('operator', $.occurrence),
+    )),
 
     binary_type: $ => choice(
       ...type_pattern($._type_expr),

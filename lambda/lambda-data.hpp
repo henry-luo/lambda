@@ -191,6 +191,11 @@ typedef enum Operator {
     OPERATOR_EXCLUDE,
     OPERATOR_IS,
     OPERATOR_IN,
+
+    // occurrence
+    OPERATOR_OPTIONAL,  // ?
+    OPERATOR_ONE_MORE,  // +
+    OPERATOR_ZERO_MORE,  // *
 } Operator;
 
 typedef enum SysFunc {
@@ -235,6 +240,12 @@ typedef struct TypeBinary : Type {
     Operator op;  // operator
     int type_index;  // index of the type in the type list
 } TypeBinary;
+
+typedef struct TypeUnary : Type {
+    Type* operand;
+    Operator op;  // operator
+    int type_index;  // index of the type in the type list
+} TypeUnary;
 
 typedef struct TypeParam : Type {
     struct TypeParam *next;

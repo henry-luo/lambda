@@ -5936,12 +5936,20 @@
         "type": "SEQ",
         "members": [
           {
-            "type": "SYMBOL",
-            "name": "_type_expr"
+            "type": "FIELD",
+            "name": "operand",
+            "content": {
+              "type": "SYMBOL",
+              "name": "_type_expr"
+            }
           },
           {
-            "type": "SYMBOL",
-            "name": "occurrence"
+            "type": "FIELD",
+            "name": "operator",
+            "content": {
+              "type": "SYMBOL",
+              "name": "occurrence"
+            }
           }
         ]
       }
