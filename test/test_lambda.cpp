@@ -265,3 +265,7 @@ Test(lambda_tests, test_numeric_sys_func) {
 Test(lambda_tests, test_complex_data_science_report) {
     test_lambda_script_against_file("test/lambda/complex_data_science_report.ls", "test/lambda/complex_data_science_report.txt");
 }
+
+Test(lambda_tests, test_complex_iot_report) {
+    test_lambda_script_against_file("test/lambda/complex_iot_report.ls", "test/lambda/complex_iot_report.txt");
+}

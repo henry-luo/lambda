@@ -1,0 +1,97 @@
+"=== Smart City IoT Analytics Results ==="
+"Environmental data processed from 4 sensors"
+"Traffic analysis completed for 3 intersections"
+"Energy consumption analyzed for 3 meters"
+{
+  smart_city_overview: {
+    monitoring_scope: {
+      environmental_sensors: 4,
+      traffic_intersections: 3,
+      energy_meters: 3,
+      data_quality_score: 1
+    },
+    city_health_indicators: {
+      environmental_status: "acceptable",
+      traffic_efficiency: "congested",
+      energy_sustainability: "needs_improvement",
+      overall_livability_score: 0.600462963
+    }
+  },
+  environmental_intelligence: {
+    air_quality_status: {
+      current_pm25_level: 30.4,
+      trend: "deteriorating",
+      alert_zones: 0
+    },
+    climate_comfort: {
+      temperature_avg: 24.9,
+      humidity_avg: 64.5,
+      comfort_index: 0.7825,
+      heat_warnings: 0
+    },
+    noise_pollution: {
+      citywide_avg: 67.775,
+      violations: 2,
+      quiet_hours_compliance: 25
+    }
+  },
+  mobility_intelligence: {
+    traffic_performance: {
+      congestion_distribution: {
+          low_congestion: 0,
+          moderate_congestion: 2,
+          high_congestion: 0
+        },
+      speed_by_zone: {
+          downtown_avg: 0,
+          residential_avg: 0,
+          industrial_avg: 0
+        },
+      optimization_needed: 0
+    },
+    safety_metrics: {
+      incident_hotspots: 0,
+      safety_scores: ({
+          zone: "downtown",
+          incident_rate: 0,
+          safety_score: 1
+        }, {
+          zone: "residential",
+          incident_rate: 0,
+          safety_score: 1
+        }, {
+          zone: "industrial",
+          incident_rate: 0,
+          safety_score: 1
+        }),
+      infrastructure_improvements_needed: 0
+    }
+  },
+  energy_intelligence: {
+    consumption_overview: {
+      total_usage: 621.5,
+      renewable_integration: 40,
+      grid_stability: 0.85,
+      efficiency_opportunities: 0
+    },
+    sustainability_metrics: {
+      renewable_leaders: 0,
+      grid_dependency_breakdown: {
+          high_dependency: 0,
+          medium_dependency: 0,
+          low_dependency: 0
+        },
+      load_balancing_potential: 0
+    }
+  },
+  actionable_insights: {
+    immediate_priorities: [null, null, null],
+    strategic_initiatives: ["Expand environmental sensor network in industrial zones", "Implement AI-powered traffic signal optimization", "Accelerate renewable energy adoption programs", "Deploy citizen engagement platform for real-time feedback"],
+    investment_priorities: {
+      environmental: "Air quality monitoring expansion in industrial areas",
+      mobility: "Smart intersection upgrades for congestion relief",
+      energy: "Grid modernization and battery storage deployment",
+      estimated_roi_timeline: "18-24 months for infrastructure investments"
+    }
+  }
+}
