@@ -290,7 +290,7 @@ void transpile_push_items(Transpiler* tp, AstNode *item, bool is_elmt) {
     while (item) {
         // skip let declaration
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || 
-            item->node_type == AST_NODE_FUNC) {
+            item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_FUNC) {
             item = item->next;  continue;
         }
         strbuf_append_format(tp->code_buf, " list_push(%s, ", is_elmt ? "el" : "ls");
@@ -980,7 +980,7 @@ void transpile_items(Transpiler* tp, AstNode *item) {
     while (item) {
         // skip let declaration
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || 
-            item->node_type == AST_NODE_FUNC) {
+            item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_FUNC) {
             item = item->next;  continue;
         }
         if (is_first) { is_first = false; } 
@@ -1081,7 +1081,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
     AstNode *item = list_node->item;
     int effective_length = type->length;
     while (item) {
-        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM) {
+        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM) {
             effective_length--;
             transpile_let_stam(tp, (AstLetNode*)item);
         }
@@ -1563,7 +1563,7 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_CALL_EXPR:
         transpile_call_expr(tp, (AstCallNode*)expr_node);
         break;
-    case AST_NODE_FUNC:  case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:
+    case AST_NODE_FUNC:  case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
         // already transpiled
         break;
     case AST_NODE_FUNC_EXPR:
@@ -1695,7 +1695,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         }
         break;
     }
-    case AST_NODE_LET_STAM: {
+    case AST_NODE_LET_STAM:  case AST_NODE_TYPE_STAM: {
         AstNode *declare = ((AstLetNode*)node)->declare;
         while (declare) {
             define_ast_node(tp, declare);
@@ -1834,7 +1834,7 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     while (child) {
         switch (child->node_type) {
         case AST_NODE_IMPORT:
-        case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:
+        case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
         case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:
             break;  // skip defintion nodes
         default:

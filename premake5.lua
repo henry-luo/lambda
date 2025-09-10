@@ -145,7 +145,6 @@ project "lambda-input-full-cpp"
         "lambda/name_pool.cpp",
         "lambda/lambda-data.cpp",
         "lambda/validator/validate.cpp",
-        "lambda/validator/schema_parser.cpp",
         "lambda/validator/validator.cpp",
     }
     
