@@ -1,0 +1,472 @@
+% Lambda Script Language Specification in Ott
+% Author: Henry Luo
+% This specification defines the formal syntax and semantics of Lambda Script,
+% a pure functional scripting language for data processing and document presentation.
+
+metavar x, y, z, f, g ::= {{ com variables }}
+metavar n ::= {{ com numeric literals }}
+metavar s ::= {{ com string literals }}
+metavar b ::= {{ com boolean literals }}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% SYNTAX
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Base types
+defn BaseType :: BaseType_ ::=
+  | null        :: :: Null      {{ com null type }}
+  | bool        :: :: Bool      {{ com boolean type }}
+  | int         :: :: Int       {{ com 32-bit signed integer }}
+  | int64       :: :: Int64     {{ com 64-bit signed integer }}
+  | float       :: :: Float     {{ com 64-bit floating point }}
+  | decimal     :: :: Decimal   {{ com arbitrary precision decimal }}
+  | number      :: :: Number    {{ com numeric union (int | float | decimal) }}
+  | string      :: :: String    {{ com UTF-8 text string }}
+  | symbol      :: :: Symbol    {{ com interned identifier }}
+  | binary      :: :: Binary    {{ com binary data }}
+  | datetime    :: :: DateTime  {{ com date and time }}
+  | any         :: :: Any       {{ com top type }}
+  | error       :: :: Error     {{ com error type }}
+
+% Type expressions
+defn Type :: T_ ::=
+  | BaseType                    :: :: Base
+  | x                           :: :: Var        {{ com type variable }}
+  | ( Type1 , .. , Typen )     :: :: List       {{ com list type }}
+  | [ Type1 , .. , Typen ]     :: :: Array      {{ com array type }}
+  | { x1 : Type1 , .. , xn : Typen } :: :: Map {{ com map type }}
+  | < x attr_list ; content >   :: :: Element   {{ com element type }}
+  | ( Type1 , .. , Typen ) -> Type :: :: Function {{ com function type }}
+  | Type ?                      :: :: Optional   {{ com optional type }}
+  | Type +                      :: :: OneOrMore  {{ com one or more }}
+  | Type *                      :: :: ZeroOrMore {{ com zero or more }}
+  | Type1 | Type2               :: :: Union      {{ com union type }}
+  | Type1 & Type2               :: :: Intersect  {{ com intersection type }}
+  | Type1 ! Type2               :: :: Exclude    {{ com exclusion type }}
+
+% Attribute list for elements
+defn attr_list :: attr_ ::=
+  | x1 : Expr1 , .. , xn : Exprn :: :: AttrList
+
+% Literals
+defn Lit :: L_ ::=
+  | null                        :: :: Null
+  | true                        :: :: True
+  | false                       :: :: False
+  | n                           :: :: Numeric    {{ com integers, floats, decimals }}
+  | s                           :: :: String
+  | 'x                          :: :: Symbol
+  | b' hex                      :: :: Binary     {{ com binary data }}
+  | t' datetime                 :: :: DateTime
+  | inf                         :: :: Infinity
+  | nan                         :: :: NaN
+
+% Operators
+defn UnaryOp :: UOp_ ::=
+  | +                           :: :: Plus
+  | -                           :: :: Minus
+  | not                         :: :: Not
+
+defn BinaryOp :: BOp_ ::=
+  % Arithmetic
+  | +                           :: :: Add
+  | -                           :: :: Sub
+  | *                           :: :: Mul
+  | /                           :: :: Div
+  | _/                          :: :: IntDiv     {{ com integer division }}
+  | %                           :: :: Mod
+  | ^                           :: :: Pow
+  % Comparison
+  | ==                          :: :: Eq
+  | !=                          :: :: Ne
+  | <                           :: :: Lt
+  | <=                          :: :: Le
+  | >                           :: :: Gt
+  | >=                          :: :: Ge
+  % Logical
+  | and                         :: :: And
+  | or                          :: :: Or
+  % Set operations
+  | |                           :: :: Union
+  | &                           :: :: Intersect
+  | !                           :: :: Exclude
+  % Range and membership
+  | to                          :: :: Range
+  | is                          :: :: Is
+  | in                          :: :: In
+
+% Expressions
+defn Expr :: E_ ::=
+  | Lit                         :: :: Literal
+  | x                           :: :: Var
+  | ( Expr1 , .. , Exprn )     :: :: List
+  | [ Expr1 , .. , Exprn ]     :: :: Array
+  | { x1 : Expr1 , .. , xn : Exprn } :: :: Map
+  | < x attr_list ; Expr1 .. Exprn > :: :: Element
+  | UnaryOp Expr                :: :: Unary
+  | Expr1 BinaryOp Expr2        :: :: Binary
+  | Expr [ Expr' ]              :: :: Index
+  | Expr . x                    :: :: Member
+  | Expr ( Expr1 , .. , Exprn ) :: :: Call
+  | let x = Expr , Expr'        :: :: Let
+  | if ( Expr1 ) Expr2 else Expr3 :: :: If
+  | for ( x in Expr1 ) Expr2    :: :: For
+  | fn ( x1 : Type1 , .. , xn : Typen ) : Type { Stmt* Expr } :: :: Function
+  | fn ( x1 : Type1 , .. , xn : Typen ) : Type => Expr :: :: FunctionExpr
+  | ( Expr )                    :: :: Paren
+  | BaseType                    :: :: TypeExpr
+
+% Statements
+defn Stmt :: S_ ::=
+  | let x = Expr                :: :: Let
+  | let x : Type = Expr         :: :: LetTyped
+  | pub x = Expr                :: :: Pub
+  | pub x : Type = Expr         :: :: PubTyped
+  | fn x ( x1 : Type1 , .. , xn : Typen ) : Type { Stmt* Expr } :: :: Function
+  | fn x ( x1 : Type1 , .. , xn : Typen ) : Type => Expr :: :: FunctionExpr
+  | if Expr { Stmt* Expr } else { Stmt* Expr } :: :: If
+  | for x in Expr { Stmt* Expr } :: :: For
+  | type x = Type               :: :: TypeDef
+  | type x < attr_list ; Type > :: :: EntityType
+  | type x { attr_list }        :: :: ObjectType
+  | import module               :: :: Import
+  | Expr ;                      :: :: ExprStmt
+
+% Program structure
+defn Content :: C_ ::=
+  | Stmt*                       :: :: Statements
+  | Expr                        :: :: Expression
+  | Stmt* Expr                  :: :: Mixed
+
+defn Program :: P_ ::=
+  | import* Content             :: :: Program
+
+% Module imports
+defn module :: mod_ ::=
+  | x                           :: :: Simple
+  | x : module'                 :: :: Aliased
+  | 'symbol                     :: :: Symbol
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% OPERATIONAL SEMANTICS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Values
+defn Value :: V_ ::=
+  | Lit                         :: :: Literal
+  | ( Value1 , .. , Valuen )   :: :: List
+  | [ Value1 , .. , Valuen ]   :: :: Array
+  | { x1 = Value1 , .. , xn = Valuen } :: :: Map
+  | < x attr_vals ; Value* >    :: :: Element
+  | closure ( x1 : Type1 , .. , xn : Typen ) Expr env :: :: Closure
+  | error                       :: :: Error
+
+defn attr_vals :: av_ ::=
+  | x1 = Value1 , .. , xn = Valuen :: :: AttrVals
+
+% Environments
+defn env :: G_ ::=
+  | empty                       :: :: Empty
+  | env , x = Value             :: :: Bind
+
+% Environment lookup
+defn
+env |- x --> Value :: :: lookup :: ''
+by
+
+env |- x --> Value
+----------------------------- :: var
+env, x = Value |- x --> Value
+
+% Evaluation relation
+defn
+env |- Expr --> Value :: :: eval :: ''
+by
+
+-------------------- :: lit
+env |- Lit --> Lit
+
+env |- x --> Value
+---------------------- :: var
+env |- x --> Value
+
+env |- Expr --> Value   env, x = Value |- Expr' --> Value'
+------------------------------------------------------------ :: let
+env |- let x = Expr , Expr' --> Value'
+
+env |- Expr1 --> Value1   env |- Expr2 --> Value2
+-------------------------------------------------- :: add_int
+env |- Expr1 + Expr2 --> n
+{{ where n is the sum of Value1 and Value2 when both are integers }}
+
+env |- Expr1 --> Value1   env |- Expr2 --> Value2
+-------------------------------------------------- :: add_string
+env |- Expr1 + Expr2 --> s
+{{ where s is the concatenation of Value1 and Value2 when both are strings }}
+
+env |- Expr --> true   env |- Expr1 --> Value1
+----------------------------------------------- :: if_true
+env |- if ( Expr ) Expr1 else Expr2 --> Value1
+
+env |- Expr --> false   env |- Expr2 --> Value2
+------------------------------------------------ :: if_false
+env |- if ( Expr ) Expr1 else Expr2 --> Value2
+
+env |- Expr1 --> Value1   ... env |- Exprn --> Valuen
+------------------------------------------------------ :: list
+env |- ( Expr1 , .. , Exprn ) --> ( Value1 , .. , Valuen )
+
+env |- Expr1 --> Value1   ... env |- Exprn --> Valuen
+------------------------------------------------------ :: array
+env |- [ Expr1 , .. , Exprn ] --> [ Value1 , .. , Valuen ]
+
+env |- Expr1 --> Value1   ... env |- Exprn --> Valuen
+-------------------------------------------------------------- :: map
+env |- { x1 : Expr1 , .. , xn : Exprn } --> { x1 = Value1 , .. , xn = Valuen }
+
+env |- Expr --> ( Value1 , .. , Valuen )   env |- Expr' --> Valuek
+------------------------------------------------------------------- :: index_list
+env |- Expr [ Expr' ] --> Valuek
+{{ where Valuek is the k-th element and Expr' evaluates to integer k }}
+
+env |- Expr --> { x1 = Value1 , .. , xn = Valuen }
+--------------------------------------------------- :: member
+env |- Expr . xi --> Valuei
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% TYPE SYSTEM
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Type environments
+defn tenv :: D_ ::=
+  | empty                       :: :: Empty
+  | tenv , x : Type             :: :: Bind
+
+% Subtyping relation
+defn
+Type1 <: Type2 :: :: subtype :: ''
+by
+
+-------------- :: refl
+Type <: Type
+
+Type1 <: Type2   Type2 <: Type3
+------------------------------- :: trans
+Type1 <: Type3
+
+Type <: any
+----------- :: any_super
+
+null <: Type?
+------------- :: null_opt
+
+int <: number
+------------- :: int_num
+
+float <: number
+--------------- :: float_num
+
+decimal <: number
+----------------- :: decimal_num
+
+% Typing relation
+defn
+tenv |- Expr : Type :: :: typing :: ''
+by
+
+---------------------- :: lit_null
+tenv |- null : null
+
+--------------------- :: lit_true
+tenv |- true : bool
+
+---------------------- :: lit_false
+tenv |- false : bool
+
+--------------------- :: lit_int
+tenv |- n : int
+{{ where n is an integer literal }}
+
+--------------------- :: lit_float
+tenv |- n : float
+{{ where n is a float literal }}
+
+--------------------- :: lit_string
+tenv |- s : string
+
+---------------------- :: lit_symbol
+tenv |- 'x : symbol
+
+tenv |- x : Type
+---------------- :: var
+tenv |- x : Type
+
+tenv |- Expr : Type   tenv, x : Type |- Expr' : Type'
+----------------------------------------------------- :: let
+tenv |- let x = Expr , Expr' : Type'
+
+tenv |- Expr1 : int   tenv |- Expr2 : int
+---------------------------------------- :: add_int
+tenv |- Expr1 + Expr2 : int
+
+tenv |- Expr1 : float   tenv |- Expr2 : float
+--------------------------------------------- :: add_float
+tenv |- Expr1 + Expr2 : float
+
+tenv |- Expr1 : string   tenv |- Expr2 : string
+----------------------------------------------- :: add_string
+tenv |- Expr1 + Expr2 : string
+
+tenv |- Expr : bool   tenv |- Expr1 : Type   tenv |- Expr2 : Type
+----------------------------------------------------------------- :: if
+tenv |- if ( Expr ) Expr1 else Expr2 : Type
+{{ where Type is the join of types of Expr1 and Expr2 }}
+
+tenv |- Expr1 : Type1   ... tenv |- Exprn : Typen
+-------------------------------------------------- :: list
+tenv |- ( Expr1 , .. , Exprn ) : ( Type1 , .. , Typen )
+
+tenv |- Expr1 : Type   ... tenv |- Exprn : Type
+----------------------------------------------- :: array_uniform
+tenv |- [ Expr1 , .. , Exprn ] : [ Type ]
+
+tenv |- Expr1 : Type1   ... tenv |- Exprn : Typen
+-------------------------------------------------- :: map
+tenv |- { x1 : Expr1 , .. , xn : Exprn } : { x1 : Type1 , .. , xn : Typen }
+
+tenv |- Expr : ( Type1 , .. , Typen )   tenv |- Expr' : int
+----------------------------------------------------------- :: index_list
+tenv |- Expr [ Expr' ] : Typei
+
+tenv |- Expr : { x1 : Type1 , .. , xn : Typen }
+----------------------------------------------- :: member
+tenv |- Expr . xi : Typei
+
+tenv, x1 : Type1, .., xn : Typen |- Expr : Type
+--------------------------------------------------------------- :: function
+tenv |- fn ( x1 : Type1 , .. , xn : Typen ) : Type => Expr : ( Type1 , .. , Typen ) -> Type
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% WELL-FORMEDNESS RULES
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Well-formed types
+defn
+|- Type ok :: :: wf_type :: ''
+by
+
+----------------- :: base
+|- BaseType ok
+
+|- Type ok
+-------------- :: optional
+|- Type ? ok
+
+|- Type ok
+-------------- :: one_or_more
+|- Type + ok
+
+|- Type ok
+-------------- :: zero_or_more
+|- Type * ok
+
+|- Type1 ok   |- Type2 ok
+------------------------- :: union
+|- Type1 | Type2 ok
+
+|- Type1 ok   |- Type2 ok
+------------------------- :: intersect
+|- Type1 & Type2 ok
+
+|- Type1 ok   |- Type2 ok
+------------------------- :: exclude
+|- Type1 ! Type2 ok
+
+|- Type1 ok   ... |- Typen ok
+------------------------------ :: list
+|- ( Type1 , .. , Typen ) ok
+
+|- Type ok
+------------------ :: array
+|- [ Type ] ok
+
+|- Type1 ok   ... |- Typen ok
+------------------------------------- :: map
+|- { x1 : Type1 , .. , xn : Typen } ok
+
+|- Type1 ok   ... |- Typen ok   |- Type ok
+----------------------------------------------- :: function
+|- ( Type1 , .. , Typen ) -> Type ok
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% SPECIAL FEATURES
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Element structure (document processing)
+defn Element_Content :: EC_ ::=
+  | Expr*                       :: :: Content
+
+% Range expressions
+defn Range :: R_ ::=
+  | Expr1 to Expr2              :: :: Range
+
+% For-loop comprehensions
+defn Comprehension :: Comp_ ::=
+  | for ( x in Expr1 ) Expr2    :: :: ForComp
+  | for ( x in Expr1 , y in Expr2 ) Expr3 :: :: ForMulti
+
+% System functions (built-ins)
+defn SysFunc :: SF_ ::=
+  | input                       :: :: Input
+  | format                      :: :: Format
+  | print                       :: :: Print
+  | len                         :: :: Length
+  | type                        :: :: Type
+  | string                      :: :: ToString
+  | int                         :: :: ToInt
+  | float                       :: :: ToFloat
+  | min                         :: :: Min
+  | max                         :: :: Max
+  | sum                         :: :: Sum
+  | avg                         :: :: Average
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% MEMORY MANAGEMENT SEMANTICS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Reference counting semantics (simplified)
+defn
+Value : nat :: :: refcount :: ''
+{{ com Reference count of a value }}
+
+% All values start with reference count 1
+% Reference counts are managed automatically by the runtime
+% Immutable data structures allow for safe sharing
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% COMMENTS AND METADATA
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% This specification captures the core Lambda Script language features:
+%
+% 1. Pure functional paradigm with immutable data structures
+% 2. Rich type system with union, intersection, and exclusion types
+% 3. First-class functions and closures
+% 4. Comprehensive collection types (lists, arrays, maps, elements)
+% 5. Built-in document processing capabilities
+% 6. Strong static typing with type inference
+% 7. Pattern matching and destructuring (implicit in member access)
+% 8. Range expressions and comprehensions
+% 9. Module system with imports
+% 10. Reference counting memory management
+%
+% The language is designed for data processing and document transformation,
+% with special support for structured markup through element types and
+% extensive built-in parsing and formatting capabilities.
+%
+% Key design principles:
+% - Immutability by default
+% - Type safety
+% - Expressive syntax for data manipulation
+% - High performance through JIT compilation
+% - Cross-platform consistency
