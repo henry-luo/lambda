@@ -1575,6 +1575,7 @@ Item fn_int(Item item) {
         return {._type= LMD_TYPE_INT, .int_val = (int32_t)dval};
     }
     else if (item.type_id == LMD_TYPE_DECIMAL) {
+        // todo: truncate any fractional part
         return item;  // keep it as it is
     }
     else if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL) {
