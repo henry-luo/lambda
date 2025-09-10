@@ -913,9 +913,9 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
 
     // start the loop
     strbuf_append_str(tp->code_buf, 
-        expr_type->type_id == LMD_TYPE_RANGE ? ";\n for (long i=rng->start; i<=rng->end; i++) {\n " : 
-        expr_type->type_id == LMD_TYPE_ARRAY ? ";\n for (int i=0; i<arr->length; i++) {\n " :
-        "; int ilen = fn_len(it);\n for (int i=0; i<ilen; i++) {\n ");
+        expr_type->type_id == LMD_TYPE_RANGE ? ";\n if (!rng) { list_push(ls, ITEM_ERROR); } else { for (long i=rng->start; i<=rng->end; i++) {\n " : 
+        expr_type->type_id == LMD_TYPE_ARRAY ? ";\n if (!arr) { list_push(ls, ITEM_ERROR); } else { for (int i=0; i<arr->length; i++) {\n " :
+        ";\n int ilen = fn_len(it);\n for (int i=0; i<ilen; i++) {\n ");
 
     // construct loop variable
     write_type(tp->code_buf, item_type);
@@ -952,6 +952,7 @@ void transpile_loop_expr(Transpiler* tp, AstNamedNode *loop_node, AstNode* then)
         strbuf_append_str(tp->code_buf, ");");
     }
     // end the loop
+    if (expr_type->type_id == LMD_TYPE_RANGE || expr_type->type_id == LMD_TYPE_ARRAY) strbuf_append_char(tp->code_buf, '}');
     strbuf_append_str(tp->code_buf, " }\n");
 }
 

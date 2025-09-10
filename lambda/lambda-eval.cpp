@@ -150,17 +150,6 @@ Item fn_normalize(Item str_item, Item type_item) {
 }
 
 Range* fn_to(Item item_a, Item item_b) {
-    // Handle error types gracefully to prevent crashes
-    if (item_a.type_id == LMD_TYPE_ERROR || item_b.type_id == LMD_TYPE_ERROR) {
-        log_error("Error type in range creation: %d, %d", item_a.type_id, item_b.type_id);
-        // Return empty range instead of NULL to prevent crashes
-        Range *range = (Range *)heap_alloc(sizeof(Range), LMD_TYPE_RANGE);
-        range->type_id = LMD_TYPE_RANGE;
-        range->start = 0;  range->end = -1;  // Empty range (0 to -1)
-        range->length = 0;
-        return range;
-    }
-    
     if ((item_a.type_id == LMD_TYPE_INT || item_a.type_id == LMD_TYPE_INT64 || item_a.type_id == LMD_TYPE_FLOAT) && 
         (item_b.type_id == LMD_TYPE_INT || item_b.type_id == LMD_TYPE_INT64 || item_b.type_id == LMD_TYPE_FLOAT)) {
         long start = item_a.type_id == LMD_TYPE_INT ? item_a.int_val : 
@@ -168,7 +157,7 @@ Range* fn_to(Item item_a, Item item_b) {
         long end = item_b.type_id == LMD_TYPE_INT ? item_b.int_val : 
             item_b.type_id == LMD_TYPE_INT64 ? *(long*)item_b.pointer : (long)*(double*)item_b.pointer;
         if (start > end) {
-            // Return empty range instead of NULL
+            // return empty range instead of NULL
             log_debug("Error: start of range is greater than end: %ld > %ld", start, end);
             Range *range = (Range *)heap_alloc(sizeof(Range), LMD_TYPE_RANGE);
             range->type_id = LMD_TYPE_RANGE;
@@ -185,12 +174,7 @@ Range* fn_to(Item item_a, Item item_b) {
     }
     else {
         log_error("unknown range type: %d, %d\n", item_a.type_id, item_b.type_id);
-        // Return empty range instead of NULL to prevent crashes
-        Range *range = (Range *)heap_alloc(sizeof(Range), LMD_TYPE_RANGE);
-        range->type_id = LMD_TYPE_RANGE;
-        range->start = 0;  range->end = -1;  // Empty range
-        range->length = 0;
-        return range;
+        return NULL;
     }
 }
 
