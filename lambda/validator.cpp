@@ -776,7 +776,7 @@ AstValidationResult* validate_against_union_type(AstValidator* validator, TypedI
 AstValidationResult* validate_occurrence_constraint(AstValidator* validator, TypedItem* items, long item_count, Type* expected_type, Operator occurrence_op, AstValidationContext* ctx) {
     AstValidationResult* result = create_ast_validation_result(ctx->pool);
     
-    if (!items || !expected_type) {
+    if (!expected_type) {
         add_ast_validation_error(result, create_ast_validation_error(
             AST_VALID_ERROR_PARSE_ERROR, "Invalid occurrence constraint parameters", ctx->current_path, ctx->pool));
         return result;
