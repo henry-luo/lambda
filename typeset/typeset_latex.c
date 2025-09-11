@@ -3,6 +3,8 @@
 #include "typeset.h"
 #include "output/pdf_renderer.h"
 #include "../lib/log.h"
+#include "../lambda/input/input.h"
+#include "../lambda/lambda-data.hpp"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -333,115 +335,80 @@ bool fn_typeset_latex_standalone(const char* input_file, const char* output_file
     
     bool result = false;
     
-    // Parse LaTeX input file
-    log_info("Reading LaTeX file: %s", input_file);
+    // Step 1: Parse LaTeX input using Lambda's input system
+    log_info("Parsing LaTeX file: %s", input_file);
     
-    // Read LaTeX content (simplified for stub implementation)
-    FILE* latex_file = fopen(input_file, "r");
-    if (!latex_file) {
-        log_error("Failed to open LaTeX file: %s", input_file);
+    // Create input system to parse LaTeX
+    extern Input* input_new(const Url* url);
+    extern void input_auto_detect(Input* input, const char* filename);
+    extern void pool_variable_destroy(VariablePool* pool);
+    
+    // Create URL for the input file  
+    char url_buffer[512];
+    snprintf(url_buffer, sizeof(url_buffer), "file://%s", input_file);
+    
+    // Create URL object - simplified approach
+    Url file_url = {0};
+    file_url.scheme = "file";
+    file_url.path = (char*)input_file;
+    
+    Input* input = input_new(&file_url);
+    if (!input) {
+        log_error("Failed to create input parser for LaTeX file");
         latex_typeset_options_destroy(options);
         return false;
     }
     
-    // For now, just close and continue to demonstrate PDF generation
-    fclose(latex_file);
+    // Parse the LaTeX file
+    input_auto_detect(input, input_file);
     
-    // Call appropriate function based on extension
+    if (input->root.item == ITEM_ERROR || input->root.item == ITEM_NULL) {
+        log_error("Failed to parse LaTeX file: %s", input_file);
+        if (input->type_list) arraylist_free(input->type_list);
+        pool_variable_destroy(input->pool);
+        free(input);
+        latex_typeset_options_destroy(options);
+        return false;
+    }
+    
+    log_info("Successfully parsed LaTeX AST");
+    
+    // Step 2: Create typeset engine and convert to ViewTree
+    // Create a simple context for typeset engine
+    Context simple_ctx = {0};  // Initialize with zeros
+    
+    extern TypesetEngine* typeset_engine_create(Context* ctx);
+    extern void typeset_engine_destroy(TypesetEngine* engine);
+    
+    TypesetEngine* engine = typeset_engine_create(&simple_ctx);
+    if (!engine) {
+        log_error("Failed to create typeset engine");
+        if (input->type_list) arraylist_free(input->type_list);
+        pool_variable_destroy(input->pool);
+        free(input);
+        latex_typeset_options_destroy(options);
+        return false;
+    }
+    
+    // Step 3: Call appropriate function based on extension
     if (strcmp(ext, ".pdf") == 0) {
-        log_info("Generating real PDF using libharu...");
-        
-        // Create a simple PDF renderer for demonstration
-        PDFRenderer* renderer = pdf_renderer_create(NULL);  // Use default options
-        if (!renderer) {
-            log_error("Failed to create PDF renderer");
-            latex_typeset_options_destroy(options);
-            return false;
-        }
-        
-        // Create a simple page with the LaTeX content
-        HPDF_Doc pdf = HPDF_New(pdf_error_handler, renderer);
-        if (!pdf) {
-            log_error("Failed to create PDF document");
-            pdf_renderer_destroy(renderer);
-            latex_typeset_options_destroy(options);
-            return false;
-        }
-        
-        HPDF_Page page = HPDF_AddPage(pdf);
-        HPDF_Page_SetSize(page, HPDF_PAGE_SIZE_A4, HPDF_PAGE_PORTRAIT);
-        
-        // Set font and add some content
-        HPDF_Font font = HPDF_GetFont(pdf, "Helvetica", NULL);
-        HPDF_Page_SetFontAndSize(page, font, 12);
-        HPDF_Page_BeginText(page);
-        HPDF_Page_MoveTextPos(page, 72, 720);  // 1 inch from left and top
-        HPDF_Page_ShowText(page, "Lambda LaTeX Phase 2 - Real PDF!");
-        HPDF_Page_MoveTextPos(page, 0, -20);
-        HPDF_Page_ShowText(page, "Generated using libharu PDF library");
-        HPDF_Page_MoveTextPos(page, 0, -20);
-        HPDF_Page_ShowText(page, "Input file: ");
-        HPDF_Page_ShowText(page, input_file);
-        HPDF_Page_EndText(page);
-        
-        // Save PDF
-        HPDF_STATUS status = HPDF_SaveToFile(pdf, output_file);
-        result = (status == HPDF_OK);
-        
-        if (result) {
-            log_info("Successfully generated real PDF: %s", output_file);
-        } else {
-            log_error("Failed to save PDF file: %s", output_file);
-        }
-        
-        // Cleanup
-        HPDF_Free(pdf);
-        pdf_renderer_destroy(renderer);
-        
+        log_info("Generating PDF through typeset pipeline...");
+        result = typeset_latex_to_pdf(engine, input->root, output_file, (TypesetOptions*)options);
     } else if (strcmp(ext, ".svg") == 0) {
-        log_info("Generating real SVG...");
-        FILE* svg_file = fopen(output_file, "w");
-        if (svg_file) {
-            fprintf(svg_file, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-            fprintf(svg_file, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"600\" height=\"400\">\n");
-            fprintf(svg_file, "  <rect width=\"100%%\" height=\"100%%\" fill=\"white\"/>\n");
-            fprintf(svg_file, "  <text x=\"50\" y=\"50\" font-family=\"serif\" font-size=\"16\" fill=\"black\">\n");
-            fprintf(svg_file, "    Lambda LaTeX Phase 2 - Real SVG!\n");
-            fprintf(svg_file, "  </text>\n");
-            fprintf(svg_file, "  <text x=\"50\" y=\"80\" font-family=\"serif\" font-size=\"12\" fill=\"gray\">\n");
-            fprintf(svg_file, "    Input: %s\n", input_file);
-            fprintf(svg_file, "  </text>\n");
-            fprintf(svg_file, "</svg>\n");
-            fclose(svg_file);
-            result = true;
-            log_info("Successfully generated real SVG: %s", output_file);
-        }
+        log_info("Generating SVG through typeset pipeline...");
+        result = typeset_latex_to_svg(engine, input->root, output_file, (TypesetOptions*)options);
     } else if (strcmp(ext, ".html") == 0) {
-        log_info("Generating real HTML...");
-        FILE* html_file = fopen(output_file, "w");
-        if (html_file) {
-            fprintf(html_file, "<!DOCTYPE html>\n");
-            fprintf(html_file, "<html lang=\"en\">\n");
-            fprintf(html_file, "<head>\n");
-            fprintf(html_file, "  <meta charset=\"UTF-8\">\n");
-            fprintf(html_file, "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
-            fprintf(html_file, "  <title>Lambda LaTeX Phase 2</title>\n");
-            fprintf(html_file, "</head>\n");
-            fprintf(html_file, "<body>\n");
-            fprintf(html_file, "  <h1>Lambda LaTeX Phase 2 - Real HTML!</h1>\n");
-            fprintf(html_file, "  <p>Generated from LaTeX input: <code>%s</code></p>\n", input_file);
-            fprintf(html_file, "  <p>This demonstrates real HTML generation from LaTeX source.</p>\n");
-            fprintf(html_file, "</body>\n");
-            fprintf(html_file, "</html>\n");
-            fclose(html_file);
-            result = true;
-            log_info("Successfully generated real HTML: %s", output_file);
-        }
+        log_info("Generating HTML through typeset pipeline...");
+        result = typeset_latex_to_html(engine, input->root, output_file, (TypesetOptions*)options);
     } else {
         log_error("Unsupported output format: %s", ext);
     }
     
     // Cleanup
+    typeset_engine_destroy(engine);
+    if (input->type_list) arraylist_free(input->type_list);
+    pool_variable_destroy(input->pool);
+    free(input);
     latex_typeset_options_destroy(options);
     
     return result;
