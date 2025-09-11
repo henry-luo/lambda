@@ -1018,3 +1018,6 @@ build-test: generate-premake
 	cd build/premake && premake5 gmake --file=../../premake5.lua
 	@mv build/premake/Makefile build/premake/PremakeMakefile 2>/dev/null || true
 	@$(MAKE) -C build/premake -f PremakeMakefile config=debug_x64
+
+# Include KLEE analysis targets
+
