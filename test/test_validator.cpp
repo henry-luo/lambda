@@ -18,38 +18,9 @@
 // Include validator headers for ValidationResult and run_validation
 #include "../lambda/validator.hpp"
 
-AstValidationResult* exec_validation(int argc, char* argv[]);
-AstValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format);
-
-// Stub implementations for missing functions
-AstValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format) {
-    printf("Mock validation for %s (schema: %s, format: %s)\n", 
-           data_file, schema_file ? schema_file : "auto", input_format ? input_format : "auto");
-    
-    // Create a mock successful result
-    AstValidationResult* result = (AstValidationResult*)malloc(sizeof(AstValidationResult));
-    if (result) {
-        result->valid = true;
-        result->error_count = 0;
-        result->errors = nullptr;
-        result->pool = nullptr;
-    }
-    return result;
-}
-
-AstValidationResult* exec_validation(int argc, char* argv[]) {
-    printf("Mock exec_validation with %d arguments\n", argc);
-    
-    // Create a mock successful result
-    AstValidationResult* result = (AstValidationResult*)malloc(sizeof(AstValidationResult));
-    if (result) {
-        result->valid = true;
-        result->error_count = 0;
-        result->errors = nullptr;
-        result->pool = nullptr;
-    }
-    return result;
-}
+// External validation functions - implemented in validator/ast_validate.cpp
+extern "C" ValidationResult* exec_validation(int argc, char* argv[]);
+extern "C" ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format);
 
 // Memory pool disabled for CLI-only tests
 // static VariableMemPool* test_pool = NULL;
@@ -169,11 +140,11 @@ void test_cli_validation_helper(const char* data_file, const char* schema_file,
     cr_log_info("Calling exec_validation:: with %d arguments for %s", test_argc, data_file);    
     
     // Add crash protection for problematic validation cases
-    AstValidationResult* validation_result = nullptr;
+    ValidationResult* validation_result = nullptr;
     if (strstr(data_file, "json_user_profile") || strstr(data_file, "cookbook")) {
         printf("CRASH PROTECTION: Skipping problematic validation for %s\n", data_file);
         // Create a mock successful result for crash-prone cases
-        validation_result = (AstValidationResult*)malloc(sizeof(AstValidationResult));
+        validation_result = (ValidationResult*)malloc(sizeof(ValidationResult));
         if (validation_result) {
             validation_result->valid = should_pass;  // Use expected result
             validation_result->error_count = 0;
@@ -293,7 +264,7 @@ void test_auto_schema_detection_helper(const char* data_file, const char* expect
                 data_file, format ? format : "auto", should_pass ? 1 : 0);
     
     // Call exec_validation to get detailed ValidationResult
-    AstValidationResult* validation_result = exec_validation(test_argc, test_argv);
+    ValidationResult* validation_result = exec_validation(test_argc, test_argv);
     
     // Enhanced validation result check with detailed error information
     if (should_pass) {

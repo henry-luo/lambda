@@ -15,3 +15,9 @@ Script* load_script(Runtime* runtime, const char* script_path, const char* sourc
     return nullptr;
 }
 
+// Stub implementation of find_errors for test builds
+void find_errors(TSNode node) {
+    (void)node; // Suppress unused parameter warning
+    // Stub implementation - do nothing for tests
+}
+

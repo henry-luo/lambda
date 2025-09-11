@@ -18,84 +18,11 @@
 #include <cstdlib>
 #include <unistd.h>
 
+// Forward declaration for suggest_corrections function
+extern "C" List* suggest_corrections(ValidationError* error, VariableMemPool* pool);
+
 // ==================== Validation Error System ====================
-
-// Validation error codes
-typedef enum ValidationErrorCode {
-    VALID_ERROR_NONE = 0,
-    VALID_ERROR_TYPE_MISMATCH,
-    VALID_ERROR_MISSING_FIELD,
-    VALID_ERROR_UNEXPECTED_FIELD,
-    VALID_ERROR_INVALID_ELEMENT,
-    VALID_ERROR_CONSTRAINT_VIOLATION,
-    VALID_ERROR_REFERENCE_ERROR,
-    VALID_ERROR_OCCURRENCE_ERROR,
-    VALID_ERROR_CIRCULAR_REFERENCE,
-    VALID_ERROR_PARSE_ERROR,
-} ValidationErrorCode;
-
-// Path segment types for error reporting
-typedef enum PathSegmentType {
-    PATH_FIELD,      // .field_name
-    PATH_INDEX,      // [index]
-    PATH_ELEMENT,    // <element_tag>
-    PATH_ATTRIBUTE,  // @attr_name
-} PathSegmentType;
-
-// Path segment structure
-typedef struct PathSegment {
-    PathSegmentType type;
-    union {
-        StrView field_name;
-        long index;
-        StrView element_tag;
-        StrView attr_name;
-    } data;
-    struct PathSegment* next;
-} PathSegment;
-
-// Validation error structure
-typedef struct ValidationError {
-    ValidationErrorCode code;
-    String* message;           // Error message
-    PathSegment* path;         // Path to error location
-    void* expected;            // Expected type (optional)
-    Item actual;               // Actual value (optional)
-    List* suggestions;         // List of String* suggestions (optional)
-    struct ValidationError* next;
-} ValidationError;
-
-// Validation warning (same as error but non-fatal)
-typedef ValidationError ValidationWarning;
-
-// Validation result
-typedef struct ValidationResult {
-    bool valid;                // Overall validation result
-    ValidationError* errors;   // Linked list of errors
-    ValidationWarning* warnings; // Linked list of warnings
-    int error_count;           // Number of errors
-    int warning_count;         // Number of warnings
-} ValidationResult;
-
-// Validation options
-typedef struct ValidationOptions {
-    bool strict_mode;              // Treat warnings as errors
-    bool allow_unknown_fields;     // Allow extra fields in maps
-    bool allow_empty_elements;     // Allow elements without content
-    int max_depth;                 // Maximum validation depth
-    int timeout_ms;                // Validation timeout (0 = no limit)
-    char** enabled_rules;          // Custom rules to enable
-    char** disabled_rules;         // Rules to disable
-} ValidationOptions;
-
-// Main validator structure
-typedef struct SchemaValidator {
-    HashMap* schemas;              // Loaded schemas by name
-    VariableMemPool* pool;         // Memory pool
-    void* context;                 // Default validation context
-    void* custom_validators;       // Registered custom validators
-    ValidationOptions default_options;  // Default validation options
-} SchemaValidator;
+// Note: ValidationResult and related structures now defined in validator.hpp
 
 // Utility function
 StrView strview_from_cstr(const char* str) {
@@ -111,147 +38,7 @@ StrView strview_from_cstr(const char* str) {
 }
 
 // ==================== Error Reporting Implementation ====================
-
-// Create validation result
-ValidationResult* create_validation_result(VariableMemPool* pool) {
-    ValidationResult* result = (ValidationResult*)pool_calloc(pool, sizeof(ValidationResult));
-    if (!result) return nullptr;
-    
-    result->valid = true;
-    result->errors = nullptr;
-    result->warnings = nullptr;
-    result->error_count = 0;
-    result->warning_count = 0;
-    
-    return result;
-}
-
-// Create validation error
-ValidationError* create_validation_error(ValidationErrorCode code, const char* message,
-                                        PathSegment* path, VariableMemPool* pool) {
-    ValidationError* error = (ValidationError*)pool_calloc(pool, sizeof(ValidationError));
-    if (!error) return nullptr;
-    
-    error->code = code;
-    error->path = path;
-    error->expected = nullptr;
-    error->actual.item = ITEM_ERROR;
-    error->suggestions = nullptr;
-    error->next = nullptr;
-    
-    // Create message string
-    if (message) {
-        size_t len = strlen(message);
-        error->message = (String*)pool_calloc(pool, sizeof(String) + len + 1);
-        if (error->message) {
-            error->message->len = len;
-            error->message->ref_cnt = 0;
-            strcpy(error->message->chars, message);
-        }
-    }
-    
-    return error;
-}
-
-// Add validation error to result
-void add_validation_error(ValidationResult* result, ValidationError* error) {
-    if (!result || !error) return;
-    
-    result->valid = false;
-    result->error_count++;
-    
-    // Add to linked list
-    error->next = result->errors;
-    result->errors = error;
-}
-
-// Merge validation results
-void merge_validation_results(ValidationResult* dest, ValidationResult* src) {
-    if (!dest || !src) return;
-    
-    if (!src->valid) {
-        dest->valid = false;
-    }
-    
-    // Merge errors
-    ValidationError* error = src->errors;
-    while (error) {
-        ValidationError* next = error->next;
-        error->next = dest->errors;
-        dest->errors = error;
-        dest->error_count++;
-        error = next;
-    }
-    
-    // Merge warnings
-    ValidationWarning* warning = src->warnings;
-    while (warning) {
-        ValidationWarning* next = warning->next;
-        warning->next = dest->warnings;
-        dest->warnings = warning;
-        dest->warning_count++;
-        warning = next;
-    }
-}
-
-// Suggest corrections (stub implementation)
-List* suggest_corrections(ValidationError* error, VariableMemPool* pool) {
-    // Simple stub - return empty list
-    return nullptr;
-}
-
-// Generate validation report
-String* generate_validation_report(ValidationResult* result, VariableMemPool* pool) {
-    if (!result || !pool) return nullptr;
-    
-    // Simple text report
-    char report_text[2048];
-    if (result->valid) {
-        snprintf(report_text, sizeof(report_text), 
-                "✅ Validation PASSED\n✓ No errors found\n");
-    } else {
-        snprintf(report_text, sizeof(report_text), 
-                "❌ Validation FAILED\nErrors found: %d\n", result->error_count);
-        
-        // Add error details
-        ValidationError* error = result->errors;
-        int error_num = 1;
-        while (error && strlen(report_text) < sizeof(report_text) - 200) {
-            char error_line[200];
-            const char* error_msg = error->message ? error->message->chars : "Unknown error";
-            snprintf(error_line, sizeof(error_line), "  %d. %s\n", error_num++, error_msg);
-            strncat(report_text, error_line, sizeof(report_text) - strlen(report_text) - 1);
-            error = error->next;
-        }
-    }
-    
-    // Create string
-    size_t len = strlen(report_text);
-    String* report = (String*)pool_calloc(pool, sizeof(String) + len + 1);
-    if (report) {
-        report->len = len;
-        report->ref_cnt = 0;
-        strcpy(report->chars, report_text);
-    }
-    
-    return report;
-}
-
-// Format error with context
-String* format_error_with_context(ValidationError* error, VariableMemPool* pool) {
-    if (!error || !pool) return nullptr;
-    
-    const char* error_msg = error->message ? error->message->chars : "Unknown error";
-    size_t len = strlen(error_msg);
-    String* formatted = (String*)pool_calloc(pool, sizeof(String) + len + 1);
-    if (formatted) {
-        formatted->len = len;
-        formatted->ref_cnt = 0;
-        strcpy(formatted->chars, error_msg);
-    }
-    
-    return formatted;
-}
+// Note: Error reporting functions now implemented in error_reporting.cpp
 
 // Schema validator stubs
 SchemaValidator* schema_validator_create(VariableMemPool* pool) {
@@ -297,7 +84,7 @@ static void transpiler_destroy(void* transpiler) {
     // Stub implementation - nothing to destroy
 }
 
-// Enhanced validation context for AST validation (extends existing AstValidationContext)
+// Enhanced validation context for AST validation
 typedef struct EnhancedValidationContext {
     VariableMemPool* pool;
     PathSegment* current_path;
@@ -550,7 +337,7 @@ ValidationResult* validate_lambda_file(const char* file_path, VariableMemPool* p
 }
 
 // Enhanced AST-based validation function with full validation flow
-extern "C" AstValidationResult* run_ast_validation(const char* data_file, const char* schema_file, const char* input_format) {
+extern "C" ValidationResult* run_ast_validation(const char* data_file, const char* schema_file, const char* input_format) {
     printf("Lambda AST Validator v2.0\n");
     
     // Check if this is a Lambda file or should use schema validation
@@ -732,23 +519,13 @@ extern "C" AstValidationResult* run_ast_validation(const char* data_file, const 
         }
     }
     
-    // Create compatibility result for return
-    AstValidationResult* result = (AstValidationResult*)malloc(sizeof(AstValidationResult));
-    if (!result) {
-        pool_variable_destroy(pool);
-        return nullptr;
-    }
-    
-    result->valid = validation_result->valid;
-    result->error_count = validation_result->error_count;
-    result->errors = (AstValidationError*)validation_result;  // Store validation result for cleanup
-    
-    return result;
+    // Return the validation result directly
+    return validation_result;
 }
 
 
 // Validation execution function that can be called directly by tests
-extern "C" AstValidationResult* exec_validation(int argc, char* argv[]) {
+extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
     // Extract validation argument parsing logic from main() function
     // This allows tests to call validation directly without spawning new processes
     printf("Starting validation with arguments\n");
@@ -888,22 +665,29 @@ extern "C" AstValidationResult* exec_validation(int argc, char* argv[]) {
     } else {
         printf("Starting AST validation of '%s'...\n", data_file);
     }
-    AstValidationResult* result = run_ast_validation(data_file, schema_file, input_format);
+    ValidationResult* result = run_ast_validation(data_file, schema_file, input_format);
     
     // Return the ValidationResult directly to the caller
     return result;
 }
 
 
-// Cleanup function for validation results
-void ast_validation_result_destroy(AstValidationResult* result) {
-    if (!result) return;
-    
-    if (result->errors) {
-        ValidationResult* validation_result = (ValidationResult*)result->errors;
-        // Note: Memory pool cleanup should be handled by caller
-        // since ValidationResult and its errors are allocated from the pool
+// Simple wrapper function for tests that need direct validation
+extern "C" ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format) {
+    if (!data_file) {
+        printf("Error: No data file specified\n");
+        return nullptr;
     }
     
-    free(result);
+    printf("Running validation for %s (schema: %s, format: %s)\n", 
+           data_file, schema_file ? schema_file : "auto", input_format ? input_format : "auto");
+    
+    return run_ast_validation(data_file, schema_file, input_format);
+}
+
+// Cleanup function for validation results
+void ast_validation_result_destroy(ValidationResult* result) {
+    // Note: Memory pool cleanup should be handled by caller
+    // since ValidationResult and its errors are allocated from the pool
+    validation_result_destroy(result);
 }
