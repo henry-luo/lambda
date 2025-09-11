@@ -1,0 +1,210 @@
+# Integration targets for KLEE analysis
+
+# Variables
+KLEE_BUILD_DIR = build_klee
+KLEE_OUTPUT_DIR = klee_output
+KLEE_TEST_DIR = test/klee
+KLEE_SCRIPTS_DIR = test
+
+# KLEE test files
+KLEE_TESTS = test_arithmetic_simple test_strings_simple test_arrays_simple
+
+# Default KLEE flags
+KLEE_CFLAGS = -I. -Ilib -Ilambda -Ilib/mem-pool/include -emit-llvm -c -g -O0 -Xclang -disable-O0-optnone -DKLEE_ANALYSIS
+KLEE_FLAGS = --libc=uclibc --posix-runtime --write-test-cases --write-paths --max-time=300 --max-memory=1000
+
+.PHONY: klee-setup klee-compile klee-run klee-analyze klee-clean klee-all klee-install-docker klee-help klee-docker-all klee-docker-compile klee-docker-run klee-docker-analyze klee-docker-clean
+
+# Show KLEE installation options
+klee-help:
+	@echo "🔍 KLEE Installation Options for Lambda Script:"
+	@echo
+	@echo "📦 Available Installation Methods:"
+	@echo "  make klee-install-docker   # Docker-based (recommended)"
+	@echo
+	@echo "🐳 Docker Method:"
+	@echo "  ✅ Easy installation and reliable execution"
+	@echo "  ✅ No complex dependencies or compilation issues"
+	@echo "  ✅ Works on all platforms (macOS, Linux, Windows)"
+	@echo "  ✅ Isolated environment prevents conflicts"
+	@echo "  ⚠️  Requires Docker Desktop to be installed"
+	@echo
+	@echo "🚀 After Installation:"
+	@echo "  make klee-docker-all       # Run complete KLEE analysis"
+	@echo "  make klee-compile          # Compile test cases only"
+	@echo "  make klee-run              # Run symbolic execution only"
+	@echo
+	@echo "🐳 Docker Commands (Recommended):"
+	@echo "  make klee-docker-all       # Complete Docker-based analysis"
+	@echo "  make klee-docker-compile   # Compile using Docker"
+	@echo "  make klee-docker-run       # Run symbolic execution using Docker" 
+	@echo "  make klee-docker-analyze   # Analyze results"
+	@echo "  make klee-docker-clean     # Clean Docker results"
+	@echo
+
+# Install KLEE using Docker (recommended for macOS)
+klee-install-docker:
+	@echo "Installing KLEE using Docker (recommended for macOS)..."
+	@if [ -f "./setup-klee-docker.sh" ]; then \
+		./setup-klee-docker.sh; \
+	else \
+		echo "setup-klee-docker.sh not found."; \
+		exit 1; \
+	fi
+
+# Setup KLEE directories and check installation
+klee-setup:
+	@echo "Setting up KLEE analysis environment..."
+	@mkdir -p $(KLEE_BUILD_DIR)
+	@mkdir -p $(KLEE_OUTPUT_DIR)
+	@mkdir -p $(KLEE_OUTPUT_DIR)/arithmetic
+	@mkdir -p $(KLEE_OUTPUT_DIR)/strings
+	@mkdir -p $(KLEE_OUTPUT_DIR)/arrays
+	@mkdir -p $(KLEE_OUTPUT_DIR)/memory_pool
+	@mkdir -p $(KLEE_OUTPUT_DIR)/validation
+	@if ! command -v klee >/dev/null 2>&1; then \
+		echo ""; \
+		echo "❌ KLEE not found. Please install KLEE first."; \
+		echo ""; \
+		echo "For macOS, run:"; \
+		echo "  make klee-install-docker     # Docker installation"; \
+		echo "  ./setup-klee-docker.sh      # Direct Docker install"; \
+		echo ""; \
+		echo "Or install manually:"; \
+		echo "  1. Install Docker Desktop"; \
+		echo "  2. Run: make klee-install-docker"; \
+		echo ""; \
+		echo "For other platforms, see: https://klee.github.io/"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@if ! command -v klee-clang >/dev/null 2>&1; then \
+		echo ""; \
+		echo "⚠️  klee-clang not found. KLEE installation may be incomplete."; \
+		echo "   Make sure KLEE's bin directory is in your PATH."; \
+		echo ""; \
+		exit 1; \
+	fi
+	@echo "✅ KLEE environment ready."
+
+# Compile individual KLEE test to LLVM bitcode
+$(KLEE_BUILD_DIR)/%.bc: $(KLEE_TEST_DIR)/%.c | klee-setup
+	@echo "Compiling $< for KLEE analysis..."
+	@klee-clang $(KLEE_CFLAGS) $< -o $@
+
+# Compile all KLEE tests
+klee-compile: $(addprefix $(KLEE_BUILD_DIR)/, $(addsuffix .bc, $(KLEE_TESTS)))
+	@echo "All KLEE tests compiled successfully."
+
+# Docker-based KLEE targets (recommended)
+klee-docker-all:
+	@echo "🐳 Running KLEE analysis using Docker..."
+	@./test/run_klee_docker.sh all
+
+klee-docker-compile:
+	@echo "🐳 Compiling KLEE tests using Docker..."
+	@./test/run_klee_docker.sh compile
+
+klee-docker-run:
+	@echo "🐳 Running KLEE symbolic execution using Docker..."
+	@./test/run_klee_docker.sh run
+
+klee-docker-analyze:
+	@echo "🐳 Analyzing KLEE results..."
+	@./test/run_klee_docker.sh analyze
+
+klee-docker-clean:
+	@echo "🐳 Cleaning KLEE Docker results..."
+	@./test/run_klee_docker.sh clean
+
+# Run KLEE on individual test
+klee-run-%: $(KLEE_BUILD_DIR)/%.bc
+	@echo "Running KLEE analysis on $*..."
+	@mkdir -p $(KLEE_OUTPUT_DIR)/$*
+	@klee --output-dir=$(KLEE_OUTPUT_DIR)/$* $(KLEE_FLAGS) $< 2>&1 | tee $(KLEE_OUTPUT_DIR)/$*/klee.log
+	@echo "KLEE analysis for $* completed. Results in $(KLEE_OUTPUT_DIR)/$*/"
+
+# Run KLEE on all tests
+klee-run: $(addprefix klee-run-, $(KLEE_TESTS))
+	@echo "All KLEE analyses completed."
+
+# Analyze KLEE results for individual test
+klee-analyze-%:
+	@echo "Analyzing KLEE results for $*..."
+	@if [ -d "$(KLEE_OUTPUT_DIR)/$*" ]; then \
+		echo "Test cases generated: $$(find $(KLEE_OUTPUT_DIR)/$* -name '*.ktest' | wc -l)"; \
+		echo "Errors found: $$(find $(KLEE_OUTPUT_DIR)/$* -name '*.err' | wc -l)"; \
+		if [ "$$(find $(KLEE_OUTPUT_DIR)/$* -name '*.err' | wc -l)" -gt 0 ]; then \
+			echo "Error details:"; \
+			find $(KLEE_OUTPUT_DIR)/$* -name "*.err" -exec echo "  {}" \; -exec cat {} \; -exec echo \;; \
+		fi; \
+		if [ -f "$(KLEE_OUTPUT_DIR)/$*/run.stats" ]; then \
+			echo "Statistics:"; \
+			grep -E "(Instructions|Branches|TotalInstructions|CompletedPaths)" $(KLEE_OUTPUT_DIR)/$*/run.stats; \
+		fi; \
+	else \
+		echo "No results found for $*. Run 'make klee-run-$*' first."; \
+	fi
+
+# Generate comprehensive analysis report
+klee-analyze: klee-run
+	@echo "Generating comprehensive KLEE analysis report..."
+	@if [ -f "$(KLEE_SCRIPTS_DIR)/run_klee_analysis.sh" ]; then \
+		cd $(KLEE_SCRIPTS_DIR) && ./run_klee_analysis.sh; \
+	else \
+		echo "Manual analysis:"; \
+		for test in $(KLEE_TESTS); do \
+			echo "=== $$test ==="; \
+			$(MAKE) klee-analyze-$$test; \
+			echo; \
+		done; \
+	fi
+
+# Quick KLEE check - run with shorter timeout for CI
+klee-check: KLEE_FLAGS = --libc=uclibc --posix-runtime --write-test-cases --max-time=60 --max-memory=500
+klee-check: klee-compile klee-run
+	@echo "Quick KLEE check completed."
+
+# Clean KLEE build artifacts
+klee-clean:
+	@echo "Cleaning KLEE artifacts..."
+	@rm -rf $(KLEE_BUILD_DIR)
+	@rm -rf $(KLEE_OUTPUT_DIR)
+	@rm -f klee_analysis_report.md
+	@echo "KLEE artifacts cleaned."
+
+# Full KLEE analysis pipeline
+klee-all: klee-clean klee-setup klee-compile klee-run klee-analyze
+	@echo "Complete KLEE analysis pipeline finished."
+	@echo "Check klee_analysis_report.md for detailed results."
+
+# Run KLEE with custom timeout (usage: make klee-custom TIMEOUT=600)
+TIMEOUT ?= 300
+klee-custom: KLEE_FLAGS = --libc=uclibc --posix-runtime --write-test-cases --max-time=$(TIMEOUT) --max-memory=1000
+klee-custom: klee-compile klee-run klee-analyze
+	@echo "Custom KLEE analysis with $(TIMEOUT)s timeout completed."
+
+# Interactive KLEE test runner
+klee-interactive:
+	@echo "Interactive KLEE test runner"
+	@echo "Available tests: $(KLEE_TESTS)"
+	@read -p "Enter test name to run (or 'all'): " test; \
+	if [ "$$test" = "all" ]; then \
+		$(MAKE) klee-all; \
+	else \
+		$(MAKE) klee-run-$$test && $(MAKE) klee-analyze-$$test; \
+	fi
+
+# Show KLEE test coverage
+klee-coverage:
+	@echo "KLEE Test Coverage Summary:"
+	@echo "=========================="
+	@for test in $(KLEE_TESTS); do \
+		if [ -f "$(KLEE_OUTPUT_DIR)/$$test/run.stats" ]; then \
+			echo "$$test:"; \
+			grep -E "(Instructions|Branches)" $(KLEE_OUTPUT_DIR)/$$test/run.stats | sed 's/^/  /'; \
+		else \
+			echo "$$test: No coverage data (not run)"; \
+		fi; \
+		echo; \
+	done
