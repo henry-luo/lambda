@@ -146,6 +146,8 @@ project "lambda-input-full-cpp"
         "lambda/lambda-data.cpp",
         "lambda/build_ast.cpp",
         "lambda/validator.cpp",
+        "lambda/validator/ast_validate.cpp",
+        "lambda/validator/error_reporting.cpp",
         "test/test_stubs.cpp",
     }
     

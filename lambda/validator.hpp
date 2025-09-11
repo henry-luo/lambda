@@ -15,53 +15,111 @@
 // Forward declarations
 typedef struct AstValidator AstValidator;
 typedef struct AstValidationContext AstValidationContext;
-typedef struct AstValidationResult AstValidationResult;
-typedef struct AstValidationError AstValidationError;
+typedef struct ValidationResult ValidationResult;
+typedef struct ValidationError ValidationError;
+typedef struct PathSegment PathSegment;
 
-// Validation error types
-typedef enum {
-    AST_VALID_ERROR_NONE = 0,
-    AST_VALID_ERROR_TYPE_MISMATCH,
-    AST_VALID_ERROR_MISSING_FIELD,
-    AST_VALID_ERROR_CONSTRAINT_VIOLATION,
-    AST_VALID_ERROR_PARSE_ERROR,
-    AST_VALID_ERROR_OCCURRENCE_ERROR
-} AstValidationErrorType;
+// ==================== Validation Error System ====================
 
-// Validation options
-typedef struct {
-    bool strict_mode;           // Strict type checking
-    bool allow_unknown_fields;  // Allow fields not in schema
-    bool allow_empty_elements;  // Allow empty elements
-    int max_depth;             // Maximum validation depth
-    int timeout_ms;            // Validation timeout
-} AstValidationOptions;
+// Validation error codes
+typedef enum ValidationErrorCode {
+    VALID_ERROR_NONE = 0,
+    VALID_ERROR_TYPE_MISMATCH,
+    VALID_ERROR_MISSING_FIELD,
+    VALID_ERROR_UNEXPECTED_FIELD,
+    VALID_ERROR_INVALID_ELEMENT,
+    VALID_ERROR_CONSTRAINT_VIOLATION,
+    VALID_ERROR_REFERENCE_ERROR,
+    VALID_ERROR_OCCURRENCE_ERROR,
+    VALID_ERROR_CIRCULAR_REFERENCE,
+    VALID_ERROR_PARSE_ERROR,
+} ValidationErrorCode;
+
+// Path segment types for error reporting
+typedef enum PathSegmentType {
+    PATH_FIELD,      // .field_name
+    PATH_INDEX,      // [index]
+    PATH_ELEMENT,    // <element_tag>
+    PATH_ATTRIBUTE,  // @attr_name
+} PathSegmentType;
+
+// Path segment structure
+typedef struct PathSegment {
+    PathSegmentType type;
+    union {
+        StrView field_name;
+        long index;
+        StrView element_tag;
+        StrView attr_name;
+    } data;
+    struct PathSegment* next;
+} PathSegment;
 
 // Validation error structure
-typedef struct AstValidationError {
-    AstValidationErrorType error_type;
-    char* message;
-    char* path;                // JSON path to error location
-    Type* expected_type;       // Expected type from AST
-    TypedItem actual_item;     // Actual item that failed
-    struct AstValidationError* next;
-} AstValidationError;
+typedef struct ValidationError {
+    ValidationErrorCode code;
+    String* message;           // Error message
+    PathSegment* path;         // Path to error location
+    void* expected;            // Expected type (optional)
+    Item actual;               // Actual value (optional)
+    List* suggestions;         // List of String* suggestions (optional)
+    struct ValidationError* next;
+} ValidationError;
 
-// Validation result structure
-typedef struct AstValidationResult {
-    bool valid;
-    int error_count;
-    AstValidationError* errors;
-    VariableMemPool* pool;     // Memory pool for cleanup
-} AstValidationResult;
+// Validation warning (same as error but non-fatal)
+typedef struct ValidationWarning {
+    ValidationErrorCode code;
+    String* message;           // Error message
+    PathSegment* path;         // Path to error location
+    void* expected;            // Expected type (optional)
+    Item actual;               // Actual value (optional)
+    List* suggestions;         // List of String* suggestions (optional)
+    struct ValidationWarning* next;
+} ValidationWarning;
+
+// Validation result
+typedef struct ValidationResult {
+    bool valid;                // Overall validation result
+    ValidationError* errors;   // Linked list of errors
+    ValidationWarning* warnings; // Linked list of warnings
+    int error_count;           // Number of errors
+    int warning_count;         // Number of warnings
+} ValidationResult;
+
+// Validation options
+typedef struct ValidationOptions {
+    bool strict_mode;              // Treat warnings as errors
+    bool allow_unknown_fields;     // Allow extra fields in maps
+    bool allow_empty_elements;     // Allow elements without content
+    int max_depth;                 // Maximum validation depth
+    int timeout_ms;                // Validation timeout (0 = no limit)
+    char** enabled_rules;          // Custom rules to enable
+    char** disabled_rules;         // Rules to disable
+} ValidationOptions;
+
+// Legacy typedef for backward compatibility - will be phased out
+typedef ValidationResult AstValidationResult;
+typedef ValidationError AstValidationError;
+typedef ValidationOptions AstValidationOptions;
+typedef ValidationErrorCode AstValidationErrorType;
+
+// Legacy enum mappings
+#define AST_VALID_ERROR_NONE VALID_ERROR_NONE
+#define AST_VALID_ERROR_TYPE_MISMATCH VALID_ERROR_TYPE_MISMATCH
+#define AST_VALID_ERROR_MISSING_FIELD VALID_ERROR_MISSING_FIELD
+#define AST_VALID_ERROR_CONSTRAINT_VIOLATION VALID_ERROR_CONSTRAINT_VIOLATION
+#define AST_VALID_ERROR_PARSE_ERROR VALID_ERROR_PARSE_ERROR
+#define AST_VALID_ERROR_OCCURRENCE_ERROR VALID_ERROR_OCCURRENCE_ERROR
 
 // Validation context
 typedef struct AstValidationContext {
     AstValidator* validator;
-    char* current_path;
+    PathSegment* current_path;
     int current_depth;
-    AstValidationOptions options;
+    int max_depth;
+    ValidationOptions options;
     VariableMemPool* pool;
+    HashMap* visited_nodes;  // For circular reference detection
 } AstValidationContext;
 
 // Main validator structure
@@ -69,8 +127,17 @@ typedef struct AstValidator {
     Transpiler* transpiler;           // Direct use of transpiler for AST
     VariableMemPool* pool;           // Memory pool
     HashMap* type_definitions;       // Registry of Type* definitions
-    AstValidationOptions default_options;
+    ValidationOptions default_options;
 } AstValidator;
+
+// Schema validator structure
+typedef struct SchemaValidator {
+    HashMap* schemas;              // Loaded schemas by name
+    VariableMemPool* pool;         // Memory pool
+    void* context;                 // Default validation context
+    void* custom_validators;       // Registered custom validators
+    ValidationOptions default_options;  // Default validation options
+} SchemaValidator;
 
 // ==================== Core API ====================
 
@@ -92,12 +159,12 @@ int ast_validator_load_schema(AstValidator* validator, const char* source, const
 /**
  * Validate a typed item against a type name
  */
-AstValidationResult* ast_validator_validate(AstValidator* validator, TypedItem item, const char* type_name);
+ValidationResult* ast_validator_validate(AstValidator* validator, TypedItem item, const char* type_name);
 
 /**
  * Validate a typed item against a specific Type*
  */
-AstValidationResult* ast_validator_validate_type(AstValidator* validator, TypedItem item, Type* type);
+ValidationResult* ast_validator_validate_type(AstValidator* validator, TypedItem item, Type* type);
 
 // ==================== Type Extraction ====================
 
@@ -116,60 +183,101 @@ Type* ast_validator_find_type(AstValidator* validator, const char* type_name);
 /**
  * Main validation dispatcher
  */
-AstValidationResult* validate_against_type(AstValidator* validator, TypedItem item, Type* type, AstValidationContext* ctx);
+ValidationResult* validate_against_type(AstValidator* validator, TypedItem item, Type* type, AstValidationContext* ctx);
 
 /**
  * Validate against primitive type
  */
-AstValidationResult* validate_against_primitive_type(TypedItem item, Type* type, AstValidationContext* ctx);
+ValidationResult* validate_against_primitive_type(TypedItem item, Type* type, AstValidationContext* ctx);
 
 /**
  * Validate against array type
  */
-AstValidationResult* validate_against_array_type(AstValidator* validator, TypedItem item, TypeArray* array_type, AstValidationContext* ctx);
+ValidationResult* validate_against_array_type(AstValidator* validator, TypedItem item, TypeArray* array_type, AstValidationContext* ctx);
 
 /**
  * Validate against map type
  */
-AstValidationResult* validate_against_map_type(AstValidator* validator, TypedItem item, TypeMap* map_type, AstValidationContext* ctx);
+ValidationResult* validate_against_map_type(AstValidator* validator, TypedItem item, TypeMap* map_type, AstValidationContext* ctx);
 
 /**
  * Validate against element type
  */
-AstValidationResult* validate_against_element_type(AstValidator* validator, TypedItem item, TypeElmt* element_type, AstValidationContext* ctx);
+ValidationResult* validate_against_element_type(AstValidator* validator, TypedItem item, TypeElmt* element_type, AstValidationContext* ctx);
 
 /**
  * Validate against union type (multiple valid types)
  */
-AstValidationResult* validate_against_union_type(AstValidator* validator, TypedItem item, Type** union_types, int type_count, AstValidationContext* ctx);
+ValidationResult* validate_against_union_type(AstValidator* validator, TypedItem item, Type** union_types, int type_count, AstValidationContext* ctx);
 
 /**
  * Validate occurrence constraints (?, *, +, min/max)
  */
-AstValidationResult* validate_occurrence_constraint(AstValidator* validator, TypedItem* items, long item_count, Type* expected_type, Operator occurrence_op, AstValidationContext* ctx);
+ValidationResult* validate_occurrence_constraint(AstValidator* validator, TypedItem* items, long item_count, Type* expected_type, Operator occurrence_op, AstValidationContext* ctx);
 
 // ==================== Error Handling ====================
 
 /**
  * Create validation result
  */
-AstValidationResult* create_ast_validation_result(VariableMemPool* pool);
+ValidationResult* create_validation_result(VariableMemPool* pool);
 
 /**
  * Create validation error
  */
-AstValidationError* create_ast_validation_error(AstValidationErrorType type, const char* message, 
-                                               const char* path, VariableMemPool* pool);
+ValidationError* create_validation_error(ValidationErrorCode code, const char* message,
+                                        PathSegment* path, VariableMemPool* pool);
 
 /**
  * Add error to validation result
  */
-void add_ast_validation_error(AstValidationResult* result, AstValidationError* error);
+void add_validation_error(ValidationResult* result, ValidationError* error);
+
+/**
+ * Add warning to validation result
+ */
+void add_validation_warning(ValidationResult* result, ValidationWarning* warning);
+
+/**
+ * Merge validation results
+ */
+void merge_validation_results(ValidationResult* dest, ValidationResult* src);
+
+/**
+ * Generate validation report
+ */
+String* generate_validation_report(ValidationResult* result, VariableMemPool* pool);
+
+/**
+ * Generate JSON validation report
+ */
+String* generate_json_report(ValidationResult* result, VariableMemPool* pool);
+
+/**
+ * Format error with context
+ */
+String* format_error_with_context(ValidationError* error, VariableMemPool* pool);
+
+/**
+ * Format validation path
+ */
+String* format_validation_path(PathSegment* path, VariableMemPool* pool);
+
+/**
+ * Format type name
+ */
+String* format_type_name(void* type, VariableMemPool* pool);
 
 /**
  * Free validation result
  */
-void free_ast_validation_result(AstValidationResult* result);
+void validation_result_destroy(ValidationResult* result);
+
+// Legacy function names for backward compatibility
+#define create_ast_validation_result create_validation_result
+#define create_ast_validation_error create_validation_error
+#define add_ast_validation_error add_validation_error
+#define free_ast_validation_result validation_result_destroy
 
 // ==================== Utility Functions ====================
 

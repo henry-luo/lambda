@@ -12,19 +12,53 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include "../lib/mem-pool/include/mem_pool.h"
-#include "../lambda/validator.hpp"
+#include <stddef.h>
 
-// Avoid INT_MAX redefinition issues
-#ifdef INT_MAX
-#undef INT_MAX
-#endif
-#include <limits.h>
+// Include validator headers for ValidationResult and run_validation
+#include "../lambda/validator.hpp"
 
 // External function declarations for memory pool
 extern "C" {
     MemPoolError pool_variable_init(VariableMemPool **pool, size_t grow_size, uint16_t tolerance_percent);
     MemPoolError pool_variable_destroy(VariableMemPool *pool);
+}
+
+// Forward declaration for path segment creation
+PathSegment* create_path_segment(PathSegmentType type, const char* name, long index, VariableMemPool* pool);
+
+// Simple implementation of create_path_segment for tests
+PathSegment* create_path_segment(PathSegmentType type, const char* name, long index, VariableMemPool* pool) {
+    PathSegment* segment = (PathSegment*)pool_calloc(pool, sizeof(PathSegment));
+    if (!segment) return nullptr;
+    
+    segment->type = type;
+    segment->next = nullptr;
+    
+    switch (type) {
+        case PATH_FIELD:
+            if (name) {
+                segment->data.field_name.str = name;
+                segment->data.field_name.length = strlen(name);
+            }
+            break;
+        case PATH_INDEX:
+            segment->data.index = index;
+            break;
+        case PATH_ELEMENT:
+            if (name) {
+                segment->data.element_tag.str = name;
+                segment->data.element_tag.length = strlen(name);
+            }
+            break;
+        case PATH_ATTRIBUTE:
+            if (name) {
+                segment->data.attr_name.str = name;
+                segment->data.attr_name.length = strlen(name);
+            }
+            break;
+    }
+    
+    return segment;
 }
 
 // Stub implementations for missing functions required by validator (C++ linkage)
@@ -164,7 +198,7 @@ Test(primitive_validation, validate_string_type_mismatch) {
     cr_assert_not(result->valid, "Validation should fail for type mismatch");
     cr_assert_eq(result->error_count, 1, "Should have one error");
     cr_assert_not_null(result->errors, "Should have error details");
-    cr_assert_eq(result->errors->error_type, AST_VALID_ERROR_TYPE_MISMATCH, "Should be type mismatch error");
+    cr_assert_eq(result->errors->code, VALID_ERROR_TYPE_MISMATCH, "Should be type mismatch error");
 }
 
 Test(primitive_validation, validate_int_success) {
@@ -224,7 +258,7 @@ Test(error_handling, validate_with_null_validator) {
     cr_assert_not_null(result, "Should return error result");
     cr_assert_not(result->valid, "Should be invalid");
     cr_assert_eq(result->error_count, 1, "Should have one error");
-    cr_assert_eq(result->errors->error_type, AST_VALID_ERROR_PARSE_ERROR, "Should be parse error");
+    cr_assert_eq(result->errors->code, VALID_ERROR_PARSE_ERROR, "Should be parse error");
 }
 
 Test(error_handling, validate_with_null_type) {
@@ -235,17 +269,16 @@ Test(error_handling, validate_with_null_type) {
     cr_assert_not_null(result, "Should return error result");
     cr_assert_not(result->valid, "Should be invalid");
     cr_assert_eq(result->error_count, 1, "Should have one error");
-    cr_assert_eq(result->errors->error_type, AST_VALID_ERROR_PARSE_ERROR, "Should be parse error");
+    cr_assert_eq(result->errors->code, VALID_ERROR_PARSE_ERROR, "Should be parse error");
 }
 
 Test(error_handling, create_validation_error) {
-    AstValidationError* error = create_ast_validation_error(
-        AST_VALID_ERROR_TYPE_MISMATCH, "Test error message", "/test/path", test_pool);
+    ValidationError* error = create_validation_error(
+        VALID_ERROR_TYPE_MISMATCH, "Test error message", nullptr, test_pool);
     
     cr_assert_not_null(error, "Error should be created");
-    cr_assert_eq(error->error_type, AST_VALID_ERROR_TYPE_MISMATCH, "Error type should match");
-    cr_assert_str_eq(error->message, "Test error message", "Error message should match");
-    cr_assert_str_eq(error->path, "/test/path", "Error path should match");
+    cr_assert_eq(error->code, VALID_ERROR_TYPE_MISMATCH, "Error code should match");
+    cr_assert_str_eq(error->message->chars, "Test error message", "Error message should match");
     cr_assert_null(error->next, "Next pointer should be null");
 }
 
@@ -319,7 +352,7 @@ Test(integration_tests, validation_depth_check) {
     
     cr_assert_not_null(result, "Should return result");
     cr_assert_not(result->valid, "Should fail due to depth limit");
-    cr_assert_eq(result->errors->error_type, AST_VALID_ERROR_CONSTRAINT_VIOLATION, "Should be constraint violation");
+    cr_assert_eq(result->errors->code, VALID_ERROR_CONSTRAINT_VIOLATION, "Should be constraint violation");
 }
 
 // ==================== Advanced Element Validation Tests ====================
@@ -368,7 +401,7 @@ Test(element_validation, valid_element_validation) {
     
     AstValidationContext ctx;
     ctx.pool = test_pool;
-    ctx.current_path = (char*)"root";
+    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
@@ -388,7 +421,7 @@ Test(element_validation, element_content_length_violation) {
     
     AstValidationContext ctx;
     ctx.pool = test_pool;
-    ctx.current_path = (char*)"root";
+    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
@@ -408,7 +441,7 @@ Test(element_validation, element_type_mismatch) {
     
     AstValidationContext ctx;
     ctx.pool = test_pool;
-    ctx.current_path = (char*)"root";
+    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
@@ -441,7 +474,7 @@ Test(union_validation, valid_string_in_union) {
     
     AstValidationContext ctx;
     ctx.pool = test_pool;
-    ctx.current_path = (char*)"root";
+    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
@@ -470,7 +503,7 @@ Test(union_validation, valid_int_in_union) {
     
     AstValidationContext ctx;
     ctx.pool = test_pool;
-    ctx.current_path = (char*)"root";
+    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
@@ -499,7 +532,7 @@ Test(union_validation, invalid_type_not_in_union) {
     
     AstValidationContext ctx;
     ctx.pool = test_pool;
-    ctx.current_path = (char*)"root";
+    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
@@ -520,7 +553,7 @@ Test(occurrence_constraints, optional_constraint_zero_items) {
     
     AstValidationContext ctx;
     ctx.pool = test_pool;
-    ctx.current_path = (char*)"root";
+    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
@@ -542,7 +575,7 @@ Test(occurrence_constraints, optional_constraint_too_many_items) {
     
     AstValidationContext ctx;
     ctx.pool = test_pool;
-    ctx.current_path = (char*)"root";
+    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
@@ -559,7 +592,7 @@ Test(occurrence_constraints, one_or_more_constraint_zero_items) {
     
     AstValidationContext ctx;
     ctx.pool = test_pool;
-    ctx.current_path = (char*)"root";
+    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
@@ -584,7 +617,7 @@ Test(occurrence_constraints, one_or_more_constraint_multiple_items) {
     
     AstValidationContext ctx;
     ctx.pool = test_pool;
-    ctx.current_path = (char*)"root";
+    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
@@ -606,7 +639,7 @@ Test(occurrence_constraints, zero_or_more_constraint_any_items) {
     
     AstValidationContext ctx;
     ctx.pool = test_pool;
-    ctx.current_path = (char*)"root";
+    ctx.current_path = create_path_segment(PATH_FIELD, "root", 0, test_pool);
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
@@ -730,7 +763,7 @@ Test(error_recovery, multiple_error_accumulation) {
     
     // Verify error structure
     cr_assert_not_null(result->errors, "Should have error details");
-    cr_assert_eq(result->errors->error_type, AST_VALID_ERROR_TYPE_MISMATCH, "Should be type mismatch error");
+    cr_assert_eq(result->errors->code, VALID_ERROR_TYPE_MISMATCH, "Should be type mismatch error");
 }
 
 Test(error_recovery, error_message_content) {
@@ -743,7 +776,7 @@ Test(error_recovery, error_message_content) {
     cr_assert_not(result->valid, "Should be invalid due to type mismatch");
     cr_assert_not_null(result->errors, "Should have error details");
     cr_assert_not_null(result->errors->message, "Should have error message");
-    cr_assert_gt(strlen(result->errors->message), 0, "Error message should not be empty");
+    cr_assert_gt(strlen(result->errors->message->chars), 0, "Error message should not be empty");
 }
 
 Test(error_recovery, validation_state_isolation) {

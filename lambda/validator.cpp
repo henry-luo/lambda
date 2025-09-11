@@ -232,44 +232,45 @@ Type* ast_validator_find_type(AstValidator* validator, const char* type_name) {
 
 // ==================== Validation Functions ====================
 
-AstValidationResult* ast_validator_validate(AstValidator* validator, TypedItem item, const char* type_name) {
+ValidationResult* ast_validator_validate(AstValidator* validator, TypedItem item, const char* type_name) {
     if (!validator || !type_name) {
-        AstValidationResult* result = create_ast_validation_result(validator ? validator->pool : nullptr);
+        ValidationResult* result = create_validation_result(validator ? validator->pool : nullptr);
         if (result) {
-            add_ast_validation_error(result, create_ast_validation_error(
+            add_validation_error(result, create_validation_error(
                 AST_VALID_ERROR_PARSE_ERROR, "Invalid validator or type name", 
-                "", validator ? validator->pool : nullptr));
+                nullptr, validator ? validator->pool : nullptr));
         }
         return result;
     }
     
     Type* type = ast_validator_find_type(validator, type_name);
     if (!type) {
-        AstValidationResult* result = create_ast_validation_result(validator->pool);
+        ValidationResult* result = create_validation_result(validator->pool);
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg), "Type not found: %s", type_name);
-        add_ast_validation_error(result, create_ast_validation_error(
-            AST_VALID_ERROR_PARSE_ERROR, error_msg, "", validator->pool));
+        ValidationError* error = create_validation_error(
+            AST_VALID_ERROR_PARSE_ERROR, error_msg, nullptr, validator->pool);
+        add_validation_error(result, error);
         return result;
     }
     
     return ast_validator_validate_type(validator, item, type);
 }
 
-AstValidationResult* ast_validator_validate_type(AstValidator* validator, TypedItem item, Type* type) {
+ValidationResult* ast_validator_validate_type(AstValidator* validator, TypedItem item, Type* type) {
     if (!validator || !type) {
-        AstValidationResult* result = create_ast_validation_result(validator ? validator->pool : nullptr);
-        AstValidationError* error = create_ast_validation_error(
+        ValidationResult* result = create_validation_result(validator ? validator->pool : nullptr);
+        ValidationError* error = create_validation_error(
             AST_VALID_ERROR_PARSE_ERROR, "Invalid validator or type", 
-            "", validator ? validator->pool : nullptr);
-        add_ast_validation_error(result, error);
+            nullptr, validator ? validator->pool : nullptr);
+        add_validation_error(result, error);
         return result;
     }
     
     // Create validation context
     AstValidationContext ctx = {};
     ctx.validator = validator;
-    ctx.current_path = (char*)"";
+    ctx.current_path = nullptr;
     ctx.current_depth = 0;
     ctx.options = validator->default_options;
     ctx.pool = validator->pool;
@@ -277,29 +278,31 @@ AstValidationResult* ast_validator_validate_type(AstValidator* validator, TypedI
     return validate_against_type(validator, item, type, &ctx);
 }
 
-AstValidationResult* validate_against_type(AstValidator* validator, TypedItem item, Type* type, AstValidationContext* ctx) {
+ValidationResult* validate_against_type(AstValidator* validator, TypedItem item, Type* type, AstValidationContext* ctx) {
     if (!validator || !type || !ctx) {
-        AstValidationResult* result = create_ast_validation_result(ctx ? ctx->pool : nullptr);
+        ValidationResult* result = create_validation_result(ctx ? ctx->pool : nullptr);
         if (result) {
-            add_ast_validation_error(result, create_ast_validation_error(
+            ValidationError* error = create_validation_error(
                 AST_VALID_ERROR_PARSE_ERROR, "Invalid validation parameters", 
-                ctx ? ctx->current_path : "", ctx ? ctx->pool : nullptr));
+                ctx ? ctx->current_path : nullptr, ctx ? ctx->pool : nullptr);
+            add_validation_error(result, error);
         }
         return result;
     }
     
     // Check validation depth
     if (ctx->current_depth >= ctx->options.max_depth) {
-        AstValidationResult* result = create_ast_validation_result(ctx->pool);
-        add_ast_validation_error(result, create_ast_validation_error(
+        ValidationResult* result = create_validation_result(ctx->pool);
+        ValidationError* error = create_validation_error(
             AST_VALID_ERROR_CONSTRAINT_VIOLATION, "Maximum validation depth exceeded", 
-            ctx->current_path, ctx->pool));
+            ctx->current_path, ctx->pool);
+        add_validation_error(result, error);
         return result;
     }
     
     ctx->current_depth++;
     
-    AstValidationResult* result = nullptr;
+    ValidationResult* result = nullptr;
     
     // Dispatch based on type
     printf("[AST_VALIDATOR] Validating against type_id: %d\n", type->type_id);
@@ -325,11 +328,11 @@ AstValidationResult* validate_against_type(AstValidator* validator, TypedItem it
             return validate_against_element_type(validator, item, (TypeElmt*)type, ctx);
         
         default:
-            result = create_ast_validation_result(ctx->pool);
+            result = create_validation_result(ctx->pool);
             char error_msg[256];
             snprintf(error_msg, sizeof(error_msg), 
                     "Unsupported type for validation: %d", type->type_id);
-            add_ast_validation_error(result, create_ast_validation_error(
+            add_validation_error(result, create_validation_error(
                 AST_VALID_ERROR_PARSE_ERROR, error_msg, ctx->current_path, ctx->pool));
             break;
     }
@@ -338,23 +341,26 @@ AstValidationResult* validate_against_type(AstValidator* validator, TypedItem it
     return result;
 }
 
-AstValidationResult* validate_against_primitive_type(TypedItem item, Type* type, AstValidationContext* ctx) {
+ValidationResult* validate_against_primitive_type(TypedItem item, Type* type, AstValidationContext* ctx) {
     printf("[AST_VALIDATOR] Validating primitive: expected=%d, actual=%d\n", type->type_id, item.type_id);
     
-    AstValidationResult* result = create_ast_validation_result(ctx->pool);
+    ValidationResult* result = create_validation_result(ctx->pool);
     
-    if (!is_item_compatible_with_type(item, type)) {
+    if (type->type_id == item.type_id) {
+        result->valid = true;
+    } else {
+        result->valid = false;
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg), 
                 "Type mismatch: expected %s, got type %d",
                 type_to_string(type), item.type_id);
         
-        AstValidationError* error = create_ast_validation_error(
+        ValidationError* error = create_validation_error(
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, ctx->current_path, ctx->pool);
         if (error) {
-            error->expected_type = type;
-            error->actual_item = item;
-            add_ast_validation_error(result, error);
+            error->expected = type;
+            error->actual = (Item){.type_id = item.type_id, .pointer = (uint64_t)(uintptr_t)item.pointer};
+            add_validation_error(result, error);
         }
     }
     
@@ -363,74 +369,67 @@ AstValidationResult* validate_against_primitive_type(TypedItem item, Type* type,
 
 // ==================== Error Handling ====================
 
-AstValidationResult* create_ast_validation_result(VariableMemPool* pool) {
-    AstValidationResult* result;
+ValidationResult* create_validation_result(VariableMemPool* pool) {
+    ValidationResult* result;
     
     if (pool) {
-        result = (AstValidationResult*)pool_calloc(pool, sizeof(AstValidationResult));
+        result = (ValidationResult*)pool_calloc(pool, sizeof(ValidationResult));
     } else {
         // For error cases with null pool, use malloc
-        result = (AstValidationResult*)calloc(1, sizeof(AstValidationResult));
+        result = (ValidationResult*)calloc(1, sizeof(ValidationResult));
     }
     if (!result) return nullptr;
     
     result->valid = true;
     result->error_count = 0;
     result->errors = nullptr;
-    result->pool = pool;
     
     return result;
 }
 
-AstValidationError* create_ast_validation_error(AstValidationErrorType type, const char* message, 
-                                               const char* path, VariableMemPool* pool) {
+ValidationError* create_validation_error(ValidationErrorCode code, const char* message,
+                                        PathSegment* path, VariableMemPool* pool) {
     if (!message) return nullptr;
     
-    AstValidationError* error;
+    ValidationError* error;
     if (pool) {
-        error = (AstValidationError*)pool_calloc(pool, sizeof(AstValidationError));
+        error = (ValidationError*)pool_calloc(pool, sizeof(ValidationError));
     } else {
         // For error cases with null pool, use malloc
-        error = (AstValidationError*)calloc(1, sizeof(AstValidationError));
+        error = (ValidationError*)calloc(1, sizeof(ValidationError));
     }
     if (!error) return nullptr;
     
-    error->error_type = type;
+    error->code = code;
     
     // Copy message
     if (message) {
         size_t msg_len = strlen(message) + 1;
         if (pool) {
-            error->message = (char*)pool_calloc(pool, msg_len);
+            error->message = create_string(pool, message);
         } else {
-            error->message = (char*)malloc(msg_len);
-        }
-        if (error->message) {
-            strcpy(error->message, message);
+            // For non-pool allocation, create a simple string copy
+            size_t len = strlen(message);
+            error->message = (String*)malloc(sizeof(String) + len + 1);
+            if (error->message) {
+                error->message->len = len;
+                error->message->ref_cnt = 1;
+                strcpy(error->message->chars, message);
+            }
         }
     }
     
-    // Copy path
-    if (path) {
-        size_t path_len = strlen(path) + 1;
-        if (pool) {
-            error->path = (char*)pool_calloc(pool, path_len);
-        } else {
-            error->path = (char*)malloc(path_len);
-        }
-        if (error->path) {
-            strcpy(error->path, path);
-        }
-    }
+    // Set path
+    error->path = path;
     
-    error->expected_type = nullptr;
-    error->actual_item = {};
+    error->expected = nullptr;
+    error->actual = (Item){0};
     error->next = nullptr;
     
     return error;
 }
 
-void add_ast_validation_error(AstValidationResult* result, AstValidationError* error) {
+void add_validation_error(ValidationResult* result, ValidationError* error) {
     if (!result || !error) return;
     
     result->valid = false;
@@ -440,7 +439,7 @@ void add_ast_validation_error(AstValidationResult* result, AstValidationError* e
     if (!result->errors) {
         result->errors = error;
     } else {
-        AstValidationError* current = result->errors;
+        ValidationError* current = result->errors;
         while (current->next) {
             current = current->next;
         }
@@ -448,7 +447,7 @@ void add_ast_validation_error(AstValidationResult* result, AstValidationError* e
     }
 }
 
-void free_ast_validation_result(AstValidationResult* result) {
+void free_ast_validation_result(ValidationResult* result) {
     // Memory cleanup handled by pool
     (void)result;
 }
@@ -480,15 +479,15 @@ const char* type_to_string(Type* type) {
 
 // ==================== Phase 2: Array and Map Validation ====================
 
-AstValidationResult* validate_against_array_type(AstValidator* validator, TypedItem item, TypeArray* array_type, AstValidationContext* ctx) {
-    AstValidationResult* result = create_ast_validation_result(ctx->pool);
+ValidationResult* validate_against_array_type(AstValidator* validator, TypedItem item, TypeArray* array_type, AstValidationContext* ctx) {
+    ValidationResult* result = create_validation_result(ctx->pool);
     
     // Check if item is actually an array/list
     if (item.type_id != LMD_TYPE_ARRAY && item.type_id != LMD_TYPE_LIST) {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg), 
                 "Type mismatch: expected array, got type %d", item.type_id);
-        add_ast_validation_error(result, create_ast_validation_error(
+        add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, ctx->current_path, ctx->pool));
         return result;
     }
@@ -496,7 +495,7 @@ AstValidationResult* validate_against_array_type(AstValidator* validator, TypedI
     // Get the actual array data
     List* array_data = (List*)item.pointer;
     if (!array_data) {
-        add_ast_validation_error(result, create_ast_validation_error(
+        add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_PARSE_ERROR, "Array data is null", ctx->current_path, ctx->pool));
         return result;
     }
@@ -507,18 +506,23 @@ AstValidationResult* validate_against_array_type(AstValidator* validator, TypedI
         snprintf(error_msg, sizeof(error_msg), 
                 "Array length mismatch: expected %ld, got %ld", 
                 array_type->length, array_data->length);
-        add_ast_validation_error(result, create_ast_validation_error(
+        add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, ctx->current_path, ctx->pool));
     }
     
     // Validate each array element against nested type
     if (array_type->nested && array_data->length > 0) {
         for (long i = 0; i < array_data->length; i++) {
-            // Create path for array element
-            char element_path[512];
-            snprintf(element_path, sizeof(element_path), "%s[%ld]", ctx->current_path, i);
-            
-            // Create context for element validation
+            // Create path segment for array index
+            PathSegment* element_path = nullptr;
+            if (ctx->pool) {
+                element_path = (PathSegment*)pool_calloc(ctx->pool, sizeof(PathSegment));
+                if (element_path) {
+                    element_path->type = PATH_INDEX;
+                    element_path->data.index = i;
+                    element_path->next = ctx->current_path;
+                }
+            }
             AstValidationContext element_ctx = *ctx;
             element_ctx.current_path = element_path;
             
@@ -529,7 +533,7 @@ AstValidationResult* validate_against_array_type(AstValidator* validator, TypedI
             element_item.pointer = (void*)(uintptr_t)element.pointer;
             
             // Recursively validate element
-            AstValidationResult* element_result = validate_against_type(
+            ValidationResult* element_result = validate_against_type(
                 validator, element_item, array_type->nested, &element_ctx);
             
             // Merge element validation results
@@ -537,15 +541,15 @@ AstValidationResult* validate_against_array_type(AstValidator* validator, TypedI
                 result->valid = false;
                 
                 // Add all element errors to main result
-                AstValidationError* element_error = element_result->errors;
+                ValidationError* element_error = element_result->errors;
                 while (element_error) {
                     result->error_count++;
                     
                     // Copy error to main result
-                    AstValidationError* copied_error = create_ast_validation_error(
-                        element_error->error_type, element_error->message, 
+                    ValidationError* copied_error = create_validation_error(
+                        element_error->code, element_error->message->chars, 
                         element_error->path, ctx->pool);
-                    add_ast_validation_error(result, copied_error);
+                    add_validation_error(result, copied_error);
                     
                     element_error = element_error->next;
                 }
@@ -556,23 +560,23 @@ AstValidationResult* validate_against_array_type(AstValidator* validator, TypedI
     return result;
 }
 
-AstValidationResult* validate_against_map_type(AstValidator* validator, TypedItem item, TypeMap* map_type, AstValidationContext* ctx) {
-    AstValidationResult* result = create_ast_validation_result(ctx->pool);
+ValidationResult* validate_against_map_type(AstValidator* validator, TypedItem item, TypeMap* map_type, AstValidationContext* ctx) {
+    ValidationResult* result = create_validation_result(ctx->pool);
     
     // Check if item is actually a map
     if (item.type_id != LMD_TYPE_MAP) {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg), 
                 "Type mismatch: expected map, got type %d", item.type_id);
-        add_ast_validation_error(result, create_ast_validation_error(
+        add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, ctx->current_path, ctx->pool));
         return result;
     }
-    
+
     // Get the actual map data (assuming it's stored as a struct with typed fields)
     void* map_data = item.pointer;
     if (!map_data) {
-        add_ast_validation_error(result, create_ast_validation_error(
+        add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_PARSE_ERROR, "Map data is null", ctx->current_path, ctx->pool));
         return result;
     }
@@ -580,10 +584,16 @@ AstValidationResult* validate_against_map_type(AstValidator* validator, TypedIte
     // Validate each field in the map shape
     ShapeEntry* shape_entry = map_type->shape;
     while (shape_entry) {
-        // Create path for map field
-        char field_path[512];
-        snprintf(field_path, sizeof(field_path), "%s.%.*s", 
-                ctx->current_path, (int)shape_entry->name->length, shape_entry->name->str);
+        // Create path segment for map field
+        PathSegment* field_path = nullptr;
+        if (ctx->pool) {
+            field_path = (PathSegment*)pool_calloc(ctx->pool, sizeof(PathSegment));
+            if (field_path) {
+                field_path->type = PATH_FIELD;
+                field_path->data.field_name = *shape_entry->name;
+                field_path->next = ctx->current_path;
+            }
+        }
         
         // Create context for field validation
         AstValidationContext field_ctx = *ctx;
@@ -598,7 +608,7 @@ AstValidationResult* validate_against_map_type(AstValidator* validator, TypedIte
         field_item.pointer = field_data;
         
         // Recursively validate field
-        AstValidationResult* field_result = validate_against_type(
+        ValidationResult* field_result = validate_against_type(
             validator, field_item, shape_entry->type, &field_ctx);
         
         // Merge field validation results
@@ -606,15 +616,15 @@ AstValidationResult* validate_against_map_type(AstValidator* validator, TypedIte
             result->valid = false;
             
             // Add all field errors to main result
-            AstValidationError* field_error = field_result->errors;
+            ValidationError* field_error = field_result->errors;
             while (field_error) {
                 result->error_count++;
                 
                 // Copy error to main result
-                AstValidationError* copied_error = create_ast_validation_error(
-                    field_error->error_type, field_error->message, 
+                ValidationError* copied_error = create_validation_error(
+                    field_error->code, field_error->message->chars, 
                     field_error->path, ctx->pool);
-                add_ast_validation_error(result, copied_error);
+                add_validation_error(result, copied_error);
                 
                 field_error = field_error->next;
             }
@@ -628,15 +638,15 @@ AstValidationResult* validate_against_map_type(AstValidator* validator, TypedIte
 
 // ==================== Phase 3: Element Validation ====================
 
-AstValidationResult* validate_against_element_type(AstValidator* validator, TypedItem item, TypeElmt* element_type, AstValidationContext* ctx) {
-    AstValidationResult* result = create_ast_validation_result(ctx->pool);
+ValidationResult* validate_against_element_type(AstValidator* validator, TypedItem item, TypeElmt* element_type, AstValidationContext* ctx) {
+    ValidationResult* result = create_validation_result(ctx->pool);
     
     // Check if item is actually an element
     if (item.type_id != LMD_TYPE_ELEMENT) {
         char error_msg[256];
         snprintf(error_msg, sizeof(error_msg), 
                 "Type mismatch: expected element, got type %d", item.type_id);
-        add_ast_validation_error(result, create_ast_validation_error(
+        add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, ctx->current_path, ctx->pool));
         return result;
     }
@@ -644,21 +654,33 @@ AstValidationResult* validate_against_element_type(AstValidator* validator, Type
     // Get the actual element data
     Element* element_data = (Element*)item.pointer;
     if (!element_data) {
-        add_ast_validation_error(result, create_ast_validation_error(
+        add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_PARSE_ERROR, "Element data is null", ctx->current_path, ctx->pool));
         return result;
     }
     
     // Validate element name if specified
     if (element_type->name.length > 0) {
-        char element_name_error[512];
-        snprintf(element_name_error, sizeof(element_name_error), 
-                "Element name validation for: %.*s", 
+        // Create path segment for element name
+        PathSegment* element_name_path = nullptr;
+        if (ctx->pool) {
+            element_name_path = (PathSegment*)pool_calloc(ctx->pool, sizeof(PathSegment));
+            if (element_name_path) {
+                element_name_path->type = PATH_ELEMENT;
+                element_name_path->data.element_tag = element_type->name;
+                element_name_path->next = ctx->current_path;
+            }
+        }
+        
+        // Create context for attribute validation
+        AstValidationContext attr_ctx = *ctx;
+        attr_ctx.current_path = element_name_path;
+        
+        // Validate element name
+        printf("[AST_VALIDATOR] Element name validation for: %.*s\n", 
                 (int)element_type->name.length, element_type->name.str);
-        printf("[AST_VALIDATOR] %s\n", element_name_error);
     }
     
-    // Validate element attributes using inherited map validation
     // TypeElmt inherits from TypeMap, so we can validate attributes as map fields
     TypeMap* map_part = (TypeMap*)element_type;
     if (map_part->shape) {
@@ -667,26 +689,33 @@ AstValidationResult* validate_against_element_type(AstValidator* validator, Type
         attr_item.type_id = LMD_TYPE_MAP;
         attr_item.pointer = element_data->data;
         
-        // Create context for attribute validation
-        char attr_path[512];
-        snprintf(attr_path, sizeof(attr_path), "%s@attributes", ctx->current_path);
+        // Create path segment for attributes
+        PathSegment* attr_path = nullptr;
+        if (ctx->pool) {
+            attr_path = (PathSegment*)pool_calloc(ctx->pool, sizeof(PathSegment));
+            if (attr_path) {
+                attr_path->type = PATH_ATTRIBUTE;
+                attr_path->data.attr_name = (StrView){"attrs", 5};
+                attr_path->next = ctx->current_path;
+            }
+        }
         AstValidationContext attr_ctx = *ctx;
         attr_ctx.current_path = attr_path;
         
         // Validate attributes using map validation
-        AstValidationResult* attr_result = validate_against_map_type(validator, attr_item, map_part, &attr_ctx);
+        ValidationResult* attr_result = validate_against_map_type(validator, attr_item, map_part, &attr_ctx);
         
         // Merge attribute validation results
         if (attr_result && !attr_result->valid) {
             result->valid = false;
             result->error_count += attr_result->error_count;
             
-            AstValidationError* attr_error = attr_result->errors;
+            ValidationError* attr_error = attr_result->errors;
             while (attr_error) {
-                AstValidationError* copied_error = create_ast_validation_error(
-                    attr_error->error_type, attr_error->message, 
+                ValidationError* copied_error = create_validation_error(
+                    attr_error->code, attr_error->message->chars, 
                     attr_error->path, ctx->pool);
-                add_ast_validation_error(result, copied_error);
+                add_validation_error(result, copied_error);
                 attr_error = attr_error->next;
             }
         }
@@ -694,15 +723,23 @@ AstValidationResult* validate_against_element_type(AstValidator* validator, Type
     
     // Validate element content length
     if (element_type->content_length > 0) {
-        char content_path[512];
-        snprintf(content_path, sizeof(content_path), "%s/content", ctx->current_path);
+        // Create path segment for content
+        PathSegment* content_path = nullptr;
+        if (ctx->pool) {
+            content_path = (PathSegment*)pool_calloc(ctx->pool, sizeof(PathSegment));
+            if (content_path) {
+                content_path->type = PATH_ELEMENT;
+                content_path->data.element_tag = (StrView){"content", 7};
+                content_path->next = ctx->current_path;
+            }
+        }
         
         if (element_data->length > element_type->content_length) {
             char content_error[256];
             snprintf(content_error, sizeof(content_error), 
                     "Element content length mismatch: expected %ld, got %ld", 
                     element_type->content_length, element_data->length);
-            add_ast_validation_error(result, create_ast_validation_error(
+            add_validation_error(result, create_validation_error(
                 AST_VALID_ERROR_CONSTRAINT_VIOLATION, content_error, content_path, ctx->pool));
         }
     }
@@ -712,31 +749,39 @@ AstValidationResult* validate_against_element_type(AstValidator* validator, Type
 
 // ==================== Phase 4: Union and Advanced Validation ====================
 
-AstValidationResult* validate_against_union_type(AstValidator* validator, TypedItem item, Type** union_types, int type_count, AstValidationContext* ctx) {
-    AstValidationResult* result = create_ast_validation_result(ctx->pool);
+ValidationResult* validate_against_union_type(AstValidator* validator, TypedItem item, Type** union_types, int type_count, AstValidationContext* ctx) {
+    ValidationResult* result = create_validation_result(ctx->pool);
     
     if (!union_types || type_count <= 0) {
-        add_ast_validation_error(result, create_ast_validation_error(
-            AST_VALID_ERROR_PARSE_ERROR, "Invalid union type definition", ctx->current_path, ctx->pool));
+        ValidationError* error = create_validation_error(
+            AST_VALID_ERROR_PARSE_ERROR, "Invalid union type definition", ctx->current_path, ctx->pool);
+        add_validation_error(result, error);
         return result;
     }
     
     // Try to validate against each type in the union
     bool any_valid = false;
-    AstValidationResult* best_result = nullptr;
+    ValidationResult* best_result = nullptr;
     int min_errors = 2147483647; // INT_MAX value
     
     for (int i = 0; i < type_count; i++) {
         if (!union_types[i]) continue;
         
-        // Create context for union member validation
-        char union_path[512];
-        snprintf(union_path, sizeof(union_path), "%s|type_%d", ctx->current_path, i);
+        // Create path segment for union member
+        PathSegment* union_path = nullptr;
+        if (ctx->pool) {
+            union_path = (PathSegment*)pool_calloc(ctx->pool, sizeof(PathSegment));
+            if (union_path) {
+                union_path->type = PATH_INDEX;
+                union_path->data.index = i;
+                union_path->next = ctx->current_path;
+            }
+        }
         AstValidationContext union_ctx = *ctx;
         union_ctx.current_path = union_path;
         
         // Try validating against this union member
-        AstValidationResult* member_result = validate_against_type(validator, item, union_types[i], &union_ctx);
+        ValidationResult* member_result = validate_against_type(validator, item, union_types[i], &union_ctx);
         
         if (member_result && member_result->valid) {
             any_valid = true;
@@ -754,30 +799,31 @@ AstValidationResult* validate_against_union_type(AstValidator* validator, TypedI
         
         if (best_result) {
             result->error_count = best_result->error_count;
-            AstValidationError* error = best_result->errors;
+            ValidationError* error = best_result->errors;
             while (error) {
-                AstValidationError* copied_error = create_ast_validation_error(
-                    error->error_type, error->message, error->path, ctx->pool);
-                add_ast_validation_error(result, copied_error);
+                ValidationError* copied_error = create_validation_error(
+                    error->code, error->message->chars, error->path, ctx->pool);
+                add_validation_error(result, copied_error);
                 error = error->next;
             }
         } else {
             char error_msg[256];
             snprintf(error_msg, sizeof(error_msg), 
                     "Item does not match any type in union (%d types)", type_count);
-            add_ast_validation_error(result, create_ast_validation_error(
-                AST_VALID_ERROR_TYPE_MISMATCH, error_msg, ctx->current_path, ctx->pool));
+            ValidationError* error = create_validation_error(
+                AST_VALID_ERROR_TYPE_MISMATCH, error_msg, ctx->current_path, ctx->pool);
+            add_validation_error(result, error);
         }
     }
     
     return result;
 }
 
-AstValidationResult* validate_occurrence_constraint(AstValidator* validator, TypedItem* items, long item_count, Type* expected_type, Operator occurrence_op, AstValidationContext* ctx) {
-    AstValidationResult* result = create_ast_validation_result(ctx->pool);
+ValidationResult* validate_occurrence_constraint(AstValidator* validator, TypedItem* items, long item_count, Type* expected_type, Operator occurrence_op, AstValidationContext* ctx) {
+    ValidationResult* result = create_validation_result(ctx->pool);
     
     if (!expected_type) {
-        add_ast_validation_error(result, create_ast_validation_error(
+        add_validation_error(result, create_validation_error(
             AST_VALID_ERROR_PARSE_ERROR, "Invalid occurrence constraint parameters", ctx->current_path, ctx->pool));
         return result;
     }
@@ -789,14 +835,14 @@ AstValidationResult* validate_occurrence_constraint(AstValidator* validator, Typ
                 char error_msg[256];
                 snprintf(error_msg, sizeof(error_msg), 
                         "Optional constraint violated: expected 0 or 1 items, got %ld", item_count);
-                add_ast_validation_error(result, create_ast_validation_error(
+                add_validation_error(result, create_validation_error(
                     AST_VALID_ERROR_CONSTRAINT_VIOLATION, error_msg, ctx->current_path, ctx->pool));
             }
             break;
             
         case OPERATOR_ONE_MORE: // + (1 or more)
             if (item_count < 1) {
-                add_ast_validation_error(result, create_ast_validation_error(
+                add_validation_error(result, create_validation_error(
                     AST_VALID_ERROR_CONSTRAINT_VIOLATION, 
                     "One-or-more constraint violated: expected at least 1 item, got 0", 
                     ctx->current_path, ctx->pool));
@@ -811,35 +857,75 @@ AstValidationResult* validate_occurrence_constraint(AstValidator* validator, Typ
             char error_msg[256];
             snprintf(error_msg, sizeof(error_msg), 
                     "Unsupported occurrence operator: %d", occurrence_op);
-            add_ast_validation_error(result, create_ast_validation_error(
+            add_validation_error(result, create_validation_error(
                 AST_VALID_ERROR_PARSE_ERROR, error_msg, ctx->current_path, ctx->pool));
             return result;
     }
     
     // Validate each item against the expected type
     for (long i = 0; i < item_count; i++) {
-        char item_path[512];
-        snprintf(item_path, sizeof(item_path), "%s[%ld]", ctx->current_path, i);
+        // Create path segment for item index
+        PathSegment* item_path = nullptr;
+        if (ctx->pool) {
+            item_path = (PathSegment*)pool_calloc(ctx->pool, sizeof(PathSegment));
+            if (item_path) {
+                item_path->type = PATH_INDEX;
+                item_path->data.index = i;
+                item_path->next = ctx->current_path;
+            }
+        }
         AstValidationContext item_ctx = *ctx;
         item_ctx.current_path = item_path;
         item_ctx.current_depth++;
         
-        AstValidationResult* item_result = validate_against_type(validator, items[i], expected_type, &item_ctx);
+        ValidationResult* item_result = validate_against_type(validator, items[i], expected_type, &item_ctx);
         
         if (item_result && !item_result->valid) {
             result->valid = false;
             result->error_count += item_result->error_count;
             
-            AstValidationError* item_error = item_result->errors;
+            ValidationError* item_error = item_result->errors;
             while (item_error) {
-                AstValidationError* copied_error = create_ast_validation_error(
-                    item_error->error_type, item_error->message, 
+                ValidationError* copied_error = create_validation_error(
+                    item_error->code, item_error->message->chars, 
                     item_error->path, ctx->pool);
-                add_ast_validation_error(result, copied_error);
+                add_validation_error(result, copied_error);
                 item_error = item_error->next;
             }
         }
     }
     
     return result;
+}
+
+// ==================== Missing Function Implementation ====================
+
+void merge_validation_results(ValidationResult* dest, ValidationResult* src) {
+    if (!dest || !src) return;
+    
+    // If source has errors, merge them into destination
+    if (src->errors) {
+        dest->valid = false;
+        dest->error_count += src->error_count;
+        
+        // Add all source errors to destination
+        ValidationError* src_error = src->errors;
+        while (src_error) {
+            ValidationError* copied_error = create_validation_error(
+                src_error->code, 
+                src_error->message ? src_error->message->chars : "Unknown error", 
+                src_error->path, 
+                nullptr);
+            if (copied_error) {
+                add_validation_error(dest, copied_error);
+            }
+            src_error = src_error->next;
+        }
+    }
+    
+    // Merge warnings if present
+    if (src->warnings) {
+        dest->warning_count += src->warning_count;
+        // Note: Warning merging implementation would go here
+    }
 }
