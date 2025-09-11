@@ -5,6 +5,10 @@
 #include "../../lambda/lambda.h"
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // LaTeX-specific bridge for converting Lambda LaTeX AST to typeset structures
 // This is a separate bridge to avoid disrupting existing Markdown/HTML pipelines
 
@@ -128,5 +132,9 @@ void latex_conversion_error_destroy(LatexConversionError* error);
 // LaTeX debugging utilities
 void debug_print_latex_element(Item element, int indent);
 void debug_print_latex_metadata(LatexDocumentMetadata* metadata);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // LATEX_BRIDGE_H
