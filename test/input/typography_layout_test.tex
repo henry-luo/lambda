@@ -1,0 +1,116 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{color}
+
+\title{LaTeX Typography and Layout Test}
+\author{Phase 3 Enhanced System}
+\date{September 2025}
+
+\begin{document}
+
+\maketitle
+
+\section{Typography Tests}
+
+\subsection{Font Weight and Style}
+
+Regular text with \textbf{bold emphasis} and \textit{italic styling}. We can also combine \textbf{\textit{bold italic}} text.
+
+For technical content, use \texttt{monospace typewriter font}.
+
+\subsection{Font Size Hierarchy}
+
+{\Large Large heading text for sections}
+
+{\large Medium heading text for subsections}
+
+{\normalsize Normal body text for paragraphs}
+
+{\small Small text for captions or footnotes}
+
+{\footnotesize Very small text for fine print}
+
+\section{Paragraph Layout}
+
+This paragraph demonstrates normal text flow with proper line spacing and justification. The text should wrap naturally at word boundaries and maintain consistent spacing throughout the paragraph. Multiple sentences demonstrate how spacing is handled between words and punctuation.
+
+\paragraph{Paragraph Heading} This shows a paragraph-level heading followed immediately by text content.
+
+Here is a new paragraph with proper spacing above. The paragraph spacing should be visually distinct from line spacing within paragraphs.
+
+\section{List Structures}
+
+\subsection{Bullet Lists}
+
+\begin{itemize}
+\item First bullet point
+\item Second bullet point with longer text that demonstrates text wrapping within list items
+\item Third bullet point
+\item Fourth bullet point with nested structure:
+  \begin{itemize}
+  \item Nested bullet one
+  \item Nested bullet two
+  \item Nested bullet three
+  \end{itemize}
+\item Fifth bullet back at top level
+\end{itemize}
+
+\subsection{Numbered Lists}
+
+\begin{enumerate}
+\item First numbered item
+\item Second numbered item
+\item Third numbered item with nesting:
+  \begin{enumerate}
+  \item Sub-item A
+  \item Sub-item B
+  \item Sub-item C
+  \end{enumerate}
+\item Fourth numbered item
+\end{enumerate}
+
+\section{Mathematical Content}
+
+Inline mathematics: $x^2 + y^2 = r^2$ and $\sum_{i=1}^n i = \frac{n(n+1)}{2}$.
+
+Display mathematics:
+\begin{equation}
+\int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}
+\end{equation}
+
+More complex expressions:
+\begin{align}
+f(x) &= ax^2 + bx + c \\
+f'(x) &= 2ax + b \\
+f''(x) &= 2a
+\end{align}
+
+\section{Tables}
+
+\begin{tabular}{|l|c|r|}
+\hline
+Left & Center & Right \\
+\hline
+Data A & Data B & Data C \\
+Data D & Data E & Data F \\
+\hline
+\end{tabular}
+
+\section{Special Elements}
+
+\begin{quote}
+This is a block quotation that should be formatted with appropriate indentation and spacing to distinguish it from regular paragraph text.
+\end{quote}
+
+\begin{verbatim}
+Code block with monospace font
+def hello():
+    print("Hello World")
+\end{verbatim}
+
+\section{Conclusion}
+
+This document tests the essential typography and layout features needed for Phase 3 of the LaTeX typesetting system.
+
+\end{document}

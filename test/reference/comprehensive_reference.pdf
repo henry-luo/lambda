@@ -1,0 +1,354 @@
+%PDF-1.3
+%·¾­ª
+1 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Kids [ 4 0 R ]
+/Count 1
+>>
+endobj
+3 0 obj
+<<
+/Producer (Haru Free PDF Library 2.4.5)
+>>
+endobj
+4 0 obj
+<<
+/Type /Page
+/MediaBox [ 0 0 595.276 841.89001 ]
+/Contents 5 0 R
+/Resources <<
+/ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+/Font <<
+/F1 8 0 R
+/F2 7 0 R
+/F3 9 0 R
+/F4 10 0 R
+>>
+>>
+/Parent 2 0 R
+>>
+endobj
+5 0 obj
+<<
+/Length 6 0 R
+>>
+stream
+BT
+/F1 16 Tf
+0 0 0 rg
+0 0 0 RG
+50 750 Td
+(Phase 3: Advanced LaTeX Document Typesetting) Tj
+ET
+BT
+/F1 16 Tf
+0 0 0 rg
+0 0 0 RG
+50 716 Td
+(1. Introduction) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 697 Td
+(This document demonstrates the advanced typesetting capabilities implemented in) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 683 Td
+(Phase 3 of the LaTeX processing system. We showcase complex document layouts,) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 669 Td
+(mathematical expressions, and sophisticated formatting.) Tj
+ET
+BT
+/F1 16 Tf
+0 0 0 rg
+0 0 0 RG
+50 640 Td
+(2. Typography and Font Variations) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 621 Td
+(Regular text demonstrates standard typography.) Tj
+ET
+BT
+/F1 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 607 Td
+(Bold text for emphasis and headings.) Tj
+ET
+BT
+/F3 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 593 Td
+(Italic text for foreign words and emphasis.) Tj
+ET
+BT
+/F1 14 Tf
+0 0 0 rg
+0 0 0 RG
+50 569 Td
+(2.1 Font Families) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 550 Td
+(Different font families are used appropriately throughout the document to) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 536 Td
+(maintain readability and hierarchy.) Tj
+ET
+BT
+/F1 16 Tf
+0 0 0 rg
+0 0 0 RG
+50 507 Td
+(3. Lists and Structures) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 488 Td
+(\342\200\242 First level list item) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 474 Td
+(\342\200\242 Another first level item) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 460 Td
+(    \342\200\242 Nested second level item) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 446 Td
+(    \342\200\242 Another nested item) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 432 Td
+(        \342\200\242 Deep nesting third level) Tj
+ET
+BT
+/F1 16 Tf
+0 0 0 rg
+0 0 0 RG
+50 408 Td
+(4. Mathematical Content) Tj
+ET
+BT
+/F4 12 Tf
+0 0 0.8 rg
+0 0 0.8 RG
+50 389 Td
+(Math: \342\210\253\342\202\200^\342\210\236 e^\050-x\302\262\051 dx = \342\210\232\317\200\0572) Tj
+ET
+BT
+/F4 12 Tf
+0 0 0.8 rg
+0 0 0.8 RG
+50 375 Td
+(Math: \342\210\221\341\265\242\342\202\214\342\202\201^n i\302\262 = n\050n+1\051\0502n+1\051\0576) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 361 Td
+(Mathematical expressions are rendered with appropriate fonts and spacing to) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 347 Td
+(maintain clarity and professional appearance.) Tj
+ET
+BT
+/F1 16 Tf
+0 0 0 rg
+0 0 0 RG
+50 318 Td
+(5. Tables and Data) Tj
+ET
+BT
+/F1 10 Tf
+0 0 0 rg
+0 0 0 RG
+50 299 Td
+(| Feature              | Status               |) Tj
+ET
+BT
+/F2 10 Tf
+0 0 0 rg
+0 0 0 RG
+50 285 Td
+(|----------------------|----------------------|) Tj
+ET
+BT
+/F2 10 Tf
+0 0 0 rg
+0 0 0 RG
+50 271 Td
+(| Typography           | \342\234\205 Complete         |) Tj
+ET
+BT
+/F1 10 Tf
+0 0 0 rg
+0 0 0 RG
+50 252 Td
+(| Mathematics          | \342\234\205 Complete         |) Tj
+ET
+BT
+/F2 10 Tf
+0 0 0 rg
+0 0 0 RG
+50 238 Td
+(|----------------------|----------------------|) Tj
+ET
+BT
+/F2 10 Tf
+0 0 0 rg
+0 0 0 RG
+50 224 Td
+(| Tables               | \342\234\205 Complete         |) Tj
+ET
+BT
+/F1 16 Tf
+0 0 0 rg
+0 0 0 RG
+50 195 Td
+(6. Code Examples) Tj
+ET
+BT
+/F2 10 Tf
+0 0.6 0 rg
+0 0.6 0 RG
+50 176 Td
+(Code: function processLaTeX\050input\051 \173 return render\050parse\050input\051\051; \175) Tj
+ET
+BT
+/F1 16 Tf
+0 0 0 rg
+0 0 0 RG
+50 152 Td
+(7. Conclusion) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 133 Td
+(This document demonstrates successful implementation of advanced LaTeX document) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 119 Td
+(processing with enhanced typography, mathematical rendering, and complex layout) Tj
+ET
+BT
+/F2 11 Tf
+0 0 0 rg
+0 0 0 RG
+50 105 Td
+(capabilities.) Tj
+ET
+
+endstream
+endobj
+6 0 obj
+3535
+endobj
+7 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica
+/Subtype /Type1
+/Encoding /StandardEncoding
+>>
+endobj
+8 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Bold
+/Subtype /Type1
+/Encoding /StandardEncoding
+>>
+endobj
+9 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Oblique
+/Subtype /Type1
+/Encoding /StandardEncoding
+>>
+endobj
+10 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Roman
+/Subtype /Type1
+/Encoding /StandardEncoding
+>>
+endobj
+xref
+0 11
+0000000000 65535 f
+0000000015 00000 n
+0000000064 00000 n
+0000000123 00000 n
+0000000184 00000 n
+0000000401 00000 n
+0000003990 00000 n
+0000004010 00000 n
+0000004108 00000 n
+0000004211 00000 n
+0000004317 00000 n
+trailer
+<<
+/Root 1 0 R
+/Info 3 0 R
+/Size 11
+>>
+startxref
+4418
+%%EOF
