@@ -5,19 +5,19 @@
  * @license MIT
  */
 
-#include "validator.hpp"
-#include "../../lib/strbuf.h"
+#include "../validator.hpp"
+#include "../../lib/stringbuf.h"
 #include <string.h>
 #include <assert.h>
 
 // Helper function implementations
-static void strbuf_append_cstr(StrBuf* sb, const char* str) {
-    strbuf_append_str(sb, str);
+static void stringbuf_append_cstr(StringBuf* sb, const char* str) {
+    stringbuf_append_str(sb, str);
 }
 
-static void strbuf_append_string(StrBuf* sb, String* str) {
+static void stringbuf_append_string(StringBuf* sb, String* str) {
     if (str && str->chars) {
-        strbuf_append_str_n(sb, str->chars, str->len);
+        stringbuf_append_str_n(sb, str->chars, str->len);
     }
 }
 
@@ -251,13 +251,13 @@ String* generate_validation_report(ValidationResult* result, VariableMemPool* po
         return string_from_strview(strview_from_cstr("No validation result"), pool);
     }
     
-    StrBuf* report = strbuf_new();
+    StringBuf* report = stringbuf_new(pool);
     
     // Header
     if (result->valid) {
-        strbuf_append_cstr(report, "✓ Validation successful\n");
+        stringbuf_append_cstr(report, "✓ Validation successful\n");
     } else {
-        strbuf_append_cstr(report, "✗ Validation failed\n");
+        stringbuf_append_cstr(report, "✗ Validation failed\n");
     }
     
     // Summary
@@ -265,46 +265,46 @@ String* generate_validation_report(ValidationResult* result, VariableMemPool* po
     snprintf(summary, sizeof(summary), 
              "Errors: %d, Warnings: %d\n", 
              result->error_count, result->warning_count);
-    strbuf_append_cstr(report, summary);
+    stringbuf_append_cstr(report, summary);
     
     if (result->error_count > 0 || result->warning_count > 0) {
-        strbuf_append_cstr(report, "\n");
+        stringbuf_append_cstr(report, "\n");
     }
     
     // Errors
     if (result->error_count > 0) {
-        strbuf_append_cstr(report, "Errors:\n");
+        stringbuf_append_cstr(report, "Errors:\n");
         ValidationError* error = result->errors;
         int error_num = 1;
         
         while (error) {
             char error_prefix[32];
             snprintf(error_prefix, sizeof(error_prefix), "  %d. ", error_num++);
-            strbuf_append_cstr(report, error_prefix);
+            stringbuf_append_cstr(report, error_prefix);
             
             String* error_str = format_error_with_context(error, pool);
-            strbuf_append_string(report, error_str);
-            strbuf_append_cstr(report, "\n");
+            stringbuf_append_string(report, error_str);
+            stringbuf_append_cstr(report, "\n");
             
             error = error->next;
         }
-        strbuf_append_cstr(report, "\n");
+        stringbuf_append_cstr(report, "\n");
     }
     
     // Warnings
     if (result->warning_count > 0) {
-        strbuf_append_cstr(report, "Warnings:\n");
+        stringbuf_append_cstr(report, "Warnings:\n");
         ValidationWarning* warning = result->warnings;
         int warning_num = 1;
         
         while (warning) {
             char warning_prefix[32];
             snprintf(warning_prefix, sizeof(warning_prefix), "  %d. ", warning_num++);
-            strbuf_append_cstr(report, warning_prefix);
+            stringbuf_append_cstr(report, warning_prefix);
             
             String* warning_str = format_error_with_context(warning, pool);
-            strbuf_append_string(report, warning_str);
-            strbuf_append_cstr(report, "\n");
+            stringbuf_append_string(report, warning_str);
+            stringbuf_append_cstr(report, "\n");
             
             warning = warning->next;
         }
@@ -320,101 +320,101 @@ String* generate_json_report(ValidationResult* result, VariableMemPool* pool) {
         return string_from_strview(strview_from_cstr("{\"error\": \"No validation result\"}"), pool);
     }
     
-    StrBuf* json = strbuf_new();
+    StringBuf* json = stringbuf_new(pool);
     
-    strbuf_append_cstr(json, "{\n");
-    strbuf_append_cstr(json, "  \"valid\": ");
-    strbuf_append_cstr(json, result->valid ? "true" : "false");
-    strbuf_append_cstr(json, ",\n");
+    stringbuf_append_cstr(json, "{\n");
+    stringbuf_append_cstr(json, "  \"valid\": ");
+    stringbuf_append_cstr(json, result->valid ? "true" : "false");
+    stringbuf_append_cstr(json, ",\n");
     
     char counts[128];
     snprintf(counts, sizeof(counts), 
              "  \"error_count\": %d,\n  \"warning_count\": %d", 
              result->error_count, result->warning_count);
-    strbuf_append_cstr(json, counts);
+    stringbuf_append_cstr(json, counts);
     
     // Errors array
     if (result->error_count > 0) {
-        strbuf_append_cstr(json, ",\n  \"errors\": [\n");
+        stringbuf_append_cstr(json, ",\n  \"errors\": [\n");
         ValidationError* error = result->errors;
         bool first = true;
         
         while (error) {
             if (!first) {
-                strbuf_append_cstr(json, ",\n");
+                stringbuf_append_cstr(json, ",\n");
             }
             first = false;
             
-            strbuf_append_cstr(json, "    {\n");
+            stringbuf_append_cstr(json, "    {\n");
             
             // Error code
             char code_str[64];
             snprintf(code_str, sizeof(code_str), 
                      "      \"code\": \"%s\"", get_error_code_name(error->code));
-            strbuf_append_cstr(json, code_str);
+            stringbuf_append_cstr(json, code_str);
             
             // Message
             if (error->message) {
-                strbuf_append_cstr(json, ",\n      \"message\": \"");
+                stringbuf_append_cstr(json, ",\n      \"message\": \"");
                 // Escape JSON string (simplified)
                 for (size_t i = 0; i < error->message->len; i++) {
                     char c = error->message->chars[i];
                     if (c == '"' || c == '\\') {
-                        strbuf_append_char(json, '\\');
+                        stringbuf_append_char(json, '\\');
                     }
-                    strbuf_append_char(json, c);
+                    stringbuf_append_char(json, c);
                 }
-                strbuf_append_cstr(json, "\"");
+                stringbuf_append_cstr(json, "\"");
             }
             
             // Path
             if (error->path) {
                 String* path_str = format_validation_path(error->path, pool);
-                strbuf_append_cstr(json, ",\n      \"path\": \"");
-                strbuf_append_string(json, path_str);
-                strbuf_append_cstr(json, "\"");
+                stringbuf_append_cstr(json, ",\n      \"path\": \"");
+                stringbuf_append_string(json, path_str);
+                stringbuf_append_cstr(json, "\"");
             }
             
-            strbuf_append_cstr(json, "\n    }");
+            stringbuf_append_cstr(json, "\n    }");
             error = error->next;
         }
         
-        strbuf_append_cstr(json, "\n  ]");
+        stringbuf_append_cstr(json, "\n  ]");
     }
     
     // Warnings array (similar structure)
     if (result->warning_count > 0) {
-        strbuf_append_cstr(json, ",\n  \"warnings\": [\n");
+        stringbuf_append_cstr(json, ",\n  \"warnings\": [\n");
         ValidationWarning* warning = result->warnings;
         bool first = true;
         
         while (warning) {
             if (!first) {
-                strbuf_append_cstr(json, ",\n");
+                stringbuf_append_cstr(json, ",\n");
             }
             first = false;
             
-            strbuf_append_cstr(json, "    {\n");
+            stringbuf_append_cstr(json, "    {\n");
             
             char code_str[64];
             snprintf(code_str, sizeof(code_str), 
                      "      \"code\": \"%s\"", get_error_code_name(warning->code));
-            strbuf_append_cstr(json, code_str);
+            stringbuf_append_cstr(json, code_str);
             
             if (warning->message) {
-                strbuf_append_cstr(json, ",\n      \"message\": \"");
-                strbuf_append_string(json, warning->message);
-                strbuf_append_cstr(json, "\"");
+                stringbuf_append_cstr(json, ",\n      \"message\": \"");
+                stringbuf_append_string(json, warning->message);
+                stringbuf_append_cstr(json, "\"");
             }
             
-            strbuf_append_cstr(json, "\n    }");
+            stringbuf_append_cstr(json, "\n    }");
             warning = warning->next;
         }
         
-        strbuf_append_cstr(json, "\n  ]");
+        stringbuf_append_cstr(json, "\n  ]");
     }
     
-    strbuf_append_cstr(json, "\n}");
+    stringbuf_append_cstr(json, "\n}");
     
     return stringbuf_to_string(json);
 }
