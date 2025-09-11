@@ -7,7 +7,7 @@ KLEE_TEST_DIR = test/klee
 KLEE_SCRIPTS_DIR = test
 
 # KLEE test files
-KLEE_TESTS = test_arithmetic_simple test_strings_simple test_arrays_simple
+KLEE_TESTS = test_arithmetic_simple test_strings_simple test_arrays_simple test_null_pointers test_memory_safety test_lambda_patterns test_real_vulnerabilities
 
 # Default KLEE flags
 KLEE_CFLAGS = -I. -Ilib -Ilambda -Ilib/mem-pool/include -emit-llvm -c -g -O0 -Xclang -disable-O0-optnone -DKLEE_ANALYSIS
@@ -208,3 +208,14 @@ klee-coverage:
 		fi; \
 		echo; \
 	done
+
+# Quick test targets for new vulnerability patterns
+klee-test-real-vulnerabilities: klee-setup
+	@echo "🔍 Testing real Lambda vulnerabilities..."
+	@mkdir -p $(KLEE_BUILD_DIR) $(KLEE_OUTPUT_DIR)/test_real_vulnerabilities
+	@klee-clang $(KLEE_CFLAGS) $(KLEE_TEST_DIR)/test_real_vulnerabilities.c -o $(KLEE_BUILD_DIR)/test_real_vulnerabilities.bc
+	@rm -rf $(KLEE_OUTPUT_DIR)/test_real_vulnerabilities/*
+	@klee --output-dir=$(KLEE_OUTPUT_DIR)/test_real_vulnerabilities --search=dfs --max-time=600 --warnings-only-to-file=false --write-cov --write-cvcs --write-smt2s $(KLEE_BUILD_DIR)/test_real_vulnerabilities.bc
+	@echo "✅ Real vulnerabilities test complete. Results in $(KLEE_OUTPUT_DIR)/test_real_vulnerabilities/"
+
+.PHONY: klee-test-real-vulnerabilities

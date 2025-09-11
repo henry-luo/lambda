@@ -39,6 +39,10 @@ KLEE_TESTS=(
     "test_arithmetic_simple"
     "test_strings_simple" 
     "test_arrays_simple"
+    "test_null_pointers"
+    "test_memory_safety"
+    "test_lambda_patterns"
+    "test_real_vulnerabilities"
 )
 
 # KLEE compilation flags
