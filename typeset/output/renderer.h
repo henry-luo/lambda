@@ -209,7 +209,7 @@ typedef struct PNGRenderOptions {
     // PNG-specific options
     int compression_level;      // PNG compression level (0-9)
     bool use_transparency;      // Use transparency
-    struct ViewColor background_color; // Background color
+    ViewColor background_color; // Background color
     
     // Rasterization
     double pixel_density;       // Pixel density (DPI)
