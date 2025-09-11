@@ -25,6 +25,7 @@ typedef struct SVGRenderer {
 
 // SVG renderer creation and basic API
 SVGRenderer* svg_renderer_create(void);
+void svg_renderer_destroy(SVGRenderer* renderer);
 bool svg_render_view_tree(SVGRenderer* renderer, ViewTree* tree, StrBuf* output);
 
 // SVG render options (extends base ViewRenderOptions)
@@ -87,17 +88,6 @@ void svg_render_rectangle(SVGRenderer* renderer, ViewNode* node);
 void svg_render_line(SVGRenderer* renderer, ViewNode* node);
 void svg_render_math_element(SVGRenderer* renderer, ViewNode* node);
 void svg_escape_text(SVGRenderer* renderer, const char* text);
-
-// Additional SVG render options for simple testing
-typedef struct {
-    double width;
-    double height;
-    double margin_left;
-    double margin_top;
-    double margin_right;
-    double margin_bottom;
-    const char* background_color;
-} SVGRenderOptions;
 
 // Public API functions
 StrBuf* render_view_tree_to_svg(ViewTree* tree, SVGRenderOptions* options);
