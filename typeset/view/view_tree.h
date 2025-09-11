@@ -16,6 +16,14 @@ typedef struct TypesetEngine TypesetEngine;
 typedef struct MathMetrics MathMetrics;
 typedef struct MathLayoutContext MathLayoutContext;
 
+// Math style enumeration
+typedef enum {
+    VIEW_MATH_DISPLAY,
+    VIEW_MATH_TEXT,
+    VIEW_MATH_SCRIPT,
+    VIEW_MATH_SCRIPTSCRIPT
+} ViewMathStyle;
+
 // Mathematical styling and metrics
 typedef struct MathMetrics {
     double font_size;            // Font size for this level
@@ -32,7 +40,7 @@ typedef struct MathMetrics {
 
 // Mathematical layout parameters
 typedef struct MathLayoutContext {
-    enum ViewMathStyle style;    // Display, text, script, scriptscript
+    ViewMathStyle style;         // Display, text, script, scriptscript
     bool cramped;                // Cramped style flag
     double scale_factor;         // Relative scaling
     MathMetrics metrics;         // Typographic metrics
@@ -144,12 +152,7 @@ typedef struct ViewMathElement {
     double denom_shift;         // Denominator shift
     
     // Math style
-    enum ViewMathStyle {
-        VIEW_MATH_DISPLAY,
-        VIEW_MATH_TEXT,
-        VIEW_MATH_SCRIPT,
-        VIEW_MATH_SCRIPTSCRIPT
-    } math_style;               // Math style
+    ViewMathStyle math_style;   // Math style
     bool is_cramped;            // Cramped style
     
     enum ViewMathClass {

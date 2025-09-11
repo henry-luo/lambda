@@ -39,6 +39,23 @@ SVGRenderer* svg_renderer_create(void) {
     return renderer;
 }
 
+void svg_renderer_destroy(SVGRenderer* renderer) {
+    if (!renderer) return;
+    
+    // Free base renderer strings
+    free(renderer->base.name);
+    free(renderer->base.format_name);
+    free(renderer->base.mime_type);
+    free(renderer->base.file_extension);
+    
+    // Free SVG-specific data
+    if (renderer->svg_content) {
+        strbuf_destroy(renderer->svg_content);
+    }
+    
+    free(renderer);
+}
+
 bool svg_renderer_initialize(ViewRenderer* base_renderer, ViewRenderOptions* options) {
     SVGRenderer* renderer = (SVGRenderer*)base_renderer->renderer_data;
     if (!renderer) return false;
@@ -556,7 +573,7 @@ StrBuf* render_view_tree_to_svg(ViewTree* tree, SVGRenderOptions* options) {
     }
     
     // Create output buffer
-    StrBuf* output = strbuf_create();
+    StrBuf* output = strbuf_create("");
     if (!output) {
         svg_renderer_cleanup((ViewRenderer*)renderer);
         return NULL;
@@ -581,14 +598,14 @@ StrBuf* render_view_tree_to_svg_internal(ViewTree* tree, SVGRenderOptions* optio
     if (!tree) return NULL;
     
     // Create simple SVG output for testing
-    StrBuf* svg = strbuf_create();
+    StrBuf* svg = strbuf_create("");
     if (!svg) return NULL;
     
-    double width = options ? options->width : 595.276;
-    double height = options ? options->height : 841.89;
-    double margin_left = options ? options->margin_left : 72.0;
-    double margin_top = options ? options->margin_top : 72.0;
-    const char* bg_color = (options && options->background_color) ? options->background_color : "white";
+    double width = (options && options->base.page_width > 0) ? options->base.page_width : 595.276;
+    double height = (options && options->base.page_height > 0) ? options->base.page_height : 841.89;
+    double margin_left = (options && options->base.margin_left > 0) ? options->base.margin_left : 72.0;
+    double margin_top = (options && options->base.margin_top > 0) ? options->base.margin_top : 72.0;
+    const char* bg_color = "white"; // Default background
     
     // SVG header
     strbuf_append_str(svg, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n");

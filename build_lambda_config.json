@@ -44,6 +44,10 @@
         "lambda/input/css_tokenizer.c",
         "lambda/input/css_properties.c",
         "lambda/input/css_parser.c",
+        "typeset/typeset.c",
+        "typeset/view/view_tree.c",
+        "typeset/integration/latex_bridge.c",
+        "typeset/typeset_latex.c",
         "lambda/main-repl.cpp",
         "lambda/main.cpp"
     ],

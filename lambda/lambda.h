@@ -432,6 +432,7 @@ Type* fn_type(Item item);
 
 Item fn_input(Item url, Item type);
 String* fn_format(Item item, Item type);
+Item fn_typeset_latex(Item input_file, Item output_file, Item options);
 DateTime fn_datetime();
 
 // procedural functions
