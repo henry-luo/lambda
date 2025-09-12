@@ -492,15 +492,17 @@ module.exports = grammar({
       field('name', $.identifier), optional(seq(':', field('type', $._type_expr))),
     ),
 
+    // fn with stam body
     fn_stam: $ => seq(
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
-      'fn', field('name', $.identifier), 
+      field('kind', choice('fn','pn')), field('name', $.identifier), 
       '(', optional(field('declare', $.parameter)), repeat(seq(',', field('declare', $.parameter))), ')', 
       // return type
       optional(seq(':', field('type', $._type_expr))),      
       '{', field('body', $.content), '}',
     ),
 
+    // fn with expr body
     fn_expr_stam: $ => seq(
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
       'fn', field('name', $.identifier), 
@@ -569,7 +571,7 @@ module.exports = grammar({
       '{', field('then', $.content), '}'
     ),
 
-    // Type Definitions
+    // Type Definitions: ----------------------------------
 
     occurrence: $ => choice('?', '+', '*'),
 

@@ -13,6 +13,9 @@
 
 extern __thread Context* context;
 
+// External typeset function
+extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* output_file);
+
 #define stack_alloc(size) alloca(size);
 
 #define Malloc malloc
@@ -1091,4 +1094,33 @@ DateTime fn_datetime() {
     static_dt.format_hint = DATETIME_FORMAT_ISO8601_UTC;
     
     return static_dt;
+}
+
+// LaTeX Typeset Function
+Item fn_typeset_latex(Item input_file, Item output_file, Item options) {
+    log_info("fn_typeset_latex called!");
+    
+    // Validate input parameters
+    if (input_file.type_id != LMD_TYPE_STRING || output_file.type_id != LMD_TYPE_STRING) {
+        log_error("typeset_latex: input_file and output_file must be strings");
+        return {.item = ITEM_FALSE};
+    }
+    
+    String* input_str = (String*)input_file.pointer;
+    String* output_str = (String*)output_file.pointer;
+    
+    if (!input_str || !output_str || !input_str->chars || !output_str->chars) {
+        log_error("typeset_latex: invalid string parameters");
+        return {.item = ITEM_FALSE};
+    }
+    
+    log_info("typeset_latex: Input: %s, Output: %s", input_str->chars, output_str->chars);
+    
+    // For now, we'll call our standalone function
+    // TODO: Extract LaTeX AST from input file and use proper pipeline
+    bool result = fn_typeset_latex_standalone(input_str->chars, output_str->chars);
+    
+    log_info("typeset_latex: Result: %s", result ? "SUCCESS" : "FAILED");
+    
+    return {.item = result ? ITEM_TRUE : ITEM_FALSE};
 }

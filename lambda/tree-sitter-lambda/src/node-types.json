@@ -976,6 +976,20 @@
           }
         ]
       },
+      "kind": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "fn",
+            "named": false
+          },
+          {
+            "type": "pn",
+            "named": false
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -2381,11 +2395,11 @@
   },
   {
     "type": "decimal",
-    "named": true
+    "named": false
   },
   {
     "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "element",
@@ -2413,11 +2427,11 @@
   },
   {
     "type": "float",
-    "named": true
+    "named": false
   },
   {
     "type": "float",
-    "named": false
+    "named": true
   },
   {
     "type": "fn",
@@ -2512,6 +2526,10 @@
     "named": false
   },
   {
+    "type": "pn",
+    "named": false
+  },
+  {
     "type": "pub",
     "named": false
   },
@@ -2537,11 +2555,11 @@
   },
   {
     "type": "time",
-    "named": true
+    "named": false
   },
   {
     "type": "time",
-    "named": false
+    "named": true
   },
   {
     "type": "to",

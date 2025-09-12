@@ -6,6 +6,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Forward declarations
 typedef struct ViewTree ViewTree;
 typedef struct ViewNode ViewNode;
@@ -15,6 +19,14 @@ typedef struct ViewPage ViewPage;
 typedef struct TypesetEngine TypesetEngine;
 typedef struct MathMetrics MathMetrics;
 typedef struct MathLayoutContext MathLayoutContext;
+
+// Math style enumeration
+typedef enum {
+    VIEW_MATH_DISPLAY,
+    VIEW_MATH_TEXT,
+    VIEW_MATH_SCRIPT,
+    VIEW_MATH_SCRIPTSCRIPT
+} ViewMathStyle;
 
 // Mathematical styling and metrics
 typedef struct MathMetrics {
@@ -32,7 +44,7 @@ typedef struct MathMetrics {
 
 // Mathematical layout parameters
 typedef struct MathLayoutContext {
-    enum ViewMathStyle style;    // Display, text, script, scriptscript
+    ViewMathStyle style;         // Display, text, script, scriptscript
     bool cramped;                // Cramped style flag
     double scale_factor;         // Relative scaling
     MathMetrics metrics;         // Typographic metrics
@@ -75,6 +87,12 @@ typedef enum {
     VIEW_NODE_CLIPPING          // Clipping region
 } ViewNodeType;
 
+// Color structure used throughout the view system
+typedef struct ViewColor {
+    double r, g, b, a;      // RGBA components (0.0 - 1.0)
+    char* name;             // Color name (optional)
+} ViewColor;
+
 // Content-specific structures
 typedef struct ViewTextRun {
     char* text;                 // UTF-8 text content
@@ -82,10 +100,7 @@ typedef struct ViewTextRun {
     int glyph_count;            // Number of glyphs
     
     ViewFont* font;             // Font for this run
-    struct ViewColor {
-        double r, g, b, a;      // RGBA components (0.0 - 1.0)
-        char* name;             // Color name (optional)
-    } color;                    // Text color
+    ViewColor color;            // Text color
     double font_size;           // Font size
     
     // Glyph positioning
@@ -144,12 +159,7 @@ typedef struct ViewMathElement {
     double denom_shift;         // Denominator shift
     
     // Math style
-    enum ViewMathStyle {
-        VIEW_MATH_DISPLAY,
-        VIEW_MATH_TEXT,
-        VIEW_MATH_SCRIPT,
-        VIEW_MATH_SCRIPTSCRIPT
-    } math_style;               // Math style
+    ViewMathStyle math_style;   // Math style
     bool is_cramped;            // Cramped style
     
     enum ViewMathClass {
@@ -207,7 +217,7 @@ typedef struct ViewMathElement {
         struct {
             char* operator_name; // Operator name
             ViewNode* operand;   // Operand (for unary ops)
-        } operator;
+        } math_operator;
         
         struct {
             char* accent_type;  // Accent type
@@ -229,7 +239,7 @@ typedef struct ViewGeometry {
         VIEW_GEOM_PATH
     } type;                     // Geometry type
     
-    struct ViewColor color;     // Color
+    ViewColor color;            // Color
     double stroke_width;        // Stroke width
     bool filled;                // Filled geometry
     
@@ -252,7 +262,7 @@ typedef struct ViewImage {
 typedef struct ViewGroup {
     char* name;                 // Group name
     ViewTransform group_transform; // Group transformation
-    struct ViewColor background_color; // Background color
+    ViewColor background_color; // Background color
     bool clip_children;         // Clip children to bounds
 } ViewGroup;
 
@@ -435,5 +445,9 @@ ViewRect view_rect_transform(ViewRect rect, ViewTransform* transform);
 bool view_rect_contains_point(ViewRect rect, ViewPoint point);
 bool view_rect_intersects_rect(ViewRect rect1, ViewRect rect2);
 ViewRect view_rect_union(ViewRect rect1, ViewRect rect2);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // VIEW_TREE_H

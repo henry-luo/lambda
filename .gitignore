@@ -125,6 +125,7 @@ test/*.dSYM
 test.ls
 test*.exe
 test_output/
-test/venv
+test/venv/
+klee_output/
 
 analysis-results*/

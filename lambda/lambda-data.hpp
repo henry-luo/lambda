@@ -213,7 +213,6 @@ typedef enum SysFunc {
     SYSFUNC_DATETIME,
     SYSFUNC_DATE,
     SYSFUNC_TIME,
-    SYSFUNC_TODAY,
     SYSFUNC_JUSTNOW,
     SYSFUNC_SET,
     SYSFUNC_SLICE,    
@@ -228,10 +227,16 @@ typedef enum SysFunc {
     SYSFUNC_FLOOR,
     SYSFUNC_CEIL,
     SYSFUNC_INPUT,
-    SYSFUNC_PRINT,
     SYSFUNC_FORMAT,
     SYSFUNC_ERROR,
     SYSFUNC_NORMALIZE,
+    // procedural functions
+    SYSPROC_NOW,
+    SYSPROC_TODAY,
+    SYSPROC_PRINT,
+    SYSPROC_FETCH,
+    SYSPROC_OUTPUT,
+    SYSPROC_CMD,
 } SysFunc;
 
 typedef struct TypeBinary : Type {
@@ -258,6 +263,7 @@ typedef struct TypeFunc : Type {
     int type_index;
     bool is_anonymous;
     bool is_public;
+    bool is_proc;
 } TypeFunc;
 
 typedef struct TypeSysFunc : Type {

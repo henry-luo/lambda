@@ -14,43 +14,49 @@ struct SysFuncInfo {
     const char* name;
     int arg_count;  // -1 for variable args
     Type* return_type;
+    bool is_proc;   // is procedural
 };
 
+// todo: properly define fn param types
 SysFuncInfo sys_funcs[] = {
-    {SYSFUNC_LEN, "len", 1, &TYPE_INT64},
-    {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE},
-    {SYSFUNC_INT, "int", 1, &TYPE_ANY},
-    {SYSFUNC_INT64, "int64", 1, &TYPE_INT64},
-    {SYSFUNC_FLOAT, "float", 1, &TYPE_FLOAT},
-    {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_DECIMAL},
-    {SYSFUNC_BINARY, "binary", 1, &TYPE_BINARY},
-    {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY},
-    {SYSFUNC_STRING, "string", 1, &TYPE_STRING},
-    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL},
-    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME},
-    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME},
-    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME},
-    {SYSFUNC_TODAY, "today", 0, &TYPE_DTIME},
-    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME},
-    {SYSFUNC_SET, "set", -1, &TYPE_ANY},
-    {SYSFUNC_SLICE, "slice", -1, &TYPE_ANY},
-    {SYSFUNC_ALL, "all", 1, &TYPE_BOOL},
-    {SYSFUNC_ANY, "any", 1, &TYPE_BOOL},
-    {SYSFUNC_MIN, "min", 2, &TYPE_ANY}, // TYPE_NUMBER;
-    {SYSFUNC_MAX, "max", 2, &TYPE_ANY}, // TYPE_NUMBER;
-    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY}, // TYPE_NUMBER;
-    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY}, // TYPE_NUMBER;
-    {SYSFUNC_ABS, "abs", 1, &TYPE_ANY}, // TYPE_NUMBER;
-    {SYSFUNC_ROUND, "round", 1, &TYPE_ANY}, // TYPE_NUMBER;
-    {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY}, // TYPE_NUMBER;
-    {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY}, // TYPE_NUMBER;
-    {SYSFUNC_INPUT, "input", 2, &TYPE_ANY},
-    {SYSFUNC_PRINT, "print", 1, &TYPE_NULL},
-    {SYSFUNC_FORMAT, "format", 2, &TYPE_STRING},
-    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR},
-    {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING},
+    {SYSFUNC_LEN, "len", 1, &TYPE_INT64, false},
+    {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false},
+    {SYSFUNC_INT, "int", 1, &TYPE_ANY, false},
+    {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false},
+    {SYSFUNC_FLOAT, "float", 1, &TYPE_FLOAT, false},
+    {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_DECIMAL, false},
+    {SYSFUNC_BINARY, "binary", 1, &TYPE_BINARY, false},
+    {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false},
+    {SYSFUNC_STRING, "string", 1, &TYPE_STRING, false},
+    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false},
+    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false},
+    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME, false},
+    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false},
+    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false},
+    {SYSFUNC_SET, "set", -1, &TYPE_ANY, false},
+    {SYSFUNC_SLICE, "slice", -1, &TYPE_ANY, false},
+    {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false},
+    {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false},
+    {SYSFUNC_MIN, "min", 2, &TYPE_ANY, false}, // TYPE_NUMBER;
+    {SYSFUNC_MAX, "max", 2, &TYPE_ANY, false}, // TYPE_NUMBER;
+    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false}, // TYPE_NUMBER;
+    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false}, // TYPE_NUMBER;
+    {SYSFUNC_ABS, "abs", 1, &TYPE_ANY, false}, // TYPE_NUMBER;
+    {SYSFUNC_ROUND, "round", 1, &TYPE_ANY, false}, // TYPE_NUMBER;
+    {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY, false}, // TYPE_NUMBER;
+    {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY, false}, // TYPE_NUMBER;
+    {SYSFUNC_INPUT, "input", 2, &TYPE_ANY, false},
+    {SYSFUNC_FORMAT, "format", 2, &TYPE_STRING, false},
+    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false},
+    {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING, false},
     // {SYSFUNC_SUBSTRING, "substring", 2, &TYPE_ANY},
-    // {SYSFUNC_CONTAINS, "contains", 2, &TYPE_ANY},    
+    // {SYSFUNC_CONTAINS, "contains", 2, &TYPE_ANY},
+    {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true},
+    {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true},
+    {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true},
+    {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true},
+    {SYSPROC_OUTPUT, "output", 2, &TYPE_ANY, true},
+    {SYSPROC_CMD, "cmd", 0, &TYPE_ANY, true},
 };
 
 SysFuncInfo* get_sys_func_info(StrView *name) {
@@ -182,6 +188,14 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     SysFuncInfo* sys_func_info = get_sys_func_info(&func_name);
     if (sys_func_info) {
         log_debug("build sys call");
+        if (sys_func_info->is_proc) {
+            if (!tp->current_scope->is_proc) {
+                log_error("Error: procedure '%.*s' cannot be called in a function", 
+                    (int)func_name.length, func_name.str);
+                ast_node->type = &TYPE_ERROR;
+                return (AstNode*)ast_node;
+            }
+        }
         AstSysFuncNode* fn_node = (AstSysFuncNode*)alloc_ast_node(tp, 
             AST_NODE_SYS_FUNC, function_node, sizeof(AstSysFuncNode));
         fn_node->fn = sys_func_info->fn;
@@ -192,7 +206,14 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     else {
         ast_node->function = build_expr(tp, function_node);
         if (ast_node->function->type->type_id == LMD_TYPE_FUNC) {
-            ast_node->type = ((TypeFunc*)ast_node->function->type)->returned;
+            TypeFunc* func_type = (TypeFunc*)ast_node->function->type;
+            if (func_type->is_proc && !tp->current_scope->is_proc) {
+                log_error("Error: procedure '%.*s' cannot be called in a function", 
+                    (int)func_name.length, func_name.str);
+                ast_node->type = &TYPE_ERROR;
+                return (AstNode*)ast_node;
+            }
+            ast_node->type = func_type->returned;
             if (!ast_node->type) { // e.g. recursive fn
                 ast_node->type = &TYPE_ANY;
             }
@@ -1660,13 +1681,20 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
     return ast_node;
 }
 
+// for both func expr and stam
 AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_global) {
     log_debug("build function");
+    TSNode kind = ts_node_child_by_field_id(func_node, FIELD_KIND);
+    StrView kind_str = ts_node_source(tp, kind);
+    bool is_proc = strview_equal(&kind_str, "pn");
+    log_debug("is proc: %d", is_proc);
+
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp,
-        is_named ? AST_NODE_FUNC : AST_NODE_FUNC_EXPR, func_node, sizeof(AstFuncNode));
+        is_proc ? AST_NODE_PROC : is_named ? AST_NODE_FUNC : AST_NODE_FUNC_EXPR, 
+        func_node, sizeof(AstFuncNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_FUNC, sizeof(TypeFunc));
     TypeFunc *fn_type = (TypeFunc*) ast_node->type;
-    fn_type->is_anonymous = !is_named;  
+    fn_type->is_anonymous = !is_named;  fn_type->is_proc = is_proc; 
     
     // 'pub' flag
     TSNode pub = ts_node_child_by_field_id(func_node, FIELD_PUB);
@@ -1684,6 +1712,7 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     // build the params
     ast_node->vars = (NameScope*)pool_calloc(tp->ast_pool, sizeof(NameScope));
     ast_node->vars->parent = tp->current_scope;
+    ast_node->vars->is_proc = is_proc;
     tp->current_scope = ast_node->vars;
     TSTreeCursor cursor = ts_tree_cursor_new(func_node);
     bool has_node = ts_tree_cursor_goto_first_child(&cursor);
