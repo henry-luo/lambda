@@ -102,12 +102,14 @@ func_obj_t func_list[] = {
     {"fn_string", (fn_ptr) fn_string},
     {"fn_type", (fn_ptr) fn_type},
     {"fn_input", (fn_ptr) fn_input},
-    {"fn_print", (fn_ptr) fn_print},
     {"fn_format", (fn_ptr) fn_format},
     {"fn_datetime", (fn_ptr) fn_datetime},
     {"fn_index", (fn_ptr) fn_index},
     {"fn_member", (fn_ptr) fn_member},
     {"fn_len", (fn_ptr) fn_len},
+    // procedures
+    {"fn_print", (fn_ptr) fn_print},
+    {"fn_cmd", (fn_ptr) fn_cmd},
 };
 
 void *import_resolver(const char *name) {

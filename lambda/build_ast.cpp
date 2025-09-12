@@ -56,7 +56,7 @@ SysFuncInfo sys_funcs[] = {
     {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true},
     {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true},
     {SYSPROC_OUTPUT, "output", 2, &TYPE_ANY, true},
-    {SYSPROC_CMD, "cmd", 0, &TYPE_ANY, true},
+    {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true},
 };
 
 SysFuncInfo* get_sys_func_info(StrView *name) {

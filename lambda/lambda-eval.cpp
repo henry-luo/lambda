@@ -10,6 +10,7 @@
 #include <stdarg.h>
 #include <time.h>
 #include <errno.h>  // for errno checking
+#include <sys/wait.h>  // for WIFEXITED, WEXITSTATUS
 
 extern __thread Context* context;
 
@@ -775,14 +776,6 @@ Item fn_input(Item url, Item type) {
     return (input && input->root.item) ? input->root : ItemNull;
 }
 
-Item fn_print(Item item) {
-    String *str = fn_string(item);
-    if (str) {
-        printf("%s", str->chars);
-    }
-    return ItemNull;
-}
-
 extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
 
 // Single-argument format function wrapper - uses default formatting
@@ -1124,4 +1117,230 @@ Item fn_typeset_latex(Item input_file, Item output_file, Item options) {
     log_info("typeset_latex: Result: %s", result ? "SUCCESS" : "FAILED");
     
     return {.item = result ? ITEM_TRUE : ITEM_FALSE};
+}
+
+Item fn_print(Item item) {
+    String *str = fn_string(item);
+    if (str) {
+        printf("%s", str->chars);
+    }
+    return ItemNull;
+}
+
+// Helper function to escape shell arguments for safety
+String* escape_shell_arg(String* arg) {
+    if (!arg || arg->len == 0) {
+        return heap_string("''", 2);  // Empty string as quoted empty
+    }
+    
+    // Check if argument needs escaping (contains spaces, special chars, etc.)
+    bool needs_quoting = false;
+    for (int i = 0; i < arg->len; i++) {
+        char c = arg->chars[i];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '"' || c == '\'' || 
+            c == '\\' || c == '|' || c == '&' || c == ';' || c == '(' || c == ')' ||
+            c == '<' || c == '>' || c == '`' || c == '$' || c == '*' || c == '?' ||
+            c == '[' || c == ']' || c == '{' || c == '}' || c == '~') {
+            needs_quoting = true;
+            break;
+        }
+    }
+    
+    if (!needs_quoting) {
+        // Return original string if no escaping needed
+        return arg;
+    }
+    
+    // Use single quotes for safety and escape any single quotes in the string
+    size_t escaped_len = arg->len + 2; // Start with quotes
+    for (int i = 0; i < arg->len; i++) {
+        if (arg->chars[i] == '\'') {
+            escaped_len += 3; // Replace ' with '\''
+        }
+    }
+    
+    String* escaped = (String*)heap_alloc(sizeof(String) + escaped_len + 1, LMD_TYPE_STRING);
+    escaped->len = escaped_len;
+    
+    char* dst = escaped->chars;
+    *dst++ = '\''; // Opening quote
+    
+    for (int i = 0; i < arg->len; i++) {
+        if (arg->chars[i] == '\'') {
+            // Escape single quote: ' becomes '\''
+            *dst++ = '\'';
+            *dst++ = '\\';
+            *dst++ = '\'';
+            *dst++ = '\'';
+        } else {
+            *dst++ = arg->chars[i];
+        }
+    }
+    
+    *dst++ = '\''; // Closing quote
+    *dst = '\0';
+    
+    return escaped;
+}
+
+// Helper function to format arguments into command line string
+String* format_cmd_args(String* cmd, Item args) {
+    StrBuf* sb = strbuf_new();
+    strbuf_append_str(sb, cmd->chars);
+    
+    TypeId args_type = get_type_id(args);
+    
+    if (args_type == LMD_TYPE_NULL) {
+        // No arguments
+    }
+    else if (args_type == LMD_TYPE_LIST || args_type == LMD_TYPE_ARRAY) {
+        List* arg_list = args.list;
+        for (int i = 0; i < arg_list->length; i++) {
+            Item arg_item = arg_list->items[i];
+            String* arg_str = fn_string(arg_item);
+            if (arg_str && arg_str->len > 0) {
+                String* escaped = escape_shell_arg(arg_str);
+                strbuf_append_char(sb, ' ');
+                strbuf_append_str(sb, escaped->chars);
+            }
+        }
+    }
+    else if (args_type == LMD_TYPE_MAP) {
+        // Handle map-style arguments for named parameters
+        Map* arg_map = args.map;
+        TypeMap* type_map = (TypeMap*)arg_map->type;
+        
+        // Iterate through map entries using ShapeEntry linked list
+        ShapeEntry* field = type_map->shape;
+        for (int i = 0; i < type_map->length && field; i++) {
+            if (!field->name || !field->name->str) {
+                field = field->next;
+                continue;
+            }
+            
+            // Get field value by reconstructing the item from the field data
+            void* field_ptr = (char*)arg_map->data + field->byte_offset;
+            Item value_item = {.item = 0};
+            
+            switch (field->type->type_id) {
+            case LMD_TYPE_NULL:
+                value_item.type_id = LMD_TYPE_NULL;
+                break;
+            case LMD_TYPE_BOOL:
+                value_item.type_id = LMD_TYPE_BOOL;
+                value_item.bool_val = *(bool*)field_ptr;
+                break;
+            case LMD_TYPE_INT:
+                value_item.type_id = LMD_TYPE_INT;
+                value_item.int_val = *(int*)field_ptr;
+                break;
+            case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: {
+                String* str = *(String**)field_ptr;
+                value_item = {.item = s2it(str)};
+                break;
+            }
+            default:
+                value_item = ItemNull;
+                break;
+            }
+
+            // format as --key=value or --key value depending on convention
+            strbuf_append_str(sb, " --");
+            strbuf_append_str_n(sb, field->name->str, field->name->length);
+
+            String* value_str = fn_string(value_item);
+            if (value_str && value_str->len > 0) {
+                if (!(value_item.type_id == LMD_TYPE_BOOL && value_item.bool_val == true)) {
+                    String* escaped = escape_shell_arg(value_str);
+                    strbuf_append_char(sb, '=');
+                    strbuf_append_str(sb, escaped->chars);
+                }
+                // else skip boolean true values (just add the flag)
+            }
+            
+            field = field->next;
+        }
+    }
+    else {
+        // Single argument - convert to string
+        String* arg_str = fn_string(args);
+        if (arg_str && arg_str->len > 0) {
+            String* escaped = escape_shell_arg(arg_str);
+            strbuf_append_char(sb, ' ');
+            strbuf_append_str(sb, escaped->chars);
+        }
+    }
+    
+    String* result = heap_string(sb->str, sb->length);
+    strbuf_free(sb);
+    return result;
+}
+
+Item fn_cmd(Item cmd, Item args) {
+    log_debug("fn_cmd called");
+    if (get_type_id(cmd) != LMD_TYPE_STRING) {
+        log_debug("fn_cmd: command must be a string");
+        return ItemError;
+    }
+    
+    String* cmd_str = (String*)cmd.pointer;
+    if (!cmd_str || cmd_str->len == 0) {
+        log_debug("fn_cmd: command string is empty");
+        return ItemError;
+    }
+    
+    // Format the complete command with arguments
+    String* full_cmd = format_cmd_args(cmd_str, args);
+    if (!full_cmd) {
+        log_debug("fn_cmd: failed to format command arguments");
+        return ItemError;
+    }
+    
+    log_debug("fn_cmd: executing command: %s", full_cmd->chars);
+    
+    // Use popen to capture stdout
+    FILE* pipe = popen(full_cmd->chars, "r");
+    if (!pipe) {
+        log_error("fn_cmd: failed to execute command: %s (errno: %d)", full_cmd->chars, errno);
+        return ItemError;
+    }
+    
+    // Read output into a string buffer
+    StrBuf* output_buf = strbuf_new();
+    char buffer[4096];
+    size_t bytes_read;
+    
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), pipe)) > 0) {
+        strbuf_append_str_n(output_buf, buffer, bytes_read);
+    }
+    
+    // Get the exit status
+    int exit_status = pclose(pipe);
+    
+    // Check for command execution errors
+    if (exit_status == -1) {
+        log_error("fn_cmd: pclose failed (errno: %d)", errno);
+        strbuf_free(output_buf);
+        return ItemError;
+    }
+    
+    // Extract actual exit code (pclose returns status in wait() format)
+    int actual_exit_code = WIFEXITED(exit_status) ? WEXITSTATUS(exit_status) : -1;
+    log_debug("fn_cmd: command completed with exit code: %d", actual_exit_code);
+    
+    // Create result string from captured output
+    String* result_str;
+    if (output_buf->length > 0) {
+        result_str = heap_string(output_buf->str, output_buf->length);
+    } else {
+        // Return empty string if no output
+        result_str = heap_string("", 0);
+    }
+    log_debug("fn_cmd: command output length: %s", result_str->chars);
+    
+    strbuf_free(output_buf);
+    
+    // For now, return the stdout output as a string
+    // TODO: Could return a map with {stdout: string, exit_code: int} for more info
+    return {.item = s2it(result_str)};
 }

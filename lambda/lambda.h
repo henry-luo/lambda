@@ -438,5 +438,6 @@ DateTime fn_datetime();
 
 // procedural functions
 Item fn_print(Item item);
+Item fn_cmd(Item cmd, Item args);
 
 #endif
