@@ -6,6 +6,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Forward declarations
 typedef struct TypesetEngine TypesetEngine;
 typedef struct ViewTree ViewTree;
@@ -80,5 +84,9 @@ Item fn_typeset(Context* ctx, Item* args, int arg_count);
 #define POINTS_PER_INCH 72.0
 #define POINTS_PER_MM 2.834645669
 #define POINTS_PER_CM 28.34645669
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // TYPESET_H

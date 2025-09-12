@@ -4,6 +4,7 @@
 #include "../lambda/input/input.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/log.h"
+#include "../lib/string.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -20,7 +21,7 @@ ViewTree* typeset_latex_to_view_tree_enhanced(TypesetEngine* engine, Item latex_
         return NULL;
     }
     
-    if (!latex_ast) {
+    if (get_type_id(latex_ast) == LMD_TYPE_NULL) {
         log_error("No LaTeX AST provided for enhanced typesetting");
         return NULL;
     }
@@ -51,7 +52,7 @@ ViewTree* typeset_latex_to_view_tree_enhanced(TypesetEngine* engine, Item latex_
 }
 
 bool typeset_latex_to_pdf_enhanced(TypesetEngine* engine, Item latex_ast, const char* output_path, TypesetOptions* options) {
-    if (!engine || !latex_ast || !output_path) {
+    if (!engine || get_type_id(latex_ast) == LMD_TYPE_NULL || !output_path) {
         log_error("Invalid parameters for enhanced LaTeX to PDF typesetting");
         return false;
     }
@@ -66,11 +67,12 @@ bool typeset_latex_to_pdf_enhanced(TypesetEngine* engine, Item latex_ast, const 
     }
     
     // Create enhanced PDF renderer with enhanced options
-    PDFRenderOptions pdf_options = {0};
+    PDFRenderOptions pdf_options = {};
+    pdf_options.base.format = VIEW_FORMAT_PDF;
     pdf_options.base.dpi = 72.0;
     pdf_options.base.embed_fonts = true;
     pdf_options.base.quality = VIEW_RENDER_QUALITY_HIGH;
-    pdf_options.pdf_version = PDF_VERSION_1_4;
+    pdf_options.pdf_version = PDFRenderOptions::PDF_VERSION_1_4;
     pdf_options.compress_streams = true;
     pdf_options.compress_images = true;
     
@@ -121,19 +123,68 @@ bool fn_typeset_latex_enhanced_standalone(const char* input_file, const char* ou
     log_info("Enhanced LaTeX standalone processing: %s -> %s", input_file, output_file);
     
     // Initialize memory pool
-    MemPool* pool = mem_pool_create(1024 * 1024); // 1MB initial pool
-    if (!pool) {
+    VariableMemPool* pool;
+    if (pool_variable_init(&pool, 1024 * 1024, MEM_POOL_NO_BEST_FIT) != MEM_POOL_ERR_OK) { // 1MB initial pool
         log_error("Failed to create memory pool for enhanced processing");
         return false;
     }
     
     // Parse LaTeX input file using Lambda's input system
     log_info("Parsing LaTeX file: %s", input_file);
-    Item latex_ast = input_latex_file(pool, input_file);
+    
+    // Create URL for the input file
+    char url_buffer[512];
+    snprintf(url_buffer, sizeof(url_buffer), "file://%s", input_file);
+    
+    // Create URL object
+    Url file_url = {0};
+    file_url.scheme = URL_SCHEME_FILE;
+    file_url.pathname = create_string(pool, input_file);
+    
+    // Read file content
+    FILE* file = fopen(input_file, "r");
+    if (!file) {
+        log_error("Failed to open input file: %s", input_file);
+        pool_variable_destroy(pool);
+        return false;
+    }
+    
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    
+    char* file_content = (char*)malloc(file_size + 1);
+    if (!file_content) {
+        log_error("Failed to allocate memory for file content");
+        fclose(file);
+        pool_variable_destroy(pool);
+        return false;
+    }
+    
+    fread(file_content, 1, file_size, file);
+    file_content[file_size] = '\0';
+    fclose(file);
+    
+    // Create input from source with auto-detection
+    String* type_str = create_string(pool, "auto");
+    Input* input = input_from_source(file_content, &file_url, type_str, NULL);
+    
+    free(file_content);  // Free file content after parsing
+    
+    if (!input) {
+        log_error("Failed to create input parser for LaTeX file");
+        pool_variable_destroy(pool);
+        return false;
+    }
+    
+    Item latex_ast = input->root;
     
     if (get_type_id(latex_ast) == LMD_TYPE_ERROR) {
         log_error("Failed to parse LaTeX file: %s", input_file);
-        mem_pool_destroy(pool);
+        if (input->type_list) arraylist_free(input->type_list);
+        pool_variable_destroy(input->pool);
+        free(input);
+        pool_variable_destroy(pool);
         return false;
     }
     
@@ -141,13 +192,16 @@ bool fn_typeset_latex_enhanced_standalone(const char* input_file, const char* ou
     
     // Create simple context for typeset engine
     Context simple_ctx = {0};
-    simple_ctx.pool = pool;
+    simple_ctx.ast_pool = pool;
     
     // Create enhanced typeset engine
     TypesetEngine* engine = typeset_engine_create(&simple_ctx);
     if (!engine) {
         log_error("Failed to create enhanced typeset engine");
-        mem_pool_destroy(pool);
+        if (input->type_list) arraylist_free(input->type_list);
+        pool_variable_destroy(input->pool);
+        free(input);
+        pool_variable_destroy(pool);
         return false;
     }
     
@@ -173,7 +227,10 @@ bool fn_typeset_latex_enhanced_standalone(const char* input_file, const char* ou
     
     // Clean up
     typeset_engine_destroy(engine);
-    mem_pool_destroy(pool);
+    if (input->type_list) arraylist_free(input->type_list);
+    pool_variable_destroy(input->pool);
+    free(input);
+    pool_variable_destroy(pool);
     
     if (success) {
         log_info("Enhanced LaTeX processing completed successfully");
@@ -204,7 +261,7 @@ LatexTypesetOptions* latex_typeset_options_create_enhanced(void) {
     
     options->base.default_font_family = strdup("Computer Modern");
     options->base.default_font_size = 10.0;
-    options->base.default_line_height = 12.0;
+    options->base.line_height = 12.0;
     
     // Set enhanced LaTeX-specific options
     options->process_citations = true;
@@ -236,8 +293,6 @@ void latex_typeset_options_destroy_enhanced(LatexTypesetOptions* options) {
     
     // Clean up base options
     if (options->base.default_font_family) free(options->base.default_font_family);
-    if (options->base.output_title) free(options->base.output_title);
-    if (options->base.output_author) free(options->base.output_author);
     
     // Clean up enhanced LaTeX options
     if (options->math_font) free(options->math_font);
@@ -252,7 +307,7 @@ void latex_typeset_options_destroy_enhanced(LatexTypesetOptions* options) {
 // =============================================================================
 
 bool analyze_latex_document_enhanced(Item latex_ast, LatexDocumentStructure** structure_out) {
-    if (!latex_ast || !structure_out) {
+    if (get_type_id(latex_ast) == LMD_TYPE_NULL || !structure_out) {
         log_error("Invalid parameters for enhanced document analysis");
         return false;
     }

@@ -415,6 +415,7 @@ HOMEBREW_DEPS=(
     "coreutils"  # For timeout command needed by test suite
     "openssl@3"  # For SSL/TLS support - required for libcurl
     "ginac"      # For mathematical expression equivalence testing
+    "libharu"    # For PDF generation - referenced in build config
 )
 
 if command -v brew >/dev/null 2>&1; then

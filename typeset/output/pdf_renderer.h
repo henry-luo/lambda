@@ -6,6 +6,10 @@
 #include <hpdf.h>
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // PDF renderer structure
 typedef struct PDFRenderer {
     ViewRenderer base;          // Base renderer interface
@@ -57,5 +61,9 @@ void pdf_set_position(PDFRenderer* renderer, double x, double y);
 // Error handling
 void pdf_error_handler(HPDF_STATUS error_no, HPDF_STATUS detail_no, void* user_data);
 const char* pdf_get_last_error(PDFRenderer* renderer);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // PDF_RENDERER_H

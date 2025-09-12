@@ -31,7 +31,7 @@ LatexFontStyle* latex_font_style_create_default() {
 }
 
 LatexFontStyle* latex_font_style_from_command(Item font_command) {
-    if (!font_command) return latex_font_style_create_default();
+    if (get_type_id(font_command) == LMD_TYPE_NULL) return latex_font_style_create_default();
     
     LatexFontStyle* style = latex_font_style_create_default();
     if (!style) return NULL;
@@ -86,7 +86,7 @@ LatexParagraphStyle* latex_paragraph_style_create_default() {
 }
 
 LatexParagraphStyle* latex_paragraph_style_from_environment(Item environment) {
-    if (!environment) return latex_paragraph_style_create_default();
+    if (get_type_id(environment) == LMD_TYPE_NULL) return latex_paragraph_style_create_default();
     
     LatexParagraphStyle* style = latex_paragraph_style_create_default();
     // TODO: Analyze environment for specific paragraph settings
@@ -220,7 +220,7 @@ double get_latex_font_size_for_section(int section_level) {
 // =============================================================================
 
 ViewNode* process_latex_document_enhanced(TypesetEngine* engine, Item document) {
-    if (!engine || !document) return NULL;
+    if (!engine || get_type_id(document) == LMD_TYPE_NULL) return NULL;
     
     log_info("Processing enhanced LaTeX document");
     
@@ -244,7 +244,7 @@ ViewNode* process_latex_document_enhanced(TypesetEngine* engine, Item document) 
 }
 
 ViewNode* process_latex_section_enhanced(TypesetEngine* engine, Item section, int level) {
-    if (!engine || !section) return NULL;
+    if (!engine || get_type_id(section) == LMD_TYPE_NULL) return NULL;
     
     log_debug("Processing LaTeX section at level %d", level);
     
@@ -267,7 +267,7 @@ ViewNode* process_latex_section_enhanced(TypesetEngine* engine, Item section, in
 }
 
 ViewNode* process_latex_paragraph_enhanced(TypesetEngine* engine, Item paragraph) {
-    if (!engine || !paragraph) return NULL;
+    if (!engine || get_type_id(paragraph) == LMD_TYPE_NULL) return NULL;
     
     log_debug("Processing enhanced LaTeX paragraph");
     
@@ -287,7 +287,7 @@ ViewNode* process_latex_paragraph_enhanced(TypesetEngine* engine, Item paragraph
 }
 
 ViewNode* process_latex_text_formatting_enhanced(TypesetEngine* engine, Item text_element) {
-    if (!engine || !text_element) return NULL;
+    if (!engine || get_type_id(text_element) == LMD_TYPE_NULL) return NULL;
     
     log_debug("Processing enhanced LaTeX text formatting");
     
@@ -308,7 +308,7 @@ ViewNode* process_latex_text_formatting_enhanced(TypesetEngine* engine, Item tex
 }
 
 ViewNode* process_latex_list_enhanced(TypesetEngine* engine, Item list) {
-    if (!engine || !list) return NULL;
+    if (!engine || get_type_id(list) == LMD_TYPE_NULL) return NULL;
     
     log_debug("Processing enhanced LaTeX list");
     
@@ -328,7 +328,7 @@ ViewNode* process_latex_list_enhanced(TypesetEngine* engine, Item list) {
 }
 
 ViewNode* process_latex_list_item_enhanced(TypesetEngine* engine, Item item, LatexListStyle* list_style) {
-    if (!engine || !item) return NULL;
+    if (!engine || get_type_id(item) == LMD_TYPE_NULL) return NULL;
     
     log_debug("Processing enhanced LaTeX list item");
     
@@ -350,7 +350,7 @@ ViewNode* process_latex_list_item_enhanced(TypesetEngine* engine, Item item, Lat
 }
 
 ViewNode* process_latex_table_enhanced(TypesetEngine* engine, Item table) {
-    if (!engine || !table) return NULL;
+    if (!engine || get_type_id(table) == LMD_TYPE_NULL) return NULL;
     
     log_debug("Processing enhanced LaTeX table");
     
@@ -365,7 +365,7 @@ ViewNode* process_latex_table_enhanced(TypesetEngine* engine, Item table) {
 }
 
 ViewNode* process_latex_math_enhanced(TypesetEngine* engine, Item math_element) {
-    if (!engine || !math_element) return NULL;
+    if (!engine || get_type_id(math_element) == LMD_TYPE_NULL) return NULL;
     
     log_debug("Processing enhanced LaTeX math");
     
@@ -378,7 +378,7 @@ ViewNode* process_latex_math_enhanced(TypesetEngine* engine, Item math_element) 
     ViewMathElement* math = (ViewMathElement*)malloc(sizeof(ViewMathElement));
     if (math) {
         memset(math, 0, sizeof(ViewMathElement));
-        math->type = VIEW_MATH_ATOM;
+        math->type = ViewMathElement::VIEW_MATH_ATOM;
         math->math_style = VIEW_MATH_DISPLAY;
         math->content.atom.symbol = strdup("x");
         
@@ -389,7 +389,7 @@ ViewNode* process_latex_math_enhanced(TypesetEngine* engine, Item math_element) 
 }
 
 ViewNode* process_latex_figure_enhanced(TypesetEngine* engine, Item figure) {
-    if (!engine || !figure) return NULL;
+    if (!engine || get_type_id(figure) == LMD_TYPE_NULL) return NULL;
     
     log_debug("Processing enhanced LaTeX figure");
     
@@ -446,7 +446,7 @@ void calculate_latex_list_layout(ViewNode* list_node, LatexListStyle* style) {
 // =============================================================================
 
 LatexDocumentStructure* analyze_latex_document_structure(Item document) {
-    if (!document) return NULL;
+    if (get_type_id(document) == LMD_TYPE_NULL) return NULL;
     
     LatexDocumentStructure* structure = (LatexDocumentStructure*)malloc(sizeof(LatexDocumentStructure));
     if (!structure) return NULL;
