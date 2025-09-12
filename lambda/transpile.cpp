@@ -1625,15 +1625,6 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
     strbuf_append_format(tp->code_buf, "} m%d;\n", import_node->script->index);
 }
 
-void declare_let(Transpiler* tp, AstNode *node) {
-    // declare global vars
-    AstNode *decl = ((AstLetNode*)node)->declare;
-    while (decl) {
-        transpile_assign_expr(tp, (AstNamedNode*)decl);
-        decl = decl->next;
-    }
-}
-
 void define_ast_node(Transpiler* tp, AstNode *node) {
     // get the function name
     log_debug("define_ast_node: node %p, type %d", node, node ? node->node_type : -1);
@@ -1788,9 +1779,40 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
     }
 }
 
+void declare_global_var(Transpiler* tp, AstLetNode *let_node) {
+    // declare global vars
+    AstNode *decl = let_node->declare;
+    while (decl) {
+        AstNamedNode *asn_node = (AstNamedNode*)decl;
+        Type *var_type = asn_node->type;
+        write_type(tp->code_buf, var_type);
+        strbuf_append_char(tp->code_buf, ' ');
+        write_var_name(tp->code_buf, asn_node, NULL);
+        strbuf_append_str(tp->code_buf, ";\n");
+        decl = decl->next;
+    }
+}
+
+void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
+    // declare global vars
+    AstNode *decl = let_node->declare;
+    while (decl) {
+        AstNamedNode *asn_node = (AstNamedNode*)decl;
+        Type *var_type = asn_node->type;
+        strbuf_append_str(tp->code_buf, "\n ");
+        strbuf_append_char(tp->code_buf, ' ');
+        write_var_name(tp->code_buf, asn_node, NULL);
+        strbuf_append_char(tp->code_buf, '=');
+        transpile_expr(tp, asn_node->as);
+        strbuf_append_char(tp->code_buf, ';');
+        decl = decl->next;
+    }
+}
+
+// include lambda-embed.h to get the lambda header file content as a string
 #include "lambda-embed.h"
 
-void transpile_ast(Transpiler* tp, AstScript *script) {
+void transpile_ast_root(Transpiler* tp, AstScript *script) {
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
     // all (nested) function definitions need to be hoisted to global level
     log_debug("define_ast_node ...");
@@ -1801,11 +1823,12 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     AstNode* child = script->child;
     while (child) {
         switch (child->node_type) {
-        // case AST_NODE_CONTENT:
-        //     child = ((AstListNode*)child)->item;
-        //     continue;  // restart the loop with the first content item
-        // case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
-        //     transpile_let_stam(tp, (AstLetNode*)child);
+        case AST_NODE_CONTENT:
+            child = ((AstListNode*)child)->item;
+            continue;  // restart the loop with the first content item
+        // declare global vars, types
+        case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
+            declare_global_var(tp, (AstLetNode*)child);
         default:
             define_ast_node(tp, child);
         }
@@ -1813,7 +1836,7 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     }
 
     // global evaluation, wrapped inside main()
-    log_debug("transpile_ast_node...");
+    log_debug("transpile main() ...");
     strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime) {\n rt = runtime;\n");
 
     // transpile body content
@@ -1824,6 +1847,7 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
         switch (child->node_type) {
         case AST_NODE_IMPORT:
         case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
+            assign_global_var(tp, (AstLetNode*)child);
         case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:  case AST_NODE_PROC:
             break;  // skip global definition nodes
         default:

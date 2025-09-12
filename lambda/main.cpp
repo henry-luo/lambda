@@ -23,7 +23,7 @@ extern "C" {
 // ValidationResult* run_ast_validation(const char *data_file, const char *schema_file, const char *input_format);
 extern "C" AstValidationResult* exec_validation(int argc, char* argv[]);
 int exec_convert(int argc, char* argv[]);
-void transpile_ast(Transpiler* tp, AstScript *script);
+void transpile_ast_root(Transpiler* tp, AstScript *script);
 
 // External function declarations
 extern "C" {

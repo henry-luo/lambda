@@ -95,6 +95,7 @@ Item fn_add(Item item_a, Item item_b) {
         return {.item = x2it(result)};
     }
     else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
+        log_debug("add int + int: %lld + %d", item_a.int_val, item_b.int_val);
         return {.item = i2it(item_a.int_val + item_b.int_val)};
     }
     else if (type_a == LMD_TYPE_INT64 && type_b == LMD_TYPE_INT64) {

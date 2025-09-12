@@ -53,7 +53,7 @@ void write_text_file(const char *filename, const char *content);
 TSParser* lambda_parser(void);
 TSTree* lambda_parse_source(TSParser* parser, const char* source_code);
 }
-void transpile_ast(Transpiler* tp, AstScript *script);
+void transpile_ast_root(Transpiler* tp, AstScript *script);
 void check_memory_leak();
 void print_heap_entries();
 int dataowner_compare(const void *a, const void *b, void *udata);
@@ -239,7 +239,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     log_debug("transpiling...");
     get_time(&start);
     tp->code_buf = strbuf_new_cap(1024);
-    transpile_ast(tp, (AstScript*)tp->ast_root);
+    transpile_ast_root(tp, (AstScript*)tp->ast_root);
     get_time(&end);
     print_elapsed_time("transpiling", start, end);
 
