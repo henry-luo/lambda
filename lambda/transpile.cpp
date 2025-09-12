@@ -797,61 +797,16 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
 void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     log_debug("transpile assign expr");
     // Defensive validation: ensure all required pointers and components are valid
-    if (!asn_node) {
-        log_error("Error: transpile_assign_expr called with null assign node");
+    if (!asn_node || !asn_node->type || !asn_node->as) {
+        log_error("Error: asn_node is invalid");
         strbuf_append_str(tp->code_buf, "error");
         return;
-    }
-    if (!asn_node->type) {
-        log_error("Error: transpile_assign_expr missing type information");
-        strbuf_append_str(tp->code_buf, "error");
-        return;
-    }
-    if (!asn_node->as) {
-        log_error("Error: transpile_assign_expr missing assignment expression");
-        strbuf_append_str(tp->code_buf, "error");
-        return;
-    }
-    
-    strbuf_append_str(tp->code_buf, "\n ");
-    // Check if the assigned expression requires type coercion (will be boxed to Item)
-    bool expression_needs_boxing = false;
-    Type *expr_type = asn_node->as->type;
-    
-    // Check if this is a conditional expression that needs coercion
-    if (asn_node->as->node_type == AST_NODE_IF_EXPR) {
-        AstIfNode *if_node = (AstIfNode*)asn_node->as;
-        Type* then_type = if_node->then ? if_node->then->type : nullptr;
-        Type* else_type = if_node->otherwise ? if_node->otherwise->type : nullptr;
-        
-        if (then_type && else_type) {
-            bool then_is_null = (then_type->type_id == LMD_TYPE_NULL);
-            bool else_is_null = (else_type->type_id == LMD_TYPE_NULL);
-            bool then_is_int = (then_type->type_id == LMD_TYPE_INT);
-            bool else_is_int = (else_type->type_id == LMD_TYPE_INT);  
-            bool then_is_string = (then_type->type_id == LMD_TYPE_STRING);
-            bool else_is_string = (else_type->type_id == LMD_TYPE_STRING);
-            
-            // These combinations cause type coercion to Item:
-            if ((then_is_null && (else_is_string || else_is_int)) ||
-                (else_is_null && (then_is_string || then_is_int)) ||
-                (then_is_int && else_is_string) ||
-                (then_is_string && else_is_int) ||
-                (expr_type && expr_type->type_id == LMD_TYPE_ANY)) {
-                expression_needs_boxing = true;
-            }
-        }
     }
     
     // Declare the variable type - use Item if expression needs boxing, original type otherwise
     Type *var_type = asn_node->type;
-    if (expression_needs_boxing) {
-        // Override the variable type to Item when the expression will be boxed
-        strbuf_append_str(tp->code_buf, "Item");
-        log_debug("transpile_assign_expr: using Item type due to expression boxing");
-    } else {
-        write_type(tp->code_buf, var_type);
-    }
+    strbuf_append_str(tp->code_buf, "\n ");
+    write_type(tp->code_buf, var_type);
     
     strbuf_append_char(tp->code_buf, ' ');
     write_var_name(tp->code_buf, asn_node, NULL);
@@ -1670,6 +1625,15 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
     strbuf_append_format(tp->code_buf, "} m%d;\n", import_node->script->index);
 }
 
+void declare_let(Transpiler* tp, AstNode *node) {
+    // declare global vars
+    AstNode *decl = ((AstLetNode*)node)->declare;
+    while (decl) {
+        transpile_assign_expr(tp, (AstNamedNode*)decl);
+        decl = decl->next;
+    }
+}
+
 void define_ast_node(Transpiler* tp, AstNode *node) {
     // get the function name
     log_debug("define_ast_node: node %p, type %d", node, node ? node->node_type : -1);
@@ -1830,7 +1794,10 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
     // all (nested) function definitions need to be hoisted to global level
     log_debug("define_ast_node ...");
-    strbuf_append_str(tp->code_buf, "\nContext *rt;\n");  // defines global runtime context
+    // defines global runtime context
+    strbuf_append_str(tp->code_buf, "\nContext *rt;\n");
+
+    // declare global vars, types, define fns, etc.
     AstNode* child = script->child;
     while (child) {
         switch (child->node_type) {
