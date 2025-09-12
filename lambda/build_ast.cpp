@@ -1684,9 +1684,12 @@ AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type) 
 // for both func expr and stam
 AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_global) {
     log_debug("build function");
+    bool is_proc = false;
     TSNode kind = ts_node_child_by_field_id(func_node, FIELD_KIND);
-    StrView kind_str = ts_node_source(tp, kind);
-    bool is_proc = strview_equal(&kind_str, "pn");
+    if (!ts_node_is_null(kind)) {
+        StrView kind_str = ts_node_source(tp, kind);
+        is_proc = strview_equal(&kind_str, "pn");
+    }
     log_debug("is proc: %d", is_proc);
 
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp,
