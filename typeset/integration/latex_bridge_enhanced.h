@@ -31,20 +31,26 @@ typedef struct {
     double line_spacing;        // Line spacing multiplier (1.0 = single, 1.5 = one-and-half, etc.)
     double paragraph_spacing;   // Space before/after paragraphs
     double indent;              // First-line indent
-    enum {
-        LATEX_ALIGN_LEFT,
-        LATEX_ALIGN_CENTER,
-        LATEX_ALIGN_RIGHT,
-        LATEX_ALIGN_JUSTIFY
-    } alignment;                // Text alignment
+    int alignment;              // Text alignment (use LATEX_ALIGN_* constants)
 } LatexParagraphStyle;
 
+// Alignment constants
+typedef enum {
+    LATEX_ALIGN_LEFT,
+    LATEX_ALIGN_CENTER,
+    LATEX_ALIGN_RIGHT,
+    LATEX_ALIGN_JUSTIFY
+} LatexAlignment;
+
+// List type constants
+typedef enum {
+    LATEX_LIST_ITEMIZE,     // Bulleted list
+    LATEX_LIST_ENUMERATE,   // Numbered list
+    LATEX_LIST_DESCRIPTION  // Description list
+} LatexListType;
+
 typedef struct {
-    enum {
-        LATEX_LIST_ITEMIZE,     // Bulleted list
-        LATEX_LIST_ENUMERATE,   // Numbered list
-        LATEX_LIST_DESCRIPTION  // Description list
-    } type;
+    int type;                   // List type (use LATEX_LIST_* constants)
     int level;                  // Nesting level (0 = top level)
     char* bullet_style;         // Custom bullet style
     double indent;              // List indentation

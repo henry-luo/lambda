@@ -3,6 +3,7 @@
 #include "typeset.h"
 #include "output/pdf_renderer.h"
 #include "../lib/log.h"
+#include "../lib/string.h"
 #include "../lambda/input/input.h"
 #include "../lambda/lambda-data.hpp"
 #include <stdlib.h>
@@ -13,7 +14,7 @@
 
 // Options management
 LatexTypesetOptions* latex_typeset_options_create_default(void) {
-    LatexTypesetOptions* options = malloc(sizeof(LatexTypesetOptions));
+    LatexTypesetOptions* options = (LatexTypesetOptions*)malloc(sizeof(LatexTypesetOptions));
     if (!options) return NULL;
     
     memset(options, 0, sizeof(LatexTypesetOptions));
@@ -82,7 +83,7 @@ void latex_typeset_options_destroy(LatexTypesetOptions* options) {
 
 // Main LaTeX to View Tree conversion using existing TypesetEngine
 ViewTree* typeset_latex_to_view_tree(TypesetEngine* engine, Item latex_ast, TypesetOptions* options) {
-    if (!engine || !latex_ast) {
+    if (!engine || get_type_id(latex_ast) == LMD_TYPE_NULL) {
         log_error("Invalid parameters for LaTeX to view tree conversion");
         return NULL;
     }
@@ -110,7 +111,7 @@ ViewTree* typeset_latex_to_view_tree(TypesetEngine* engine, Item latex_ast, Type
 // LaTeX to PDF conversion using existing engine
 bool typeset_latex_to_pdf(TypesetEngine* engine, Item latex_ast, 
                          const char* output_path, TypesetOptions* options) {
-    if (!engine || !latex_ast || !output_path) {
+    if (!engine || get_type_id(latex_ast) == LMD_TYPE_NULL || !output_path) {
         log_error("Invalid parameters for LaTeX to PDF conversion");
         return false;
     }
@@ -125,11 +126,12 @@ bool typeset_latex_to_pdf(TypesetEngine* engine, Item latex_ast,
     }
     
     // Use proper PDF renderer with libharu
-    PDFRenderOptions pdf_options = {0};
+    PDFRenderOptions pdf_options = {};
+    pdf_options.base.format = VIEW_FORMAT_PDF;
     pdf_options.base.dpi = 72.0;
     pdf_options.base.embed_fonts = true;
     pdf_options.base.quality = VIEW_RENDER_QUALITY_NORMAL;
-    pdf_options.pdf_version = PDF_VERSION_1_4;
+    pdf_options.pdf_version = PDFRenderOptions::PDF_VERSION_1_4;
     
     PDFRenderer* pdf_renderer = pdf_renderer_create(&pdf_options);
     if (!pdf_renderer) {
@@ -170,7 +172,7 @@ bool typeset_latex_to_pdf(TypesetEngine* engine, Item latex_ast,
 // LaTeX to SVG conversion using existing engine
 bool typeset_latex_to_svg(TypesetEngine* engine, Item latex_ast, 
                          const char* output_path, TypesetOptions* options) {
-    if (!engine || !latex_ast || !output_path) {
+    if (!engine || get_type_id(latex_ast) == LMD_TYPE_NULL || !output_path) {
         log_error("Invalid parameters for LaTeX to SVG conversion");
         return false;
     }
@@ -259,7 +261,7 @@ bool typeset_latex_to_svg(TypesetEngine* engine, Item latex_ast,
 // LaTeX to HTML conversion using existing engine
 bool typeset_latex_to_html(TypesetEngine* engine, Item latex_ast, 
                           const char* output_path, TypesetOptions* options) {
-    if (!engine || !latex_ast || !output_path) {
+    if (!engine || get_type_id(latex_ast) == LMD_TYPE_NULL || !output_path) {
         log_error("Invalid parameters for LaTeX to HTML conversion");
         return false;
     }
@@ -285,7 +287,7 @@ bool typeset_latex_to_html(TypesetEngine* engine, Item latex_ast,
 
 // Input validation
 bool validate_latex_ast(Item latex_ast) {
-    if (!latex_ast) return false;
+    if (get_type_id(latex_ast) == LMD_TYPE_NULL) return false;
     
     // Simple validation - check if item exists and has reasonable structure
     // TODO: Add more sophisticated LaTeX AST validation
@@ -295,7 +297,7 @@ bool validate_latex_ast(Item latex_ast) {
 
 // Preprocessing
 Item preprocess_latex_ast(Item latex_ast) {
-    if (!latex_ast) return latex_ast;
+    if (get_type_id(latex_ast) == LMD_TYPE_NULL) return latex_ast;
     
     // TODO: Add LaTeX preprocessing (macro expansion, etc.)
     log_debug("LaTeX AST preprocessing (placeholder)");
@@ -303,6 +305,7 @@ Item preprocess_latex_ast(Item latex_ast) {
 }
 
 // Standalone function for Lambda script interface
+extern "C" {
 bool fn_typeset_latex_standalone(const char* input_file, const char* output_file) {
     if (!input_file || !output_file) {
         log_error("fn_typeset_latex_standalone: invalid parameters");
@@ -311,10 +314,18 @@ bool fn_typeset_latex_standalone(const char* input_file, const char* output_file
     
     log_info("LaTeX Standalone: %s -> %s", input_file, output_file);
     
+    // Create temporary memory pool
+    VariableMemPool* pool = NULL;
+    if (pool_variable_init(&pool, 1024 * 1024, MEM_POOL_NO_BEST_FIT) != MEM_POOL_ERR_OK) {
+        log_error("Failed to create memory pool for LaTeX processing");
+        return false;
+    }
+    
     // Check if input file exists
     FILE* input_check = fopen(input_file, "r");
     if (!input_check) {
         log_error("Input file not found: %s", input_file);
+        pool_variable_destroy(pool);
         return false;
     }
     fclose(input_check);
@@ -323,6 +334,7 @@ bool fn_typeset_latex_standalone(const char* input_file, const char* output_file
     const char* ext = strrchr(output_file, '.');
     if (!ext) {
         log_error("Output file has no extension: %s", output_file);
+        pool_variable_destroy(pool);
         return false;
     }
     
@@ -330,6 +342,7 @@ bool fn_typeset_latex_standalone(const char* input_file, const char* output_file
     LatexTypesetOptions* options = latex_typeset_options_create_default();
     if (!options) {
         log_error("Failed to create LaTeX typeset options");
+        pool_variable_destroy(pool);
         return false;
     }
     
@@ -338,29 +351,53 @@ bool fn_typeset_latex_standalone(const char* input_file, const char* output_file
     // Step 1: Parse LaTeX input using Lambda's input system
     log_info("Parsing LaTeX file: %s", input_file);
     
-    // Create input system to parse LaTeX
-    extern Input* input_new(const Url* url);
-    extern void input_auto_detect(Input* input, const char* filename);
-    extern void pool_variable_destroy(VariablePool* pool);
-    
     // Create URL for the input file  
     char url_buffer[512];
     snprintf(url_buffer, sizeof(url_buffer), "file://%s", input_file);
     
     // Create URL object - simplified approach
     Url file_url = {0};
-    file_url.scheme = "file";
-    file_url.path = (char*)input_file;
+    file_url.scheme = URL_SCHEME_FILE;
+    file_url.pathname = create_string(pool, input_file);
     
-    Input* input = input_new(&file_url);
-    if (!input) {
-        log_error("Failed to create input parser for LaTeX file");
+    // Read file content
+    FILE* file = fopen(input_file, "r");
+    if (!file) {
+        log_error("Failed to open input file: %s", input_file);
         latex_typeset_options_destroy(options);
+        pool_variable_destroy(pool);
         return false;
     }
     
-    // Parse the LaTeX file
-    input_auto_detect(input, input_file);
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    
+    char* file_content = (char*)malloc(file_size + 1);
+    if (!file_content) {
+        log_error("Failed to allocate memory for file content");
+        fclose(file);
+        latex_typeset_options_destroy(options);
+        pool_variable_destroy(pool);
+        return false;
+    }
+    
+    fread(file_content, 1, file_size, file);
+    file_content[file_size] = '\0';
+    fclose(file);
+    
+    // Create input from source with auto-detection
+    String* type_str = create_string(pool, "auto");
+    Input* input = input_from_source(file_content, &file_url, type_str, NULL);
+    
+    free(file_content);  // Free file content after parsing
+    
+    if (!input) {
+        log_error("Failed to create input parser for LaTeX file");
+        latex_typeset_options_destroy(options);
+        pool_variable_destroy(pool);
+        return false;
+    }
     
     if (input->root.item == ITEM_ERROR || input->root.item == ITEM_NULL) {
         log_error("Failed to parse LaTeX file: %s", input_file);
@@ -368,6 +405,7 @@ bool fn_typeset_latex_standalone(const char* input_file, const char* output_file
         pool_variable_destroy(input->pool);
         free(input);
         latex_typeset_options_destroy(options);
+        pool_variable_destroy(pool);
         return false;
     }
     
@@ -377,9 +415,6 @@ bool fn_typeset_latex_standalone(const char* input_file, const char* output_file
     // Create a simple context for typeset engine
     Context simple_ctx = {0};  // Initialize with zeros
     
-    extern TypesetEngine* typeset_engine_create(Context* ctx);
-    extern void typeset_engine_destroy(TypesetEngine* engine);
-    
     TypesetEngine* engine = typeset_engine_create(&simple_ctx);
     if (!engine) {
         log_error("Failed to create typeset engine");
@@ -387,6 +422,7 @@ bool fn_typeset_latex_standalone(const char* input_file, const char* output_file
         pool_variable_destroy(input->pool);
         free(input);
         latex_typeset_options_destroy(options);
+        pool_variable_destroy(pool);
         return false;
     }
     
@@ -410,6 +446,8 @@ bool fn_typeset_latex_standalone(const char* input_file, const char* output_file
     pool_variable_destroy(input->pool);
     free(input);
     latex_typeset_options_destroy(options);
+    pool_variable_destroy(pool);  // Clean up temporary pool
     
     return result;
 }
+} // End extern "C"
