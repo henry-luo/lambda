@@ -397,7 +397,7 @@ void transpile_mir_ast(MIR_context_t ctx, AstScript *script) {
 }
 
 // Main entry point for MIR compilation
-Item run_script_mir(Runtime *runtime, const char* source, char* script_path) {
+Item run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main) {
     log_notice("Running script with MIR JIT compilation");
     
     Script* script;
@@ -433,8 +433,11 @@ Item run_script_mir(Runtime *runtime, const char* source, char* script_path) {
         return ItemError;
     }
     
-    // Create a simple context for execution
+    // Create a context for execution with run_main set appropriately
     Context exec_ctx = {0};
+    exec_ctx.run_main = run_main;
+    log_debug("MIR execution context run_main = %s", run_main ? "true" : "false");
+    
     Item result = main_fn(&exec_ctx);
     
     jit_cleanup(ctx);

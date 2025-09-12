@@ -50,7 +50,10 @@ const char* get_repl_prompt();
 void print_help();
 
 // Forward declare MIR transpiler function
-Item run_script_mir(Runtime *runtime, const char* source, char* script_path);
+Item run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main);
+
+// Forward declare function with run_main support
+Item run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main);
 
 void run_repl(Runtime *runtime, bool use_mir) {
     printf("Lambda Script REPL v1.0%s\n", use_mir ? " (MIR JIT)" : "");
@@ -105,7 +108,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
         // Run the accumulated script
         Item result;
         if (use_mir) {
-            result = run_script_mir(runtime, repl_history->str, script_path);
+            result = run_script_mir(runtime, repl_history->str, script_path, false);  // false for run_main in REPL
         } else {
             result = run_script(runtime, repl_history->str, script_path, false);
         }
@@ -122,20 +125,25 @@ void run_repl(Runtime *runtime, bool use_mir) {
     strbuf_free(repl_history);
 }
 
-void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bool transpile_only = false) {
+void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bool transpile_only = false, bool run_main = false) {
     Item result;
     if (use_mir) {
-        result = run_script_mir(runtime, NULL, (char*)script_path);
+        result = run_script_mir(runtime, nullptr, (char*)script_path, run_main);
     } else {
-        result = run_script_at(runtime, (char*)script_path, false);
+        result = run_script_with_run_main(runtime, (char*)script_path, false, run_main);
     }
     
-    printf("##### Script '%s' executed: #####\n", script_path);
-    log_debug("Script '%s' executed ====================", script_path);
     StrBuf *output = strbuf_new_cap(256);
     print_root_item(output, result);
-    printf("%s", output->str);
-    log_debug("%s", output->str);
+    log_debug("Script '%s' executed ====================", script_path);
+    if (run_main) {
+        // just print to debug log
+        log_info("%s", output->str);
+    } else {
+        printf("##### Script '%s' executed: #####\n", script_path);
+        printf("%s", output->str);
+        log_info("%s", output->str);
+    }
     strbuf_free(output);
     // todo: should have return value
 }
@@ -535,6 +543,74 @@ int main(int argc, char *argv[]) {
         return exit_code;
     }
     
+    // Handle run command
+    log_debug("Checking for run command");
+    if (argc >= 2 && strcmp(argv[1], "run") == 0) {
+        log_debug("Entering run command handler");
+        
+        // Check for help first
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda Script Runner v1.0\n\n");
+            printf("Usage: %s run [--mir] <script>\n", argv[0]);
+            printf("\nOptions:\n");
+            printf("  --mir          Use MIR JIT compilation (default: tree-walking interpreter)\n");
+            printf("  -h, --help     Show this help message\n");
+            printf("\nDescription:\n");
+            printf("  The 'run' command executes a Lambda script with run_main context enabled.\n");
+            printf("  This means that if the script defines a main function, it will be\n");
+            printf("  automatically executed during script execution.\n");
+            printf("\nExamples:\n");
+            printf("  %s run script.ls                 # Run script with tree-walking interpreter\n", argv[0]);
+            printf("  %s run --mir script.ls           # Run script with MIR JIT compilation\n", argv[0]);
+            log_finish();  // Cleanup logging before exit
+            return 0;
+        }
+        
+        // Parse run command arguments
+        bool use_mir = false;
+        char* script_file = NULL;
+        
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--mir") == 0) {
+                use_mir = true;
+            } else if (argv[i][0] != '-') {
+                if (script_file == NULL) {
+                    script_file = argv[i];
+                } else {
+                    printf("Error: Multiple script files not supported\n");
+                    log_finish();
+                    return 1;
+                }
+            } else {
+                printf("Error: Unknown run option '%s'\n", argv[i]);
+                log_finish();
+                return 1;
+            }
+        }
+        
+        if (!script_file) {
+            printf("Error: run command requires a script file\n");
+            printf("Usage: %s run [--mir] <script>\n", argv[0]);
+            log_finish();
+            return 1;
+        }
+        
+        // Check if script file exists
+        if (access(script_file, F_OK) != 0) {
+            printf("Error: Script file '%s' does not exist\n", script_file);
+            log_finish();
+            return 1;
+        }
+        
+        log_debug("Running script '%s' with run_main=true, use_mir=%s", script_file, use_mir ? "true" : "false");
+        
+        // Execute script with run_main enabled
+        run_script_file(&runtime, script_file, use_mir, false, true);  // true for run_main
+        
+        log_finish();
+        return 0;
+    }
+    
     bool use_mir = false;
     bool transpile_only = false;
     bool help_only = false;
@@ -569,7 +645,7 @@ int main(int argc, char *argv[]) {
         print_help();
     }
     else if (script_file) {
-        run_script_file(&runtime, script_file, use_mir, transpile_only);
+        run_script_file(&runtime, script_file, use_mir, transpile_only, false);  // false for run_main in regular execution
         // todo: inspect return value
     }
     else if (transpile_only) { // without a script file

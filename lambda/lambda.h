@@ -325,6 +325,7 @@ typedef struct Context {
     Url* cwd;  // current working directory
     Item result; // final exec result
     mpd_context_t* decimal_ctx; // libmpdec context for decimal operations
+    bool run_main; // whether to run main procedure on start
 } Context;
 
 #ifndef LAMBDA_STATIC
