@@ -138,11 +138,12 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
     log_debug("Script '%s' executed ====================", script_path);
     if (run_main) {
         // just print to debug log
-        log_info("%s", output->str);
+        log_debug("%s", output->str);
+        printf("\n");  // help end any output, otherwise, may see '%' at the end of the line
     } else {
         printf("##### Script '%s' executed: #####\n", script_path);
         printf("%s", output->str);
-        log_info("%s", output->str);
+        log_debug("%s", output->str);
     }
     strbuf_free(output);
     // todo: should have return value
