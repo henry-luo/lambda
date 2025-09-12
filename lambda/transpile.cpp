@@ -61,7 +61,13 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
     }
     switch (item->type->type_id) {
     case LMD_TYPE_NULL:
-        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        if (item->type->is_literal) {
+            strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        } else {
+            strbuf_append_char(tp->code_buf, '(');
+            transpile_expr(tp, item);  // e.g. for procedural code
+            strbuf_append_str(tp->code_buf, ",ITEM_NULL)");
+        }
         break;
     case LMD_TYPE_BOOL:
         strbuf_append_str(tp->code_buf, "b2it(");
@@ -1666,6 +1672,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
 
 void define_ast_node(Transpiler* tp, AstNode *node) {
     // get the function name
+    log_debug("define_ast_node: node %p, type %d", node, node ? node->node_type : -1);
     switch(node->node_type) {
     case AST_NODE_IDENT:  case AST_NODE_PARAM:
         break;
@@ -1822,17 +1829,25 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
 void transpile_ast(Transpiler* tp, AstScript *script) {
     strbuf_append_str_n(tp->code_buf, (const char*)lambda_lambda_h, lambda_lambda_h_len);
     // all (nested) function definitions need to be hoisted to global level
-    log_debug("define_ast_node...");
+    log_debug("define_ast_node ...");
     strbuf_append_str(tp->code_buf, "\nContext *rt;\n");  // defines global runtime context
     AstNode* child = script->child;
     while (child) {
-        define_ast_node(tp, child);
+        switch (child->node_type) {
+        // case AST_NODE_CONTENT:
+        //     child = ((AstListNode*)child)->item;
+        //     continue;  // restart the loop with the first content item
+        // case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
+        //     transpile_let_stam(tp, (AstLetNode*)child);
+        default:
+            define_ast_node(tp, child);
+        }
         child = child->next;
     }
 
     // global evaluation, wrapped inside main()
     log_debug("transpile_ast_node...");
-    strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime){\n rt = runtime;\n");
+    strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime) {\n rt = runtime;\n");
 
     // transpile body content
     strbuf_append_str(tp->code_buf, " Item result = ");
@@ -1843,7 +1858,7 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
         case AST_NODE_IMPORT:
         case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
         case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:  case AST_NODE_PROC:
-            break;  // skip defintion nodes
+            break;  // skip global definition nodes
         default:
             // AST_NODE_CONTENT, AST_NODE_PRIMARY, AST_NODE_BINARY, etc.
             transpile_box_item(tp, child);
@@ -1855,22 +1870,35 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
     strbuf_append_str(tp->code_buf, ";\n");
 
     // transpile invocation of main procedure if defined
+    log_debug("transpiling main proc (if any)...");
     child = script->child;
+    bool has_main = false;
     while (child) {
         switch (child->node_type) {
-        case AST_NODE_PROC:
+        case AST_NODE_PROC: {
             AstFuncNode* proc_node = (AstFuncNode*)child;
+            log_debug("got global proc: %.*s", (int)proc_node->name->len, proc_node->name->chars);
             if (strcmp(proc_node->name->chars, "main") == 0) {
                 strbuf_append_str(tp->code_buf, " if (rt->run_main) result = ");
                 write_fn_name(tp->code_buf, proc_node, NULL);
                 // todo: pass command line args
-                strbuf_append_str(tp->code_buf, "();\n");          
+                strbuf_append_str(tp->code_buf, "();\n");
+                has_main = true;
             }
             break;
         }
+        case AST_NODE_CONTENT: {
+            child = ((AstListNode*)child)->item;
+            continue;  // restart the loop with the first content item
+        }
+        default:
+            log_debug("not a proc: %d", child->node_type);
+            break;  // skip other nodes
+        }
         child = child->next;
     }
+    log_debug("done transpiling main proc, has_main: %d", has_main);
+
+    // return the result
     strbuf_append_str(tp->code_buf, " return result;\n}\n");
 }
-
-

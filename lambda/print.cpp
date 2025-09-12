@@ -875,8 +875,9 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
     }
     case AST_NODE_LIST:  case AST_NODE_CONTENT:  case AST_NODE_CONTENT_TYPE: {
         AstListNode* list_node = (AstListNode*)node;
-        log_debug("[%s:%s[%ld]]", node->node_type == 
-            AST_NODE_CONTENT_TYPE ? "content_type" : AST_NODE_CONTENT ? "content" : "list", 
+        log_debug("[%s:%s[%ld]]", 
+            node->node_type == AST_NODE_CONTENT_TYPE ? "content_type" : 
+            node->node_type == AST_NODE_CONTENT ? "content" : "list", 
             type_name, list_node->list_type->length);
         AstNode *ld = list_node->declare;
         if (!ld) {
