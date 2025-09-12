@@ -1686,7 +1686,8 @@ AstNode* build_func(Transpiler* tp, TSNode func_node, bool is_named, bool is_glo
     log_debug("build function");
     TSNode kind = ts_node_child_by_field_id(func_node, FIELD_KIND);
     StrView kind_str = ts_node_source(tp, kind);
-    bool is_proc = strview_equal(&kind_str, "proc");
+    bool is_proc = strview_equal(&kind_str, "pn");
+    log_debug("is proc: %d", is_proc);
 
     AstFuncNode* ast_node = (AstFuncNode*)alloc_ast_node(tp,
         is_proc ? AST_NODE_PROC : is_named ? AST_NODE_FUNC : AST_NODE_FUNC_EXPR, 
