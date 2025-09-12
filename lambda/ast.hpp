@@ -85,6 +85,7 @@ extern "C" {
 #define FIELD_ALIAS field_alias
 #define FIELD_MODULE field_module
 #define FIELD_PUB field_pub
+#define FIELD_KIND field_kind
 
 #ifdef __cplusplus
 }
@@ -106,8 +107,9 @@ typedef struct NameEntry {
 
 // name_scope
 typedef struct NameScope {
-    NameEntry* first;  // start name entry in the current scope
-    NameEntry* last;  // last name entry in the current scope
+    NameEntry* first;   // start name entry in the current scope
+    NameEntry* last;    // last name entry in the current scope
+    bool is_proc;       // whether is inside a procedural scope
     struct NameScope* parent;  // parent scope
 } NameScope;
 
@@ -148,6 +150,7 @@ typedef enum AstNodeType {
     AST_NODE_UNARY_TYPE,
     AST_NODE_FUNC,
     AST_NODE_FUNC_EXPR,
+    AST_NODE_PROC, // procedural function
     AST_NODE_IMPORT,
     AST_SCRIPT,
 } AstNodeType;

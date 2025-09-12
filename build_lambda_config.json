@@ -44,6 +44,14 @@
         "lambda/input/css_tokenizer.c",
         "lambda/input/css_properties.c",
         "lambda/input/css_parser.c",
+        "typeset/typeset.c",
+        "typeset/view/view_tree.c",
+        "typeset/integration/latex_bridge.cpp",
+        "typeset/integration/latex_bridge_enhanced.c",
+        "typeset/output/pdf_renderer.c",
+        "typeset/output/pdf_renderer_enhanced.c",
+        "typeset/typeset_latex.c",
+        "typeset/latex_typeset_enhanced.c",
         "lambda/main-repl.cpp",
         "lambda/main.cpp"
     ],
@@ -83,6 +91,13 @@
             "name": "utf8proc",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+            "link": "static"
+        },
+        {
+            "name": "hpdf",
+            "description": "libharu PDF generation library",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/Cellar/libharu/2.4.5/lib/libhpdf.a",
             "link": "static"
         },
         {

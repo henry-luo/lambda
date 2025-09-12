@@ -9,6 +9,15 @@
 typedef struct ViewRenderer ViewRenderer;
 typedef struct ViewRenderOptions ViewRenderOptions;
 
+// Output format types
+typedef enum {
+    VIEW_FORMAT_SVG,
+    VIEW_FORMAT_HTML,
+    VIEW_FORMAT_PDF,
+    VIEW_FORMAT_PNG,
+    VIEW_FORMAT_TEX
+} ViewFormat;
+
 // Color space definitions
 typedef enum {
     VIEW_COLOR_SPACE_RGB,
@@ -27,6 +36,9 @@ typedef enum {
 
 // Base render options
 struct ViewRenderOptions {
+    // Output format
+    ViewFormat format;          // Output format type
+    
     // Output format specific options
     double dpi;                 // For raster formats (72.0 default)
     bool embed_fonts;           // Embed font data
@@ -54,6 +66,7 @@ struct ViewRenderer {
     char* format_name;          // Output format name ("HTML")
     char* mime_type;            // MIME type ("text/html")
     char* file_extension;       // File extension (".html")
+    ViewFormat format;          // Format type enum
     
     // Renderer functions
     bool (*initialize)(ViewRenderer* renderer, ViewRenderOptions* options);
@@ -196,7 +209,7 @@ typedef struct PNGRenderOptions {
     // PNG-specific options
     int compression_level;      // PNG compression level (0-9)
     bool use_transparency;      // Use transparency
-    struct ViewColor background_color; // Background color
+    ViewColor background_color; // Background color
     
     // Rasterization
     double pixel_density;       // Pixel density (DPI)
