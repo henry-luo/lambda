@@ -125,7 +125,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             node = ((AstListNode*)node)->item; 
             while (node) {
                 log_debug("checking content node: %d", node->node_type);
-                if (node->node_type == AST_NODE_FUNC) {
+                if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) {
                     AstFuncNode *func_node = (AstFuncNode*)node;
                     if (((TypeFunc*)func_node->type)->is_public) {
                         // get func addr

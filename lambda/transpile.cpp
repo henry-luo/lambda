@@ -289,8 +289,8 @@ void transpile_box_item(Transpiler* tp, AstNode *item) {
 void transpile_push_items(Transpiler* tp, AstNode *item, bool is_elmt) {
     while (item) {
         // skip let declaration
-        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || 
-            item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_FUNC) {
+        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM || 
+            item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC) {
             item = item->next;  continue;
         }
         strbuf_append_format(tp->code_buf, " list_push(%s, ", is_elmt ? "el" : "ls");
@@ -307,31 +307,33 @@ void transpile_primary_expr(Transpiler* tp, AstPrimaryNode *pri_node) {
             AstIdentNode* ident_node = (AstIdentNode*)pri_node->expr;
             log_debug("transpile_primary_expr: identifier %.*s, type: %d", 
                 (int)ident_node->name->len, ident_node->name->chars, pri_node->type->type_id);
-                
-            if (ident_node->entry && ident_node->entry->node && 
-                ident_node->entry->node->node_type == AST_NODE_FUNC) {
-                write_fn_name(tp->code_buf, (AstFuncNode*)ident_node->entry->node, 
-                    (AstImportNode*)ident_node->entry->import);
-            }
-            else if (ident_node->entry && ident_node->entry->node) {
-                log_debug("transpile_primary_expr: writing var name for %.*s, entry type: %d",
-                    (int)ident_node->name->len, ident_node->name->chars,
-                    ident_node->entry->node->type->type_id);
-                
-                // For decimal identifiers, we need to convert the pointer to an Item
-                if (ident_node->entry->node->type->type_id == LMD_TYPE_DECIMAL) {
-                    strbuf_append_str(tp->code_buf, "c2it(");
-                    write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node, 
+            
+            AstNode* entry_node = ident_node->entry ? ident_node->entry->node : nullptr;
+            if (entry_node) {
+                if (entry_node->node_type == AST_NODE_FUNC || entry_node->node_type == AST_NODE_FUNC_EXPR || entry_node->node_type == AST_NODE_PROC) {
+                    write_fn_name(tp->code_buf, (AstFuncNode*)entry_node, 
                         (AstImportNode*)ident_node->entry->import);
-                    strbuf_append_char(tp->code_buf, ')');
-                } else {
-                    write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node, 
-                        (AstImportNode*)ident_node->entry->import);
+                }
+                else {
+                    log_debug("transpile_primary_expr: writing var name for %.*s, entry type: %d",
+                        (int)ident_node->name->len, ident_node->name->chars,
+                        ident_node->entry->node->type->type_id);
+                    
+                    // For decimal identifiers, we need to convert the pointer to an Item
+                    if (ident_node->entry->node->type->type_id == LMD_TYPE_DECIMAL) {
+                        strbuf_append_str(tp->code_buf, "c2it(");
+                        write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node, 
+                            (AstImportNode*)ident_node->entry->import);
+                        strbuf_append_char(tp->code_buf, ')');
+                    } else {
+                        write_var_name(tp->code_buf, (AstNamedNode*)ident_node->entry->node, 
+                            (AstImportNode*)ident_node->entry->import);
+                    }
                 }
             }
             else {
-                log_warn("Warning: ident_node->entry is null or entry->node is null");
-                // Handle the case where entry is null - perhaps write the identifier directly
+                // handle the case where entry is null - perhaps write the identifier directly
+                log_error("Error: identifier '%.*s' missing name entry", (int)ident_node->name->len, ident_node->name->chars);
                 write_node_source(tp, ident_node->node);
             }
         } else { 
@@ -979,8 +981,8 @@ void transpile_items(Transpiler* tp, AstNode *item) {
     bool is_first = true;
     while (item) {
         // skip let declaration
-        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || 
-            item->node_type == AST_NODE_TYPE_STAM || item->node_type == AST_NODE_FUNC) {
+        if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM || 
+            item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC) {
             item = item->next;  continue;
         }
         if (is_first) { is_first = false; } 
@@ -1085,7 +1087,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
             effective_length--;
             transpile_let_stam(tp, (AstLetNode*)item);
         }
-        else if (item->node_type == AST_NODE_FUNC) {
+        else if (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC) {
             effective_length--;
             // already transpiled
         }
@@ -1235,9 +1237,10 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                 (AstPrimaryNode*)call_node->function:null;
             if (fn_node && fn_node->expr && fn_node->expr->node_type == AST_NODE_IDENT) {
                 AstIdentNode* ident_node = (AstIdentNode*)fn_node->expr;
-                if (ident_node->entry && ident_node->entry->node && 
-                    ident_node->entry->node->node_type == AST_NODE_FUNC) {
-                    write_fn_name(tp->code_buf, (AstFuncNode*)ident_node->entry->node, 
+                AstNode* entry_node = ident_node->entry ? ident_node->entry->node : NULL;
+                if (entry_node && (entry_node->node_type == AST_NODE_FUNC || 
+                    entry_node->node_type == AST_NODE_FUNC_EXPR || entry_node->node_type == AST_NODE_PROC)) {
+                    write_fn_name(tp->code_buf, (AstFuncNode*)entry_node, 
                         (AstImportNode*)ident_node->entry->import);
                 } else { // variable
                     strbuf_append_char(tp->code_buf, '_');
@@ -1563,7 +1566,8 @@ void transpile_expr(Transpiler* tp, AstNode *expr_node) {
     case AST_NODE_CALL_EXPR:
         transpile_call_expr(tp, (AstCallNode*)expr_node);
         break;
-    case AST_NODE_FUNC:  case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
+    case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
+    case AST_NODE_FUNC:  case AST_NODE_PROC:
         // already transpiled
         break;
     case AST_NODE_FUNC_EXPR:
@@ -1633,7 +1637,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
     strbuf_append_format(tp->code_buf, "struct Mod%d {\n", import_node->script->index);
     node = ((AstListNode*)node)->item;
     while (node) {
-        if (node->node_type == AST_NODE_FUNC) {
+        if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
             log_debug("got imported fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
                 ((TypeFunc*)func_node->type)->is_public);
@@ -1785,7 +1789,7 @@ void define_ast_node(Transpiler* tp, AstNode *node) {
         }
         break;
     }
-    case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR: {
+    case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:  case AST_NODE_PROC: {
         // func needs to be brought to global scope in C
         define_func(tp, (AstFuncNode*)node, false);
         AstFuncNode* func = (AstFuncNode*)node;
@@ -1835,7 +1839,7 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
         switch (child->node_type) {
         case AST_NODE_IMPORT:
         case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
-        case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:
+        case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:  case AST_NODE_PROC:
             break;  // skip defintion nodes
         default:
             // AST_NODE_CONTENT, AST_NODE_PRIMARY, AST_NODE_BINARY, etc.

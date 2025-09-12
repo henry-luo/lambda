@@ -943,15 +943,19 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         break;
     }
     case AST_NODE_SYS_FUNC:
-        log_debug("[sys func:%d:%s]", ((AstSysFuncNode*)node)->fn, type_name);
+        log_debug("[sys fn/pn:%d:%s]", ((AstSysFuncNode*)node)->fn, type_name);
         break;
-    case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR: {
+    case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR: case AST_NODE_PROC: {
         // function definition
         AstFuncNode* func = (AstFuncNode*)node;
         if (node->node_type == AST_NODE_FUNC_EXPR) {
             log_debug("[fn expr:%s]", type_name);
-        } else {
+        } 
+        else if (node->node_type == AST_NODE_FUNC) {
             log_debug("[fn: %.*s:%s]", (int)func->name->len, func->name->chars, type_name);
+        }
+        else {
+            log_debug("[pn: %.*s:%s]", (int)func->name->len, func->name->chars, type_name);
         }
         print_label(indent + 1, "params:"); 
         AstNode* fn_param = (AstNode*)func->param;

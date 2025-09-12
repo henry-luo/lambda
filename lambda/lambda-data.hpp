@@ -39,6 +39,15 @@ typedef struct NamePool NamePool;
 }
 #endif
 
+// get raw value out of an Item
+inline double get_double(Item item) { return *(double*)item.pointer; }
+inline int64_t get_int64(Item item) { return *(int64_t*)item.pointer; }
+inline DateTime get_datetime(Item item) { return *(DateTime*)item.pointer; }
+inline Decimal* get_decimal(Item item) { return (Decimal*)item.pointer; }
+inline String* get_string(Item item) { return (String*)item.pointer; }
+inline String* get_symbol(Item item) { return (String*)item.pointer; }
+inline String* get_binary(Item item) { return (String*)item.pointer; }
+
 // Unicode-enhanced comparison functions are declared in utf_string.h
 #include "utf_string.h"
 

@@ -775,11 +775,12 @@ Item fn_input(Item url, Item type) {
     return (input && input->root.item) ? input->root : ItemNull;
 }
 
-void fn_print(Item item) {
+Item fn_print(Item item) {
     String *str = fn_string(item);
     if (str) {
         log_debug("%s", str->chars);
     }
+    return ItemNull;
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);

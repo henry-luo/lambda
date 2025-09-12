@@ -436,6 +436,6 @@ Item fn_typeset_latex(Item input_file, Item output_file, Item options);
 DateTime fn_datetime();
 
 // procedural functions
-void fn_print(Item item);
+Item fn_print(Item item);
 
 #endif
