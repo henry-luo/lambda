@@ -1832,7 +1832,10 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
 
     // global evaluation, wrapped inside main()
     log_debug("transpile_ast_node...");
-    strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime){\n rt = runtime;\n return ");
+    strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime){\n rt = runtime;\n");
+
+    // transpile body content
+    strbuf_append_str(tp->code_buf, " Item result = ");
     child = script->child;
     bool has_content = false;
     while (child) {
@@ -1849,7 +1852,25 @@ void transpile_ast(Transpiler* tp, AstScript *script) {
         child = child->next;
     }
     if (!has_content) { strbuf_append_str(tp->code_buf, "ITEM_NULL"); }
-    strbuf_append_str(tp->code_buf, ";\n}\n");
+    strbuf_append_str(tp->code_buf, ";\n");
+
+    // transpile invocation of main procedure if defined
+    child = script->child;
+    while (child) {
+        switch (child->node_type) {
+        case AST_NODE_PROC:
+            AstFuncNode* proc_node = (AstFuncNode*)child;
+            if (strcmp(proc_node->name->chars, "main") == 0) {
+                strbuf_append_str(tp->code_buf, " if (rt->run_main) result = ");
+                write_fn_name(tp->code_buf, proc_node, NULL);
+                // todo: pass command line args
+                strbuf_append_str(tp->code_buf, "();\n");          
+            }
+            break;
+        }
+        child = child->next;
+    }
+    strbuf_append_str(tp->code_buf, " return result;\n}\n");
 }
 
 

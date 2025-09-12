@@ -778,7 +778,7 @@ Item fn_input(Item url, Item type) {
 Item fn_print(Item item) {
     String *str = fn_string(item);
     if (str) {
-        log_debug("%s", str->chars);
+        printf("%s", str->chars);
     }
     return ItemNull;
 }

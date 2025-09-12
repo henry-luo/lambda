@@ -380,6 +380,37 @@ Item run_script_at(Runtime *runtime, char* script_path, bool transpile_only) {
     return run_script(runtime, NULL, script_path, transpile_only);
 }
 
+// Extended function that supports setting run_main context
+Item run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main) {
+    Runner runner;
+    runner_init(runtime, &runner);
+    runner.script = load_script(runtime, script_path, NULL);
+    if (transpile_only) {
+        log_info("Transpiled script %s only, not executing.", script_path);
+        return ItemNull;
+    }
+    // execute the function
+    Item result;
+    if (!runner.script || !runner.script->main_func) { 
+        log_error("Error: Failed to compile the function."); 
+        result = ItemNull;
+    } else {
+        log_notice("Executing JIT compiled code...");
+        runner_setup_context(&runner);
+        
+        // Set the run_main flag in the execution context
+        runner.context.run_main = run_main;
+        log_debug("Set context run_main = %s", run_main ? "true" : "false");
+        
+        log_debug("exec main func");
+        result = context->result = runner.script->main_func(context);
+        log_debug("after main func");
+        // for the time being, we need to keep the context for result item printing
+        // todo: runner_cleanup(&runner);
+    }
+    return result;
+}
+
 void runtime_init(Runtime* runtime) {
     memset(runtime, 0, sizeof(Runtime));
     runtime->parser = lambda_parser();

@@ -16,9 +16,13 @@ void print_help() {
     printf("  lambda [script.ls]           - Run a script file\n");
     printf("  lambda --mir [script.ls]     - Run with MIR JIT compilation\n");
     printf("  lambda --transpile-only [script.ls] - Transpile to C code only (no execution)\n");
+    printf("  lambda run [--mir] <script.ls>      - Run script with main function execution\n");
     printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
     printf("  lambda --help                - Show this help message\n");
+    printf("\nScript Commands:\n");
+    printf("  run [--mir] <script>         - Execute script with run_main enabled\n");
+    printf("                               - This automatically runs the main function if defined\n");
     printf("\nREPL Commands:\n");
     printf("  .quit, .q, .exit     - Exit REPL\n");
     printf("  .help, .h            - Show help\n");
