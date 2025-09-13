@@ -560,6 +560,13 @@
                         "name": "🎮 Lambda REPL Interface Tests",
                         "dependencies": [],
                         "binary": "test/test_lambda_repl.exe"
+                    },
+                    {
+                        "source": "test/test_lambda_proc.cpp",
+                        "name": "🐑 Lambda Procedural Tests",
+                        "dependencies": [],
+                        "binary": "test/test_lambda_proc.exe",
+                        "libraries": ["criterion"]
                     }
                 ],
                 "type": "lambda",
