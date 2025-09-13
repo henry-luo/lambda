@@ -1626,6 +1626,7 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
 void define_ast_node(Transpiler* tp, AstNode *node) {
     // get the function name
     log_debug("define_ast_node: node %p, type %d", node, node ? node->node_type : -1);
+    if (!node) return;
     switch(node->node_type) {
     case AST_NODE_IDENT:  case AST_NODE_PARAM:
         break;
