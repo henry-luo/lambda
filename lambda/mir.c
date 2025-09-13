@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>  // for va_list
 #include "../lib/log.h"
 #include "mir.h"
 #include "mir-gen.h"
@@ -137,11 +138,63 @@ MIR_context_t jit_init() {
 // compile C code to MIR
 void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, const char *file_name) {
     struct c2mir_options ops = {0}; // Default options
-    ops.message_file = stdout;  ops.verbose_p = 1;  ops.debug_p = 0;
+    
+    // Check if we want to capture C2MIR debug messages via environment variable
+    const char* debug_env = getenv("LAMBDA_C2MIR_DEBUG");
+    bool enable_debug = (debug_env && (strcmp(debug_env, "1") == 0 || strcmp(debug_env, "true") == 0));
+    
+    #ifdef ENABLE_C2MIR_DEBUG
+        enable_debug = true;  // Force enable if compile-time flag is set
+    #endif
+    
+    if (enable_debug) {
+        // Create a temporary file to capture C2MIR messages
+        FILE* temp_log = tmpfile();
+        if (temp_log) {
+            ops.message_file = temp_log;
+            ops.verbose_p = 1;  // Enable verbose output
+            ops.debug_p = 0;    // Keep debug off to avoid too much noise
+            log_debug("C2MIR debug logging enabled");
+        } else {
+            ops.message_file = NULL;
+            ops.verbose_p = 0;
+            ops.debug_p = 0;
+            log_warn("Failed to create temporary file for C2MIR logging");
+        }
+    } else {
+        ops.message_file = NULL;
+        ops.verbose_p = 0;
+        ops.debug_p = 0;
+    }
+    
     log_notice("Compiling C code in '%s' to MIR", file_name);
     jit_item_t jit_ptr = {.curr = 0, .code = code, .code_size = code_size};
     if (!c2mir_compile(ctx, &ops, getc_func, &jit_ptr, file_name, NULL)) {
         log_error("compiled '%s' with error!!", file_name);
+    }
+    
+    // Read and log the captured C2MIR messages
+    if (enable_debug && ops.message_file) {
+        // Rewind to beginning of temp file
+        rewind(ops.message_file);
+        
+        // Read and log each line
+        char line_buffer[1024];
+        while (fgets(line_buffer, sizeof(line_buffer), ops.message_file)) {
+            // Remove trailing newline
+            size_t len = strlen(line_buffer);
+            if (len > 0 && line_buffer[len - 1] == '\n') {
+                line_buffer[len - 1] = '\0';
+            }
+            
+            // Log the C2MIR message (skip empty lines)
+            if (strlen(line_buffer) > 0) {
+                log_debug("C2MIR: %s", line_buffer);
+            }
+        }
+        
+        // Close the temporary file
+        fclose(ops.message_file);
     }
 }
 
