@@ -146,6 +146,7 @@ void jit_compile_to_mir(MIR_context_t ctx, const char *code, size_t code_size, c
     #ifdef ENABLE_C2MIR_DEBUG
         enable_debug = true;  // Force enable if compile-time flag is set
     #endif
+    enable_debug = true;  // hardcode enable for now
     
     if (enable_debug) {
         // Create a temporary file to capture C2MIR messages
