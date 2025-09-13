@@ -56,9 +56,16 @@ Lambda is a modern scripting language that combines:
 
 ### Building
 
-**Lambda project (default):**
+**Using Make (Recommended - Premake-based):**
 ```bash
-./compile.sh
+make build      # Build using modern Premake system
+make debug      # Debug build with AddressSanitizer
+make release    # Optimized release build
+```
+
+**Legacy shell script method:**
+```bash
+./compile.sh    # Lambda project (direct shell script)
 ```
 
 **Radiant sub-project:**
@@ -191,10 +198,16 @@ Lambda uses advanced memory pool management:
 
 ## Build System
 
-Lambda uses a unified build system that supports multiple projects and platforms:
+Lambda now uses a modern **Premake5-based build system** alongside the legacy shell script approach:
+
+### Modern Build System (Premake)
+- **Premake5**: Cross-platform build configuration generator
+- **Auto-generated**: Makefiles generated from JSON configuration
+- **IDE Integration**: Native support for Visual Studio, Xcode, Code::Blocks
+- **Incremental Builds**: Fast incremental compilation with proper dependency tracking
 
 ### Supported Projects
-- **Lambda**: Main scripting language and document processing engine
+- **Lambda**: Main scripting language and document processing engine  
 - **Radiant**: GUI framework and rendering engine
 
 ### Supported Platforms
@@ -202,9 +215,19 @@ Lambda uses a unified build system that supports multiple projects and platforms
 - **Cross-compilation**: Windows binaries using MinGW-w64
 
 ### Configuration
-- **JSON-based**: Flexible configuration files for each project
+- **JSON-based**: Single `build_lambda_config.json` configuration source
 - **Platform-specific**: Override settings for different target platforms
-- **Modular**: Separate library and dependency management
+- **Modular**: Automatic library and dependency management
+- **Mixed Language**: Seamless C/C++ compilation with appropriate flags
+
+### Build Commands
+```bash
+make build           # Incremental build (recommended)
+make debug           # Debug build with sanitizers
+make release         # Optimized release build
+make clean-premake   # Clean Premake build artifacts
+make generate-premake # Regenerate Premake configuration
+```
 
 ## Testing
 
