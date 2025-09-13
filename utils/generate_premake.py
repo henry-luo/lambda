@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Premake5 Generator for Lambda Test System
-Migrates from shell-based test_build.sh to Premake5-based build system
+Premake5 Generator for Lambda Build System
+Migrates from shell-based compile.sh to Premake5-based build system
 while preserving the existing JSON configuration structure.
 """
 
 import json
 import os
 import sys
+import glob
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
@@ -55,12 +56,15 @@ class PremakeGenerator:
     
     def generate_workspace(self) -> None:
         """Generate the main workspace configuration"""
+        output = self.config.get('output', 'lambda.exe')
+        startup_project = output.replace('.exe', '')
+        
         self.premake_content.extend([
-            'workspace "LambdaTests"',
+            'workspace "Lambda"',
             '    configurations { "Debug", "Release" }',
             '    platforms { "x64" }',
             '    location "build/premake"',
-            '    startproject "lambda-lib"',
+            f'    startproject "{startup_project}"',
             '    ',
             '    -- Global settings',
             '    cppdialect "C++17"',
@@ -751,6 +755,163 @@ class PremakeGenerator:
             ''
         ])
     
+    def generate_main_program(self) -> None:
+        """Generate the main Lambda program executable"""
+        output = self.config.get('output', 'lambda.exe')
+        source_files = self.config.get('source_files', [])
+        source_dirs = self.config.get('source_dirs', [])
+        dependencies = []
+        
+        # Extract main program dependencies from libraries
+        for lib in self.config.get('libraries', []):
+            lib_name = lib.get('name', '')
+            if lib_name not in ['criterion']:  # Exclude test-only libraries
+                dependencies.append(lib_name)
+        
+        # Add dev_libraries for main program
+        for lib in self.config.get('dev_libraries', []):
+            lib_name = lib.get('name', '')
+            dependencies.append(lib_name)
+        
+        # Remove .exe extension for project name
+        project_name = output.replace('.exe', '')
+        
+        # Add files from source directories explicitly
+        all_source_files = source_files[:]
+        for source_dir in source_dirs:
+            import glob
+            c_pattern = f"{source_dir}/**/*.c"
+            cpp_pattern = f"{source_dir}/**/*.cpp"
+            
+            # Find all C files
+            c_files = glob.glob(c_pattern, recursive=True)
+            all_source_files.extend(c_files)
+            
+            # Find all C++ files  
+            cpp_files = glob.glob(cpp_pattern, recursive=True)
+            all_source_files.extend(cpp_files)
+        
+        self.premake_content.extend([
+            f'project "{project_name}"',
+            '    kind "ConsoleApp"',
+            '    language "C++"',  # Use C++ as primary language since we have mixed sources
+            '    targetdir "."',
+            '    objdir "build/obj/%{prj.name}"',
+            '    targetname "lambda"',
+            '    targetextension ".exe"',
+            '    ',
+            '    files {',
+        ])
+        
+        # Add all source files explicitly
+        for source in all_source_files:
+            self.premake_content.append(f'        "{source}",')
+        
+        self.premake_content.extend([
+            '    }',
+            '    ',
+            '    includedirs {',
+            '        ".",',
+            '        "lambda/tree-sitter/lib/include",',
+            '        "lambda/tree-sitter-lambda/bindings/c",',
+            '        "lib/mem-pool/include",',
+        ])
+        
+        # Add external library include paths
+        for lib_name, lib_info in self.external_libraries.items():
+            if lib_info['include'] and lib_name != 'criterion':
+                self.premake_content.append(f'        "{lib_info["include"]}",')
+        
+        self.premake_content.extend([
+            '        "/usr/local/include",',
+            '        "/opt/homebrew/include",',
+            '    }',
+            '    ',
+            '    libdirs {',
+            '        "/opt/homebrew/lib",',
+            '        "/usr/local/lib",',
+            '        "build/lib",',
+            '    }',
+            '    '
+        ])
+        
+        # Add static library linkoptions
+        static_libs = []
+        frameworks = []
+        dynamic_libs = []
+        
+        for dep in dependencies:
+            if dep in self.external_libraries:
+                lib_info = self.external_libraries[dep]
+                lib_path = lib_info['lib']
+                
+                if lib_info.get('link') == 'dynamic':
+                    if lib_path.startswith('-framework '):
+                        frameworks.append(lib_path)
+                    elif lib_path.startswith('-l'):
+                        dynamic_libs.append(lib_path.replace('-l', ''))
+                    else:
+                        dynamic_libs.append(lib_path)
+                else:
+                    # Static library
+                    if not lib_path.startswith('/'):
+                        lib_path = f"../../{lib_path}"
+                    static_libs.append(lib_path)
+        
+        # Add static libraries to linkoptions
+        if static_libs:
+            self.premake_content.append('    linkoptions {')
+            for lib_path in static_libs:
+                self.premake_content.append(f'        "{lib_path}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+        
+        # Add dynamic libraries and frameworks
+        if frameworks or dynamic_libs:
+            self.premake_content.append('    links {')
+            for lib in dynamic_libs:
+                self.premake_content.append(f'        "{lib}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+            
+            if frameworks:
+                self.premake_content.append('    linkoptions {')
+                for framework in frameworks:
+                    self.premake_content.append(f'        "{framework}",')
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
+        
+        # Add build options with separate handling for C and C++ files
+        self.premake_content.extend([
+            '    buildoptions {',
+            '        "-fms-extensions",',
+            '        "-fcolor-diagnostics",',
+            '        "-pedantic"',
+            '    }',
+            '    ',
+            '    -- C++ specific options',
+            '    filter "files:**.cpp"',
+            '        buildoptions { "-std=c++17" }',
+            '    ',
+            '    -- C specific options',
+            '    filter "files:**.c"',
+            '        buildoptions { "-std=c99" }',
+            '    ',
+            '    filter {}',
+            '    ',
+            '    defines {',
+            '        "_GNU_SOURCE"',
+            '    }',
+            '    ',
+            ''
+        ])
+
     def generate_premake_file(self, output_path: str = "premake5.lua") -> None:
         """Generate the complete premake5.lua file"""
         self.premake_content = []
@@ -758,7 +919,7 @@ class PremakeGenerator:
         # Add header comment
         self.premake_content.extend([
             '-- Generated by utils/generate_premake.py',
-            '-- Lambda Test System Premake5 Configuration',
+            '-- Lambda Build System Premake5 Configuration',
             '-- DO NOT EDIT MANUALLY - Regenerate using: python3 utils/generate_premake.py',
             '',
         ])
@@ -767,6 +928,7 @@ class PremakeGenerator:
         self.generate_workspace()
         self.generate_library_projects()
         self.generate_complex_libraries()
+        self.generate_main_program()
         self.generate_test_projects()
         
         # Write to file

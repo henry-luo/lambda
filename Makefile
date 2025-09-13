@@ -111,13 +111,13 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
 help:
 	@echo "$(PROJECT_NAME) - Available Make Targets:"
 	@echo ""
-	@echo "Build Targets:"
-	@echo "  build         - Build lambda project with -O2 optimization (incremental, default)"
-	@echo "  build-ascii   - Build lambda project with ASCII-only support (no Unicode)"
-	@echo "  debug         - Build with debug symbols, AddressSanitizer, and -O0"
-	@echo "  release       - Build optimized release version with -O3, LTO, and stripped symbols"
-	@echo "  rebuild       - Force complete rebuild"
-	@echo "  lambda        - Build lambda project specifically"
+	@echo "Build Targets (Premake-based):"
+	@echo "  build         - Build lambda project using Premake build system (incremental, default)"
+	@echo "  build-ascii   - Build lambda project with ASCII-only support (legacy, same as build)"
+	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
+	@echo "  release       - Build optimized release version using Premake"
+	@echo "  rebuild       - Force complete rebuild using Premake"
+	@echo "  lambda        - Build lambda project specifically using Premake"
 	@echo "  radiant       - Build radiant project"
 	@echo "  window        - Build window project"
 	@echo "  all           - Build all projects"
@@ -133,6 +133,11 @@ help:
 	@echo "  clean-all     - Remove all build directories"
 	@echo "  distclean     - Complete cleanup (build dirs + executables + tests)"
 	@echo "  intellisense  - Update VS Code IntelliSense database (compile_commands.json)"
+	@echo ""
+	@echo "Premake Build System:"
+	@echo "  generate-premake - Generate premake5.lua from build_lambda_config.json"
+	@echo "  clean-premake - Clean Premake build artifacts and generated files"
+	@echo "  build-test    - Build all test projects using Premake"
 	@echo ""
 	@echo "Grammar & Parser:"
 	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
@@ -184,10 +189,16 @@ help:
 	@echo "  make debug                # Debug build with AddressSanitizer"
 	@echo "  make rebuild              # Force complete rebuild"
 
-# Main build target (incremental)
+# Main build target (incremental) - Now uses Premake
 build: $(TS_ENUM_H) tree-sitter-libs
-	@echo "Building $(PROJECT_NAME) (incremental)..."
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
+	@echo "Building $(PROJECT_NAME) using Premake build system..."
+	@echo "Generating Premake configuration..."
+	python3 utils/generate_premake.py
+	@echo "Generating makefiles..."
+	premake5 gmake
+	@echo "Building lambda executable..."
+	$(MAKE) -C build/premake config=debug_x64 lambda
+	@echo "Build completed. Executable: lambda.exe"
 
 # Legacy ASCII-only target (now same as regular build since Unicode is always enabled)
 build-ascii: build
@@ -197,27 +208,51 @@ print-vars:
 
 $(LAMBDA_EXE): build
 
-# Debug build
-debug:
-	@echo "Building debug version..."
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --debug --jobs=$(JOBS)
+# Debug build - Now uses Premake
+debug: $(TS_ENUM_H) tree-sitter-libs
+	@echo "Building debug version using Premake build system..."
+	@echo "Generating Premake configuration..."
+	python3 utils/generate_premake.py
+	@echo "Generating makefiles..."
+	premake5 gmake
+	@echo "Building lambda executable (debug)..."
+	$(MAKE) -C build/premake config=debug_x64 lambda
+	@echo "Debug build completed. Executable: lambda.exe"
 
 # Release build (optimized)
 release: build-release
 
-build-release:
-	@echo "Building release version..."
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --platform=release --jobs=$(JOBS)
+build-release: $(TS_ENUM_H) tree-sitter-libs
+	@echo "Building release version using Premake build system..."
+	@echo "Generating Premake configuration..."
+	python3 utils/generate_premake.py
+	@echo "Generating makefiles..."
+	premake5 gmake
+	@echo "Building lambda executable (release)..."
+	$(MAKE) -C build/premake config=release_x64 lambda
+	@echo "Release build completed. Executable: lambda.exe"
 
 # Force rebuild (clean + build)
-rebuild:
-	@echo "Force rebuilding $(PROJECT_NAME)..."
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --force --jobs=$(JOBS)
+rebuild: clean
+	@echo "Force rebuilding $(PROJECT_NAME) using Premake build system..."
+	@echo "Generating Premake configuration..."
+	python3 utils/generate_premake.py
+	@echo "Generating makefiles..."
+	premake5 gmake
+	@echo "Building lambda executable..."
+	$(MAKE) -C build/premake config=debug_x64 lambda
+	@echo "Rebuild completed. Executable: lambda.exe"
 
 # Specific project builds
 lambda: $(TS_ENUM_H) tree-sitter-libs
-	@echo "Building lambda project..."
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
+	@echo "Building lambda project using Premake build system..."
+	@echo "Generating Premake configuration..."
+	python3 utils/generate_premake.py
+	@echo "Generating makefiles..."
+	premake5 gmake
+	@echo "Building lambda executable..."
+	$(MAKE) -C build/premake config=debug_x64 lambda
+	@echo "Lambda build completed. Executable: lambda.exe"
 
 radiant:
 	@echo "Building radiant project..."
