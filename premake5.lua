@@ -2121,6 +2121,60 @@ project "test_lambda_repl"
     }
     
 
+project "test_lambda_proc"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_lambda_proc.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "mac-deps/nghttp2/include",
+        "/opt/homebrew/opt/libedit/include",
+        "/opt/homebrew/Cellar/ginac/1.8.9/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "criterion",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-fms-extensions",
+        "-fcolor-diagnostics",
+        "-pedantic",
+    }
+    
+
 project "test_lambda_runner"
     kind "ConsoleApp"
     language "C++"

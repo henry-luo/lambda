@@ -1,8 +1,6 @@
-let a = 123
-
 pn main() {
-    let b = "hello" + "world\n"
+    let a = 123
+    let b = "; hello" + " world"
     print(a + 1)
     print(b)
-    print("second \n\nline\n\n")
 }
