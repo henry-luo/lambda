@@ -794,21 +794,22 @@ void transpile_if(Transpiler* tp, AstIfNode *if_node) {
     log_debug("end if expr");
 }
 
-void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
+void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node, bool is_global = false) {
     log_debug("transpile assign expr");
-    // Defensive validation: ensure all required pointers and components are valid
+    // defensive validation: ensure all required pointers and components are valid
     if (!asn_node || !asn_node->type || !asn_node->as) {
         log_error("Error: asn_node is invalid");
         strbuf_append_str(tp->code_buf, "error");
         return;
     }
     
-    // Declare the variable type - use Item if expression needs boxing, original type otherwise
+    // declare the variable type
     Type *var_type = asn_node->type;
     strbuf_append_str(tp->code_buf, "\n ");
-    write_type(tp->code_buf, var_type);
-    
-    strbuf_append_char(tp->code_buf, ' ');
+    if (!is_global) {
+        write_type(tp->code_buf, var_type);
+        strbuf_append_char(tp->code_buf, ' ');
+    }
     write_var_name(tp->code_buf, asn_node, NULL);
     strbuf_append_char(tp->code_buf, '=');
 
@@ -816,12 +817,9 @@ void transpile_assign_expr(Transpiler* tp, AstNamedNode *asn_node) {
     strbuf_append_char(tp->code_buf, ';');
 }
 
-void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
+void transpile_let_stam(Transpiler* tp, AstLetNode *let_node, bool is_global = false) {
     // Defensive validation: ensure all required pointers and components are valid
-    if (!let_node) {
-        log_error("Error: transpile_let_stam called with null let node");
-        return;
-    }
+    if (!let_node) { log_error("Error: missing let_node");  return; }
     
     AstNode *declare = let_node->declare;
     while (declare) {
@@ -832,7 +830,7 @@ void transpile_let_stam(Transpiler* tp, AstLetNode *let_node) {
             declare = declare->next;
             continue;
         }
-        transpile_assign_expr(tp, (AstNamedNode*)declare);
+        transpile_assign_expr(tp, (AstNamedNode*)declare, is_global);
         declare = declare->next;
     }
 }
@@ -1035,7 +1033,7 @@ void transpile_list_expr(Transpiler* tp, AstListNode *list_node) {
     }
 }
 
-void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
+void transpile_content_expr(Transpiler* tp, AstListNode *list_node, bool is_global = false) {
     log_debug("transpile content expr");
     TypeArray *type = list_node->list_type;
     // create list before the declarations, to contain all the allocations
@@ -1046,7 +1044,7 @@ void transpile_content_expr(Transpiler* tp, AstListNode *list_node) {
     while (item) {
         if (item->node_type == AST_NODE_LET_STAM || item->node_type == AST_NODE_PUB_STAM || item->node_type == AST_NODE_TYPE_STAM) {
             effective_length--;
-            transpile_let_stam(tp, (AstLetNode*)item);
+            transpile_let_stam(tp, (AstLetNode*)item, is_global);
         }
         else if (item->node_type == AST_NODE_FUNC || item->node_type == AST_NODE_FUNC_EXPR || item->node_type == AST_NODE_PROC) {
             effective_length--;
@@ -1798,7 +1796,6 @@ void assign_global_var(Transpiler* tp, AstLetNode *let_node) {
     AstNode *decl = let_node->declare;
     while (decl) {
         AstNamedNode *asn_node = (AstNamedNode*)decl;
-        Type *var_type = asn_node->type;
         strbuf_append_str(tp->code_buf, "\n ");
         strbuf_append_char(tp->code_buf, ' ');
         write_var_name(tp->code_buf, asn_node, NULL);
@@ -1845,18 +1842,22 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
     bool has_content = false;
     while (child) {
         switch (child->node_type) {
-        case AST_NODE_IMPORT:
         case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM:  case AST_NODE_TYPE_STAM:
-            assign_global_var(tp, (AstLetNode*)child);
-        case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:  case AST_NODE_PROC:
+            assign_global_var(tp, (AstLetNode*)child);       
+            break;  // already handled
+        case AST_NODE_IMPORT:  case AST_NODE_FUNC:  case AST_NODE_FUNC_EXPR:  case AST_NODE_PROC:
             break;  // skip global definition nodes
+        case AST_NODE_CONTENT:
+            transpile_content_expr(tp, (AstListNode*)child, true);
+            has_content = true;
+            break;  // already handled
         default:
-            // AST_NODE_CONTENT, AST_NODE_PRIMARY, AST_NODE_BINARY, etc.
+            // AST_NODE_PRIMARY, AST_NODE_BINARY, etc.
             transpile_box_item(tp, child);
             has_content = true;            
         }
         child = child->next;
-    }
+    }    
     if (!has_content) { strbuf_append_str(tp->code_buf, "ITEM_NULL"); }
     strbuf_append_str(tp->code_buf, ";\n");
 
