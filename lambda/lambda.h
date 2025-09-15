@@ -432,6 +432,7 @@ Type* const_type(int type_index);
 Type* fn_type(Item item);
 
 Item fn_input(Item url, Item type);
+Item fn_fetch(Item url, Item options);
 String* fn_format(Item item, Item type);
 Item fn_typeset_latex(Item input_file, Item output_file, Item options);
 DateTime fn_datetime();
@@ -439,5 +440,6 @@ DateTime fn_datetime();
 // procedural functions
 Item pn_print(Item item);
 Item pn_cmd(Item cmd, Item args);
+Item pn_fetch(Item url, Item options);
 
 #endif
