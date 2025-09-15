@@ -260,6 +260,7 @@ project "lambda"
         "lambda/print.cpp",
         "lambda/lambda-eval.cpp",
         "lambda/lambda-eval-num.cpp",
+        "lambda/lambda-proc.cpp",
         "lambda/utf_string.cpp",
         "lambda/lambda-mem.cpp",
         "lambda/validator.cpp",

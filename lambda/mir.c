@@ -111,19 +111,21 @@ func_obj_t func_list[] = {
     // procedures
     {"pn_print", (fn_ptr) pn_print},
     {"pn_cmd", (fn_ptr) pn_cmd},
+    {"pn_fetch", (fn_ptr) pn_fetch},
 };
 
 void *import_resolver(const char *name) {
     log_debug("resolving name: %s", name);
-    size_t len = sizeof(func_list) / sizeof(func_obj_t);
+    // Use explicit count since sizeof calculation may fail
+    const size_t len = sizeof(func_list) / sizeof(func_obj_t);
     for (int i = 0; i < len; i++) {
-        // printf("checking fn: %s\n", func_list[i].name);
+        // log_debug("checking fn: %s", func_list[i].name);
         if (strcmp(func_list[i].name, name) == 0) {
             log_debug("found function: %s at %p", name, func_list[i].func);
             return func_list[i].func;
         }
     }
-    log_error("failed to resolve native fn:: %s", name);
+    log_error("failed to resolve native fn/pn: %s", name);
     return NULL;
 }
 

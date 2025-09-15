@@ -65,9 +65,33 @@ typedef struct {
     bool enable_compression;
 } HttpConfig;
 
+// Extended fetch configuration and response structures
+typedef struct {
+    const char* method;
+    const char* body;
+    size_t body_size;
+    char** headers;
+    int header_count;
+    long timeout_seconds;
+    long max_redirects;
+    const char* user_agent;
+    bool verify_ssl;
+    bool enable_compression;
+} FetchConfig;
+
+typedef struct {
+    char* data;
+    size_t size;
+    long status_code;
+    char** response_headers;
+    int response_header_count;
+    char* content_type;
+} FetchResponse;
+
 char* download_http_content(const char* url, size_t* content_size, const HttpConfig* config);
 char* download_to_cache(const char* url, const char* cache_dir, char** out_cache_path);
 Input* input_from_http(const char* url, const char* type, const char* flavor, const char* cache_dir);
+FetchResponse* http_fetch(const char* url, const FetchConfig* config);
 
 // System information functions (from input_sysinfo.cpp)
 typedef struct SysInfoManager SysInfoManager;

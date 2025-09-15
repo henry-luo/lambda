@@ -284,3 +284,190 @@ Input* input_from_http(const char* url, const char* type, const char* flavor, co
     
     return input;
 }
+
+// Extended HTTP configuration for fetch operations
+// Note: FetchConfig and FetchResponse are defined in input.h
+
+// Callback to collect response headers
+static size_t header_callback(char* buffer, size_t size, size_t nitems, FetchResponse* response) {
+    size_t header_size = size * nitems;
+    
+    // Skip status line and empty lines
+    if (header_size < 3 || buffer[0] == '\r' || buffer[0] == '\n') {
+        return header_size;
+    }
+    
+    // Extract Content-Type header
+    if (strncasecmp(buffer, "content-type:", 13) == 0) {
+        char* value_start = buffer + 13;
+        while (*value_start == ' ' || *value_start == '\t') value_start++;
+        
+        size_t value_len = header_size - (value_start - buffer);
+        // Remove trailing CRLF
+        while (value_len > 0 && (value_start[value_len-1] == '\r' || value_start[value_len-1] == '\n')) {
+            value_len--;
+        }
+        
+        if (response->content_type) free(response->content_type);
+        response->content_type = (char*)malloc(value_len + 1);
+        if (response->content_type) {
+            memcpy(response->content_type, value_start, value_len);
+            response->content_type[value_len] = '\0';
+        }
+    }
+    
+    // Store all headers
+    response->response_headers = (char**)realloc(response->response_headers, 
+                                               (response->response_header_count + 1) * sizeof(char*));
+    if (response->response_headers) {
+        char* header_copy = (char*)malloc(header_size + 1);
+        if (header_copy) {
+            memcpy(header_copy, buffer, header_size);
+            header_copy[header_size] = '\0';
+            
+            // Remove trailing CRLF
+            size_t len = header_size;
+            while (len > 0 && (header_copy[len-1] == '\r' || header_copy[len-1] == '\n')) {
+                header_copy[--len] = '\0';
+            }
+            
+            response->response_headers[response->response_header_count++] = header_copy;
+        }
+    }
+    
+    return header_size;
+}
+
+// Free FetchResponse structure
+static void free_fetch_response(FetchResponse* response) {
+    if (response->data) {
+        free(response->data);
+        response->data = NULL;
+    }
+    
+    if (response->content_type) {
+        free(response->content_type);
+        response->content_type = NULL;
+    }
+    
+    for (int i = 0; i < response->response_header_count; i++) {
+        free(response->response_headers[i]);
+    }
+    if (response->response_headers) {
+        free(response->response_headers);
+        response->response_headers = NULL;
+    }
+    response->response_header_count = 0;
+}
+
+// Perform HTTP request with full fetch-like functionality
+FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
+    if (!init_curl()) {
+        return NULL;
+    }
+    
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        fprintf(stderr, "HTTP: Failed to initialize curl handle\n");
+        return NULL;
+    }
+    
+    FetchResponse* response = (FetchResponse*)calloc(1, sizeof(FetchResponse));
+    if (!response) {
+        curl_easy_cleanup(curl);
+        return NULL;
+    }
+    
+    CURLcode res;
+    
+    // Basic configuration
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_response_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, response);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, header_callback);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, response);
+    
+    // Method configuration
+    if (config && config->method) {
+        if (strcasecmp(config->method, "POST") == 0) {
+            curl_easy_setopt(curl, CURLOPT_POST, 1L);
+            if (config->body) {
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, config->body);
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, config->body_size);
+            }
+        } else if (strcasecmp(config->method, "PUT") == 0) {
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+            if (config->body) {
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, config->body);
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, config->body_size);
+            }
+        } else if (strcasecmp(config->method, "DELETE") == 0) {
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+        } else if (strcasecmp(config->method, "PATCH") == 0) {
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PATCH");
+            if (config->body) {
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDS, config->body);
+                curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, config->body_size);
+            }
+        } else if (strcasecmp(config->method, "HEAD") == 0) {
+            curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
+        }
+        // GET is default, no special handling needed
+    }
+    
+    // Headers configuration
+    struct curl_slist* headers = NULL;
+    if (config && config->headers && config->header_count > 0) {
+        for (int i = 0; i < config->header_count; i++) {
+            headers = curl_slist_append(headers, config->headers[i]);
+        }
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    }
+    
+    // Other configuration
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, config ? config->timeout_seconds : default_http_config.timeout_seconds);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, config ? config->max_redirects : default_http_config.max_redirects);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, config ? config->user_agent : default_http_config.user_agent);
+    
+    // SSL/TLS configuration
+    bool verify_ssl = config ? config->verify_ssl : default_http_config.verify_ssl;
+    if (verify_ssl) {
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    } else {
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
+    
+    // Compression support
+    bool enable_compression = config ? config->enable_compression : default_http_config.enable_compression;
+    if (enable_compression) {
+        curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
+    }
+    
+    // Perform the request
+    printf("HTTP: Fetching %s\n", url);
+    res = curl_easy_perform(curl);
+    
+    if (res != CURLE_OK) {
+        fprintf(stderr, "HTTP: Fetch failed: %s\n", curl_easy_strerror(res));
+        free_fetch_response(response);
+        free(response);
+        curl_easy_cleanup(curl);
+        if (headers) curl_slist_free_all(headers);
+        return NULL;
+    }
+    
+    // Get HTTP response code
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response->status_code);
+    
+    printf("HTTP: Successfully fetched %zu bytes from %s (HTTP %ld)\n", 
+           response->size, url, response->status_code);
+    
+    // Cleanup
+    curl_easy_cleanup(curl);
+    if (headers) curl_slist_free_all(headers);
+    
+    return response;
+}
