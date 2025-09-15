@@ -109,8 +109,8 @@ func_obj_t func_list[] = {
     {"fn_member", (fn_ptr) fn_member},
     {"fn_len", (fn_ptr) fn_len},
     // procedures
-    {"fn_print", (fn_ptr) fn_print},
-    {"fn_cmd", (fn_ptr) fn_cmd},
+    {"pn_print", (fn_ptr) pn_print},
+    {"pn_cmd", (fn_ptr) pn_cmd},
 };
 
 void *import_resolver(const char *name) {

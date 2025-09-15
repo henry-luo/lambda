@@ -1119,7 +1119,9 @@ Item fn_typeset_latex(Item input_file, Item output_file, Item options) {
     return {.item = result ? ITEM_TRUE : ITEM_FALSE};
 }
 
-Item fn_print(Item item) {
+Item pn_print(Item item) {
+    TypeId type_id = get_type_id(item);
+    log_debug("pn_print: %d", type_id);
     String *str = fn_string(item);
     if (str) {
         printf("%s", str->chars);
@@ -1276,32 +1278,32 @@ String* format_cmd_args(String* cmd, Item args) {
     return result;
 }
 
-Item fn_cmd(Item cmd, Item args) {
-    log_debug("fn_cmd called");
+Item pn_cmd(Item cmd, Item args) {
+    log_debug("pn_cmd called");
     if (get_type_id(cmd) != LMD_TYPE_STRING) {
-        log_debug("fn_cmd: command must be a string");
+        log_debug("pn_cmd: command must be a string");
         return ItemError;
     }
     
     String* cmd_str = (String*)cmd.pointer;
     if (!cmd_str || cmd_str->len == 0) {
-        log_debug("fn_cmd: command string is empty");
+        log_debug("pn_cmd: command string is empty");
         return ItemError;
     }
     
     // Format the complete command with arguments
     String* full_cmd = format_cmd_args(cmd_str, args);
     if (!full_cmd) {
-        log_debug("fn_cmd: failed to format command arguments");
+        log_debug("pn_cmd: failed to format command arguments");
         return ItemError;
     }
-    
-    log_debug("fn_cmd: executing command: %s", full_cmd->chars);
-    
+
+    log_debug("pn_cmd: executing command: %s", full_cmd->chars);
+
     // Use popen to capture stdout
     FILE* pipe = popen(full_cmd->chars, "r");
     if (!pipe) {
-        log_error("fn_cmd: failed to execute command: %s (errno: %d)", full_cmd->chars, errno);
+        log_error("pn_cmd: failed to execute command: %s (errno: %d)", full_cmd->chars, errno);
         return ItemError;
     }
     
@@ -1319,14 +1321,14 @@ Item fn_cmd(Item cmd, Item args) {
     
     // Check for command execution errors
     if (exit_status == -1) {
-        log_error("fn_cmd: pclose failed (errno: %d)", errno);
+        log_error("pn_cmd: pclose failed (errno: %d)", errno);
         strbuf_free(output_buf);
         return ItemError;
     }
     
     // Extract actual exit code (pclose returns status in wait() format)
     int actual_exit_code = WIFEXITED(exit_status) ? WEXITSTATUS(exit_status) : -1;
-    log_debug("fn_cmd: command completed with exit code: %d", actual_exit_code);
+    log_debug("pn_cmd: command completed with exit code: %d", actual_exit_code);
     
     // Create result string from captured output
     String* result_str;
@@ -1336,11 +1338,14 @@ Item fn_cmd(Item cmd, Item args) {
         // Return empty string if no output
         result_str = heap_string("", 0);
     }
-    log_debug("fn_cmd: command output length: %s", result_str->chars);
+    log_debug("pn_cmd: command output length: %s", result_str->chars);
     
     strbuf_free(output_buf);
     
     // For now, return the stdout output as a string
     // TODO: Could return a map with {stdout: string, exit_code: int} for more info
     return {.item = s2it(result_str)};
+}
+
+Item fn_fetch(Item cmd, Item args) {
 }

@@ -79,6 +79,25 @@ $(PARSER_C) $(GRAMMAR_JSON) $(NODE_TYPES_JSON): $(GRAMMAR_JS)
 	@echo "Generating parser from grammar.js..."
 	@cd lambda/tree-sitter-lambda && npx tree-sitter-cli@0.24.7 generate
 
+# Lambda embedding dependencies
+# Auto-generate lambda-embed.h when lambda.h changes
+# This embeds the lambda.h header file as a byte array for runtime access
+LAMBDA_H_FILE = lambda/lambda.h
+LAMBDA_EMBED_H_FILE = lambda/lambda-embed.h
+
+# Auto-generate lambda-embed.h when lambda.h changes or lambda-embed.h doesn't exist
+$(LAMBDA_EMBED_H_FILE): $(LAMBDA_H_FILE)
+	@echo "lambda.h changed or lambda-embed.h missing, regenerating lambda-embed.h..."
+	@if command -v xxd >/dev/null 2>&1; then \
+		echo "Regenerating $(LAMBDA_EMBED_H_FILE) from $(LAMBDA_H_FILE)..."; \
+		xxd -i "$(LAMBDA_H_FILE)" > "$(LAMBDA_EMBED_H_FILE)"; \
+		echo "Successfully regenerated $(LAMBDA_EMBED_H_FILE)"; \
+	else \
+		echo "Error: xxd command not found! Cannot regenerate $(LAMBDA_EMBED_H_FILE)"; \
+		echo "Install xxd or manually run: xxd -i $(LAMBDA_H_FILE) > $(LAMBDA_EMBED_H_FILE)"; \
+		exit 1; \
+	fi
+
 # Tree-sitter library targets
 TREE_SITTER_LIB = lambda/tree-sitter/libtree-sitter.a
 TREE_SITTER_LAMBDA_LIB = lambda/tree-sitter-lambda/libtree-sitter-lambda.a
@@ -129,7 +148,7 @@ help:
 	@echo "Maintenance:"
 	@echo "  clean         - Remove build artifacts"
 	@echo "  clean-test    - Remove test output and temporary files"
-	@echo "  clean-grammar - Remove generated grammar files (parser.c, ts-enum.h)"
+	@echo "  clean-grammar - Remove generated grammar and embed files (parser.c, ts-enum.h, lambda-embed.h)"
 	@echo "  clean-all     - Remove all build directories"
 	@echo "  distclean     - Complete cleanup (build dirs + executables + tests)"
 	@echo "  intellisense  - Update VS Code IntelliSense database (compile_commands.json)"
@@ -190,7 +209,7 @@ help:
 	@echo "  make rebuild              # Force complete rebuild"
 
 # Main build target (incremental) - Now uses Premake
-build: $(TS_ENUM_H) tree-sitter-libs
+build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building $(PROJECT_NAME) using Premake build system..."
 	@echo "Generating Premake configuration..."
 	python3 utils/generate_premake.py
@@ -209,7 +228,7 @@ print-vars:
 $(LAMBDA_EXE): build
 
 # Debug build - Now uses Premake
-debug: $(TS_ENUM_H) tree-sitter-libs
+debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building debug version using Premake build system..."
 	@echo "Generating Premake configuration..."
 	python3 utils/generate_premake.py
@@ -222,7 +241,7 @@ debug: $(TS_ENUM_H) tree-sitter-libs
 # Release build (optimized)
 release: build-release
 
-build-release: $(TS_ENUM_H) tree-sitter-libs
+build-release: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building release version using Premake build system..."
 	@echo "Generating Premake configuration..."
 	python3 utils/generate_premake.py
@@ -233,7 +252,7 @@ build-release: $(TS_ENUM_H) tree-sitter-libs
 	@echo "Release build completed. Executable: lambda.exe"
 
 # Force rebuild (clean + build)
-rebuild: clean
+rebuild: clean $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Force rebuilding $(PROJECT_NAME) using Premake build system..."
 	@echo "Generating Premake configuration..."
 	python3 utils/generate_premake.py
@@ -244,7 +263,7 @@ rebuild: clean
 	@echo "Rebuild completed. Executable: lambda.exe"
 
 # Specific project builds
-lambda: $(TS_ENUM_H) tree-sitter-libs
+lambda: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building lambda project using Premake build system..."
 	@echo "Generating Premake configuration..."
 	python3 utils/generate_premake.py
@@ -318,12 +337,13 @@ clean-test:
 	@echo "Test build outputs cleaned."
 
 clean-grammar:
-	@echo "Cleaning generated grammar files..."
+	@echo "Cleaning generated grammar and embed files..."
 	@rm -f $(TS_ENUM_H)
 	@rm -f $(PARSER_C)
 	@rm -f $(GRAMMAR_JSON)
 	@rm -f $(NODE_TYPES_JSON)
-	@echo "Generated grammar files cleaned."
+	@rm -f $(LAMBDA_EMBED_H_FILE)
+	@echo "Generated grammar and embed files cleaned."
 
 # IntelliSense support
 intellisense:

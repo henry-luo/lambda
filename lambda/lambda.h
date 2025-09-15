@@ -437,7 +437,7 @@ Item fn_typeset_latex(Item input_file, Item output_file, Item options);
 DateTime fn_datetime();
 
 // procedural functions
-Item fn_print(Item item);
-Item fn_cmd(Item cmd, Item args);
+Item pn_print(Item item);
+Item pn_cmd(Item cmd, Item args);
 
 #endif

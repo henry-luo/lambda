@@ -171,8 +171,16 @@ typedef struct AstCallNode : AstNode {
     AstNode *argument;
 } AstCallNode;
 
-typedef struct AstSysFuncNode : AstNode {
+typedef struct SysFuncInfo {
     SysFunc fn;
+    const char* name;
+    int arg_count;  // -1 for variable args
+    Type* return_type;
+    bool is_proc;   // is procedural
+} SysFuncInfo;
+
+typedef struct AstSysFuncNode : AstNode {
+    SysFuncInfo* fn_info;
 } AstSysFuncNode;
 
 typedef struct AstPrimaryNode : AstNode {

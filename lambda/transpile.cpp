@@ -1185,8 +1185,9 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     // write the function name/ptr
     TypeFunc *fn_type = NULL;
     if (call_node->function->node_type == AST_NODE_SYS_FUNC) {
+        AstSysFuncNode* sys_fn_node = (AstSysFuncNode*)call_node->function;
         StrView fn = ts_node_source(tp, call_node->function->node);
-        strbuf_append_str(tp->code_buf, "fn_");
+        strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->is_proc ? "pn_" : "fn_");
         strbuf_append_str_n(tp->code_buf, fn.str, fn.length);
     }
     else {
@@ -1282,7 +1283,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
     // Special handling for format function - add default second argument if only one provided
     if (call_node->function->node_type == AST_NODE_SYS_FUNC) {
         AstSysFuncNode* sys_fn_node = (AstSysFuncNode*)call_node->function;
-        if (sys_fn_node->fn == SYSFUNC_FORMAT || sys_fn_node->fn == SYSFUNC_MIN || sys_fn_node->fn == SYSFUNC_MAX) {
+        if (sys_fn_node->fn_info->fn == SYSFUNC_FORMAT || sys_fn_node->fn_info->fn == SYSFUNC_MIN || sys_fn_node->fn_info->fn == SYSFUNC_MAX) {
             // count arguments
             int arg_count = 0;
             AstNode* count_arg = call_node->argument;
