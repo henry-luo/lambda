@@ -202,7 +202,7 @@ static void format_list(StringBuf* sb, Element* elem) {
                 
                 if (li_type && li_type->name.str && strcmp(li_type->name.str, "li") == 0) {
                     if (is_ordered) {
-                        char num_buf[16];
+                        char num_buf[32];  // Increased size for 64-bit long values
                         snprintf(num_buf, sizeof(num_buf), "%ld. ", start_num + i);
                         stringbuf_append_str(sb, num_buf);
                     } else {

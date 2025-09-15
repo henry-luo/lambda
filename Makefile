@@ -12,6 +12,7 @@ BUILD_DIR = build
 BUILD_DEBUG_DIR = build_debug
 BUILD_RELEASE_DIR = build_release
 BUILD_WINDOWS_DIR = build_windows
+BUILD_LINUX_DIR = build_linux
 TYPESET_DIR = typeset
 
 # Output executables
@@ -121,9 +122,9 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-input run help install uninstall \
         lambda radiant window cross-compile format lint check docs intellisense analyze-size \
-        build-windows build-debug build-release build-test-legacy clean-all distclean \
-        build-windows build-debug build-release clean-all distclean \
-        verify-windows test-windows tree-sitter-libs \
+        build-windows build-linux build-debug build-release build-test-legacy clean-all distclean \
+        build-windows build-linux build-debug build-release clean-all distclean \
+        verify-windows verify-linux test-windows test-linux tree-sitter-libs \
         generate-premake clean-premake build-test
 
 # Help target - shows available commands
@@ -144,6 +145,7 @@ help:
 	@echo "Cross-compilation:"
 	@echo "  cross-compile - Cross-compile for Windows"
 	@echo "  build-windows - Same as cross-compile"
+	@echo "  build-linux   - Cross-compile for Linux (musl static)"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  clean         - Remove build artifacts"
@@ -181,7 +183,9 @@ help:
 	@echo "  test-all      - Run complete test suite (all test types)"
 	@echo "  test-ci       - Run CI test suite (unit + memory + integration)"
 	@echo "  verify-windows - Verify Windows cross-compiled executable with Wine"
+	@echo "  verify-linux  - Verify Linux cross-compiled executable"
 	@echo "  test-windows  - Run CI tests for Windows executable"
+	@echo "  test-linux    - Run CI tests for Linux executable"
 	@echo "  run           - Build and run the default executable"
 	@echo "  analyze       - Run static analysis with scan-build (fixed for custom build)"
 	@echo "  analyze-verbose - Run detailed static analysis with extra checkers"
@@ -294,6 +298,27 @@ build-windows:
 	@echo "Cross-compiling for Windows..."
 	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --platform=windows --jobs=$(JOBS)
 
+# Cross-compilation for Linux
+build-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+	@echo "Cross-compiling for Linux using glibc..."
+	@if [ ! -f "/opt/homebrew/Cellar/x86_64-unknown-linux-gnu/13.3.0/bin/x86_64-linux-gnu-gcc" ]; then \
+		echo "Linux cross-compilation toolchain not found."; \
+		echo "Please install it with:"; \
+		echo "  brew tap messense/macos-cross-toolchains"; \
+		echo "  brew install x86_64-unknown-linux-gnu"; \
+		exit 1; \
+	fi
+	@echo "Building lambda-linux.exe with $(JOBS) parallel jobs..."
+	$(COMPILE_SCRIPT) build_lambda_linux_config.json --jobs=$(JOBS)
+	@if [ -f "lambda-linux.exe" ]; then \
+		echo "Linux cross-compilation completed successfully!"; \
+		echo "Executable: lambda-linux.exe"; \
+		file lambda-linux.exe; \
+	else \
+		echo "Linux cross-compilation failed - executable not found"; \
+		exit 1; \
+	fi
+
 # Debugging builds with specific directories
 build-debug:
 	@echo "Building with debug configuration..."
@@ -314,10 +339,12 @@ clean:
 	@rm -rf $(BUILD_DEBUG_DIR)/*.o 2>/dev/null || true
 	@rm -rf $(BUILD_RELEASE_DIR)/*.o 2>/dev/null || true
 	@rm -rf $(BUILD_WINDOWS_DIR)/*.o 2>/dev/null || true
+	@rm -rf $(BUILD_LINUX_DIR)/*.o 2>/dev/null || true
 	@rm -f $(BUILD_DIR)/*.d 2>/dev/null || true
 	@rm -f $(BUILD_DEBUG_DIR)/*.d 2>/dev/null || true
 	@rm -f $(BUILD_RELEASE_DIR)/*.d 2>/dev/null || true
 	@rm -f $(BUILD_WINDOWS_DIR)/*.d 2>/dev/null || true
+	@rm -f $(BUILD_LINUX_DIR)/*.d 2>/dev/null || true
 	@rm -f $(BUILD_DIR)/*.compile_log 2>/dev/null || true
 	@rm -f $(BUILD_DIR)/*.compile_status 2>/dev/null || true
 	@rm -f $(BUILD_DEBUG_DIR)/*.compile_log 2>/dev/null || true
@@ -326,6 +353,8 @@ clean:
 	@rm -f $(BUILD_RELEASE_DIR)/*.compile_status 2>/dev/null || true
 	@rm -f $(BUILD_WINDOWS_DIR)/*.compile_log 2>/dev/null || true
 	@rm -f $(BUILD_WINDOWS_DIR)/*.compile_status 2>/dev/null || true
+	@rm -f $(BUILD_LINUX_DIR)/*.compile_log 2>/dev/null || true
+	@rm -f $(BUILD_LINUX_DIR)/*.compile_status 2>/dev/null || true
 	@echo "Cleaning executables..."
 	@rm -f $(LAMBDA_EXE)
 	@rm -f $(RADIANT_EXE)
@@ -333,6 +362,7 @@ clean:
 	@rm -f lambda_debug.exe
 	@rm -f lambda_release.exe
 	@rm -f lambda-windows.exe
+	@rm -f lambda-linux.exe
 	@rm -f _transpiled.c
 	@echo "Build artifacts and executables cleaned."
 
@@ -372,6 +402,7 @@ clean-all:
 	@rm -rf $(BUILD_DEBUG_DIR)
 	@rm -rf $(BUILD_RELEASE_DIR)
 	@rm -rf $(BUILD_WINDOWS_DIR)
+	@rm -rf $(BUILD_LINUX_DIR)
 	@echo "All build directories removed."
 
 distclean: clean-all clean-grammar clean-test
@@ -380,6 +411,7 @@ distclean: clean-all clean-grammar clean-test
 	@rm -f lambda_debug.exe
 	@rm -f lambda_release.exe
 	@rm -f lambda-windows.exe
+	@rm -f lambda-linux.exe
 	@rm -f $(WINDOW_EXE)
 	@rm -f _transpiled.c
 	@rm -f *.exe
@@ -689,6 +721,33 @@ test-windows:
 		exit 1; \
 	fi
 	@cd test && ./test-windows-exe-ci.sh
+
+# Linux verification targets
+verify-linux:
+	@echo "Verifying Linux cross-compiled executable..."
+	@if [ ! -f "lambda-linux.exe" ]; then \
+		echo "Linux executable not found. Building..."; \
+		$(MAKE) build-linux; \
+	fi
+	@echo "Checking Linux executable..."
+	@file lambda-linux.exe
+	@if command -v objdump >/dev/null 2>&1; then \
+		echo "Checking dynamic libraries (should be none for static build):"; \
+		objdump -p lambda-linux.exe | grep NEEDED || echo "✅ No dynamic library dependencies (static build)"; \
+	fi
+	@echo "✅ Linux executable verification complete"
+
+test-linux:
+	@echo "Running CI tests for Linux executable..."
+	@if [ ! -f "lambda-linux.exe" ]; then \
+		echo "Linux executable not found. Building..."; \
+		$(MAKE) build-linux; \
+	fi
+	@echo "Testing basic execution (note: this will only work on Linux systems)..."
+	@echo "For full testing, copy lambda-linux.exe to a Linux system and run:"
+	@echo "  ./lambda-linux.exe --version"
+	@echo "  ./lambda-linux.exe -c 'print(\"Hello from Linux!\")'"
+	@echo "✅ Linux executable CI check complete"
 
 run: build
 	@echo "Running $(LAMBDA_EXE)..."

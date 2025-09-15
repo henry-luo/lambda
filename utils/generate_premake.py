@@ -59,12 +59,24 @@ class PremakeGenerator:
         output = self.config.get('output', 'lambda.exe')
         startup_project = output.replace('.exe', '')
         
+        # Get compiler from config
+        compiler = self.config.get('compiler', 'clang')
+        
+        # Map compiler to Premake toolset
+        toolset_map = {
+            'clang': 'clang',
+            'gcc': 'gcc',
+            'g++': 'gcc'
+        }
+        toolset = toolset_map.get(compiler, 'clang')
+        
         self.premake_content.extend([
             'workspace "Lambda"',
             '    configurations { "Debug", "Release" }',
             '    platforms { "x64" }',
             '    location "build/premake"',
             f'    startproject "{startup_project}"',
+            f'    toolset "{toolset}"',
             '    ',
             '    -- Global settings',
             '    cppdialect "C++17"',

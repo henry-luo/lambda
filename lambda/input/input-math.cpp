@@ -4699,7 +4699,7 @@ void parse_math(Input* input, const char* math_string, const char* flavor_str) {
         return;
     }
     
-    printf("Setting input->root to result: %llu (0x%llx) (parsing took %.3f seconds)\n", result.item, result.item, elapsed_time);
+    printf("Setting input->root to result: %lu (0x%lx) (parsing took %.3f seconds)\n", result.item, result.item, elapsed_time);
     input->root = result;
 }
 

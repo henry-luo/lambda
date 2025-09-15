@@ -403,7 +403,7 @@ static void format_ascii_math_item(StringBuf* sb, Item item, int depth) {
     }
     
     TypeId type_id = get_type_id(item);
-    printf("DEBUG format_ascii_math_item: item=0x%llx, type_id=%d, depth=%d\n", item.item, type_id, depth);
+    printf("DEBUG format_ascii_math_item: item=0x%lx, type_id=%d, depth=%d\n", item.item, type_id, depth);
     
     switch (type_id) {
         case LMD_TYPE_ELEMENT: {
@@ -450,7 +450,7 @@ static void format_ascii_math_item(StringBuf* sb, Item item, int depth) {
         }
         default:
             // Unknown type - try to output something reasonable
-            printf("DEBUG: Unknown type %d for item 0x%llx\n", type_id, item.item);
+            printf("DEBUG: Unknown type %d for item 0x%lx\n", type_id, item.item);
             fflush(stdout);
             stringbuf_append_str(sb, "[UNKNOWN]");
             break;
@@ -459,7 +459,7 @@ static void format_ascii_math_item(StringBuf* sb, Item item, int depth) {
 
 // Main ASCII math formatter function
 String* format_math_ascii_standalone(VariableMemPool* pool, Item root_item) {
-    printf("DEBUG: format_math_ascii_standalone called with item=0x%llx\n", root_item.item);
+    printf("DEBUG: format_math_ascii_standalone called with item=0x%lx\n", root_item.item);
     fflush(stdout);
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;

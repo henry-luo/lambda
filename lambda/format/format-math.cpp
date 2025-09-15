@@ -1700,14 +1700,14 @@ static void format_math_element(StringBuf* sb, Element* elem, MathOutputFlavor f
 // Format a math item (could be element, string, number, etc.)
 static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, int depth) {
     #ifdef DEBUG_MATH_FORMAT
-    log_debug("format_math_item: depth=%d, type=%d, item=0x%llx", depth, get_type_id(item), item.item);
+    log_debug("format_math_item: depth=%d, type=%d, item=0x%lx", depth, get_type_id(item), item.item);
     log_debug("format_math_item: sb before - length=%zu, str='%s'", sb->length, sb->str ? sb->str->chars : "NULL");
     #endif
     
     // Check for invalid raw integer values that weren't properly encoded
     if (item.item > 0 && item.item < 0x1000) {
         char num_buf[32];
-        snprintf(num_buf, sizeof(num_buf), "%lld", item.item);
+        snprintf(num_buf, sizeof(num_buf), "%ld", item.item);
         stringbuf_append_str(sb, num_buf);
         #ifdef DEBUG_MATH_FORMAT
         log_debug("format_math_item: sb after - length=%zu, str='%s'", sb->length, sb->str ? sb->str->chars : "NULL");
@@ -1753,9 +1753,9 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
         case LMD_TYPE_INT: {
             // Check for invalid raw integer values that weren't properly encoded
             if (item.item < 0x1000 && item.item > 0) {
-                log_debug("Detected invalid raw integer item=0x%llx, treating as value=%lld", item.item, item.item);
+                log_debug("Detected invalid raw integer item=0x%lx, treating as value=%ld", item.item, item.item);
                 char num_buf[32];
-                snprintf(num_buf, sizeof(num_buf), "%lld", item.item);
+                snprintf(num_buf, sizeof(num_buf), "%ld", item.item);
                 stringbuf_append_str(sb, num_buf);
             } else {
                 int val = item.int_val;
@@ -2055,7 +2055,7 @@ String* format_math_typst(VariableMemPool* pool, Item root_item) {
 
 // Format math expression to ASCII
 String* format_math_ascii(VariableMemPool* pool, Item root_item) {
-    printf("DEBUG: format_math_ascii called with item=0x%llx\n", root_item.item);
+    printf("DEBUG: format_math_ascii called with item=0x%lx\n", root_item.item);
     fflush(stdout);
     // Use the dedicated standalone ASCII math formatter for better results
     String* result = format_math_ascii_standalone(pool, root_item);

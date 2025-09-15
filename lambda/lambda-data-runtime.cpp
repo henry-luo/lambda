@@ -126,7 +126,7 @@ Item array_int_get(ArrayInt *array, int index) {
         return ItemNull;  // return null instead of error
     }
     int val = array->items[index];
-    Item item = (Item){._type = LMD_TYPE_INT, .int_val = val};
+    Item item = (Item){.int_val = val, ._type = LMD_TYPE_INT};
     log_debug("array_int_get returning: type: %d, int_val: %d", item.type_id, item.int_val);
     return item;
 }

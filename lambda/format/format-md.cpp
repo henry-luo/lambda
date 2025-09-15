@@ -233,7 +233,7 @@ static void format_list(StringBuf* sb, Element* elem) {
                 
                 if (li_type && li_type->name.str && strcmp(li_type->name.str, "li") == 0) {
                     if (is_ordered) {
-                        char num_buf[16];
+                        char num_buf[32];  // Increased size for 64-bit long values
                         // Use appropriate numbering style based on type attribute
                         if (type_attr && type_attr->len > 0) {
                             if (strcmp(type_attr->chars, "a") == 0) {
@@ -846,7 +846,7 @@ static void format_item(StringBuf* sb, Item item) {
             printf("DEBUG format_item: type=%d (STRING), text='%s'\n", type, str->chars);
         }
     } else if (type == LMD_TYPE_ELEMENT) {
-        printf("DEBUG format_item: type=%d (ELEMENT), pointer=%llu\n", type, item.pointer);
+        printf("DEBUG format_item: type=%d (ELEMENT), pointer=%lu\n", type, item.pointer);
     }
     
     switch (type) {

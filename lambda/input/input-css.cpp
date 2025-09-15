@@ -1052,7 +1052,7 @@ static Item flatten_single_array(Array* arr) {
     
     // Debug: check what type we're flattening
     if (single_item .item != ITEM_ERROR) {
-        printf("Flattening single array item, type: %llu\n", single_item.item >> 56);
+        printf("Flattening single array item, type: %lu\n", single_item.item >> 56);
         
         // For container types (like Elements), the type is determined by the container's type_id field
         // Check if this is a direct pointer to a container
