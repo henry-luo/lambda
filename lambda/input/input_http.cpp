@@ -2,8 +2,6 @@
 // HTTP/HTTPS handling for Lambda Script input system using libcurl
 // Handles downloading files to cache and returning Input*
 
-#include "input.h"
-#include "../../lib/file.h"
 #include <curl/curl.h>
 #include <string.h>
 #include <stdio.h>
@@ -11,6 +9,9 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <unistd.h>
+#include "input.h"
+#include "../../lib/file.h"
+#include "../../lib/log.h"
 
 // Structure to hold response data
 typedef struct {
@@ -362,13 +363,11 @@ static void free_fetch_response(FetchResponse* response) {
 
 // Perform HTTP request with full fetch-like functionality
 FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
-    if (!init_curl()) {
-        return NULL;
-    }
+    if (!init_curl()) { return NULL; }
     
     CURL* curl = curl_easy_init();
     if (!curl) {
-        fprintf(stderr, "HTTP: Failed to initialize curl handle\n");
+        log_error("HTTP: Failed to initialize curl handle\n");
         return NULL;
     }
     
@@ -447,11 +446,11 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     }
     
     // Perform the request
-    printf("HTTP: Fetching %s\n", url);
+    log_debug("HTTP: Fetching %s\n", url);
     res = curl_easy_perform(curl);
     
     if (res != CURLE_OK) {
-        fprintf(stderr, "HTTP: Fetch failed: %s\n", curl_easy_strerror(res));
+        log_error("HTTP: Fetch failed: %s\n", curl_easy_strerror(res));
         free_fetch_response(response);
         free(response);
         curl_easy_cleanup(curl);
@@ -461,8 +460,8 @@ FetchResponse* http_fetch(const char* url, const FetchConfig* config) {
     
     // Get HTTP response code
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response->status_code);
-    
-    printf("HTTP: Successfully fetched %zu bytes from %s (HTTP %ld)\n", 
+
+    log_debug("HTTP: Successfully fetched %zu bytes from %s (HTTP %ld)\n", 
            response->size, url, response->status_code);
     
     // Cleanup

@@ -185,3 +185,7 @@ Test(lambda_proc_tests, test_proc1) {
 Test(lambda_proc_tests, test_proc2) {
     test_lambda_proc_script_against_file("test/lambda/proc2.ls", "test/lambda/proc2.txt");
 }
+
+Test(lambda_proc_tests, test_proc_fetch) {
+    test_lambda_proc_script_against_file("test/lambda/proc_fetch.ls", "test/lambda/proc_fetch.txt");
+}
