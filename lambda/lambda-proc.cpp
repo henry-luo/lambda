@@ -7,6 +7,7 @@
 #include <errno.h>  // for errno checking
 #include <sys/wait.h>  // for WIFEXITED, WEXITSTATUS
 #include <string.h>  // for strlen
+#include "input/input.h"
 
 extern __thread Context* context;
 
@@ -19,38 +20,6 @@ Item pn_print(Item item) {
     }
     return ItemNull;
 }
-
-// Add extern declarations for fetch functionality and missing functions
-extern "C" {
-    typedef struct {
-        const char* method;
-        const char* body;
-        size_t body_size;
-        char** headers;
-        int header_count;
-        long timeout_seconds;
-        long max_redirects;
-        const char* user_agent;
-        bool verify_ssl;
-        bool enable_compression;
-    } FetchConfig;
-
-    typedef struct {
-        char* data;
-        size_t size;
-        long status_code;
-        char** response_headers;
-        int response_header_count;
-        char* content_type;
-    } FetchResponse;
-
-    FetchResponse* http_fetch(const char* url, const FetchConfig* config);
-    Input* input_data(Context* ctx, String* url, String* type, String* flavor);
-    Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found);
-    void map_put(Map* mp, String* key, Item value, Input *input);
-    String* escape_shell_arg(String* str);
-}
-
 
 // Helper function to free FetchResponse from within Lambda context
 void free_fetch_response(FetchResponse* response) {
@@ -80,9 +49,7 @@ void free_fetch_response(FetchResponse* response) {
 
 // Convert FetchResponse to Lambda Item (simplified approach)
 Item fetch_response_to_item(FetchResponse* response) {
-    if (!response) {
-        return ItemError;
-    }
+    if (!response) { return ItemError; }
     
     // For now, return a simple string with the response data
     // TODO: Implement proper map structure when the complex type system is working
@@ -95,7 +62,6 @@ Item fetch_response_to_item(FetchResponse* response) {
     
     // Clean up the response structure
     free_fetch_response(response);
-    
     return {.item = s2it(result_str)};
 }
 

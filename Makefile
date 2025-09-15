@@ -215,8 +215,8 @@ build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	python3 utils/generate_premake.py
 	@echo "Generating makefiles..."
 	premake5 gmake
-	@echo "Building lambda executable..."
-	$(MAKE) -C build/premake config=debug_x64 lambda
+	@echo "Building lambda executable with $(JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=debug_x64 lambda -j$(JOBS)
 	@echo "Build completed. Executable: lambda.exe"
 
 # Legacy ASCII-only target (now same as regular build since Unicode is always enabled)
@@ -234,8 +234,8 @@ debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	python3 utils/generate_premake.py
 	@echo "Generating makefiles..."
 	premake5 gmake
-	@echo "Building lambda executable (debug)..."
-	$(MAKE) -C build/premake config=debug_x64 lambda
+	@echo "Building lambda executable (debug) with $(JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=debug_x64 lambda -j$(JOBS)
 	@echo "Debug build completed. Executable: lambda.exe"
 
 # Release build (optimized)
@@ -247,8 +247,8 @@ build-release: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	python3 utils/generate_premake.py
 	@echo "Generating makefiles..."
 	premake5 gmake
-	@echo "Building lambda executable (release)..."
-	$(MAKE) -C build/premake config=release_x64 lambda
+	@echo "Building lambda executable (release) with $(JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=release_x64 lambda -j$(JOBS)
 	@echo "Release build completed. Executable: lambda.exe"
 
 # Force rebuild (clean + build)
@@ -258,8 +258,8 @@ rebuild: clean $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	python3 utils/generate_premake.py
 	@echo "Generating makefiles..."
 	premake5 gmake
-	@echo "Building lambda executable..."
-	$(MAKE) -C build/premake config=debug_x64 lambda
+	@echo "Building lambda executable with $(JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=debug_x64 lambda -j$(JOBS)
 	@echo "Rebuild completed. Executable: lambda.exe"
 
 # Specific project builds
@@ -269,8 +269,8 @@ lambda: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	python3 utils/generate_premake.py
 	@echo "Generating makefiles..."
 	premake5 gmake
-	@echo "Building lambda executable..."
-	$(MAKE) -C build/premake config=debug_x64 lambda
+	@echo "Building lambda executable with $(JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=debug_x64 lambda -j$(JOBS)
 	@echo "Lambda build completed. Executable: lambda.exe"
 
 radiant:
@@ -305,24 +305,36 @@ build-wasm:
 
 # Clean targets
 clean:
-	@echo "Cleaning build artifacts..."
-	@rm -rf $(BUILD_DIR)/*.o
-	@rm -rf $(BUILD_DEBUG_DIR)/*.o
-	@rm -rf $(BUILD_RELEASE_DIR)/*.o
-	@rm -rf $(BUILD_WINDOWS_DIR)/*.o
-	@rm -f $(BUILD_DIR)/*.d
-	@rm -f $(BUILD_DEBUG_DIR)/*.d
-	@rm -f $(BUILD_RELEASE_DIR)/*.d
-	@rm -f $(BUILD_WINDOWS_DIR)/*.d
-	@rm -f $(BUILD_DIR)/*.compile_log
-	@rm -f $(BUILD_DIR)/*.compile_status
-	@rm -f $(BUILD_DEBUG_DIR)/*.compile_log
-	@rm -f $(BUILD_DEBUG_DIR)/*.compile_status
-	@rm -f $(BUILD_RELEASE_DIR)/*.compile_log
-	@rm -f $(BUILD_RELEASE_DIR)/*.compile_status
-	@rm -f $(BUILD_WINDOWS_DIR)/*.compile_log
-	@rm -f $(BUILD_WINDOWS_DIR)/*.compile_status
-	@echo "Build artifacts cleaned."
+	@echo "Cleaning build artifacts and executables..."
+	@echo "Cleaning Premake build artifacts..."
+	@rm -rf $(BUILD_DIR)/obj 2>/dev/null || true
+	@rm -rf $(BUILD_DIR)/lib 2>/dev/null || true
+	@echo "Cleaning legacy build artifacts (if any)..."
+	@rm -rf $(BUILD_DIR)/*.o 2>/dev/null || true
+	@rm -rf $(BUILD_DEBUG_DIR)/*.o 2>/dev/null || true
+	@rm -rf $(BUILD_RELEASE_DIR)/*.o 2>/dev/null || true
+	@rm -rf $(BUILD_WINDOWS_DIR)/*.o 2>/dev/null || true
+	@rm -f $(BUILD_DIR)/*.d 2>/dev/null || true
+	@rm -f $(BUILD_DEBUG_DIR)/*.d 2>/dev/null || true
+	@rm -f $(BUILD_RELEASE_DIR)/*.d 2>/dev/null || true
+	@rm -f $(BUILD_WINDOWS_DIR)/*.d 2>/dev/null || true
+	@rm -f $(BUILD_DIR)/*.compile_log 2>/dev/null || true
+	@rm -f $(BUILD_DIR)/*.compile_status 2>/dev/null || true
+	@rm -f $(BUILD_DEBUG_DIR)/*.compile_log 2>/dev/null || true
+	@rm -f $(BUILD_DEBUG_DIR)/*.compile_status 2>/dev/null || true
+	@rm -f $(BUILD_RELEASE_DIR)/*.compile_log 2>/dev/null || true
+	@rm -f $(BUILD_RELEASE_DIR)/*.compile_status 2>/dev/null || true
+	@rm -f $(BUILD_WINDOWS_DIR)/*.compile_log 2>/dev/null || true
+	@rm -f $(BUILD_WINDOWS_DIR)/*.compile_status 2>/dev/null || true
+	@echo "Cleaning executables..."
+	@rm -f $(LAMBDA_EXE)
+	@rm -f $(RADIANT_EXE)
+	@rm -f $(WINDOW_EXE)
+	@rm -f lambda_debug.exe
+	@rm -f lambda_release.exe
+	@rm -f lambda-windows.exe
+	@rm -f _transpiled.c
+	@echo "Build artifacts and executables cleaned."
 
 clean-test:
 	@echo "Cleaning test build outputs..."
@@ -1072,7 +1084,8 @@ build-test: generate-premake
 	@mkdir -p build/premake
 	cd build/premake && premake5 gmake --file=../../premake5.lua
 	@mv build/premake/Makefile build/premake/PremakeMakefile 2>/dev/null || true
-	@$(MAKE) -C build/premake -f PremakeMakefile config=debug_x64
+	@echo "Building tests with $(JOBS) parallel jobs..."
+	@$(MAKE) -C build/premake -f PremakeMakefile config=debug_x64 -j$(JOBS)
 
 # Include KLEE analysis targets
 
