@@ -9,14 +9,6 @@
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
 
-struct SysFuncInfo {
-    SysFunc fn;
-    const char* name;
-    int arg_count;  // -1 for variable args
-    Type* return_type;
-    bool is_proc;   // is procedural
-};
-
 // todo: properly define fn param types
 SysFuncInfo sys_funcs[] = {
     {SYSFUNC_LEN, "len", 1, &TYPE_INT64, false},
@@ -198,7 +190,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
         }
         AstSysFuncNode* fn_node = (AstSysFuncNode*)alloc_ast_node(tp, 
             AST_NODE_SYS_FUNC, function_node, sizeof(AstSysFuncNode));
-        fn_node->fn = sys_func_info->fn;
+        fn_node->fn_info = sys_func_info;
         fn_node->type = sys_func_info->return_type;
         ast_node->function = (AstNode*)fn_node;
         ast_node->type = fn_node->type;
