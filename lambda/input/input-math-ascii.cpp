@@ -782,7 +782,7 @@ Item parse_ascii_math(Input* input, const char* math_text) {
     size_t pos = 0;
     printf("DEBUG: About to parse ASCII expression\n");
     Item result = parse_ascii_expression(input, tokens, &pos, token_count);
-    printf("DEBUG: Parse result: item=0x%llx\n", result.item);
+    printf("DEBUG: Parse result: item=0x%lx\n", result.item);
     
     // Clean up
     free(tokens);

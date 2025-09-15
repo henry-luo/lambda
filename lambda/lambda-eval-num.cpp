@@ -6,6 +6,7 @@
 #include <cstdlib>  // for abs function
 #include <cmath>    // for pow function
 #include <errno.h>  // for errno checking
+#include <inttypes.h>  // for PRId64
 
 extern __thread Context* context;
 
@@ -1573,7 +1574,7 @@ Item fn_int(Item item) {
             // keep as double
             return push_d(dval);
         }
-        return {._type= LMD_TYPE_INT, .int_val = (int32_t)dval};
+        return {.int_val = (int32_t)dval, ._type= LMD_TYPE_INT};
     }
     else if (item.type_id == LMD_TYPE_DECIMAL) {
         // todo: truncate any fractional part
@@ -1609,7 +1610,7 @@ Item fn_int(Item item) {
             log_debug("promote string to decimal: %s", str->chars);
             return push_decimal(dec_val);
         }
-        return {._type= LMD_TYPE_INT, .int_val = val};
+        return {.int_val = val, ._type= LMD_TYPE_INT};
     }
     else {
         log_debug("Cannot convert type %d to int", item.type_id);
@@ -1676,7 +1677,7 @@ int64_t fn_int64(Item item) {
         log_debug("String value '%s' out of int64 range", str->chars);
             return INT_ERROR;
         }
-        log_debug("converted string to int64: %" PRId64, val);
+        log_debug("converted string to int64: %ld", val);
         return val;
     }
         log_debug("Cannot convert type %d to int64", item.type_id);

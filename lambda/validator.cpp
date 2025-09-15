@@ -359,7 +359,7 @@ ValidationResult* validate_against_primitive_type(TypedItem item, Type* type, As
             AST_VALID_ERROR_TYPE_MISMATCH, error_msg, ctx->current_path, ctx->pool);
         if (error) {
             error->expected = type;
-            error->actual = (Item){.type_id = item.type_id, .pointer = (uint64_t)(uintptr_t)item.pointer};
+            error->actual = (Item){.pointer = (uint64_t)(uintptr_t)item.pointer, .type_id = item.type_id};
             add_validation_error(result, error);
         }
     }

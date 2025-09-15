@@ -5,6 +5,7 @@
 #include "../lib/mem-pool/include/mem_pool.h"
 #include "../lib/log.h"
 #include <errno.h>
+#include <algorithm>  // for std::max
 
 AstNamedNode* build_param_expr(Transpiler* tp, TSNode param_node, bool is_type);
 AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
@@ -702,7 +703,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
             // if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
             //     type_id = LMD_TYPE_DECIMAL;
             // } else {
-                type_id = max(left_type, right_type);
+                type_id = std::max(left_type, right_type);
             // }
         }
         else {
@@ -716,7 +717,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
             // if (left_type == LMD_TYPE_DECIMAL || right_type == LMD_TYPE_DECIMAL) {
             //     type_id = LMD_TYPE_DECIMAL;
             // } else {
-                type_id = max(left_type, right_type);
+                type_id = std::max(left_type, right_type);
             //}
         }
         else {
@@ -814,7 +815,7 @@ AstNode* build_if_expr(Transpiler* tp, TSNode if_node) {
         // }
     }
     
-    TypeId type_id = need_any_type ? LMD_TYPE_ANY : max(then_type_id, else_type_id);
+    TypeId type_id = need_any_type ? LMD_TYPE_ANY : std::max(then_type_id, else_type_id);
     ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(Type));
     log_debug("end build if expr");
     return (AstNode*)ast_node;

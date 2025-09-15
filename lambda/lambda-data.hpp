@@ -33,7 +33,10 @@ typedef struct NamePool NamePool;
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
+// Avoid conflicts with C++ headers by undefining after including lambda.h
 #include "lambda.h"
+#undef max
+#undef min
 
 #ifdef __cplusplus
 }

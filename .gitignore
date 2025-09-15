@@ -89,6 +89,7 @@ log/
 logs/
 
 mac-deps/
+linux-deps/
 
 # Windows dependencies (built libraries and sources)
 windows-deps/lib/

@@ -7,6 +7,7 @@ workspace "Lambda"
     platforms { "x64" }
     location "build/premake"
     startproject "lambda"
+    toolset "clang"
     
     -- Global settings
     cppdialect "C++17"

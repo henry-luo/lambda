@@ -2,18 +2,8 @@
 // #include <math.h>  // MIR has problem parsing math.h
 // #include <stdint.h>
 
-#if !defined(_STDINT_H) && !defined(_STDINT_H_) && !defined(_STDINT) && !defined(__STDINT_H_INCLUDED)
-typedef unsigned char uint8_t;
-typedef unsigned short uint16_t;
-typedef unsigned int uint32_t;
-typedef unsigned long long uint64_t;
-typedef signed char int8_t;
-typedef short int16_t;
-typedef int int32_t;
-typedef long long int64_t;
-#define INT32_MAX  2147483647
-#define INT32_MIN  (-2147483647 - 1)
-#endif
+// Include standard integer types from system
+#include <stdint.h>
 
 #if !defined(__cplusplus) && !defined(_STDBOOL_H) && !defined(_STDBOOL_H_) && !defined(__bool_true_false_are_defined)
 #define bool uint8_t

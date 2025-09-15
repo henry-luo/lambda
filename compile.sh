@@ -423,9 +423,9 @@ else
     if [ -n "$CC" ]; then
         # Use environment variable if set
         CC="$CC"
-    elif [ -f "build_lambda_config.json" ] && command -v jq >/dev/null 2>&1; then
+    elif [ -f "$CONFIG_FILE" ] && command -v jq >/dev/null 2>&1; then
         # Use compiler from build config
-        CONFIG_COMPILER=$(jq -r '.compiler // "gcc"' build_lambda_config.json 2>/dev/null)
+        CONFIG_COMPILER=$(jq -r '.compiler // "gcc"' "$CONFIG_FILE" 2>/dev/null)
         CC="$CONFIG_COMPILER"
     else
         CC="gcc"  # Default to gcc for Linux compatibility
@@ -434,10 +434,10 @@ else
     if [ -n "$CXX" ]; then
         # Use environment variable if set
         CXX="$CXX"
-    elif [ "$CC" = "gcc" ]; then
-        CXX="g++"
-    elif [ "$CC" = "clang" ]; then
-        CXX="clang++"
+    elif [[ "$CC" == *"gcc"* ]]; then
+        CXX="${CC%gcc}g++"
+    elif [[ "$CC" == *"clang"* ]]; then  
+        CXX="${CC%clang}clang++"
     else
         CXX="${CC}++"
     fi
