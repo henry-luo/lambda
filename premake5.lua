@@ -25,11 +25,6 @@ workspace "Lambda"
         defines { "NDEBUG" }
         optimize "On"
     
-    -- Linux cross-compilation settings
-    filter "platforms:Linux_x64"
-        system "linux"
-        architecture "x64"
-    
     filter {}
 
 project "lambda-lib"
@@ -72,8 +67,8 @@ project "lambda-lib"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic"
     }
     
 
@@ -107,8 +102,8 @@ project "lambda-input-full-c"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
-        "-fcolor-diagnostics"
+        "-fcolor-diagnostics",
+        "-pedantic"
     }
     
     libdirs {
@@ -127,7 +122,7 @@ project "lambda-input-full-c"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "../../lib/unit_test/libunit_test.a",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
     }
     
     links {
@@ -177,8 +172,8 @@ project "lambda-input-full-cpp"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17"
     }
     
@@ -198,7 +193,7 @@ project "lambda-input-full-cpp"
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "../../lib/unit_test/libunit_test.a",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
     }
     
     links {
@@ -390,25 +385,21 @@ project "lambda"
         "/opt/homebrew/lib/libgmp.a",
     }
     
-    -- macOS dynamic libraries
-    filter "platforms:x64"
-        links {
-            "z",
-            "ncurses",
-        }
+    links {
+        "z",
+        "ncurses",
+    }
     
-        linkoptions {
-            "-framework CoreFoundation",
-            "-framework CoreServices",
-            "-framework SystemConfiguration",
-        }
-    
-    filter {}
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+    }
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic"
     }
     
     -- C++ specific options
@@ -446,7 +437,7 @@ project "test_strbuf"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -472,14 +463,10 @@ project "test_strbuf"
         "criterion",
     }
     
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
-    }
-    
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c99",
     }
     
@@ -504,7 +491,7 @@ project "test_stringbuf"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -530,14 +517,10 @@ project "test_stringbuf"
         "criterion",
     }
     
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
-    }
-    
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
     }
     
 
@@ -561,7 +544,7 @@ project "test_strview"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -587,14 +570,10 @@ project "test_strview"
         "criterion",
     }
     
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
-    }
-    
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c99",
     }
     
@@ -619,7 +598,7 @@ project "test_variable_pool"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -645,14 +624,10 @@ project "test_variable_pool"
         "criterion",
     }
     
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
-    }
-    
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c99",
     }
     
@@ -677,7 +652,7 @@ project "test_num_stack"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -703,14 +678,10 @@ project "test_num_stack"
         "criterion",
     }
     
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
-    }
-    
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c99",
     }
     
@@ -735,7 +706,7 @@ project "test_datetime"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -761,14 +732,10 @@ project "test_datetime"
         "criterion",
     }
     
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
-    }
-    
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c99",
     }
     
@@ -793,7 +760,7 @@ project "test_url"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -819,14 +786,10 @@ project "test_url"
         "criterion",
     }
     
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
-    }
-    
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c99",
     }
     
@@ -851,7 +814,7 @@ project "test_url_extra"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -877,14 +840,10 @@ project "test_url_extra"
         "criterion",
     }
     
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
-    }
-    
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c99",
     }
     
@@ -909,7 +868,7 @@ project "test_mime_detect"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -934,10 +893,6 @@ project "test_mime_detect"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -968,8 +923,8 @@ project "test_mime_detect"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c99",
     }
     
@@ -994,7 +949,7 @@ project "test_math"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1030,7 +985,6 @@ project "test_math"
         "/opt/homebrew/lib/libginac.a",
         "/opt/homebrew/lib/libcln.a",
         "/opt/homebrew/lib/libgmp.a",
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -1063,8 +1017,8 @@ project "test_math"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -1089,7 +1043,7 @@ project "test_math_ascii"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1125,7 +1079,6 @@ project "test_math_ascii"
         "/opt/homebrew/lib/libginac.a",
         "/opt/homebrew/lib/libcln.a",
         "/opt/homebrew/lib/libgmp.a",
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -1158,8 +1111,8 @@ project "test_math_ascii"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -1184,7 +1137,7 @@ project "test_markup_roundtrip"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1210,10 +1163,6 @@ project "test_markup_roundtrip"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -1246,8 +1195,8 @@ project "test_markup_roundtrip"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -1272,7 +1221,7 @@ project "test_input_roundtrip"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1298,10 +1247,6 @@ project "test_input_roundtrip"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -1334,8 +1279,8 @@ project "test_input_roundtrip"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -1360,7 +1305,7 @@ project "test_dir"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1386,10 +1331,6 @@ project "test_dir"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -1422,8 +1363,8 @@ project "test_dir"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -1448,7 +1389,7 @@ project "test_http"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1474,10 +1415,6 @@ project "test_http"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -1510,8 +1447,8 @@ project "test_http"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -1536,7 +1473,7 @@ project "test_sysinfo"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1562,10 +1499,6 @@ project "test_sysinfo"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -1598,8 +1531,8 @@ project "test_sysinfo"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -1624,7 +1557,7 @@ project "test_jsx_roundtrip"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1650,10 +1583,6 @@ project "test_jsx_roundtrip"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -1686,8 +1615,8 @@ project "test_jsx_roundtrip"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -1712,7 +1641,7 @@ project "test_mdx_roundtrip"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1738,10 +1667,6 @@ project "test_mdx_roundtrip"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -1774,8 +1699,8 @@ project "test_mdx_roundtrip"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -1800,7 +1725,7 @@ project "test_css_tokenizer"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1826,10 +1751,6 @@ project "test_css_tokenizer"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -1862,8 +1783,8 @@ project "test_css_tokenizer"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -1888,7 +1809,7 @@ project "test_css_parser"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1914,10 +1835,6 @@ project "test_css_parser"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -1950,8 +1867,8 @@ project "test_css_parser"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -1976,7 +1893,7 @@ project "test_css_integration"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -2002,10 +1919,6 @@ project "test_css_integration"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -2038,8 +1951,8 @@ project "test_css_integration"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -2064,7 +1977,7 @@ project "test_css_frameworks"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -2090,10 +2003,6 @@ project "test_css_frameworks"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -2126,8 +2035,8 @@ project "test_css_frameworks"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -2152,7 +2061,7 @@ project "test_validator"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -2178,10 +2087,6 @@ project "test_validator"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -2214,8 +2119,8 @@ project "test_validator"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -2240,7 +2145,7 @@ project "test_ast_validator"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -2266,10 +2171,6 @@ project "test_ast_validator"
         "lambda-input-full-c",
         "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     linkoptions {
@@ -2302,8 +2203,8 @@ project "test_ast_validator"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     
@@ -2328,7 +2229,7 @@ project "test_lambda"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -2350,20 +2251,15 @@ project "test_lambda"
     }
     
     links {
-        "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
     }
     
 
@@ -2387,7 +2283,7 @@ project "test_lambda_repl"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -2409,20 +2305,15 @@ project "test_lambda_repl"
     }
     
     links {
-        "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
     }
     
 
@@ -2446,7 +2337,7 @@ project "test_lambda_proc"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -2468,20 +2359,15 @@ project "test_lambda_proc"
     }
     
     links {
-        "lambda-lib",
         "criterion",
-    }
-    
-    linkoptions {
-        "../../lib/unit_test/libunit_test.a",
     }
     
     links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
     }
     
 
@@ -2505,7 +2391,7 @@ project "test_lambda_runner"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "lib/unit_test/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -2532,8 +2418,8 @@ project "test_lambda_runner"
     
     buildoptions {
         "-fms-extensions",
-        "-pedantic",
         "-fcolor-diagnostics",
+        "-pedantic",
         "-std=c++17",
     }
     

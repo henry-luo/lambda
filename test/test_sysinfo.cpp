@@ -1,4 +1,4 @@
-#include "../lib/unit_test/include/criterion/criterion.h"
+#include <criterion/criterion.h>
 #include <criterion/new/assert.h>
 #include "../lambda/input/input.h"
 #include "../lambda/lambda-data.hpp"

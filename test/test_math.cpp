@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
-#include "../lib/unit_test/include/criterion/criterion.h"
+#include <criterion/criterion.h>
+#include <criterion/criterion.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -678,7 +679,7 @@ bool are_expressions_semantically_equivalent(const std::string& expr1, const std
 bool test_markdown_roundtrip(const char* test_file_path, const char* debug_file_path, const char* test_description);
 
 // Common test function for math expression roundtrip testing
-void test_math_expressions_roundtrip(const char** test_cases, int num_cases, const char* type, const char* flavor, 
+bool test_math_expressions_roundtrip(const char** test_cases, int num_cases, const char* type, const char* flavor, 
                                     const char* url_prefix, const char* test_name, const char* error_prefix);
 
 #ifdef GINAC_AVAILABLE
@@ -734,7 +735,8 @@ void print_ast_debug(Input* input) {
 }
 
 // Common function to test math expression roundtrip for any array of test cases
-void test_math_expressions_roundtrip(const char** test_cases, int num_cases, const char* type, 
+// Returns true if all tests pass, false if any fail
+bool test_math_expressions_roundtrip(const char** test_cases, int num_cases, const char* type, 
     const char* flavor, const char* url_prefix, const char* test_name, const char* error_prefix) {
     printf("=== Starting %s test ===\n", test_name);
     
@@ -826,6 +828,7 @@ void test_math_expressions_roundtrip(const char** test_cases, int num_cases, con
     }
     
     printf("=== Completed %s test ===\n", test_name);
+    return true;
 }
 
 // Test roundtrip for individual inline math expressions
@@ -840,10 +843,11 @@ Test(math_roundtrip_tests, inline_math_roundtrip) {
     };
     
     int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
-    test_math_expressions_roundtrip(
+    bool result = test_math_expressions_roundtrip(
         test_cases, num_cases, "markdown", "commonmark", 
         "inline_math", "inline_math_roundtrip", "Inline math"
     );
+    cr_assert(result, "Inline math roundtrip test failed");
 }
 
 // Test roundtrip for block math expressions  
@@ -856,10 +860,11 @@ Test(math_roundtrip_tests, block_math_roundtrip) {
     };
     
     int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
-    test_math_expressions_roundtrip(
+    bool result = test_math_expressions_roundtrip(
         test_cases, num_cases, "markdown", "commonmark", 
         "block_math", "block_math_roundtrip", "Block math"
     );
+    cr_assert(result, "Block math roundtrip test failed");
 }
 
 // Test math-only expressions (pure math without markdown)
@@ -932,10 +937,11 @@ Test(math_roundtrip_tests, pure_math_roundtrip) {
     };
     
     int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
-    test_math_expressions_roundtrip(
+    bool result = test_math_expressions_roundtrip(
         test_cases, num_cases, "math", "latex", 
         "pure_math", "pure_math_roundtrip", "Pure math"
     );
+    cr_assert(result, "Pure math roundtrip test failed");
 }
 
 // Common function to test markdown roundtrip for any input file

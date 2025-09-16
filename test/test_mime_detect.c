@@ -1,5 +1,5 @@
 #define _GNU_SOURCE
-#include "../lib/unit_test/include/criterion/criterion.h"
+#include <criterion/criterion.h>
 #include <criterion/new/assert.h>
 #include <stdio.h>
 #include <stdlib.h>

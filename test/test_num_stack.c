@@ -1,4 +1,4 @@
-#include "../lib/unit_test/include/criterion/criterion.h"
+#include <criterion/criterion.h>
 #include "../lib/num_stack.h"
 
 // test basic stack creation and destruction

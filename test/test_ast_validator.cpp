@@ -5,7 +5,7 @@
  * @license MIT
  */
 
-#include "../lib/unit_test/include/criterion/criterion.h"
+#include <criterion/criterion.h>
 #include <criterion/new/assert.h>
 #include <string.h>
 #include <stdlib.h>

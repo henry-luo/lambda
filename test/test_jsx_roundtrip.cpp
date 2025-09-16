@@ -1,4 +1,4 @@
-#include "../lib/unit_test/include/criterion/criterion.h"
+#include <criterion/criterion.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
