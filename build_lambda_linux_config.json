@@ -42,7 +42,15 @@
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
-        "lambda/main-minimal.cpp"
+        "lambda/input/css_tokenizer.c",
+        "lambda/input/css_properties.c",
+        "lambda/input/css_parser.c",
+        "lambda/main-repl.cpp",
+        "lambda/main.cpp"
+    ],
+    "source_patterns": [
+        "lambda/input/input*.cpp",
+        "lambda/format/format*.cpp"
     ],
     "libraries": [
         {
@@ -73,6 +81,18 @@
             "name": "utf8proc",
             "include": "linux-deps/include",
             "lib": "linux-deps/lib/libutf8proc.a",
+            "link": "static"
+        },
+        {
+            "name": "libedit",
+            "include": "linux-deps/include",
+            "lib": "linux-deps/lib/libedit.a",
+            "link": "static"
+        },
+        {
+            "name": "ncurses",
+            "include": "linux-deps/include/ncurses",
+            "lib": "linux-deps/lib/libncurses.a",
             "link": "static"
         }
     ],
@@ -119,7 +139,6 @@
                 "DLINUX",
                 "D_GNU_SOURCE",
                 "DNATIVE_LINUX_BUILD",
-                "DLAMBDA_MINIMAL_BUILD=1",
                 "DDEBUG",
                 "static",
                 "target=x86_64-unknown-linux-gnu",
@@ -147,7 +166,7 @@
         "LINUX": "1",
         "_GNU_SOURCE": "1",
         "NATIVE_LINUX_BUILD": "1",
-        "LAMBDA_MINIMAL_BUILD": "1"
+        "_DEFAULT_SOURCE": "1"
     },
     "link_flags": [
         "-static",

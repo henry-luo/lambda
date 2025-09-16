@@ -12,6 +12,7 @@ GLIBC_TOOLCHAIN_PATH="/opt/homebrew/Cellar/x86_64-unknown-linux-gnu/13.3.0"
 # Library versions
 MPDECIMAL_VERSION="4.0.1"
 UTF8PROC_VERSION="2.10.0"
+LIBEDIT_VERSION="20240808-3.1"
 
 # Colors for output
 RED='\033[0;31m'
@@ -582,6 +583,103 @@ build_utf8proc() {
     cd "$SCRIPT_DIR"
 }
 
+# Function to build ncurses library for Linux
+build_ncurses() {
+    print_info "Building ncurses library for Linux..."
+    
+    local VERSION="6.4"
+    local URL="https://invisible-mirror.net/archives/ncurses/ncurses-${VERSION}.tar.gz"
+    
+    cd /tmp
+    rm -rf ncurses-*
+    
+    print_info "Downloading ncurses ${VERSION}..."
+    curl -LO "$URL"
+    
+    print_info "Extracting ncurses..."
+    tar -xzf "ncurses-${VERSION}.tar.gz"
+    cd "ncurses-${VERSION}"
+    
+    print_info "Configuring ncurses for cross-compilation..."
+    CC="$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-gcc" \
+    CXX="$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-g++" \
+    LDFLAGS="-L$SCRIPT_DIR/$DEPS_DIR/lib" \
+    CPPFLAGS="-I$SCRIPT_DIR/$DEPS_DIR/include" \
+    ./configure \
+        --host=x86_64-linux-gnu \
+        --prefix="$SCRIPT_DIR/$DEPS_DIR" \
+        --enable-static \
+        --disable-shared \
+        --without-debug \
+        --without-ada \
+        --without-manpages \
+        --with-fallbacks=vt100,xterm \
+        --without-progs \
+        --disable-database \
+        --with-default-terminfo-dir=/usr/share/terminfo \
+        --enable-termcap
+    
+    print_info "Building ncurses..."
+    make -j$(nproc 2>/dev/null || echo 4)
+    
+    print_info "Installing ncurses..."
+    make install
+    
+    # Fix missing _nc_fallback symbol
+    print_info "Adding ncurses fallback symbol fix..."
+    echo '// Minimal fallback implementation for ncurses
+const char* _nc_fallback(const char* term) {
+    return (const char*)0;  // Return NULL for no fallback
+}' > "$SCRIPT_DIR/$DEPS_DIR/lib/nc_fallback.c"
+    
+    "$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-gcc" -c "$SCRIPT_DIR/$DEPS_DIR/lib/nc_fallback.c" -o "$SCRIPT_DIR/$DEPS_DIR/lib/nc_fallback.o"
+    "$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-ar" r "$SCRIPT_DIR/$DEPS_DIR/lib/libncurses.a" "$SCRIPT_DIR/$DEPS_DIR/lib/nc_fallback.o"
+    "$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-ranlib" "$SCRIPT_DIR/$DEPS_DIR/lib/libncurses.a"
+    
+    print_success "ncurses build completed"
+    cd "$SCRIPT_DIR"
+}
+
+# Function to build libedit library for Linux
+build_libedit() {
+    print_info "Building libedit library for Linux..."
+    
+    local VERSION="20230828-3.1"
+    local URL="https://www.thrysoee.dk/editline/libedit-${VERSION}.tar.gz"
+    
+    cd /tmp
+    rm -rf libedit-*
+    
+    print_info "Downloading libedit ${VERSION}..."
+    curl -LO "$URL"
+    
+    print_info "Extracting libedit..."
+    tar -xzf "libedit-${VERSION}.tar.gz"
+    cd "libedit-${VERSION}"
+    
+    print_info "Configuring libedit for cross-compilation..."
+    CC="$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-gcc" \
+    CXX="$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-g++" \
+    LDFLAGS="-L$SCRIPT_DIR/$DEPS_DIR/lib" \
+    CPPFLAGS="-I$SCRIPT_DIR/$DEPS_DIR/include -I$SCRIPT_DIR/$DEPS_DIR/include/ncurses" \
+    ./configure \
+        --host=x86_64-linux-gnu \
+        --prefix="$SCRIPT_DIR/$DEPS_DIR" \
+        --enable-static \
+        --disable-shared \
+        --disable-examples \
+        --with-pic 2>/dev/null
+    
+    print_info "Building libedit..."
+    make -j$(nproc 2>/dev/null || echo 4) 2>/dev/null
+    
+    print_info "Installing libedit..."
+    make install 2>/dev/null
+    
+    print_success "libedit build completed"
+    cd "$SCRIPT_DIR"
+}
+
 # Main function
 main() {
     print_info "Setting up simplified Linux cross-compilation for Lambda Script..."
@@ -603,6 +701,8 @@ main() {
     build_curl
     build_mpdecimal
     build_utf8proc
+    build_ncurses
+    build_libedit
     
     create_env_script
     
