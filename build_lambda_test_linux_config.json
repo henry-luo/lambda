@@ -1,0 +1,156 @@
+{
+    "compiler": "/opt/homebrew/Cellar/x86_64-unknown-linux-gnu/13.3.0/bin/x86_64-linux-gnu-gcc",
+    "output": "test",
+    "workspace_name": "Lambda-Tests-Linux",
+    "platform": "Linux_x64",
+    "target_dir": "test",
+    "include_dirs": [
+        "lib/mem-pool/include",
+        "linux-deps/include",
+        "linux-deps/include/ncurses",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "include",
+        "."
+    ],
+    "lib_dirs": [
+        "linux-deps/lib"
+    ],
+    "libraries": [
+        "criterion",
+        "curl",
+        "z",
+        "ssl",
+        "crypto",
+        "edit",
+        "ncurses",
+        "cln",
+        "gmp",
+        "pthread",
+        "dl",
+        "m"
+    ],
+    "defines": [
+        "LINUX",
+        "_GNU_SOURCE", 
+        "NATIVE_LINUX_BUILD",
+        "UNICODE_LEVEL=1"
+    ],
+    "cflags": [
+        "-static",
+        "-O2",
+        "-g",
+        "-pedantic",
+        "-fno-omit-frame-pointer",
+        "-std=c99",
+        "-fms-extensions",
+        "-fdiagnostics-color=auto"
+    ],
+    "cxxflags": [
+        "-static", 
+        "-O2",
+        "-g",
+        "-pedantic",
+        "-fno-omit-frame-pointer",
+        "-std=c++17",
+        "-fms-extensions",
+        "-fdiagnostics-color=auto"
+    ],
+    "ldflags": [
+        "-static"
+    ],
+    "test_projects": [
+        {
+            "name": "test_strbuf",
+            "kind": "ConsoleApp",
+            "language": "C",
+            "files": ["test/test_strbuf.c"],
+            "links": ["lambda-lib-linux"]
+        },
+        {
+            "name": "test_stringbuf", 
+            "kind": "ConsoleApp",
+            "language": "C++",
+            "files": ["test/test_stringbuf.cpp"],
+            "links": ["lambda-lib-linux"]
+        },
+        {
+            "name": "test_strview",
+            "kind": "ConsoleApp", 
+            "language": "C",
+            "files": ["test/test_strview.c"],
+            "links": ["lambda-lib-linux"]
+        },
+        {
+            "name": "test_variable_pool",
+            "kind": "ConsoleApp",
+            "language": "C", 
+            "files": ["test/test_variable_pool.c"],
+            "links": ["lambda-lib-linux"]
+        },
+        {
+            "name": "test_num_stack",
+            "kind": "ConsoleApp",
+            "language": "C",
+            "files": ["test/test_num_stack.c"], 
+            "links": ["lambda-lib-linux"]
+        },
+        {
+            "name": "test_datetime",
+            "kind": "ConsoleApp",
+            "language": "C",
+            "files": ["test/test_datetime.c"],
+            "links": ["lambda-lib-linux"]
+        },
+        {
+            "name": "test_url",
+            "kind": "ConsoleApp", 
+            "language": "C",
+            "files": ["test/test_url.c"],
+            "links": ["lambda-lib-linux"]
+        }
+    ],
+    "lib_project": {
+        "name": "lambda-lib-linux",
+        "kind": "StaticLib",
+        "language": "C",
+        "target_dir": "build/lib",
+        "files": [
+            "lib/mem-pool/src/variable.c",
+            "lib/mem-pool/src/buffer.c", 
+            "lib/mem-pool/src/utils.c",
+            "lib/strbuf.c",
+            "lib/stringbuf.c",
+            "lib/strview.c", 
+            "lib/string.c",
+            "lib/num_stack.c",
+            "lib/datetime.c",
+            "lib/url.c",
+            "lib/url_parser.c",
+            "lib/log.c",
+            "lambda/input/mime-detect.c",
+            "lambda/utf_string.cpp",
+            "lambda/lambda-data.cpp",
+            "lambda/lambda-data-runtime.cpp",
+            "lambda/runner.cpp",
+            "lambda/transpile.cpp",
+            "lambda/transpile-mir.cpp", 
+            "lambda/build_ast.cpp",
+            "lambda/name_pool.cpp",
+            "lambda/mir.c",
+            "lambda/pack.cpp",
+            "lambda/print.cpp",
+            "lambda/lambda-eval.cpp",
+            "lambda/lambda-eval-num.cpp",
+            "lambda/lambda-proc.cpp",
+            "lambda/utf_string.cpp",
+            "lambda/lambda-mem.cpp",
+            "lambda/validator.cpp",
+            "lambda/validator/ast_validate.cpp",
+            "lambda/validator/error_reporting.cpp",
+            "lambda/tree-sitter-lambda/src/parser.c",
+            "lambda/parse.c",
+            "test/test_stubs.cpp"
+        ]
+    }
+}

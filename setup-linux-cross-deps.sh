@@ -640,6 +640,88 @@ const char* _nc_fallback(const char* term) {
     cd "$SCRIPT_DIR"
 }
 
+# Function to build criterion testing framework for Linux
+build_criterion() {
+    print_info "Building Criterion testing framework for Linux..."
+    
+    local VERSION="2.4.2"
+    local URL="https://github.com/Snaipe/Criterion/archive/v${VERSION}.tar.gz"
+    local LOG_FILE="$SCRIPT_DIR/criterion_build.log"
+    
+    # Clear previous log
+    > "$LOG_FILE"
+    
+    cd /tmp
+    rm -rf criterion-*
+    
+    print_info "Downloading Criterion ${VERSION}..."
+    curl -LO "$URL" 2>&1 | tee -a "$LOG_FILE"
+    
+    print_info "Extracting Criterion..."
+    tar -xzf "v${VERSION}.tar.gz" 2>&1 | tee -a "$LOG_FILE"
+    cd "criterion-${VERSION}"
+    
+    print_info "Configuring Criterion for cross-compilation with Meson..."
+    echo "=== Creating cross-compilation file ===" >> "$LOG_FILE"
+    # Create cross-compilation file for Meson
+    cat > cross-file.txt << EOF
+[binaries]
+c = '$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-gcc'
+cpp = '$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-g++'
+ar = '$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-ar'
+strip = '$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-strip'
+pkg-config = '/usr/bin/false'
+
+[host_machine]
+system = 'linux'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
+endian = 'little'
+EOF
+    
+    echo "=== Cross-compilation file contents ===" >> "$LOG_FILE"
+    cat cross-file.txt >> "$LOG_FILE"
+    echo "=== End cross-compilation file ===" >> "$LOG_FILE"
+    
+    echo "=== Running meson setup ===" >> "$LOG_FILE"
+    meson setup build \
+        --cross-file=cross-file.txt \
+        --prefix="$SCRIPT_DIR/$DEPS_DIR" \
+        --buildtype=release \
+        -Dtests=false \
+        -Dsamples=false 2>&1 | tee -a "$LOG_FILE"
+    
+    if [ $? -ne 0 ]; then
+        print_error "Meson setup failed. Check $LOG_FILE for details."
+        cd "$SCRIPT_DIR"
+        return 1
+    fi
+    
+    print_info "Building Criterion..."
+    echo "=== Running ninja build ===" >> "$LOG_FILE"
+    cd build
+    ninja 2>&1 | tee -a "$LOG_FILE"
+    
+    if [ $? -ne 0 ]; then
+        print_error "Ninja build failed. Check $LOG_FILE for details."
+        cd "$SCRIPT_DIR"
+        return 1
+    fi
+    
+    print_info "Installing Criterion..."
+    echo "=== Running ninja install ===" >> "$LOG_FILE"
+    ninja install 2>&1 | tee -a "$LOG_FILE"
+    
+    if [ $? -ne 0 ]; then
+        print_error "Ninja install failed. Check $LOG_FILE for details."
+        cd "$SCRIPT_DIR"
+        return 1
+    fi
+    
+    print_success "Criterion build completed successfully! Log saved to $LOG_FILE"
+    cd "$SCRIPT_DIR"
+}
+
 # Function to build libedit library for Linux
 build_libedit() {
     print_info "Building libedit library for Linux..."
@@ -703,6 +785,7 @@ main() {
     build_utf8proc
     build_ncurses
     build_libedit
+    build_criterion
     
     create_env_script
     

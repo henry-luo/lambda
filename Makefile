@@ -125,7 +125,7 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
         build-windows build-linux build-debug build-release build-test-legacy clean-all distclean \
         build-windows build-linux build-debug build-release clean-all distclean \
         verify-windows verify-linux test-windows test-linux tree-sitter-libs \
-        generate-premake clean-premake build-test
+        generate-premake clean-premake build-test build-test-linux
 
 # Help target - shows available commands
 help:
@@ -146,6 +146,7 @@ help:
 	@echo "  cross-compile - Cross-compile for Windows"
 	@echo "  build-windows - Same as cross-compile"
 	@echo "  build-linux   - Cross-compile for Linux (musl static)"
+	@echo "  build-test-linux - Cross-compile tests for Linux"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  clean         - Remove build artifacts"
@@ -1149,6 +1150,28 @@ build-test: generate-premake
 	@mv build/premake/Makefile build/premake/PremakeMakefile 2>/dev/null || true
 	@echo "Building tests with $(JOBS) parallel jobs..."
 	@$(MAKE) -C build/premake -f PremakeMakefile config=debug_x64 -j$(JOBS)
+
+build-test-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+	@echo "Cross-compiling tests for Linux using Premake5..."
+	@if [ ! -f "/opt/homebrew/Cellar/x86_64-unknown-linux-gnu/13.3.0/bin/x86_64-linux-gnu-gcc" ]; then \
+		echo "Linux cross-compilation toolchain not found."; \
+		echo "Please install it with:"; \
+		echo "  brew tap messense/macos-cross-toolchains"; \
+		echo "  brew install x86_64-unknown-linux-gnu"; \
+		exit 1; \
+	fi
+	@echo "Generating Premake5 configuration for Linux test build..."
+	python3 utils/generate_premake.py build_lambda_test_linux_config.json premake5-test-linux.lua
+	@echo "Building Linux tests with $(JOBS) parallel jobs using Premake5..."
+	premake5 --file=premake5-test-linux.lua gmake2
+	$(MAKE) -C build/premake config=release_linux_x64 -j$(JOBS)
+	@if [ -d "test" ] && [ "$(shell find test -name '*.exe' 2>/dev/null | wc -l)" -gt 0 ]; then \
+		echo "Linux test cross-compilation completed successfully!"; \
+		echo "Test executables:"; \
+		find test -name "*.exe" -type f | head -10; \
+	else \
+		echo "Warning: No test executables found in test/ directory"; \
+	fi
 
 # Include KLEE analysis targets
 
