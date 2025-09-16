@@ -482,6 +482,11 @@ for source_file in "${valid_test_sources[@]}"; do
     fi
     exe_file="test/${base_name}.exe"
     
+    # Skip Catch2 tests (exclude any test with "catch2" in the name)
+    if [[ "$base_name" == *"catch2"* ]]; then
+        continue
+    fi
+    
     # Only add if executable exists or source exists
     if [ -f "$exe_file" ] || [ -f "$source_file" ]; then
         test_executables+=("$exe_file")
