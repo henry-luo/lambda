@@ -125,7 +125,7 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
         build-windows build-linux build-debug build-release build-test-legacy clean-all distclean \
         build-windows build-linux build-debug build-release clean-all distclean \
         verify-windows verify-linux test-windows test-linux tree-sitter-libs \
-        generate-premake clean-premake build-test build-test-linux
+        generate-premake clean-premake build-test build-test-linux build-catch2 test-catch2
 
 # Help target - shows available commands
 help:
@@ -160,6 +160,7 @@ help:
 	@echo "  generate-premake - Generate premake5.lua from build_lambda_config.json"
 	@echo "  clean-premake - Clean Premake build artifacts and generated files"
 	@echo "  build-test    - Build all test projects using Premake"
+	@echo "  build-catch2  - Build Catch2 test projects using Premake"
 	@echo ""
 	@echo "Grammar & Parser:"
 	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
@@ -174,6 +175,7 @@ help:
 	@echo "  test-mir      - Run MIR JIT tests only"
 	@echo "  test-lambda   - Run lambda runtime tests only"
 	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
+	@echo "  test-catch2   - Run Catch2 test suite"
 	@echo "  test-verbose  - Run tests with verbose output"
 	@echo "  test-sequential - Run tests sequentially (not parallel)"
 	@echo "  test-coverage - Run tests with code coverage analysis"
@@ -423,10 +425,8 @@ distclean: clean-all clean-grammar clean-test
 
 # Development targets
 test: build-test
-	@echo "Running comprehensive test suite..."
-	@if [ -f "test_modern.sh" ]; then \
-		./test_modern.sh; \
-	elif [ -f "test/test_run.sh" ]; then \
+	@echo "Running old test suite (excluding Catch2 tests)..."
+	@if [ -f "test/test_run.sh" ]; then \
 		./test/test_run.sh --parallel; \
 	else \
 		echo "Error: No test suite found"; \
@@ -468,6 +468,28 @@ build-test-legacy: build
 		PARALLEL_JOBS=$(NPROCS) ./test/test_build.sh all; \
 	else \
 		echo "Error: test_build.sh not found"; \
+		exit 1; \
+	fi
+
+# Build Catch2 test projects
+build-catch2: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+	@echo "Building Catch2 test projects using Premake build system..."
+	@echo "Generating Premake configuration..."
+	python3 utils/generate_premake.py
+	@echo "Generating makefiles..."
+	premake5 gmake
+	@echo "Building Catch2 test executables with $(JOBS) parallel jobs..."
+	/Library/Developer/CommandLineTools/usr/bin/make -C build/premake config=debug_x64 test_strbuf_catch2 test_stringbuf_catch2 test_strview_catch2 test_variable_pool_catch2 test_num_stack_catch2 test_datetime_catch2 test_url_catch2 test_url_extra_catch2 -j8
+	@echo "Catch2 test build completed."
+
+# Run Catch2 tests
+test-catch2: build-catch2
+	@echo "Running Catch2 test suite using test_run_catch2.sh..."
+	@if [ -f "test/test_run_catch2.sh" ]; then \
+		./test/test_run_catch2.sh; \
+	else \
+		echo "Error: Catch2 test runner script not found at test/test_run_catch2.sh"; \
+		echo "Please ensure the test runner script exists and is executable."; \
 		exit 1; \
 	fi
 

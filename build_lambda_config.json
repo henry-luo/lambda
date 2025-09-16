@@ -108,6 +108,12 @@
             "link": "static"
         },
         {
+            "name": "catch2",
+            "include": "/opt/homebrew/Cellar/catch2/3.10.0/include",
+            "lib": "/opt/homebrew/Cellar/catch2/3.10.0/lib/libCatch2Main.a",
+            "link": "static"
+        },
+        {
             "name": "ssl",
             "include": "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
             "lib": "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
@@ -404,8 +410,73 @@
                     }
                 ],
                 "type": "library",
-                "special_flags": "-fms-extensions",
-                "parallel": true
+                "special_flags": "",
+                "cpp_flags": ""
+            },
+            {
+                "suite": "catch2",
+                "name": "🧪 Catch2 Tests",
+                "tests": [
+                    {
+                        "source": "test_strbuf_catch2.cpp",
+                        "name": "📝 String Buffer Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_strbuf_catch2.exe"
+                    },
+                    {
+                        "source": "test_stringbuf_catch2.cpp",
+                        "name": "🧵 StringBuf Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_stringbuf_catch2.exe"
+                    },
+                    {
+                        "source": "test_strview_catch2.cpp",
+                        "name": "👀 String View Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_strview_catch2.exe"
+                    },
+                    {
+                        "source": "test_variable_pool_catch2.cpp",
+                        "name": "🏊 Variable Pool Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_variable_pool_catch2.exe"
+                    },
+                    {
+                        "source": "test_num_stack_catch2.cpp",
+                        "name": "🔢 Number Stack Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_num_stack_catch2.exe"
+                    },
+                    {
+                        "source": "test_datetime_catch2.cpp",
+                        "name": "📅 DateTime Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_datetime_catch2.exe"
+                    },
+                    {
+                        "source": "test_url_catch2.cpp",
+                        "name": "🌐 URL Parser Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_url_catch2.exe"
+                    },
+                    {
+                        "source": "test_url_extra_catch2.cpp",
+                        "name": "🌐 URL Parser Extended Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_url_extra_catch2.exe"
+                    }
+                ],
+                "type": "catch2",
+                "special_flags": "",
+                "cpp_flags": "-std=c++17"
             },
             {
                 "suite": "input",
@@ -494,16 +565,10 @@
                         "binary": "test_css_integration.exe"
                     },
                     {
-                        "source": "test/test_input_css.c",
-                        "name": "🎨 CSS Input Tests (Criterion)",
+                        "source": "test_css_files_safe.c",
+                        "name": "🎨 CSS Files Safe Tests (Criterion)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_input_css.exe"
-                    },
-                    {
-                        "source": "test/test_css_minimal.c",
-                        "name": "🎨 CSS Minimal Tests (Safe)",
-                        "dependencies": ["lambda-input-full"],
-                        "binary": "test_css_minimal.exe"
+                        "binary": "test_css_files_safe.exe"
                     },
                     {
                         "source": "test/test_css_frameworks.cpp",
@@ -513,6 +578,123 @@
                     }
                 ],
                 "type": "input",
+                "special_flags": "-fms-extensions -lstdc++",
+                "cpp_flags": "-std=c++17",
+                "parallel": true
+            },
+            {
+                "suite": "input_catch2",
+                "name": "📄 Input Processing Tests (Catch2)",
+                "tests": [
+                    {
+                        "source": "test_mime_detect_catch2.cpp",
+                        "name": "📎 MIME Detection Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_mime_detect_catch2.exe"
+                    },
+                    {
+                        "source": "test_css_tokenizer_catch2.cpp",
+                        "name": "🎨 CSS Tokenizer Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_css_tokenizer_catch2.exe"
+                    },
+                    {
+                        "source": "test_css_parser_catch2.cpp",
+                        "name": "🎨 CSS Parser Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_css_parser_catch2.exe"
+                    },
+                    {
+                        "source": "test_css_integration_catch2.cpp",
+                        "name": "🎨 CSS Integration Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_css_integration_catch2.exe"
+                    },
+                    {
+                        "source": "test_css_frameworks_catch2.cpp",
+                        "name": "🎨 CSS Framework Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_css_frameworks_catch2.exe"
+                    },
+                    {
+                        "source": "test_math_catch2.cpp",
+                        "name": "🔢 Math Roundtrip Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2", "ginac", "cln", "gmp"],
+                        "defines": ["GINAC_AVAILABLE"],
+                        "binary": "test_math_catch2.exe"
+                    },
+                    {
+                        "source": "test_math_ascii_catch2.cpp",
+                        "name": "🔤 ASCII Math Roundtrip Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2", "ginac", "cln", "gmp"],
+                        "defines": ["GINAC_AVAILABLE"],
+                        "binary": "test_math_ascii_catch2.exe"
+                    },
+                    {
+                        "source": "test_markup_roundtrip_catch2.cpp",
+                        "name": "📝 Markup Roundtrip Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_markup_roundtrip_catch2.exe"
+                    },
+                    {
+                        "source": "test_input_roundtrip_catch2.cpp",
+                        "name": "🔄 Input Roundtrip Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_input_roundtrip_catch2.exe"
+                    },
+                    {
+                        "source": "test_dir_catch2.cpp",
+                        "name": "📁 Directory Listing Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_dir_catch2.exe"
+                    },
+                    {
+                        "source": "test_http_catch2.cpp",
+                        "name": "🌐 HTTP/HTTPS Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_http_catch2.exe"
+                    },
+                    {
+                        "source": "test_sysinfo_catch2.cpp",
+                        "name": "🖥️ System Information Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_sysinfo_catch2.exe"
+                    },
+                    {
+                        "source": "test_jsx_roundtrip_catch2.cpp",
+                        "name": "⚛️ JSX Roundtrip Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_jsx_roundtrip_catch2.exe"
+                    },
+                    {
+                        "source": "test_mdx_roundtrip_catch2.cpp",
+                        "name": "📝 MDX Roundtrip Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_mdx_roundtrip_catch2.exe"
+                    },
+                    {
+                        "source": "test_css_files_safe_catch2.cpp",
+                        "name": "🎨 CSS Files Safe Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["Catch2Main", "Catch2"],
+                        "binary": "test_css_files_safe_catch2.exe"
+                    }
+                ],
+                "type": "catch2",
                 "special_flags": "-fms-extensions -lstdc++",
                 "cpp_flags": "-std=c++17",
                 "parallel": true
@@ -568,6 +750,68 @@
                         "dependencies": [],
                         "binary": "test/test_lambda_proc.exe",
                         "libraries": ["criterion"]
+                    }
+                ],
+                "type": "lambda",
+                "special_flags": "-lstdc++",
+                "uses_build_config": true,
+                "requires_lambda_exe": true,
+                "parallel": true
+            },
+            {
+                "suite": "validator-catch2",
+                "name": "🔍 Validator Tests (Catch2)",
+                "tests": [
+                    {
+                        "source": "test/test_validator_catch2.cpp",
+                        "name": "🔍 Validator Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test/test_validator_catch2.exe",
+                        "libraries": ["Catch2Main", "Catch2"]
+                    },
+                    {
+                        "source": "test/test_ast_validator_catch2.cpp",
+                        "name": "🔍 AST Validator Tests (Catch2)",
+                        "dependencies": ["lambda-input-full"],
+                        "binary": "test/test_ast_validator_catch2.exe",
+                        "libraries": ["Catch2Main", "Catch2"]
+                    }
+                ],
+                "type": "validator",
+                "special_flags": "-std=c++17 -lstdc++",
+                "uses_build_config": true,
+                "environment": {
+                    "TEST_DIR_PATH": "$PWD/test/lambda/validator",
+                    "LAMBDA_EXE_PATH": "$PWD/lambda.exe"
+                },
+                "requires_lambda_exe": true,
+                "parallel": false,
+                "compiler": "clang++"
+            },
+            {
+                "suite": "lambda-catch2",
+                "name": "🐑 Lambda Runtime Tests (Catch2)",
+                "tests": [
+                    {
+                        "source": "test/test_lambda_catch2.cpp",
+                        "name": "🐑 Lambda Runtime Tests (Catch2)",
+                        "dependencies": [],
+                        "binary": "test/test_lambda_catch2.exe",
+                        "libraries": ["Catch2Main", "Catch2"]
+                    },
+                    {
+                        "source": "test/test_lambda_repl_catch2.cpp",
+                        "name": "🎮 Lambda REPL Interface Tests (Catch2)",
+                        "dependencies": [],
+                        "binary": "test/test_lambda_repl_catch2.exe",
+                        "libraries": ["Catch2Main", "Catch2"]
+                    },
+                    {
+                        "source": "test/test_lambda_proc_catch2.cpp",
+                        "name": "🐑 Lambda Procedural Tests (Catch2)",
+                        "dependencies": [],
+                        "binary": "test/test_lambda_proc_catch2.exe",
+                        "libraries": ["Catch2Main", "Catch2"]
                     }
                 ],
                 "type": "lambda",

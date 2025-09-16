@@ -25,6 +25,11 @@ workspace "Lambda"
         defines { "NDEBUG" }
         optimize "On"
     
+    -- Linux cross-compilation settings
+    filter "platforms:Linux_x64"
+        system "linux"
+        architecture "x64"
+    
     filter {}
 
 project "lambda-lib"
@@ -67,8 +72,8 @@ project "lambda-lib"
     
     buildoptions {
         "-fms-extensions",
+        "-pedantic",
         "-fcolor-diagnostics",
-        "-pedantic"
     }
     
 
@@ -102,8 +107,8 @@ project "lambda-input-full-c"
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic"
+        "-pedantic",
+        "-fcolor-diagnostics"
     }
     
     libdirs {
@@ -172,8 +177,8 @@ project "lambda-input-full-cpp"
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
         "-pedantic",
+        "-fcolor-diagnostics",
         "-std=c++17"
     }
     
@@ -350,6 +355,7 @@ project "lambda"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -376,6 +382,7 @@ project "lambda"
         "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
         "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
         "/opt/homebrew/Cellar/libharu/2.4.5/lib/libhpdf.a",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib/libCatch2Main.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
@@ -385,21 +392,25 @@ project "lambda"
         "/opt/homebrew/lib/libgmp.a",
     }
     
-    links {
-        "z",
-        "ncurses",
-    }
+    -- macOS dynamic libraries
+    filter "platforms:x64"
+        links {
+            "z",
+            "ncurses",
+        }
     
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
+        linkoptions {
+            "-framework CoreFoundation",
+            "-framework CoreServices",
+            "-framework SystemConfiguration",
+        }
+    
+    filter {}
     
     buildoptions {
         "-fms-extensions",
+        "-pedantic",
         "-fcolor-diagnostics",
-        "-pedantic"
     }
     
     -- C++ specific options
@@ -417,61 +428,7 @@ project "lambda"
     }
     
 
-project "test_strbuf"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_strbuf.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "criterion",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c99",
-    }
-    
-
-project "test_stringbuf"
+project "test_strbuf_catch2"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -479,7 +436,7 @@ project "test_stringbuf"
     targetextension ".exe"
     
     files {
-        "test/test_stringbuf.cpp",
+        "test/test_strbuf_catch2.cpp",
     }
     
     includedirs {
@@ -492,6 +449,7 @@ project "test_stringbuf"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -503,527 +461,32 @@ project "test_stringbuf"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     links {
         "lambda-lib",
-        "criterion",
+        "Catch2Main",
+        "Catch2",
     }
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
         "-pedantic",
-    }
-    
-
-project "test_strview"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_strview.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "criterion",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
         "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c99",
-    }
-    
-
-project "test_variable_pool"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_variable_pool.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "criterion",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c99",
-    }
-    
-
-project "test_num_stack"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_num_stack.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "criterion",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c99",
-    }
-    
-
-project "test_datetime"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_datetime.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "criterion",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c99",
-    }
-    
-
-project "test_url"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_url.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "criterion",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c99",
-    }
-    
-
-project "test_url_extra"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_url_extra.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "criterion",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c99",
-    }
-    
-
-project "test_mime_detect"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_mime_detect.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-    }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c99",
-    }
-    
-
-project "test_math"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_math.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    defines {
-        "GINAC_AVAILABLE",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libginac.a",
-        "/opt/homebrew/lib/libcln.a",
-        "/opt/homebrew/lib/libgmp.a",
-    }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
         "-std=c++17",
     }
     
 
-project "test_math_ascii"
+project "test_stringbuf_catch2"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1031,7 +494,7 @@ project "test_math_ascii"
     targetextension ".exe"
     
     files {
-        "test/test_math_ascii.cpp",
+        "test/test_stringbuf_catch2.cpp",
     }
     
     includedirs {
@@ -1044,6 +507,7 @@ project "test_math_ascii"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1055,69 +519,32 @@ project "test_math_ascii"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    defines {
-        "GINAC_AVAILABLE",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
+        "Catch2Main",
+        "Catch2",
     }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libginac.a",
-        "/opt/homebrew/lib/libcln.a",
-        "/opt/homebrew/lib/libgmp.a",
-    }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
         "-pedantic",
+        "-fcolor-diagnostics",
         "-std=c++17",
     }
     
 
-project "test_markup_roundtrip"
+project "test_strview_catch2"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1125,7 +552,7 @@ project "test_markup_roundtrip"
     targetextension ".exe"
     
     files {
-        "test/test_markup_roundtrip.cpp",
+        "test/test_strview_catch2.cpp",
     }
     
     includedirs {
@@ -1138,6 +565,7 @@ project "test_markup_roundtrip"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1149,59 +577,32 @@ project "test_markup_roundtrip"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
+        "Catch2Main",
+        "Catch2",
     }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
         "-pedantic",
+        "-fcolor-diagnostics",
         "-std=c++17",
     }
     
 
-project "test_input_roundtrip"
+project "test_variable_pool_catch2"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1209,7 +610,7 @@ project "test_input_roundtrip"
     targetextension ".exe"
     
     files {
-        "test/test_input_roundtrip.cpp",
+        "test/test_variable_pool_catch2.cpp",
     }
     
     includedirs {
@@ -1222,6 +623,7 @@ project "test_input_roundtrip"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1233,59 +635,32 @@ project "test_input_roundtrip"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
+        "Catch2Main",
+        "Catch2",
     }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
         "-pedantic",
+        "-fcolor-diagnostics",
         "-std=c++17",
     }
     
 
-project "test_dir"
+project "test_num_stack_catch2"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1293,7 +668,7 @@ project "test_dir"
     targetextension ".exe"
     
     files {
-        "test/test_dir.cpp",
+        "test/test_num_stack_catch2.cpp",
     }
     
     includedirs {
@@ -1306,6 +681,7 @@ project "test_dir"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1317,59 +693,32 @@ project "test_dir"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
+        "Catch2Main",
+        "Catch2",
     }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
         "-pedantic",
+        "-fcolor-diagnostics",
         "-std=c++17",
     }
     
 
-project "test_http"
+project "test_datetime_catch2"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1377,7 +726,7 @@ project "test_http"
     targetextension ".exe"
     
     files {
-        "test/test_http.cpp",
+        "test/test_datetime_catch2.cpp",
     }
     
     includedirs {
@@ -1390,6 +739,7 @@ project "test_http"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1401,59 +751,32 @@ project "test_http"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
+        "Catch2Main",
+        "Catch2",
     }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
         "-pedantic",
+        "-fcolor-diagnostics",
         "-std=c++17",
     }
     
 
-project "test_sysinfo"
+project "test_url_catch2"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1461,7 +784,7 @@ project "test_sysinfo"
     targetextension ".exe"
     
     files {
-        "test/test_sysinfo.cpp",
+        "test/test_url_catch2.cpp",
     }
     
     includedirs {
@@ -1474,6 +797,7 @@ project "test_sysinfo"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1485,59 +809,32 @@ project "test_sysinfo"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
+        "Catch2Main",
+        "Catch2",
     }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
         "-pedantic",
+        "-fcolor-diagnostics",
         "-std=c++17",
     }
     
 
-project "test_jsx_roundtrip"
+project "test_url_extra_catch2"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1545,7 +842,7 @@ project "test_jsx_roundtrip"
     targetextension ".exe"
     
     files {
-        "test/test_jsx_roundtrip.cpp",
+        "test/test_url_extra_catch2.cpp",
     }
     
     includedirs {
@@ -1558,6 +855,7 @@ project "test_jsx_roundtrip"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1569,59 +867,32 @@ project "test_jsx_roundtrip"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
+        "Catch2Main",
+        "Catch2",
     }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
         "-pedantic",
+        "-fcolor-diagnostics",
         "-std=c++17",
     }
     
 
-project "test_mdx_roundtrip"
+project "test_lambda_catch2"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1629,7 +900,7 @@ project "test_mdx_roundtrip"
     targetextension ".exe"
     
     files {
-        "test/test_mdx_roundtrip.cpp",
+        "test/test_lambda_catch2.cpp",
     }
     
     includedirs {
@@ -1642,6 +913,7 @@ project "test_mdx_roundtrip"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1653,59 +925,32 @@ project "test_mdx_roundtrip"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-    }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
+        "Catch2Main",
+        "Catch2",
     }
     
     links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
         "-pedantic",
-        "-std=c++17",
+        "-fcolor-diagnostics",
     }
     
 
-project "test_css_tokenizer"
+project "test_lambda_repl_catch2"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1713,7 +958,7 @@ project "test_css_tokenizer"
     targetextension ".exe"
     
     files {
-        "test/test_css_tokenizer.cpp",
+        "test/test_lambda_repl_catch2.cpp",
     }
     
     includedirs {
@@ -1726,6 +971,7 @@ project "test_css_tokenizer"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1737,59 +983,32 @@ project "test_css_tokenizer"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-    }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
+        "Catch2Main",
+        "Catch2",
     }
     
     links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
         "-pedantic",
-        "-std=c++17",
+        "-fcolor-diagnostics",
     }
     
 
-project "test_css_parser"
+project "test_lambda_proc_catch2"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1797,7 +1016,7 @@ project "test_css_parser"
     targetextension ".exe"
     
     files {
-        "test/test_css_parser.cpp",
+        "test/test_lambda_proc_catch2.cpp",
     }
     
     includedirs {
@@ -1810,6 +1029,7 @@ project "test_css_parser"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -1821,605 +1041,27 @@ project "test_css_parser"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-    }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
+        "Catch2Main",
+        "Catch2",
     }
     
     links { "stdc++" }
     
     buildoptions {
         "-fms-extensions",
-        "-fcolor-diagnostics",
         "-pedantic",
-        "-std=c++17",
-    }
-    
-
-project "test_css_integration"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_css_integration.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-    }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-fms-extensions",
         "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c++17",
-    }
-    
-
-project "test_css_frameworks"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_css_frameworks.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-    }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c++17",
-    }
-    
-
-project "test_validator"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_validator.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-    }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c++17",
-    }
-    
-
-project "test_ast_validator"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_ast_validator.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-    }
-    
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c++17",
-    }
-    
-
-project "test_lambda"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_lambda.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "criterion",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-    }
-    
-
-project "test_lambda_repl"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_lambda_repl.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "criterion",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-    }
-    
-
-project "test_lambda_proc"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_lambda_proc.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "criterion",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-    }
-    
-
-project "test_lambda_runner"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/lambda_test_runner.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/ginac/1.8.9/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "criterion",
-    }
-    
-    buildoptions {
-        "-fms-extensions",
-        "-fcolor-diagnostics",
-        "-pedantic",
-        "-std=c++17",
     }
     
