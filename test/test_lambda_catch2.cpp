@@ -168,92 +168,90 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     free(actual_output);
 }
 
-TEST_CASE("Lambda Runtime Tests", "[lambda][runtime]") {
-    SECTION("test_single") {
-        test_lambda_script_against_file("test/lambda/single.ls", "test/lambda/single.txt");
-    }
-    
-    SECTION("test_value") {
-        test_lambda_script_against_file("test/lambda/value.ls", "test/lambda/value.txt");
-    }
-    
-    SECTION("test_simple_expr_ls") {
-        test_lambda_script_against_file("test/lambda/simple_expr.ls", "test/lambda/simple_expr.txt");
-    }
-    
-    SECTION("test_expr_ls") {
-        test_lambda_script_against_file("test/lambda/expr.ls", "test/lambda/expr.txt");
-    }
-    
-    SECTION("test_decimal") {
-        test_lambda_script_against_file("test/lambda/decimal.ls", "test/lambda/decimal.txt");
-    }
-    
-    SECTION("test_box_unbox") {
-        test_lambda_script_against_file("test/lambda/box_unbox.ls", "test/lambda/box_unbox.txt");
-    }
-    
-    SECTION("test_sys_fn") {
-        test_lambda_script_against_file("test/lambda/sys_fn.ls", "test/lambda/sys_fn.txt");
-    }
-    
-    SECTION("test_expr_stam") {
-        test_lambda_script_against_file("test/lambda/expr_stam.ls", "test/lambda/expr_stam.txt");
-    }
-    
-    SECTION("test_numeric_expr") {
-        test_lambda_script_against_file("test/lambda/numeric_expr.ls", "test/lambda/numeric_expr.txt");
-    }
-    
-    SECTION("test_array_float") {
-        test_lambda_script_against_file("test/lambda/array_float.ls", "test/lambda/array_float.txt");
-    }
-    
-    SECTION("test_comp_expr_ls") {
-        test_lambda_script_against_file("test/lambda/comp_expr.ls", "test/lambda/comp_expr.txt");
-    }
-    
-    SECTION("test_comp_expr_edge_ls") {
-        test_lambda_script_against_file("test/lambda/comp_expr_edge.ls", "test/lambda/comp_expr_edge.txt");
-    }
-    
-    SECTION("test_type") {
-        test_lambda_script_against_file("test/lambda/type.ls", "test/lambda/type.txt");
-    }
-    
-    SECTION("test_func") {
-        test_lambda_script_against_file("test/lambda/func.ls", "test/lambda/func.txt");
-    }
-    
-    SECTION("test_int64") {
-        test_lambda_script_against_file("test/lambda/int64.ls", "test/lambda/int64.txt");
-    }
-    
-    SECTION("test_input_csv_ls") {
-        test_lambda_script_against_file("test/lambda/input_csv.ls", "test/lambda/input_csv.txt");
-    }
-    
-    SECTION("test_input_dir_ls") {
-        test_lambda_script_against_file("test/lambda/input_dir.ls", "test/lambda/input_dir.txt");
-    }
-    
-    SECTION("test_complex_report") {
-        test_lambda_script_against_file("test/lambda/complex_report.ls", "test/lambda/complex_report.txt");
-    }
-    
-    SECTION("test_import") {
-        test_lambda_script_against_file("test/lambda/import.ls", "test/lambda/import.txt");
-    }
-    
-    SECTION("test_numeric_sys_func") {
-        test_lambda_script_against_file("test/lambda/numeric_sys_func.ls", "test/lambda/numeric_sys_func.txt");
-    }
-    
-    SECTION("test_complex_data_science_report") {
-        test_lambda_script_against_file("test/lambda/complex_data_science_report.ls", "test/lambda/complex_data_science_report.txt");
-    }
-    
-    SECTION("test_complex_iot_report") {
-        test_lambda_script_against_file("test/lambda/complex_iot_report.ls", "test/lambda/complex_iot_report.txt");
-    }
+TEST_CASE("test_single", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/single.ls", "test/lambda/single.txt");
+}
+
+TEST_CASE("test_value", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/value.ls", "test/lambda/value.txt");
+}
+
+TEST_CASE("test_simple_expr_ls", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/simple_expr.ls", "test/lambda/simple_expr.txt");
+}
+
+TEST_CASE("test_expr_ls", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/expr.ls", "test/lambda/expr.txt");
+}
+
+TEST_CASE("test_decimal", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/decimal.ls", "test/lambda/decimal.txt");
+}
+
+TEST_CASE("test_box_unbox", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/box_unbox.ls", "test/lambda/box_unbox.txt");
+}
+
+TEST_CASE("test_sys_fn", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/sys_fn.ls", "test/lambda/sys_fn.txt");
+}
+
+TEST_CASE("test_expr_stam", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/expr_stam.ls", "test/lambda/expr_stam.txt");
+}
+
+TEST_CASE("test_numeric_expr", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/numeric_expr.ls", "test/lambda/numeric_expr.txt");
+}
+
+TEST_CASE("test_array_float", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/array_float.ls", "test/lambda/array_float.txt");
+}
+
+TEST_CASE("test_comp_expr_ls", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/comp_expr.ls", "test/lambda/comp_expr.txt");
+}
+
+TEST_CASE("test_comp_expr_edge_ls", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/comp_expr_edge.ls", "test/lambda/comp_expr_edge.txt");
+}
+
+TEST_CASE("test_type", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/type.ls", "test/lambda/type.txt");
+}
+
+TEST_CASE("test_func", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/func.ls", "test/lambda/func.txt");
+}
+
+TEST_CASE("test_int64", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/int64.ls", "test/lambda/int64.txt");
+}
+
+TEST_CASE("test_input_csv_ls", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/input_csv.ls", "test/lambda/input_csv.txt");
+}
+
+TEST_CASE("test_input_dir_ls", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/input_dir.ls", "test/lambda/input_dir.txt");
+}
+
+TEST_CASE("test_complex_report", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/complex_report.ls", "test/lambda/complex_report.txt");
+}
+
+TEST_CASE("test_import", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/import.ls", "test/lambda/import.txt");
+}
+
+TEST_CASE("test_numeric_sys_func", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/numeric_sys_func.ls", "test/lambda/numeric_sys_func.txt");
+}
+
+TEST_CASE("test_complex_data_science_report", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/complex_data_science_report.ls", "test/lambda/complex_data_science_report.txt");
+}
+
+TEST_CASE("test_complex_iot_report", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/complex_iot_report.ls", "test/lambda/complex_iot_report.txt");
 }
