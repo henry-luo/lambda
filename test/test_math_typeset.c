@@ -1,4 +1,4 @@
-#include "../lib/unit_test/include/criterion/criterion.h"
+#include <criterion/criterion.h>
 #include "../typeset/math_typeset.h"
 #include "../typeset/view/view_tree.h"
 #include "../typeset/layout/math_layout.h"

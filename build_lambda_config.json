@@ -103,8 +103,8 @@
         },
         {
             "name": "criterion",
-            "include": "lib/unit_test/include",
-            "lib": "lib/unit_test/libunit_test.a",
+            "include": "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+            "lib": "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
             "link": "static"
         },
         {
@@ -358,57 +358,49 @@
                         "source": "test_strbuf.c",
                         "name": "📝 String Buffer Tests",
                         "dependencies": ["lambda-lib"],
-                        "binary": "test_strbuf.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_strbuf.exe"
                     },
                     {
                         "source": "test_stringbuf.cpp",
                         "name": "🧵 StringBuf Tests",
                         "dependencies": ["lambda-lib"],
-                        "binary": "test_stringbuf.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_stringbuf.exe"
                     },
                     {
                         "source": "test_strview.c",
                         "name": "👀 String View Tests",
                         "dependencies": ["lambda-lib"],
-                        "binary": "test_strview.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_strview.exe"
                     },
                     {
                         "source": "test_variable_pool.c",
                         "name": "🏊 Variable Pool Tests",
                         "dependencies": ["lambda-lib"],
-                        "binary": "test_variable_pool.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_variable_pool.exe"
                     },
                     {
                         "source": "test_num_stack.c",
                         "name": "🔢 Number Stack Tests",
                         "dependencies": ["lambda-lib"],
-                        "binary": "test_num_stack.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_num_stack.exe"
                     },
                     {
                         "source": "test_datetime.c",
                         "name": "📅 DateTime Tests",
                         "dependencies": ["lambda-lib"],
-                        "binary": "test_datetime.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_datetime.exe"
                     },
                     {
                         "source": "test_url.c",
                         "name": "🔗 URL Tests",
                         "dependencies": ["lambda-lib"],
-                        "binary": "test_url.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_url.exe"
                     },
                     {
                         "source": "test_url_extra.c",
                         "name": "🌐 URL Extra Tests",
                         "dependencies": ["lambda-lib"],
-                        "binary": "test_url_extra.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_url_extra.exe"
                     }
                 ],
                 "type": "library",
@@ -423,15 +415,14 @@
                         "source": "test_mime_detect.c",
                         "name": "📎 MIME Detection Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_mime_detect.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_mime_detect.exe"
                     },
                     {
                         "source": "test_math.cpp",
                         "name": "🔢 Math Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
                         "binary": "test_math.exe",
-                        "libraries": ["ginac", "cln", "gmp", "criterion"],
+                        "libraries": ["ginac", "cln", "gmp"],
                         "defines": ["GINAC_AVAILABLE"]
                     },
                     {
@@ -439,78 +430,68 @@
                         "name": "🔤 ASCII Math Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
                         "binary": "test_math_ascii.exe",
-                        "libraries": ["ginac", "cln", "gmp", "criterion"],
+                        "libraries": ["ginac", "cln", "gmp"],
                         "defines": ["GINAC_AVAILABLE"]
                     },
                     {
                         "source": "test_markup_roundtrip.cpp",
                         "name": "📝 Markup Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_markup_roundtrip.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_markup_roundtrip.exe"
                     },
                     {
                         "source": "test/test_input_roundtrip.cpp",
                         "name": "🔄 Input Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_input_roundtrip.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_input_roundtrip.exe"
                     },
                     {
                         "source": "test/test_dir.cpp",
                         "name": "📁 Directory Listing Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_dir.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_dir.exe"
                     },
                     {
                         "source": "test/test_http.cpp",
-                        "name": "🌐 HTTP Client Tests",
+                        "name": "🌐 HTTP/HTTPS Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_http.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_http.exe"
                     },
                     {
                         "source": "test/test_sysinfo.cpp",
                         "name": "🖥️ System Information Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_sysinfo.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_sysinfo.exe"
                     },
                     {
                         "source": "test/test_jsx_roundtrip.cpp",
                         "name": "⚛️ JSX Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_jsx_roundtrip.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_jsx_roundtrip.exe"
                     },
                     {
                         "source": "test/test_mdx_roundtrip.cpp",
                         "name": "📝 MDX Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_mdx_roundtrip.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_mdx_roundtrip.exe"
                     },
                     {
                         "source": "test/test_css_tokenizer.cpp",
                         "name": "🎨 CSS Tokenizer Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_css_tokenizer.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_css_tokenizer.exe"
                     },
                     {
                         "source": "test/test_css_parser.cpp",
                         "name": "🎨 CSS Parser Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_css_parser.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_css_parser.exe"
                     },
                     {
                         "source": "test/test_css_integration.cpp",
                         "name": "🎨 CSS Integration Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_css_integration.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_css_integration.exe"
                     },
                     {
                         "source": "test/test_input_css.c",
@@ -528,8 +509,7 @@
                         "source": "test/test_css_frameworks.cpp",
                         "name": "🎨 CSS Framework Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_css_frameworks.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test_css_frameworks.exe"
                     }
                 ],
                 "type": "input",
@@ -545,15 +525,13 @@
                         "source": "test/test_validator.cpp",
                         "name": "🔍 Validator Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test/test_validator.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test/test_validator.exe"
                     },
                     {
                         "source": "test/test_ast_validator.cpp",
                         "name": "🔍 AST Validator Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test/test_ast_validator.exe",
-                        "libraries": ["criterion"]
+                        "binary": "test/test_ast_validator.exe"
                     }
                 ],
                 "type": "validator",
@@ -574,21 +552,20 @@
                     {
                         "source": "test/test_lambda.cpp",
                         "name": "🐑 Lambda Runtime Tests",
-                        "dependencies": ["lambda-lib"],
+                        "dependencies": [],
                         "binary": "test/test_lambda.exe",
                         "libraries": ["criterion"]
                     },
                     {
                         "source": "test/test_lambda_repl.cpp",
                         "name": "🎮 Lambda REPL Interface Tests",
-                        "dependencies": ["lambda-lib"],
-                        "binary": "test/test_lambda_repl.exe",
-                        "libraries": ["criterion"]
+                        "dependencies": [],
+                        "binary": "test/test_lambda_repl.exe"
                     },
                     {
                         "source": "test/test_lambda_proc.cpp",
                         "name": "🐑 Lambda Procedural Tests",
-                        "dependencies": ["lambda-lib"],
+                        "dependencies": [],
                         "binary": "test/test_lambda_proc.exe",
                         "libraries": ["criterion"]
                     }

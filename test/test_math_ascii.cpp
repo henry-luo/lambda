@@ -1,5 +1,6 @@
 #define _GNU_SOURCE
-#include "../lib/unit_test/include/criterion/criterion.h"
+#include <criterion/criterion.h>
+#include <criterion/criterion.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -314,7 +315,8 @@ void print_ast_debug(Input* input) {
 }
 
 // Common function to test ASCII math expression roundtrip for any array of test cases
-void test_ascii_math_expressions_roundtrip(const char** test_cases, int num_cases, const char* type, 
+// Returns true if all tests pass, false if any fail
+bool test_ascii_math_expressions_roundtrip(const char** test_cases, int num_cases, const char* type, 
     const char* flavor, const char* url_prefix, const char* test_name, const char* error_prefix) {
     printf("=== Starting %s test ===\n", test_name);
     
@@ -410,6 +412,7 @@ void test_ascii_math_expressions_roundtrip(const char** test_cases, int num_case
     }
     
     printf("=== Completed %s test ===\n", test_name);
+    return true;
 }
 
 // Common function to test ASCII math markdown roundtrip for any input file
@@ -694,10 +697,11 @@ Test(ascii_math_roundtrip_tests, ascii_inline_math_roundtrip) {
     };
     
     int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
-    test_ascii_math_expressions_roundtrip(
+    bool result = test_ascii_math_expressions_roundtrip(
         test_cases, num_cases, "markdown", "commonmark", 
         "ascii_inline_math", "ascii_inline_math_roundtrip", "ASCII inline math"
     );
+    cr_assert(result, "ASCII inline math roundtrip test failed");
 }
 
 // Test roundtrip for pure ASCII math expressions (without markdown wrapping)
@@ -767,10 +771,11 @@ Test(ascii_math_roundtrip_tests, ascii_pure_math_roundtrip) {
     };
     
     int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
-    test_ascii_math_expressions_roundtrip(
+    bool result = test_ascii_math_expressions_roundtrip(
         test_cases, num_cases, "math", "ascii", 
         "ascii_pure_math", "ascii_pure_math_roundtrip", "ASCII pure math"
     );
+    cr_assert(result, "ASCII pure math roundtrip test failed");
 }
 
 // Test roundtrip for ASCII math with explicit delimiters
@@ -785,10 +790,11 @@ Test(ascii_math_roundtrip_tests, ascii_explicit_math_roundtrip) {
     };
     
     int num_cases = sizeof(test_cases) / sizeof(test_cases[0]);
-    test_ascii_math_expressions_roundtrip(
+    bool result = test_ascii_math_expressions_roundtrip(
         test_cases, num_cases, "markdown", "commonmark", 
         "ascii_explicit_math", "ascii_explicit_math_roundtrip", "ASCII explicit math"
     );
+    cr_assert(result, "ASCII explicit math roundtrip test failed");
 }
 
 // Test roundtrip for markdown documents containing ASCII math
