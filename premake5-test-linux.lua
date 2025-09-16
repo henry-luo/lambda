@@ -5,9 +5,9 @@
 workspace "Lambda-Tests-Linux"
     configurations { "Debug", "Release" }
     platforms { "x64", "Linux_x64" }
-    location "build/premake"
+    location "build_linux/test"
     startproject "test"
-    toolset "clang"
+    toolset "gcc"
     
     -- Global settings
     cppdialect "C++17"
@@ -18,6 +18,9 @@ workspace "Lambda-Tests-Linux"
         defines { "DEBUG" }
         symbols "On"
         optimize "Off"
+    
+    -- AddressSanitizer for non-Linux platforms only (conflicts with -static)
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
         buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
         linkoptions { "-fsanitize=address" }
     
@@ -38,13 +41,13 @@ workspace "Lambda-Tests-Linux"
     
     filter {}
 
-
-project "lambda-lib-linux"
+project "lambda-lib"
     kind "StaticLib"
     language "C"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
     
+    -- Meta-library: combines source files from dependencies
     files {
         "lib/mem-pool/src/variable.c",
         "lib/mem-pool/src/buffer.c",
@@ -59,84 +62,20 @@ project "lambda-lib-linux"
         "lib/url_parser.c",
         "lib/log.c",
         "lambda/input/mime-detect.c",
-        "lambda/utf_string.cpp",
-        "lambda/lambda-data.cpp",
-        "lambda/lambda-data-runtime.cpp",
-        "lambda/runner.cpp",
-        "lambda/transpile.cpp",
-        "lambda/transpile-mir.cpp",
-        "lambda/build_ast.cpp",
-        "lambda/name_pool.cpp",
-        "lambda/mir.c",
-        "lambda/pack.cpp",
-        "lambda/print.cpp",
-        "lambda/lambda-eval.cpp",
-        "lambda/lambda-eval-num.cpp",
-        "lambda/lambda-proc.cpp",
-        "lambda/utf_string.cpp",
-        "lambda/lambda-mem.cpp",
-        "lambda/validator.cpp",
-        "lambda/validator/ast_validate.cpp",
-        "lambda/validator/error_reporting.cpp",
-        "lambda/tree-sitter-lambda/src/parser.c",
-        "lambda/parse.c",
-        "test/test_stubs.cpp",
+        "lambda/input/mime-types.c",
     }
     
     includedirs {
         "lib/mem-pool/include",
-        "linux-deps/include",
-        "linux-deps/include/ncurses",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "include",
-        ".",
     }
     
-    libdirs {
-        "linux-deps/lib",
+    buildoptions {
+        "-fms-extensions",
+        "-pedantic",
+        "-fdiagnostics-color=auto",
     }
     
-    filter "files:**.c"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c99",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-    
-    filter "files:**.cpp"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c++17",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-    
-    filter {}
-    defines {
-        "LINUX",
-        "_GNU_SOURCE",
-        "NATIVE_LINUX_BUILD",
-        "UNICODE_LEVEL=1",
-    }
-    
-    filter "platforms:Linux_x64"
-        system "linux"
-        architecture "x64"
-        toolset "gcc"
-        gccprefix "x86_64-linux-gnu-"
-    
-    filter {}
-    
+
 project "test"
     kind "ConsoleApp"
     language "C++"
@@ -184,569 +123,254 @@ project "test"
     }
     
 
-
-project "test_strbuf"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-
-    files {
-        "test/test_strbuf.c",
-    }
-
-    includedirs {
-        "lib/mem-pool/include",
-        "linux-deps/include",
-        "linux-deps/include/ncurses",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "include",
-        ".",
-    }
-
-    libdirs {
-        "linux-deps/lib",
-    }
-
-    links {
-        "lambda-lib-linux",
-        "criterion",
-        "curl",
-        "z",
-        "ssl",
-        "crypto",
-        "edit",
-        "ncurses",
-        "cln",
-        "gmp",
-        "pthread",
-        "dl",
-        "m",
-    }
-
-    filter "files:**.c"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c99",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    filter "files:**.cpp"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c++17",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    defines {
-        "LINUX",
-        "_GNU_SOURCE",
-        "NATIVE_LINUX_BUILD",
-        "UNICODE_LEVEL=1",
-    }
-
-    filter "platforms:Linux_x64"
-        system "linux"
-        architecture "x64"
-        toolset "gcc"
-        gccprefix "x86_64-linux-gnu-"
-
-    filter {}
-
-
-project "test_stringbuf"
+project "test_strbuf_catch2"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-
+    
     files {
-        "test/test_stringbuf.cpp",
+        "test/test_strbuf_catch2.cpp",
     }
-
+    
     includedirs {
         "lib/mem-pool/include",
         "linux-deps/include",
         "linux-deps/include/ncurses",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "include",
-        ".",
     }
-
+    
     libdirs {
         "linux-deps/lib",
+        "build/lib",
     }
-
+    
     links {
-        "lambda-lib-linux",
+        "lambda-lib",
+        "Catch2Maind",
+        "Catch2d",
         "criterion",
-        "curl",
-        "z",
-        "ssl",
-        "crypto",
-        "edit",
-        "ncurses",
-        "cln",
-        "gmp",
-        "pthread",
-        "dl",
-        "m",
     }
-
-    filter "files:**.c"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c99",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    filter "files:**.cpp"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c++17",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    defines {
-        "LINUX",
-        "_GNU_SOURCE",
-        "NATIVE_LINUX_BUILD",
-        "UNICODE_LEVEL=1",
+    
+    buildoptions {
+        "-fms-extensions",
+        "-pedantic",
+        "-fdiagnostics-color=auto",
     }
+    
 
-    filter "platforms:Linux_x64"
-        system "linux"
-        architecture "x64"
-        toolset "gcc"
-        gccprefix "x86_64-linux-gnu-"
-
-    filter {}
-
-
-project "test_strview"
+project "test_stringbuf_catch2"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-
+    
     files {
-        "test/test_strview.c",
+        "test/test_stringbuf_catch2.cpp",
     }
-
+    
     includedirs {
         "lib/mem-pool/include",
         "linux-deps/include",
         "linux-deps/include/ncurses",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "include",
-        ".",
     }
-
+    
     libdirs {
         "linux-deps/lib",
+        "build/lib",
     }
-
+    
     links {
-        "lambda-lib-linux",
+        "lambda-lib",
+        "Catch2Maind",
+        "Catch2d",
         "criterion",
-        "curl",
-        "z",
-        "ssl",
-        "crypto",
-        "edit",
-        "ncurses",
-        "cln",
-        "gmp",
-        "pthread",
-        "dl",
-        "m",
     }
-
-    filter "files:**.c"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c99",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    filter "files:**.cpp"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c++17",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    defines {
-        "LINUX",
-        "_GNU_SOURCE",
-        "NATIVE_LINUX_BUILD",
-        "UNICODE_LEVEL=1",
+    
+    buildoptions {
+        "-fms-extensions",
+        "-pedantic",
+        "-fdiagnostics-color=auto",
     }
+    
 
-    filter "platforms:Linux_x64"
-        system "linux"
-        architecture "x64"
-        toolset "gcc"
-        gccprefix "x86_64-linux-gnu-"
-
-    filter {}
-
-
-project "test_variable_pool"
+project "test_strview_catch2"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-
+    
     files {
-        "test/test_variable_pool.c",
+        "test/test_strview_catch2.cpp",
     }
-
+    
     includedirs {
         "lib/mem-pool/include",
         "linux-deps/include",
         "linux-deps/include/ncurses",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "include",
-        ".",
     }
-
+    
     libdirs {
         "linux-deps/lib",
+        "build/lib",
     }
-
+    
     links {
-        "lambda-lib-linux",
+        "lambda-lib",
+        "Catch2Maind",
+        "Catch2d",
         "criterion",
-        "curl",
-        "z",
-        "ssl",
-        "crypto",
-        "edit",
-        "ncurses",
-        "cln",
-        "gmp",
-        "pthread",
-        "dl",
-        "m",
     }
-
-    filter "files:**.c"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c99",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    filter "files:**.cpp"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c++17",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    defines {
-        "LINUX",
-        "_GNU_SOURCE",
-        "NATIVE_LINUX_BUILD",
-        "UNICODE_LEVEL=1",
+    
+    buildoptions {
+        "-fms-extensions",
+        "-pedantic",
+        "-fdiagnostics-color=auto",
     }
+    
 
-    filter "platforms:Linux_x64"
-        system "linux"
-        architecture "x64"
-        toolset "gcc"
-        gccprefix "x86_64-linux-gnu-"
-
-    filter {}
-
-
-project "test_num_stack"
+project "test_variable_pool_catch2"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-
+    
     files {
-        "test/test_num_stack.c",
+        "test/test_variable_pool_catch2.cpp",
     }
-
+    
     includedirs {
         "lib/mem-pool/include",
         "linux-deps/include",
         "linux-deps/include/ncurses",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "include",
-        ".",
     }
-
+    
     libdirs {
         "linux-deps/lib",
+        "build/lib",
     }
-
+    
     links {
-        "lambda-lib-linux",
+        "lambda-lib",
+        "Catch2Maind",
+        "Catch2d",
         "criterion",
-        "curl",
-        "z",
-        "ssl",
-        "crypto",
-        "edit",
-        "ncurses",
-        "cln",
-        "gmp",
-        "pthread",
-        "dl",
-        "m",
     }
-
-    filter "files:**.c"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c99",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    filter "files:**.cpp"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c++17",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    defines {
-        "LINUX",
-        "_GNU_SOURCE",
-        "NATIVE_LINUX_BUILD",
-        "UNICODE_LEVEL=1",
+    
+    buildoptions {
+        "-fms-extensions",
+        "-pedantic",
+        "-fdiagnostics-color=auto",
     }
+    
 
-    filter "platforms:Linux_x64"
-        system "linux"
-        architecture "x64"
-        toolset "gcc"
-        gccprefix "x86_64-linux-gnu-"
-
-    filter {}
-
-
-project "test_datetime"
+project "test_num_stack_catch2"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-
+    
     files {
-        "test/test_datetime.c",
+        "test/test_num_stack_catch2.cpp",
     }
-
+    
     includedirs {
         "lib/mem-pool/include",
         "linux-deps/include",
         "linux-deps/include/ncurses",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "include",
-        ".",
     }
-
+    
     libdirs {
         "linux-deps/lib",
+        "build/lib",
     }
-
+    
     links {
-        "lambda-lib-linux",
+        "lambda-lib",
+        "Catch2Maind",
+        "Catch2d",
         "criterion",
-        "curl",
-        "z",
-        "ssl",
-        "crypto",
-        "edit",
-        "ncurses",
-        "cln",
-        "gmp",
-        "pthread",
-        "dl",
-        "m",
     }
-
-    filter "files:**.c"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c99",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    filter "files:**.cpp"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c++17",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    defines {
-        "LINUX",
-        "_GNU_SOURCE",
-        "NATIVE_LINUX_BUILD",
-        "UNICODE_LEVEL=1",
+    
+    buildoptions {
+        "-fms-extensions",
+        "-pedantic",
+        "-fdiagnostics-color=auto",
     }
+    
 
-    filter "platforms:Linux_x64"
-        system "linux"
-        architecture "x64"
-        toolset "gcc"
-        gccprefix "x86_64-linux-gnu-"
-
-    filter {}
-
-
-project "test_url"
+project "test_datetime_catch2"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-
+    
     files {
-        "test/test_url.c",
+        "test/test_datetime_catch2.cpp",
     }
-
+    
     includedirs {
         "lib/mem-pool/include",
         "linux-deps/include",
         "linux-deps/include/ncurses",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "include",
-        ".",
     }
-
+    
     libdirs {
         "linux-deps/lib",
+        "build/lib",
     }
-
+    
     links {
-        "lambda-lib-linux",
+        "lambda-lib",
+        "Catch2Maind",
+        "Catch2d",
         "criterion",
-        "curl",
-        "z",
-        "ssl",
-        "crypto",
-        "edit",
-        "ncurses",
-        "cln",
-        "gmp",
-        "pthread",
-        "dl",
-        "m",
     }
-
-    filter "files:**.c"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c99",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    filter "files:**.cpp"
-        buildoptions {
-            "-static",
-            "-O2",
-            "-g",
-            "-pedantic",
-            "-fno-omit-frame-pointer",
-            "-std=c++17",
-            "-fms-extensions",
-            "-fdiagnostics-color=auto",
-        }
-
-    defines {
-        "LINUX",
-        "_GNU_SOURCE",
-        "NATIVE_LINUX_BUILD",
-        "UNICODE_LEVEL=1",
+    
+    buildoptions {
+        "-fms-extensions",
+        "-pedantic",
+        "-fdiagnostics-color=auto",
     }
+    
 
-    filter "platforms:Linux_x64"
-        system "linux"
-        architecture "x64"
-        toolset "gcc"
-        gccprefix "x86_64-linux-gnu-"
-
-    filter {}
+project "test_url_catch2"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_url_catch2.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "linux-deps/include",
+        "linux-deps/include/ncurses",
+    }
+    
+    libdirs {
+        "linux-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-lib",
+        "Catch2Maind",
+        "Catch2d",
+        "criterion",
+    }
+    
+    buildoptions {
+        "-fms-extensions",
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+    }
+    

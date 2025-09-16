@@ -64,13 +64,24 @@ class PremakeGenerator:
         # Get compiler from config
         compiler = self.config.get('compiler', 'clang')
         
+        # Extract compiler name from path
+        compiler_name = os.path.basename(compiler)
+        if 'gcc' in compiler_name:
+            base_compiler = 'gcc'
+        elif 'g++' in compiler_name:
+            base_compiler = 'g++'
+        elif 'clang' in compiler_name:
+            base_compiler = 'clang'
+        else:
+            base_compiler = 'clang'  # default fallback
+        
         # Map compiler to Premake toolset
         toolset_map = {
             'clang': 'clang',
             'gcc': 'gcc',
             'g++': 'gcc'
         }
-        toolset = toolset_map.get(compiler, 'clang')
+        toolset = toolset_map.get(base_compiler, 'clang')
         
         # Determine platforms based on config or compiler and output
         platform = self.config.get('platform', '')
@@ -83,11 +94,18 @@ class PremakeGenerator:
         
         platform_str = ', '.join([f'"{p}"' for p in platforms])
         
+        # Set location based on platform
+        platform = self.config.get('platform', 'macOS')
+        if platform == 'Linux_x64':
+            location = 'build_linux/test'
+        else:
+            location = 'build/premake'
+        
         self.premake_content.extend([
             f'workspace "{workspace_name}"',
             '    configurations { "Debug", "Release" }',
             f'    platforms {{ {platform_str} }}',
-            '    location "build/premake"',
+            f'    location "{location}"',
             f'    startproject "{startup_project}"',
             f'    toolset "{toolset}"',
             '    ',
@@ -100,6 +118,9 @@ class PremakeGenerator:
             '        defines { "DEBUG" }',
             '        symbols "On"',
             '        optimize "Off"',
+            '    ',
+            '    -- AddressSanitizer for non-Linux platforms only (conflicts with -static)',
+            '    filter { "configurations:Debug", "not platforms:Linux_x64" }',
             '        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }',
             '        linkoptions { "-fsanitize=address" }',
             '    ',
@@ -921,12 +942,24 @@ class PremakeGenerator:
             if lib_info['include']:
                 self.premake_content.append(f'        "{lib_info["include"]}",')
         
-        # Add system include paths
+        # Add platform-specific include paths
+        platform = self.config.get('platform', 'macOS')
+        if platform == 'Linux_x64':
+            # Linux cross-compilation paths
+            self.premake_content.extend([
+                '        "linux-deps/include",',
+                '        "linux-deps/include/ncurses",',
+            ])
+        else:
+            # macOS paths (default)
+            self.premake_content.extend([
+                '        "/usr/local/include",',
+                '        "/opt/homebrew/include",',
+                '        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",',
+                '        "/opt/homebrew/Cellar/catch2/3.10.0/include",',
+            ])
+        
         self.premake_content.extend([
-            '        "/usr/local/include",',
-            '        "/opt/homebrew/include",',
-            '        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",',
-            '        "/opt/homebrew/Cellar/catch2/3.10.0/include",',
             '    }',
             '    '
         ])
@@ -942,13 +975,27 @@ class PremakeGenerator:
             ])
         
         # Add library paths
+        self.premake_content.append('    libdirs {')
+        
+        # Add platform-specific library paths
+        platform = self.config.get('platform', 'macOS')
+        if platform == 'Linux_x64':
+            # Linux cross-compilation paths
+            self.premake_content.extend([
+                '        "linux-deps/lib",',
+                '        "build/lib",',
+            ])
+        else:
+            # macOS paths (default)
+            self.premake_content.extend([
+                '        "/opt/homebrew/lib",',
+                '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
+                '        "/opt/homebrew/Cellar/catch2/3.10.0/lib",',
+                '        "/usr/local/lib",',
+                '        "build/lib",',
+            ])
+        
         self.premake_content.extend([
-            '    libdirs {',
-            '        "/opt/homebrew/lib",',
-            '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
-            '        "/opt/homebrew/Cellar/catch2/3.10.0/lib",',
-            '        "/usr/local/lib",',
-            '        "build/lib",',
             '    }',
             '    '
         ])
@@ -1002,8 +1049,8 @@ class PremakeGenerator:
                     self.premake_content.append('        "Catch2",')
                     self.premake_content.append('        "Catch2Main",')
                     test_frameworks_added.append('catch2')
-                elif lib == 'Catch2Main' or lib == 'Catch2':
-                    # Handle individual Catch2 library references
+                elif lib == 'Catch2Main' or lib == 'Catch2' or lib == 'Catch2Maind' or lib == 'Catch2d':
+                    # Handle individual Catch2 library references (including debug versions)
                     self.premake_content.append(f'        "{lib}",')
                     test_frameworks_added.append('catch2')
                 elif lib == 'criterion':
@@ -1015,7 +1062,7 @@ class PremakeGenerator:
                     
             # Special handling for lambda tests that use Catch2
             if (test_name and 'lambda' in test_name.lower() and 'catch2' in test_name.lower() and 
-                libraries and any(lib in ['Catch2Main', 'Catch2'] for lib in libraries)):
+                libraries and any(lib in ['Catch2Main', 'Catch2', 'Catch2Maind', 'Catch2d'] for lib in libraries)):
                 # Ensure catch2 is marked as added for lambda tests using Catch2
                 if 'catch2' not in test_frameworks_added:
                     test_frameworks_added.append('catch2')

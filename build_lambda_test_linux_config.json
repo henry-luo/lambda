@@ -17,18 +17,57 @@
         "linux-deps/lib"
     ],
     "libraries": [
-        "criterion",
+        "Catch2Maind",
+        "Catch2d", 
         "curl",
         "z",
         "ssl",
         "crypto",
         "edit",
         "ncurses",
-        "cln",
-        "gmp",
         "pthread",
         "dl",
         "m"
+    ],
+    "library_definitions": [
+        {
+            "name": "Catch2Maind",
+            "include": "linux-deps/include",
+            "lib": "linux-deps/lib/libCatch2Maind.a",
+            "link": "static"
+        },
+        {
+            "name": "Catch2d",
+            "include": "linux-deps/include",
+            "lib": "linux-deps/lib/libCatch2d.a",
+            "link": "static"
+        }
+    ],
+    "targets": [
+        {
+            "name": "lambda-lib",
+            "description": "Unified runtime with all basic libraries for tests",
+            "include": "lib/mem-pool/include",
+            "sources": [
+                "lib/mem-pool/src/variable.c",
+                "lib/mem-pool/src/buffer.c",
+                "lib/mem-pool/src/utils.c",
+                "lib/strbuf.c",
+                "lib/stringbuf.c",
+                "lib/strview.c",
+                "lib/string.c",
+                "lib/num_stack.c",
+                "lib/datetime.c",
+                "lib/url.c",
+                "lib/url_parser.c",
+                "lib/log.c",
+                "lambda/input/mime-detect.c",
+                "lambda/input/mime-types.c"
+            ],
+            "libraries": [],
+            "special_flags": "",
+            "link": "static"
+        }
     ],
     "defines": [
         "LINUX",
@@ -59,98 +98,71 @@
     "ldflags": [
         "-static"
     ],
-    "test_projects": [
-        {
-            "name": "test_strbuf",
-            "kind": "ConsoleApp",
-            "language": "C",
-            "files": ["test/test_strbuf.c"],
-            "links": ["lambda-lib-linux"]
-        },
-        {
-            "name": "test_stringbuf", 
-            "kind": "ConsoleApp",
-            "language": "C++",
-            "files": ["test/test_stringbuf.cpp"],
-            "links": ["lambda-lib-linux"]
-        },
-        {
-            "name": "test_strview",
-            "kind": "ConsoleApp", 
-            "language": "C",
-            "files": ["test/test_strview.c"],
-            "links": ["lambda-lib-linux"]
-        },
-        {
-            "name": "test_variable_pool",
-            "kind": "ConsoleApp",
-            "language": "C", 
-            "files": ["test/test_variable_pool.c"],
-            "links": ["lambda-lib-linux"]
-        },
-        {
-            "name": "test_num_stack",
-            "kind": "ConsoleApp",
-            "language": "C",
-            "files": ["test/test_num_stack.c"], 
-            "links": ["lambda-lib-linux"]
-        },
-        {
-            "name": "test_datetime",
-            "kind": "ConsoleApp",
-            "language": "C",
-            "files": ["test/test_datetime.c"],
-            "links": ["lambda-lib-linux"]
-        },
-        {
-            "name": "test_url",
-            "kind": "ConsoleApp", 
-            "language": "C",
-            "files": ["test/test_url.c"],
-            "links": ["lambda-lib-linux"]
-        }
-    ],
-    "lib_project": {
-        "name": "lambda-lib-linux",
-        "kind": "StaticLib",
-        "language": "C",
-        "target_dir": "build/lib",
-        "files": [
-            "lib/mem-pool/src/variable.c",
-            "lib/mem-pool/src/buffer.c", 
-            "lib/mem-pool/src/utils.c",
-            "lib/strbuf.c",
-            "lib/stringbuf.c",
-            "lib/strview.c", 
-            "lib/string.c",
-            "lib/num_stack.c",
-            "lib/datetime.c",
-            "lib/url.c",
-            "lib/url_parser.c",
-            "lib/log.c",
-            "lambda/input/mime-detect.c",
-            "lambda/utf_string.cpp",
-            "lambda/lambda-data.cpp",
-            "lambda/lambda-data-runtime.cpp",
-            "lambda/runner.cpp",
-            "lambda/transpile.cpp",
-            "lambda/transpile-mir.cpp", 
-            "lambda/build_ast.cpp",
-            "lambda/name_pool.cpp",
-            "lambda/mir.c",
-            "lambda/pack.cpp",
-            "lambda/print.cpp",
-            "lambda/lambda-eval.cpp",
-            "lambda/lambda-eval-num.cpp",
-            "lambda/lambda-proc.cpp",
-            "lambda/utf_string.cpp",
-            "lambda/lambda-mem.cpp",
-            "lambda/validator.cpp",
-            "lambda/validator/ast_validate.cpp",
-            "lambda/validator/error_reporting.cpp",
-            "lambda/tree-sitter-lambda/src/parser.c",
-            "lambda/parse.c",
-            "test/test_stubs.cpp"
+    "test": {
+        "test_suites": [
+            {
+                "suite": "catch2",
+                "name": "🧪 Catch2 Tests (Linux)",
+                "tests": [
+                    {
+                        "source": "test_strbuf_catch2.cpp",
+                        "name": "📝 String Buffer Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Maind", "Catch2d"],
+                        "binary": "test_strbuf_catch2"
+                    },
+                    {
+                        "source": "test_stringbuf_catch2.cpp",
+                        "name": "🧵 StringBuf Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Maind", "Catch2d"],
+                        "binary": "test_stringbuf_catch2"
+                    },
+                    {
+                        "source": "test_strview_catch2.cpp",
+                        "name": "👀 String View Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Maind", "Catch2d"],
+                        "binary": "test_strview_catch2"
+                    },
+                    {
+                        "source": "test_variable_pool_catch2.cpp",
+                        "name": "🏊 Variable Pool Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Maind", "Catch2d"],
+                        "binary": "test_variable_pool_catch2"
+                    },
+                    {
+                        "source": "test_num_stack_catch2.cpp",
+                        "name": "🔢 Number Stack Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Maind", "Catch2d"],
+                        "binary": "test_num_stack_catch2"
+                    },
+                    {
+                        "source": "test_datetime_catch2.cpp",
+                        "name": "📅 DateTime Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Maind", "Catch2d"],
+                        "binary": "test_datetime_catch2"
+                    },
+                    {
+                        "source": "test_url_catch2.cpp",
+                        "name": "🌐 URL Parser Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Maind", "Catch2d"],
+                        "binary": "test_url_catch2"
+                    },
+                    {
+                        "source": "test_url_extra_catch2.cpp",
+                        "name": "🌐 URL Parser Extended Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Maind", "Catch2d"],
+                        "binary": "test_url_extra_catch2"
+                    }
+                ],
+                "type": "catch2"
+            }
         ]
     }
 }
