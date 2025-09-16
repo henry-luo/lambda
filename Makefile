@@ -125,7 +125,8 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
         build-windows build-linux build-debug build-release build-test-legacy clean-all distclean \
         build-windows build-linux build-debug build-release clean-all distclean \
         verify-windows verify-linux test-windows test-linux tree-sitter-libs \
-        generate-premake clean-premake build-test build-test-linux build-catch2 test-catch2
+        generate-premake clean-premake build-test build-test-linux build-catch2 test-catch2 \
+        build-test-catch2-linux test-catch2-linux test-catch2-linux-docker
 
 # Help target - shows available commands
 help:
@@ -176,6 +177,9 @@ help:
 	@echo "  test-lambda   - Run lambda runtime tests only"
 	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
 	@echo "  test-catch2   - Run Catch2 test suite"
+	@echo "  build-test-catch2-linux - Cross-compile Catch2 tests for Linux"
+	@echo "  test-catch2-linux - Run Linux Catch2 tests using QEMU"
+	@echo "  test-catch2-linux-docker - Run Linux Catch2 tests using Docker"
 	@echo "  test-verbose  - Run tests with verbose output"
 	@echo "  test-sequential - Run tests sequentially (not parallel)"
 	@echo "  test-coverage - Run tests with code coverage analysis"
@@ -490,6 +494,44 @@ test-catch2: build-catch2
 	else \
 		echo "Error: Catch2 test runner script not found at test/test_run_catch2.sh"; \
 		echo "Please ensure the test runner script exists and is executable."; \
+		exit 1; \
+	fi
+
+# Build Catch2 test projects for Linux cross-compilation
+build-test-catch2-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+	@echo "Building Catch2 test projects for Linux using Premake build system..."
+	@echo "Generating Premake configuration for Linux..."
+	python3 utils/generate_premake.py build_lambda_test_linux_config.json
+	@echo "Generating Linux makefiles..."
+	premake5 gmake
+	@echo "Building Linux Catch2 test executables with $(JOBS) parallel jobs..."
+	/Library/Developer/CommandLineTools/usr/bin/make -C build_linux/test config=debug_linux_x64 test_strbuf_catch2 test_stringbuf_catch2 test_strview_catch2 test_variable_pool_catch2 test_num_stack_catch2 test_datetime_catch2 test_url_catch2 test_url_extra_catch2 -j8
+	@echo "Linux Catch2 test build completed."
+
+# Run Catch2 tests for Linux (requires QEMU)
+test-catch2-linux: build-test-catch2-linux
+	@echo "Running Linux Catch2 test suite using QEMU..."
+	@echo "Note: This requires qemu-x86_64 to be installed for emulation."
+	@if command -v qemu-x86_64 >/dev/null 2>&1; then \
+		for test in test/test_*_catch2.exe; do \
+			if [ -f "$$test" ]; then \
+				echo "Running $$test..."; \
+				qemu-x86_64 "$$test" || echo "Test $$test failed"; \
+			fi; \
+		done; \
+	else \
+		echo "Error: qemu-x86_64 not found. Install with: brew install qemu"; \
+		echo "Alternatively, use 'make test-catch2-linux-docker' to run tests in Docker."; \
+		exit 1; \
+	fi
+
+# Run Catch2 tests for Linux using Docker
+test-catch2-linux-docker: build-test-catch2-linux
+	@echo "Running Linux Catch2 test suite using Docker..."
+	@if command -v docker >/dev/null 2>&1; then \
+		./docker-test-linux.sh; \
+	else \
+		echo "Error: Docker not found. Please install Docker Desktop."; \
 		exit 1; \
 	fi
 
