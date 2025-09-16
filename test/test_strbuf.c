@@ -50,7 +50,7 @@
  * - Edge case handling and boundary conditions
  */
 
-#include <criterion/criterion.h>
+#include "../lib/unit_test/include/criterion/criterion.h"
 #include <criterion/new/assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -536,7 +536,7 @@ Test(strbuf_tests, test_ensure_cap_edge_cases) {
     // Test ensuring very large capacity
     result = strbuf_ensure_cap(sb, SIZE_MAX / 2); // Large but not overflow
     // Result depends on system memory, but should not crash
-    cr_assert(result == true || result == false); // Either is acceptable
+    cr_assert(result == true || result == false, "Memory allocation result should be boolean"); // Either is acceptable
     
     strbuf_free(sb);
 }

@@ -1,5 +1,6 @@
-#include <criterion/criterion.h>
-#include <criterion/new/assert.h>
+#include "../lib/unit_test/include/criterion/criterion.h"
+#include <stdio.h>
+#include "../lambda/input/input.h"
 #include "../lambda/input/css_tokenizer.h"
 #include "../lib/mem-pool/include/mem_pool.h"
 #include <string.h>

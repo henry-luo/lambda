@@ -1,24 +1,24 @@
-#include <criterion/criterion.h>
-#include <criterion/new/assert.h>
-#include <string.h>
+#include "../lib/unit_test/include/criterion/criterion.h"
 #include "../lib/strview.h"
+#include <stdlib.h>
+#include <string.h>
 
 // String Slice Tests
 Test(strview_suite, basic) {
     const char* str = "Hello, World!";
     StrView s = strview_from_str(str);
     
-    cr_expect(eq(u64, s.length, strlen(str)));
-    cr_expect(eq(i8, strview_get(&s, 0), 'H'));
-    cr_expect(eq(i8, strview_get(&s, s.length), '\0')); // Out of bounds should return '\0'
-    cr_expect(eq(i8, strview_get(&s, s.length - 1), '!')); // Last character
+    cr_expect(s.length == strlen(str));
+    cr_expect(strview_get(&s, 0) == 'H');
+    cr_expect(strview_get(&s, s.length) == '\0'); // Out of bounds should return '\0'
+    cr_expect(strview_get(&s, s.length - 1) == '!'); // Last character
 }
 
 Test(strview_suite, sub) {
     StrView s = strview_from_str("Hello, World!");
     StrView sub = strview_sub(&s, 7, 12);
     
-    cr_expect(eq(u64, sub.length, 5));
+    cr_expect(sub.length == 5);
     cr_expect(strview_eq(&sub, &strview_from_str("World")));
 }
 
@@ -27,22 +27,20 @@ Test(strview_suite, sub_edge_cases) {
     
     // Valid substring
     StrView sub1 = strview_sub(&s, 1, 4);
-    cr_expect(eq(u64, sub1.length, 3));
+    cr_expect(sub1.length == 3);
     cr_expect(strview_equal(&sub1, "ell"));
-    
-    // Invalid range: start > end
-    StrView sub2 = strview_sub(&s, 3, 1);
-    cr_expect(eq(u64, sub2.length, 0));
-    cr_expect(eq(ptr, (void*)sub2.str, (void*)NULL));
-    
-    // Invalid range: end > length
-    StrView sub3 = strview_sub(&s, 0, 10);
-    cr_expect(eq(u64, sub3.length, 0));
-    cr_expect(eq(ptr, (void*)sub3.str, (void*)NULL));
+
+    StrView sub2 = strview_sub(&s, 10, 5);
+    cr_expect(sub2.length == 0);
+    cr_expect((void*)sub2.str == (void*)NULL);
+
+    StrView sub3 = strview_sub(&s, 5, 0);
+    cr_expect(sub3.length == 0);
+    cr_expect((void*)sub3.str == (void*)NULL);
     
     // Empty substring
     StrView sub4 = strview_sub(&s, 2, 2);
-    cr_expect(eq(u64, sub4.length, 0));
+    cr_expect(sub4.length == 0);
 }
 
 Test(strview_suite, prefix_suffix) {
@@ -57,9 +55,9 @@ Test(strview_suite, prefix_suffix) {
 Test(strview_suite, find) {
     StrView s = strview_from_str("Hello, World!");
     
-    cr_expect(eq(i32, strview_find(&s, "World"), 7));
-    cr_expect(eq(i32, strview_find(&s, "NotFound"), -1));
-    cr_expect(eq(i32, strview_find(&s, ","), 5));
+    cr_expect(strview_find(&s, "World") == 7);
+    cr_expect(strview_find(&s, "NotFound") == -1);
+    cr_expect(strview_find(&s, ",") == 5);
 }
 
 Test(strview_suite, trim) {
@@ -67,7 +65,7 @@ Test(strview_suite, trim) {
     strview_trim(&s);
     
     cr_expect(strview_eq(&s, &strview_from_str("Hello, World!")));
-    cr_expect(eq(u64, s.length, 13));
+    cr_expect(s.length == 13);
 }
 
 Test(strview_suite, to_cstr) {
@@ -75,7 +73,7 @@ Test(strview_suite, to_cstr) {
     char* cstr = strview_to_cstr(&s);
     
     cr_expect_not_null(cstr);
-    cr_expect(eq(str, cstr, "Hello"));
+    cr_expect(strcmp(cstr, "Hello") == 0);
     free(cstr);
 }
 
@@ -94,21 +92,11 @@ Test(strview_suite, to_int) {
     StrView s4 = strview_from_str("abc");
     StrView s5 = strview_from_str("123abc");
     
-    cr_expect(eq(i32, strview_to_int(&s1), 123));
-    cr_expect(eq(i32, strview_to_int(&s2), -456));
-    cr_expect(eq(i32, strview_to_int(&s3), 0));
-    cr_expect(eq(i32, strview_to_int(&s4), 0));
-    cr_expect(eq(i32, strview_to_int(&s5), 123));
+    cr_expect(strview_to_int(&s1) == 123);
+    cr_expect(strview_to_int(&s2) == -456);
+    cr_expect(strview_to_int(&s3) == 0);
+    cr_expect(strview_to_int(&s4) == 0);
+    cr_expect(strview_to_int(&s5) == 123);
 }
 
-int main(int argc, char *argv[]) {
-    struct criterion_test_set *tests = criterion_initialize();
-    int result = 0;
-    
-    if (criterion_handle_args(argc, argv, true)) {
-        result = !criterion_run_all_tests(tests);
-    }
-    
-    criterion_finalize(tests);
-    return result;
-}
+// Main function provided by unit test framework

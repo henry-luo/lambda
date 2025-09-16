@@ -3,7 +3,7 @@
  * Provides low-level testing of the implementation in C
  */
 
-#include <criterion/criterion.h>
+#include "../lib/unit_test/include/criterion/criterion.h"
 #include <criterion/new/assert.h>
 #include <stdio.h>
 #include <stdlib.h>

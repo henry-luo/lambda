@@ -1,4 +1,4 @@
-#include <criterion/criterion.h>
+#include "../../lib/unit_test/include/criterion/criterion.h"
 #include <criterion/parameterized.h>
 #include "../../lambda/lambda.h"
 #include "../../lambda/transpiler.hpp"
