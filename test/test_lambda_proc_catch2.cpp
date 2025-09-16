@@ -168,16 +168,14 @@ void test_lambda_proc_script_against_file(const char* script_path, const char* e
     free(actual_output);
 }
 
-TEST_CASE("Lambda Procedural Tests", "[lambda][proc]") {
-    SECTION("test_proc1") {
-        test_lambda_proc_script_against_file("test/lambda/proc1.ls", "test/lambda/proc1.txt");
-    }
-    
-    SECTION("test_proc2") {
-        test_lambda_proc_script_against_file("test/lambda/proc2.ls", "test/lambda/proc2.txt");
-    }
-    
-    SECTION("test_proc_fetch") {
-        test_lambda_proc_script_against_file("test/lambda/proc_fetch.ls", "test/lambda/proc_fetch.txt");
-    }
+TEST_CASE("test_proc1", "[lambda][proc]") {
+    test_lambda_proc_script_against_file("test/lambda/proc1.ls", "test/lambda/proc1.txt");
+}
+
+TEST_CASE("test_proc2", "[lambda][proc]") {
+    test_lambda_proc_script_against_file("test/lambda/proc2.ls", "test/lambda/proc2.txt");
+}
+
+TEST_CASE("test_proc_fetch", "[lambda][proc]") {
+    test_lambda_proc_script_against_file("test/lambda/proc_fetch.ls", "test/lambda/proc_fetch.txt");
 }

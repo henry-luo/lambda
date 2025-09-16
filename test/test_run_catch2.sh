@@ -101,14 +101,13 @@ declare -a c_test_status=()
 declare -a c_test_suites=()  # Maps Catch2 test to its suite category
 
 # Function to map executable name to test suite category (from build_lambda_config.json)
-get_test_suite_category() {
+get_suite_category() {
     local exe_name="$1"
     
-    # Get suite category from build configuration for Catch2 tests
+    # Try to get suite category from build configuration
     local suite_category=$(jq -r --arg exe "$exe_name" '
         .test.test_suites[] | 
-        select(.type == "catch2" or .suite | test("catch2")) |
-        select(.tests[]? | .source | test("\\b" + $exe + "\\.(cpp)$")) | 
+        select(.tests[]? | select(. == $exe)) | 
         .suite
     ' build_lambda_config.json 2>/dev/null | head -1)
     
@@ -118,16 +117,27 @@ get_test_suite_category() {
         return
     fi
     
-    # Fallback for special cases
+    # Fallback categorization based on test name (matching old test system logic)
     case "$exe_name" in
-        *catch2*)
-            echo "catch2" ;;
+        # Library Tests
+        "test_datetime_catch2"|"test_num_stack_catch2"|"test_strbuf_catch2"|"test_stringbuf_catch2"|"test_strview_catch2"|"test_url_catch2"|"test_url_extra_catch2"|"test_variable_pool_catch2")
+            echo "library" ;;
+        # Input Processing Tests  
+        "test_css_"*"_catch2"|"test_dir_catch2"|"test_http_catch2"|"test_input_roundtrip_catch2"|"test_jsx_roundtrip_catch2"|"test_markup_roundtrip_catch2"|"test_math_catch2"|"test_math_ascii_catch2"|"test_mdx_roundtrip_catch2"|"test_mime_detect_catch2"|"test_sysinfo_catch2")
+            echo "input" ;;
+        # Lambda Runtime Tests
+        "test_lambda_catch2"|"test_lambda_proc_catch2"|"test_lambda_repl_catch2")
+            echo "lambda" ;;
+        # Validator Tests
+        "test_validator_catch2")
+            echo "validator" ;;
+        # Default to unknown
         *)
             echo "unknown" ;;
     esac
 }
 
-# Function to get test suite display name (from build_lambda_config.json)
+# Function to get test suite display name (matching old test system structure)
 get_suite_category_display_name() {
     local category="$1"
     
@@ -144,60 +154,69 @@ get_suite_category_display_name() {
         return
     fi
     
-    # Fallback for hardcoded display names
+    # Fallback for hardcoded display names (matching old test system structure)
     case "$category" in
-        "catch2") echo "🧪 Catch2 Tests" ;;
-        "input_catch2") echo "📄 Input Processing Tests (Catch2)" ;;
-        "validator-catch2") echo "🔍 Validator Tests (Catch2)" ;;
-        "lambda-catch2") echo "🐑 Lambda Runtime Tests (Catch2)" ;;
+        "library") echo "📚 Library Tests" ;;
+        "input") echo "📄 Input Processing Tests" ;;
+        "lambda") echo "🐑 Lambda Runtime Tests" ;;
+        "validator") echo "🔍 Validator Tests" ;;
         "unknown") echo "🧪 Other Tests" ;;
+        # Legacy Catch2 categories for backward compatibility
+        "catch2") echo "🧪 Catch2 Tests" ;;
+        "input_catch2") echo "📄 Input Processing Tests" ;;
+        "validator-catch2") echo "🔍 Validator Tests" ;;
+        "lambda-catch2") echo "🐑 Lambda Runtime Tests" ;;
         *) echo "🧪 $category Tests" ;;
     esac
 }
 
-# Function to map executable name to friendly Catch2 test name
+# Function to map executable name to friendly Catch2 test name (removing "(Catch2)" suffix to match old system)
 get_c_test_display_name() {
     local exe_name="$1"
     
     # Try to get custom display name from build configuration
     local display_name=$(jq -r --arg exe "$exe_name" '
         .test.test_suites[] | 
-        .tests[]? | 
-        select(.source | test("\\b" + $exe + "\\.(cpp)$")) |
-        .name
+        .tests[] | 
+        select(. == $exe) | 
+        . as $test | 
+        "Custom Test: " + $test
     ' build_lambda_config.json 2>/dev/null | head -1)
     
-    # If found custom name, return it
-    if [ -n "$display_name" ] && [ "$display_name" != "null" ]; then
+    # If found in config, return it
+    if [ -n "$display_name" ] && [ "$display_name" != "null" ] && [ "$display_name" != "Custom Test: $exe_name" ]; then
         echo "$display_name"
         return
     fi
     
-    # Fallback to hardcoded friendly names
+    # Fallback for hardcoded display names (matching old test system names)
     case "$exe_name" in
-        "test_strbuf_catch2") echo "📝 String Buffer Tests (Catch2)" ;;
-        "test_stringbuf_catch2") echo "🧵 StringBuf Tests (Catch2)" ;;
-        "test_strview_catch2") echo "👀 String View Tests (Catch2)" ;;
-        "test_variable_pool_catch2") echo "🏊 Variable Pool Tests (Catch2)" ;;
-        "test_num_stack_catch2") echo "🔢 Number Stack Tests (Catch2)" ;;
-        "test_datetime_catch2") echo "📅 DateTime Tests (Catch2)" ;;
-        "test_url_catch2") echo "🔗 URL Tests (Catch2)" ;;
-        "test_url_extra_catch2") echo "🌐 URL Extra Tests (Catch2)" ;;
-        "test_math_catch2") echo "🔢 Math Roundtrip Tests (Catch2)" ;;
-        "test_math_ascii_catch2") echo "🔤 ASCII Math Roundtrip Tests (Catch2)" ;;
-        "test_markup_roundtrip_catch2") echo "📝 Markup Roundtrip Tests (Catch2)" ;;
-        "test_input_roundtrip_catch2") echo "🔄 Input Roundtrip Tests (Catch2)" ;;
-        "test_dir_catch2") echo "📁 Directory Listing Tests (Catch2)" ;;
-        "test_http_catch2") echo "🌐 HTTP/HTTPS Tests (Catch2)" ;;
-        "test_sysinfo_catch2") echo "🖥️ System Information Tests (Catch2)" ;;
-        "test_jsx_roundtrip_catch2") echo "⚛️ JSX Roundtrip Tests (Catch2)" ;;
-        "test_mdx_roundtrip_catch2") echo "📝 MDX Roundtrip Tests (Catch2)" ;;
-        "test_css_files_safe_catch2") echo "🎨 CSS Files Safe Tests (Catch2)" ;;
-        "test_validator_catch2") echo "🔍 Validator Tests (Catch2)" ;;
-        "test_ast_validator_catch2") echo "🔍 AST Validator Tests (Catch2)" ;;
-        "test_lambda_catch2") echo "🐑 Lambda Runtime Tests (Catch2)" ;;
-        "test_lambda_repl_catch2") echo "🎮 Lambda REPL Interface Tests (Catch2)" ;;
-        "test_lambda_proc_catch2") echo "🐑 Lambda Procedural Tests (Catch2)" ;;
+        "test_css_files_safe_catch2") echo "🎨 CSS Files Safe Tests" ;;
+        "test_css_frameworks_catch2") echo "🎨 CSS Framework Tests" ;;
+        "test_css_integration_catch2") echo "🎨 CSS Integration Tests" ;;
+        "test_css_parser_catch2") echo "🎨 CSS Parser Tests" ;;
+        "test_css_tokenizer_catch2") echo "🎨 CSS Tokenizer Tests" ;;
+        "test_datetime_catch2") echo "📅 DateTime Tests" ;;
+        "test_dir_catch2") echo "📁 Directory Listing Tests" ;;
+        "test_http_catch2") echo "🌐 HTTP/HTTPS Tests" ;;
+        "test_jsx_roundtrip_catch2") echo "⚛️ JSX Roundtrip Tests" ;;
+        "test_lambda_catch2") echo "🐑 Lambda Runtime Tests" ;;
+        "test_lambda_proc_catch2") echo "🐑 Lambda Procedural Tests" ;;
+        "test_lambda_repl_catch2") echo "🎮 Lambda REPL Interface Tests" ;;
+        "test_markup_roundtrip_catch2") echo "📝 Markup Roundtrip Tests" ;;
+        "test_math_ascii_catch2") echo "🔤 ASCII Math Roundtrip Tests" ;;
+        "test_math_catch2") echo "🔢 Math Roundtrip Tests" ;;
+        "test_mdx_roundtrip_catch2") echo "📝 MDX Roundtrip Tests" ;;
+        "test_mime_detect_catch2") echo "📎 MIME Detection Tests" ;;
+        "test_num_stack_catch2") echo "🔢 Number Stack Tests" ;;
+        "test_strbuf_catch2") echo "📝 String Buffer Tests" ;;
+        "test_stringbuf_catch2") echo "🧵 StringBuf Tests" ;;
+        "test_strview_catch2") echo "👀 String View Tests" ;;
+        "test_sysinfo_catch2") echo "🖥️ System Information Tests" ;;
+        "test_url_catch2") echo "🌐 URL Parser Tests" ;;
+        "test_url_extra_catch2") echo "🌐 URL Parser Extended Tests" ;;
+        "test_validator_catch2") echo "🔍 Validator Tests" ;;
+        "test_variable_pool_catch2") echo "🏊 Variable Pool Tests" ;;
         *) echo "🧪 $exe_name" ;;
     esac
 }
@@ -244,15 +263,21 @@ parse_catch2_results() {
     fi
     
     # Parse Catch2 compact output format
-    # Look for lines like "All tests passed (289 assertions in 12 test cases)"
+    # Look for lines like "All tests passed (289 assertions in 12 test cases)" or "All tests passed (66 assertions in 1 test case)"
     # or "test cases: X | Y passed | Z failed"
     local passed=0
     local failed=0
     
     if [ $exit_code -eq 0 ]; then
-        # All tests passed - extract from summary line
-        passed=$(grep -o "All tests passed ([0-9]* assertions in [0-9]* test cases)" "$output_file" | grep -o "[0-9]* test cases" | grep -o "[0-9]*" || echo "0")
-        failed=0
+        # All tests passed - extract from summary line (handle both singular and plural)
+        if grep -q "All tests passed" "$output_file"; then
+            # Extract test case count (handles both "test case" and "test cases")
+            passed=$(grep -o "All tests passed ([0-9]* assertions in [0-9]* test cases\?)" "$output_file" | grep -o "[0-9]* test cases\?" | grep -o "[0-9]*" || echo "0")
+            failed=0
+        else
+            passed=0
+            failed=0
+        fi
     else
         # Some tests failed - try to extract counts
         if grep -q "test cases:" "$output_file"; then
@@ -342,7 +367,7 @@ if [ -n "$TARGET_SUITE" ]; then
     filtered_executables=()
     for test_exe in "${test_executables[@]}"; do
         base_name=$(basename "$test_exe" .exe)
-        suite_category=$(get_test_suite_category "$base_name")
+        suite_category=$(get_suite_category "$base_name")
         if [ "$suite_category" = "$TARGET_SUITE" ]; then
             filtered_executables+=("$test_exe")
         fi
@@ -370,7 +395,7 @@ for test_exe in "${test_executables[@]}"; do
     # Check if executable exists
     if [ -f "$test_exe" ] && [ -x "$test_exe" ]; then
         c_test_display_name=$(get_c_test_display_name "$base_name")
-        suite_category=$(get_test_suite_category "$base_name")
+        suite_category=$(get_suite_category "$base_name")
         
         echo "🏃 Running $c_test_display_name..."
         
@@ -513,8 +538,8 @@ echo "=============================================================="
 # Two-level tree breakdown (suite categories with individual tests nested)
 echo "📊 Test Results:"
 
-# Show tests in tree structure grouped by suite category
-for suite_cat in catch2 input_catch2 validator-catch2 lambda-catch2 unknown; do
+# Show tests in tree structure grouped by suite category (matching old test system order)
+for suite_cat in library input lambda validator unknown; do
     suite_display=$(get_suite_category_display_name "$suite_cat")
     suite_has_tests=false
     suite_total=0
