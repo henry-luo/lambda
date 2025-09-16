@@ -1,4 +1,4 @@
-#include <criterion/criterion.h>
+#include "../lib/unit_test/include/criterion/criterion.h"
 #include <criterion/new/assert.h>
 #include "../lambda/input/css_parser.h"
 #include "../lib/mem-pool/include/mem_pool.h"

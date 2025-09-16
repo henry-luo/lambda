@@ -1,4 +1,4 @@
-#include <criterion/criterion.h>
+#include "../lib/unit_test/include/criterion/criterion.h"
 #include <criterion/new/assert.h>
 #include <criterion/logging.h>
 #include <stdlib.h>

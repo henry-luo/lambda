@@ -2,7 +2,7 @@
 // Comprehensive Criterion unit tests for directory listing via input_from_directory
 // Tests the new directory listing feature implemented for Lambda input system
 
-#include <criterion/criterion.h>
+#include "../lib/unit_test/include/criterion/criterion.h"
 #include "../lambda/input/input.h"
 #include <sys/stat.h>
 #include <unistd.h>

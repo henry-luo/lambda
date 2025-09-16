@@ -94,8 +94,9 @@
  * under various conditions.
  */
 
-#include <criterion/criterion.h>
-#include <criterion/logging.h>
+#include "../lib/unit_test/include/criterion/criterion.h"
+#include "../lib/mem-pool/include/mem_pool.h"
+#include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdalign.h>

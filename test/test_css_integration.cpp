@@ -1,4 +1,4 @@
-#include <criterion/criterion.h>
+#include "../lib/unit_test/include/criterion/criterion.h"
 #include <string>
 #include "../lambda/input/css_parser.h"
 #include "../lambda/input/css_tokenizer.h"

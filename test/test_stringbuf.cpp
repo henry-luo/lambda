@@ -1,4 +1,4 @@
-#include <criterion/criterion.h>
+#include "../lib/unit_test/include/criterion/criterion.h"
 #include "../lib/stringbuf.h"
 #include "../lib/mem-pool/include/mem_pool.h"
 
@@ -170,7 +170,12 @@ Test(stringbuf_tests, test_stringbuf_copy, .init = setup, .fini = teardown) {
     StringBuf *sb1 = stringbuf_new(test_pool);
     StringBuf *sb2 = stringbuf_new(test_pool);
     
+    cr_assert_neq(sb1, NULL, "sb1 creation should succeed");
+    cr_assert_neq(sb2, NULL, "sb2 creation should succeed");
+    
     stringbuf_append_str(sb1, "Hello World");
+    cr_assert_neq(sb1->str, NULL, "sb1 str should be allocated after append");
+    
     stringbuf_copy(sb2, sb1);
     
     cr_assert_not_null(sb2->str, "destination str should be allocated");
@@ -217,6 +222,7 @@ Test(stringbuf_tests, test_stringbuf_to_string, .init = setup, .fini = teardown)
 
 Test(stringbuf_tests, test_stringbuf_capacity_growth, .init = setup, .fini = teardown) {
     StringBuf *sb = stringbuf_new_cap(test_pool, 10);
+    cr_assert_neq(sb, NULL, "StringBuf creation should succeed");
     size_t initial_capacity = sb->capacity;
     
     // Append enough data to force growth
@@ -243,9 +249,11 @@ Test(stringbuf_tests, test_stringbuf_capacity_growth, .init = setup, .fini = tea
 
 Test(stringbuf_tests, test_stringbuf_edge_cases, .init = setup, .fini = teardown) {
     StringBuf *sb = stringbuf_new(test_pool);
+    cr_assert_neq(sb, NULL, "StringBuf creation should succeed");
     
     // Test empty string append
     stringbuf_append_str(sb, "");
+    cr_assert_neq(sb->str, NULL, "StringBuf should have valid string after append");
     cr_assert_eq(sb->str->len, 0, "empty string append should not change length");
     
     // Test zero character append

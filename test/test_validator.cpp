@@ -12,7 +12,7 @@
 #include <cassert>
 #include <iostream>
 #include <unistd.h>  // for getcwd
-#include <criterion/criterion.h>
+#include "../lib/unit_test/include/criterion/criterion.h"
 #include <criterion/logging.h>
 
 // Include validator headers for ValidationResult and run_validation
