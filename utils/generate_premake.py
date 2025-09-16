@@ -56,6 +56,8 @@ class PremakeGenerator:
     
     def generate_workspace(self) -> None:
         """Generate the main workspace configuration"""
+        # Get workspace name from config or default
+        workspace_name = self.config.get('workspace_name', 'Lambda')
         output = self.config.get('output', 'lambda.exe')
         startup_project = output.replace('.exe', '')
         
@@ -70,9 +72,11 @@ class PremakeGenerator:
         }
         toolset = toolset_map.get(compiler, 'clang')
         
-        # Determine platforms based on compiler and output
-        platforms = []
-        if 'linux' in output.lower() or 'linux-gnu' in compiler:
+        # Determine platforms based on config or compiler and output
+        platform = self.config.get('platform', '')
+        if platform:
+            platforms = ['x64', platform]
+        elif 'linux' in output.lower() or 'linux-gnu' in compiler:
             platforms = ['x64', 'Linux_x64']
         else:
             platforms = ['x64']
@@ -80,7 +84,7 @@ class PremakeGenerator:
         platform_str = ', '.join([f'"{p}"' for p in platforms])
         
         self.premake_content.extend([
-            'workspace "Lambda"',
+            f'workspace "{workspace_name}"',
             '    configurations { "Debug", "Release" }',
             f'    platforms {{ {platform_str} }}',
             '    location "build/premake"',
@@ -110,7 +114,7 @@ class PremakeGenerator:
         ])
         
         # Add Linux-specific compiler and flags if this is a Linux build
-        if 'linux' in output.lower() or 'linux-gnu' in compiler:
+        if platform == 'Linux_x64' or 'linux' in output.lower() or 'linux-gnu' in compiler:
             self.premake_content.extend([
                 f'        toolset "gcc"',
                 f'        gccprefix "x86_64-linux-gnu-"',
@@ -120,8 +124,8 @@ class PremakeGenerator:
             ])
             
             # Add library search paths for Linux dependencies
-            if self.config.get('library_dirs'):
-                lib_dirs = self.config['library_dirs']
+            lib_dirs = self.config.get('lib_dirs', self.config.get('library_dirs', []))
+            if lib_dirs:
                 lib_dirs_str = ', '.join([f'"{d}"' for d in lib_dirs])
                 self.premake_content.append(f'        libdirs {{ {lib_dirs_str} }}')
         
@@ -133,18 +137,138 @@ class PremakeGenerator:
     
     def generate_library_projects(self) -> None:
         """Generate static library projects from JSON config"""
+        # Handle new lib_project format (for cross-platform builds)
+        lib_project = self.config.get('lib_project', {})
+        if lib_project:
+            self._generate_lib_project(lib_project)
+            
+        # Handle old libraries format (backward compatibility)
         libraries = self.config.get('libraries', [])
         
         for lib in libraries:
-            lib_name = lib.get('name', '')
-            link_type = lib.get('link', 'static')
-            
-            # Skip external libraries and inline libraries for now
-            if link_type in ['dynamic', 'static'] and 'sources' not in lib:
+            # Handle both string and object formats
+            if isinstance(lib, str):
+                # String format: just library name, skip processing
                 continue
+            elif isinstance(lib, dict):
+                lib_name = lib.get('name', '')
+                link_type = lib.get('link', 'static')
                 
-            if link_type == 'inline' and 'sources' in lib:
-                self._generate_inline_library(lib)
+                # Skip external libraries and inline libraries for now
+                if link_type in ['dynamic', 'static'] and 'sources' not in lib:
+                    continue
+                    
+                if link_type == 'inline' and 'sources' in lib:
+                    self._generate_inline_library(lib)
+    
+    def _generate_lib_project(self, lib_project: Dict[str, Any]) -> None:
+        """Generate a static library project from lib_project configuration"""
+        name = lib_project.get('name', 'lambda-lib')
+        kind = lib_project.get('kind', 'StaticLib')
+        language = lib_project.get('language', 'C')
+        target_dir = lib_project.get('target_dir', 'build/lib')
+        files = lib_project.get('files', [])
+        
+        self.premake_content.extend([
+            '',
+            f'project "{name}"',
+            f'    kind "{kind}"',
+            f'    language "{language}"',
+            f'    targetdir "{target_dir}"',
+            f'    objdir "build/obj/%{{prj.name}}"',
+            '    ',
+        ])
+        
+        # Add source files
+        if files:
+            self.premake_content.append('    files {')
+            for file in files:
+                self.premake_content.append(f'        "{file}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+        
+        # Add include directories
+        include_dirs = self.config.get('include_dirs', [])
+        if include_dirs:
+            self.premake_content.append('    includedirs {')
+            for include_dir in include_dirs:
+                self.premake_content.append(f'        "{include_dir}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+        
+        # Add library directories  
+        lib_dirs = self.config.get('lib_dirs', [])
+        if lib_dirs:
+            self.premake_content.append('    libdirs {')
+            for lib_dir in lib_dirs:
+                self.premake_content.append(f'        "{lib_dir}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+        
+        # Add build options
+        cflags = self.config.get('cflags', [])
+        cxxflags = self.config.get('cxxflags', [])
+        
+        if cflags:
+            self.premake_content.extend([
+                '    filter "files:**.c"',
+                '        buildoptions {'
+            ])
+            for flag in cflags:
+                self.premake_content.append(f'            "{flag}",')
+            self.premake_content.extend([
+                '        }',
+                '    '
+            ])
+            
+        if cxxflags:
+            self.premake_content.extend([
+                '    filter "files:**.cpp"',
+                '        buildoptions {'
+            ])
+            for flag in cxxflags:
+                self.premake_content.append(f'            "{flag}",')
+            self.premake_content.extend([
+                '        }',
+                '    '
+            ])
+            
+        # Add defines
+        defines = self.config.get('defines', [])
+        if defines:
+            self.premake_content.extend([
+                '    filter {}',
+                '    defines {'
+            ])
+            for define in defines:
+                self.premake_content.append(f'        "{define}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+            
+        # Add platform-specific settings
+        platform = self.config.get('platform', '')
+        if platform == 'Linux_x64':
+            self.premake_content.extend([
+                f'    filter "platforms:{platform}"',
+                '        system "linux"',
+                '        architecture "x64"',
+                '        toolset "gcc"',
+                '        gccprefix "x86_64-linux-gnu-"',
+                '    '
+            ])
+            
+        self.premake_content.extend([
+            '    filter {}',
+            '    '
+        ])
     
     def _generate_inline_library(self, lib: Dict[str, Any]) -> None:
         """Generate a static library project for inline libraries"""
@@ -184,10 +308,11 @@ class PremakeGenerator:
         
         # Add special build options
         output = self.config.get('output', 'lambda.exe')
+        compiler = self.config.get('compiler', '')
         build_opts = ['-fms-extensions', '-pedantic']
         
         # Use different color diagnostic flags based on target platform
-        if 'linux' in output.lower():
+        if 'linux' in output.lower() or 'linux-gnu' in compiler:
             build_opts.append('-fdiagnostics-color=auto')
         else:
             build_opts.append('-fcolor-diagnostics')
@@ -303,10 +428,11 @@ class PremakeGenerator:
         
         # Add build options
         output = self.config.get('output', 'lambda.exe')
+        compiler = self.config.get('compiler', '')
         build_opts = ['-fms-extensions', '-pedantic']
         
         # Use different color diagnostic flags based on target platform
-        if 'linux' in output.lower():
+        if 'linux' in output.lower() or 'linux-gnu' in compiler:
             build_opts.append('-fdiagnostics-color=auto')
         else:
             build_opts.append('-fcolor-diagnostics')
@@ -507,9 +633,10 @@ class PremakeGenerator:
         
         # Use different color diagnostic flags based on target platform
         output = self.config.get('output', 'lambda.exe')
+        compiler = self.config.get('compiler', '')
         build_opts = ['-fms-extensions', '-pedantic']
         
-        if 'linux' in output.lower():
+        if 'linux' in output.lower() or 'linux-gnu' in compiler:
             build_opts.append('-fdiagnostics-color=auto')
         else:
             build_opts.append('-fcolor-diagnostics')
@@ -524,7 +651,15 @@ class PremakeGenerator:
         ])
     
     def generate_test_projects(self) -> None:
-        """Generate test executable projects from test suites"""
+        """Generate test executable projects from test suites or test_projects"""
+        # Handle new test_projects format (for cross-platform builds)
+        test_projects = self.config.get('test_projects', [])
+        if test_projects:
+            for test_project in test_projects:
+                self._generate_test_project(test_project)
+            return
+            
+        # Handle old test configuration format (backward compatibility)
         test_config = self.config.get('test', {})
         if not test_config:
             # No test configuration, skip test generation
@@ -534,6 +669,129 @@ class PremakeGenerator:
         
         for suite in test_suites:
             self._generate_test_suite(suite)
+    
+    def _generate_test_project(self, project: Dict[str, Any]) -> None:
+        """Generate a single test project from test_projects configuration"""
+        name = project.get('name', '')
+        kind = project.get('kind', 'ConsoleApp')
+        language = project.get('language', 'C')
+        files = project.get('files', [])
+        links = project.get('links', [])
+        
+        if not name or not files:
+            return
+            
+        self.premake_content.extend([
+            '',
+            f'project "{name}"',
+            f'    kind "{kind}"',
+            f'    language "{language}"',
+            f'    targetdir "{self.config.get("target_dir", "test")}"',
+            f'    objdir "build/obj/%{{prj.name}}"',
+            f'    targetextension ".exe"',
+            '',
+            f'    files {{',
+        ])
+        
+        # Add source files
+        for file in files:
+            self.premake_content.append(f'        "{file}",')
+            
+        self.premake_content.extend([
+            '    }',
+            '',
+            '    includedirs {'
+        ])
+        
+        # Add include directories
+        for include_dir in self.config.get('include_dirs', []):
+            self.premake_content.append(f'        "{include_dir}",')
+            
+        self.premake_content.extend([
+            '    }',
+            '',
+            '    libdirs {'
+        ])
+        
+        # Add library directories  
+        for lib_dir in self.config.get('lib_dirs', []):
+            self.premake_content.append(f'        "{lib_dir}",')
+            
+        self.premake_content.extend([
+            '    }',
+            '',
+            '    links {'
+        ])
+        
+        # Add linked libraries
+        for link in links:
+            self.premake_content.append(f'        "{link}",')
+            
+        for lib in self.config.get('libraries', []):
+            self.premake_content.append(f'        "{lib}",')
+            
+        self.premake_content.extend([
+            '    }',
+            '',
+        ])
+        
+        # Add build options
+        cflags = self.config.get('cflags', [])
+        cxxflags = self.config.get('cxxflags', [])
+        
+        if cflags:
+            self.premake_content.extend([
+                '    filter "files:**.c"',
+                '        buildoptions {'
+            ])
+            for flag in cflags:
+                self.premake_content.append(f'            "{flag}",')
+            self.premake_content.extend([
+                '        }',
+                ''
+            ])
+            
+        if cxxflags:
+            self.premake_content.extend([
+                '    filter "files:**.cpp"',
+                '        buildoptions {'
+            ])
+            for flag in cxxflags:
+                self.premake_content.append(f'            "{flag}",')
+            self.premake_content.extend([
+                '        }',
+                ''
+            ])
+            
+        # Add defines
+        defines = self.config.get('defines', [])
+        if defines:
+            self.premake_content.extend([
+                '    defines {'
+            ])
+            for define in defines:
+                self.premake_content.append(f'        "{define}",')
+            self.premake_content.extend([
+                '    }',
+                ''
+            ])
+            
+        # Add platform-specific settings
+        platform = self.config.get('platform', '')
+        if platform == 'Linux_x64':
+            self.premake_content.extend([
+                f'    filter "platforms:{platform}"',
+                '        system "linux"',
+                '        architecture "x64"',
+                '        toolset "gcc"',
+                '        gccprefix "x86_64-linux-gnu-"',
+                ''
+            ])
+            
+        self.premake_content.extend([
+            '    filter {}',
+            ''
+        ])
     
     def _generate_test_suite(self, suite: Dict[str, Any]) -> None:
         """Generate test projects for a specific test suite"""
@@ -808,10 +1066,11 @@ class PremakeGenerator:
         # Add build options based on source file type
         is_cpp_test = source.endswith('.cpp')
         output = self.config.get('output', 'lambda.exe')
+        compiler = self.config.get('compiler', '')
         build_opts = ['-fms-extensions', '-pedantic']
         
         # Use different color diagnostic flags based on target platform
-        if 'linux' in output.lower():
+        if 'linux' in output.lower() or 'linux-gnu' in compiler:
             build_opts.append('-fdiagnostics-color=auto')
         else:
             build_opts.append('-fcolor-diagnostics')
@@ -850,14 +1109,24 @@ class PremakeGenerator:
         
         # Extract main program dependencies from libraries
         for lib in self.config.get('libraries', []):
-            lib_name = lib.get('name', '')
-            if lib_name not in ['criterion']:  # Exclude test-only libraries
-                dependencies.append(lib_name)
+            # Handle both string and object formats
+            if isinstance(lib, str):
+                # String format: just library name
+                if lib not in ['criterion']:  # Exclude test-only libraries
+                    dependencies.append(lib)
+            elif isinstance(lib, dict):
+                lib_name = lib.get('name', '')
+                if lib_name not in ['criterion']:  # Exclude test-only libraries
+                    dependencies.append(lib_name)
         
         # Add dev_libraries for main program
         for lib in self.config.get('dev_libraries', []):
-            lib_name = lib.get('name', '')
-            dependencies.append(lib_name)
+            # Handle both string and object formats
+            if isinstance(lib, str):
+                dependencies.append(lib)
+            elif isinstance(lib, dict):
+                lib_name = lib.get('name', '')
+                dependencies.append(lib_name)
         
         # Remove .exe extension for project name and adjust for platform
         project_name = output.replace('.exe', '')
@@ -1027,10 +1296,11 @@ class PremakeGenerator:
         
         # Add build options with separate handling for C and C++ files
         output = self.config.get('output', 'lambda.exe')
+        compiler = self.config.get('compiler', '')
         build_opts = ['-fms-extensions', '-pedantic']
         
         # Use different color diagnostic flags based on target platform
-        if 'linux' in output.lower():
+        if 'linux' in output.lower() or 'linux-gnu' in compiler:
             # GCC-specific flags for Linux cross-compilation
             build_opts.append('-fdiagnostics-color=auto')
         else:
