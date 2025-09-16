@@ -83,7 +83,11 @@ project "lambda-linux"
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
-        "lambda/main-minimal.cpp",
+        "lambda/input/css_tokenizer.c",
+        "lambda/input/css_properties.c",
+        "lambda/input/css_parser.c",
+        "lambda/main-repl.cpp",
+        "lambda/main.cpp",
         "lambda/input/mime-types.c",
         "lambda/input/css_tokenizer.c",
         "lambda/input/mime-detect.c",
@@ -152,6 +156,8 @@ project "lambda-linux"
         "linux-deps/include",
         "linux-deps/include",
         "linux-deps/include",
+        "linux-deps/include",
+        "linux-deps/include/ncurses",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -168,6 +174,8 @@ project "lambda-linux"
         "../../linux-deps/lib/libcurl.a",
         "../../linux-deps/lib/libmpdec.a",
         "../../linux-deps/lib/libutf8proc.a",
+        "../../linux-deps/lib/libedit.a",
+        "../../linux-deps/lib/libncurses.a",
     }
     
     -- Linux cross-compilation static libraries
@@ -178,6 +186,8 @@ project "lambda-linux"
             "../../linux-deps/lib/libcurl.a",
             "../../linux-deps/lib/libmpdec.a",
             "../../linux-deps/lib/libutf8proc.a",
+            "../../linux-deps/lib/libedit.a",
+            "../../linux-deps/lib/libncurses.a",
         }
     
     filter {}

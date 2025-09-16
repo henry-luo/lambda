@@ -44,16 +44,48 @@ extern "C" {
 #include <fcntl.h>
 #endif
 
-char *repl_readline(const char *prompt);
-int repl_add_history(const char *line);
-const char* get_repl_prompt();
-void print_help();
-
 // Forward declare MIR transpiler function
 Item run_script_mir(Runtime *runtime, const char* source, char* script_path, bool run_main);
 
 // Forward declare function with run_main support
 Item run_script_with_run_main(Runtime *runtime, char* script_path, bool transpile_only, bool run_main);
+
+// Forward declare REPL functions from main-repl.cpp
+const char* get_repl_prompt();
+char *repl_readline(const char *prompt);
+int repl_add_history(const char *line);
+void print_help();
+
+// Linux-specific compatibility functions
+#ifdef NATIVE_LINUX_BUILD
+#include <stdint.h>
+
+// Undefine any existing macros for endianness functions
+#ifdef le16toh
+#undef le16toh
+#endif
+#ifdef be16toh
+#undef be16toh
+#endif
+
+// Provide endianness functions for tree-sitter
+extern "C" {
+uint16_t le16toh(uint16_t little_endian_16bits) {
+    return little_endian_16bits;  // Assuming little-endian host
+}
+
+uint16_t be16toh(uint16_t big_endian_16bits) {
+    return __builtin_bswap16(big_endian_16bits);
+}
+}
+
+// Typeset function stub for Linux builds
+extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* output_file) {
+    printf("Typeset functionality not available in Linux build\n");
+    (void)input_file; (void)output_file; // Suppress unused parameter warnings
+    return false;
+}
+#endif
 
 void run_repl(Runtime *runtime, bool use_mir) {
     printf("Lambda Script REPL v1.0%s\n", use_mir ? " (MIR JIT)" : "");
