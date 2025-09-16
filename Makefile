@@ -300,7 +300,7 @@ build-windows:
 
 # Cross-compilation for Linux
 build-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
-	@echo "Cross-compiling for Linux using glibc..."
+	@echo "Cross-compiling for Linux using Premake5..."
 	@if [ ! -f "/opt/homebrew/Cellar/x86_64-unknown-linux-gnu/13.3.0/bin/x86_64-linux-gnu-gcc" ]; then \
 		echo "Linux cross-compilation toolchain not found."; \
 		echo "Please install it with:"; \
@@ -308,8 +308,11 @@ build-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 		echo "  brew install x86_64-unknown-linux-gnu"; \
 		exit 1; \
 	fi
-	@echo "Building lambda-linux.exe with $(JOBS) parallel jobs..."
-	$(COMPILE_SCRIPT) build_lambda_linux_config.json --jobs=$(JOBS)
+	@echo "Generating Premake5 configuration for Linux build..."
+	python3 utils/generate_premake.py build_lambda_linux_config.json premake5-linux.lua
+	@echo "Building lambda-linux.exe with $(JOBS) parallel jobs using Premake5..."
+	premake5 --file=premake5-linux.lua gmake2
+	$(MAKE) -C build/premake config=release_linux_x64 -j$(JOBS)
 	@if [ -f "lambda-linux.exe" ]; then \
 		echo "Linux cross-compilation completed successfully!"; \
 		echo "Executable: lambda-linux.exe"; \
@@ -1133,6 +1136,7 @@ clean-premake:
 	@echo "Cleaning Premake5 build artifacts..."
 	@rm -rf build/premake
 	@rm -f premake5.lua
+	@rm -f premake5-linux.lua
 	@rm -f *.make
 	@rm -f dummy.cpp
 	@echo "Premake5 artifacts cleaned."
