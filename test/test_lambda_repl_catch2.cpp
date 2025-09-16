@@ -143,169 +143,165 @@ struct test_result run_lambda_repl_interactive(const char* input) {
 // BASIC FUNCTIONALITY TESTS
 // ============================================================================
 
-TEST_CASE("Lambda REPL Basic Functionality", "[lambda][repl][basic]") {
-    SECTION("executable_exists") {
-        int result = system("test -x ./lambda.exe");
-        REQUIRE(result == 0);
-    }
+TEST_CASE("executable_exists", "[lambda][repl][basic]") {
+    int result = system("test -x ./lambda.exe");
+    REQUIRE(result == 0);
+}
+
+TEST_CASE("startup_and_quit", "[lambda][repl][basic]") {
+    struct test_result result = run_lambda_repl(".quit\\n");
     
-    SECTION("startup_and_quit") {
-        struct test_result result = run_lambda_repl(".quit\\n");
-        
-        REQUIRE(result.output != nullptr);
-        REQUIRE(result.output_len > 0);
-        REQUIRE(output_contains(result.output, "Lambda"));
-        
-        free_test_result(&result);
-    }
+    REQUIRE(result.output != nullptr);
+    REQUIRE(result.output_len > 0);
+    REQUIRE(output_contains(result.output, "Lambda"));
     
-    SECTION("basic_arithmetic") {
-        struct test_result result = run_lambda_repl("2 + 3\\n.quit\\n");
-        
-        REQUIRE(result.output != nullptr);
-        REQUIRE(output_contains(result.output, "5"));
-        
-        free_test_result(&result);
-    }
+    free_test_result(&result);
+}
+
+TEST_CASE("basic_arithmetic", "[lambda][repl][basic]") {
+    struct test_result result = run_lambda_repl("2 + 3\\n.quit\\n");
     
-    SECTION("help_command") {
-        struct test_result result = run_lambda_repl(".help\\n.quit\\n");
-        
-        REQUIRE(result.output != nullptr);
-        REQUIRE((output_contains(result.output, ".quit") || output_contains(result.output, "quit")));
-        
-        free_test_result(&result);
-    }
+    REQUIRE(result.output != nullptr);
+    REQUIRE(output_contains(result.output, "5"));
     
-    SECTION("multiple_commands") {
-        struct test_result result = run_lambda_repl("1 + 1\\n2 * 3\\n.quit\\n");
-        
-        REQUIRE(result.output != nullptr);
-        REQUIRE((output_contains(result.output, "2") || output_contains(result.output, "6")));
-        
-        free_test_result(&result);
-    }
+    free_test_result(&result);
+}
+
+TEST_CASE("help_command", "[lambda][repl][basic]") {
+    struct test_result result = run_lambda_repl(".help\\n.quit\\n");
     
-    SECTION("quit_variations") {
-        // Test .q short form
-        struct test_result result1 = run_lambda_repl(".q\\n");
-        REQUIRE(result1.output != nullptr);
-        free_test_result(&result1);
-        
-        // Test .exit
-        struct test_result result2 = run_lambda_repl(".exit\\n");
-        REQUIRE(result2.output != nullptr);
-        free_test_result(&result2);
-    }
+    REQUIRE(result.output != nullptr);
+    REQUIRE((output_contains(result.output, ".quit") || output_contains(result.output, "quit")));
     
-    SECTION("complex_arithmetic") {
-        struct test_result result = run_lambda_repl("5 * 7\\n8 / 2\\n.quit\\n");
-        
-        REQUIRE(result.output != nullptr);
-        REQUIRE((output_contains(result.output, "35") || output_contains(result.output, "4")));
-        
-        free_test_result(&result);
-    }
+    free_test_result(&result);
+}
+
+TEST_CASE("multiple_commands", "[lambda][repl][basic]") {
+    struct test_result result = run_lambda_repl("1 + 1\\n2 * 3\\n.quit\\n");
     
-    SECTION("error_recovery") {
-        struct test_result result = run_lambda_repl("2 +\\n1 + 1\\n.quit\\n");
-        
-        REQUIRE(result.output != nullptr);
-        // Should continue running despite syntax error
-        REQUIRE((output_contains(result.output, "2") || output_contains(result.output, "Lambda")));
-        
-        free_test_result(&result);
-    }
+    REQUIRE(result.output != nullptr);
+    REQUIRE((output_contains(result.output, "2") || output_contains(result.output, "6")));
     
-    SECTION("version_display") {
-        struct test_result result = run_lambda_repl(".quit\\n");
-        
-        REQUIRE(result.output != nullptr);
-        REQUIRE((output_contains(result.output, "1.0") || output_contains(result.output, "v1")));
-        
-        free_test_result(&result);
-    }
+    free_test_result(&result);
+}
+
+TEST_CASE("quit_variations", "[lambda][repl][basic]") {
+    // Test .q short form
+    struct test_result result1 = run_lambda_repl(".q\\n");
+    REQUIRE(result1.output != nullptr);
+    free_test_result(&result1);
     
-    SECTION("repl_functionality") {
-        struct test_result result = run_lambda_repl(".quit\\n");
-        
-        REQUIRE(result.output != nullptr);
-        // In non-interactive mode, prompts may not appear but REPL should function
-        bool has_startup_info = output_contains(result.output, "Lambda Script REPL") ||
-                               output_contains(result.output, "Type .help for commands");
-        
-        REQUIRE(has_startup_info);
-        
-        free_test_result(&result);
-    }
+    // Test .exit
+    struct test_result result2 = run_lambda_repl(".exit\\n");
+    REQUIRE(result2.output != nullptr);
+    free_test_result(&result2);
+}
+
+TEST_CASE("complex_arithmetic", "[lambda][repl][basic]") {
+    struct test_result result = run_lambda_repl("5 * 7\\n8 / 2\\n.quit\\n");
     
-    SECTION("command_sequence_stability") {
-        struct test_result result = run_lambda_repl("1 + 1\\n.help\\n2 * 2\\n.quit\\n");
-        
-        REQUIRE(result.output != nullptr);
-        REQUIRE(result.output_len > 50);
-        
-        free_test_result(&result);
-    }
+    REQUIRE(result.output != nullptr);
+    REQUIRE((output_contains(result.output, "35") || output_contains(result.output, "4")));
+    
+    free_test_result(&result);
+}
+
+TEST_CASE("error_recovery", "[lambda][repl][basic]") {
+    struct test_result result = run_lambda_repl("2 +\\n1 + 1\\n.quit\\n");
+    
+    REQUIRE(result.output != nullptr);
+    // Should continue running despite syntax error
+    REQUIRE((output_contains(result.output, "2") || output_contains(result.output, "Lambda")));
+    
+    free_test_result(&result);
+}
+
+TEST_CASE("version_display", "[lambda][repl][basic]") {
+    struct test_result result = run_lambda_repl(".quit\\n");
+    
+    REQUIRE(result.output != nullptr);
+    REQUIRE((output_contains(result.output, "1.0") || output_contains(result.output, "v1")));
+    
+    free_test_result(&result);
+}
+
+TEST_CASE("repl_functionality", "[lambda][repl][basic]") {
+    struct test_result result = run_lambda_repl(".quit\\n");
+    
+    REQUIRE(result.output != nullptr);
+    // In non-interactive mode, prompts may not appear but REPL should function
+    bool has_startup_info = output_contains(result.output, "Lambda Script REPL") ||
+                           output_contains(result.output, "Type .help for commands");
+    
+    REQUIRE(has_startup_info);
+    
+    free_test_result(&result);
+}
+
+TEST_CASE("command_sequence_stability", "[lambda][repl][basic]") {
+    struct test_result result = run_lambda_repl("1 + 1\\n.help\\n2 * 2\\n.quit\\n");
+    
+    REQUIRE(result.output != nullptr);
+    REQUIRE(result.output_len > 50);
+    
+    free_test_result(&result);
 }
 
 // ============================================================================
 // INTERACTIVE MODE TESTS (with pseudo-TTY to capture prompts)
 // ============================================================================
 
-TEST_CASE("Lambda REPL Interactive Mode", "[lambda][repl][interactive]") {
-    SECTION("prompt_display") {
-        struct test_result result = run_lambda_repl_interactive(".quit\n");
-        
-        REQUIRE(result.output != nullptr);
-        
-        // Check for actual Lambda prompts that appear in TTY mode
-        bool has_lambda_prompt = output_contains(result.output, "λ>");
-        bool has_ascii_prompt = output_contains(result.output, "L>");
-        
-        REQUIRE((has_lambda_prompt || has_ascii_prompt));
-        
-        free_test_result(&result);
-    }
+TEST_CASE("prompt_display", "[lambda][repl][interactive]") {
+    struct test_result result = run_lambda_repl_interactive(".quit\n");
     
-    SECTION("prompt_with_expressions") {
-        struct test_result result = run_lambda_repl_interactive("2 + 3\n.quit\n");
-        
-        REQUIRE(result.output != nullptr);
-        
-        // Interactive mode should at least show prompts, even if expressions are hard to test reliably
-        bool has_prompt = output_contains_clean(result.output, "λ>") || output_contains_clean(result.output, "L>");
-        bool has_startup = output_contains_clean(result.output, "Lambda Script REPL");
-        
-        REQUIRE((has_prompt || has_startup));
-        
-        free_test_result(&result);
-    }
+    REQUIRE(result.output != nullptr);
     
-    SECTION("unicode_prompt_support") {
-        struct test_result result = run_lambda_repl_interactive(".quit\n");
-        
-        REQUIRE(result.output != nullptr);
-        
-        // In UTF-8 environments, should prefer λ> over L>
-        bool has_unicode = output_contains(result.output, "λ>");
-        bool has_ascii = output_contains(result.output, "L>");
-        
-        // At least one prompt type should be present
-        REQUIRE((has_unicode || has_ascii));
-        
-        free_test_result(&result);
-    }
+    // Check for actual Lambda prompts that appear in TTY mode
+    bool has_lambda_prompt = output_contains(result.output, "λ>");
+    bool has_ascii_prompt = output_contains(result.output, "L>");
     
-    SECTION("multiple_prompt_sequence") {
-        struct test_result result = run_lambda_repl_interactive("1 + 1\n2 * 2\n.quit\n");
-        
-        REQUIRE(result.output != nullptr);
-        
-        // For interactive mode with pseudo-TTY, focus on what we can reliably test
-        bool has_content = result.output && strlen(result.output) > 0;
-        REQUIRE(has_content);
-        
-        free_test_result(&result);
-    }
+    REQUIRE((has_lambda_prompt || has_ascii_prompt));
+    
+    free_test_result(&result);
+}
+
+TEST_CASE("prompt_with_expressions", "[lambda][repl][interactive]") {
+    struct test_result result = run_lambda_repl_interactive("2 + 3\n.quit\n");
+    
+    REQUIRE(result.output != nullptr);
+    
+    // Interactive mode should at least show prompts, even if expressions are hard to test reliably
+    bool has_prompt = output_contains_clean(result.output, "λ>") || output_contains_clean(result.output, "L>");
+    bool has_startup = output_contains_clean(result.output, "Lambda Script REPL");
+    
+    REQUIRE((has_prompt || has_startup));
+    
+    free_test_result(&result);
+}
+
+TEST_CASE("unicode_prompt_support", "[lambda][repl][interactive]") {
+    struct test_result result = run_lambda_repl_interactive(".quit\n");
+    
+    REQUIRE(result.output != nullptr);
+    
+    // In UTF-8 environments, should prefer λ> over L>
+    bool has_unicode = output_contains(result.output, "λ>");
+    bool has_ascii = output_contains(result.output, "L>");
+    
+    // At least one prompt type should be present
+    REQUIRE((has_unicode || has_ascii));
+    
+    free_test_result(&result);
+}
+
+TEST_CASE("multiple_prompt_sequence", "[lambda][repl][interactive]") {
+    struct test_result result = run_lambda_repl_interactive("1 + 1\n2 * 2\n.quit\n");
+    
+    REQUIRE(result.output != nullptr);
+    
+    // For interactive mode with pseudo-TTY, focus on what we can reliably test
+    bool has_content = result.output && strlen(result.output) > 0;
+    REQUIRE(has_content);
+    
+    free_test_result(&result);
 }
