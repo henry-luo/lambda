@@ -88,10 +88,6 @@ The build system reads from `build_lambda_config.json` and processes:
 4. **Dependency Management**: Better handling of complex library dependencies
 5. **Incremental Builds**: Proper dependency tracking and incremental compilation
 
-## Legacy Compatibility
-
-The original `compile.sh` script is still available for comparison and fallback, but the Premake system is now the recommended build method.
-
 ## Example Build Output
 
 ```bash

@@ -138,8 +138,6 @@ help:
 	@echo "  release       - Build optimized release version using Premake"
 	@echo "  rebuild       - Force complete rebuild using Premake"
 	@echo "  lambda        - Build lambda project specifically using Premake"
-	@echo "  radiant       - Build radiant project"
-	@echo "  window        - Build window project"
 	@echo "  all           - Build all projects"
 	@echo ""
 	@echo "Cross-compilation:"
@@ -187,7 +185,6 @@ help:
 	@echo "  test-fuzz     - Run fuzzing tests for robustness"
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
-	@echo "  test-ci       - Run CI test suite (unit + memory + integration)"
 	@echo "  verify-windows - Verify Windows cross-compiled executable with Wine"
 	@echo "  verify-linux  - Verify Linux cross-compiled executable"
 	@echo "  test-windows  - Run CI tests for Windows executable"
@@ -206,9 +203,6 @@ help:
 	@echo "  lint          - Run linter (cppcheck) on source files"
 	@echo "  analyze-size  - Analyze executable size breakdown by components"
 	@echo ""
-	@echo "Unicode Support:"
-	@echo "  test-unicode  - Run Unicode string comparison tests"
-	@echo ""
 	@echo "Options:"
 	@echo "  JOBS=N        - Set number of parallel compilation jobs (default: $(JOBS))"
 	@echo "  CONFIG=file   - Use specific configuration file"
@@ -226,7 +220,8 @@ build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Generating makefiles..."
 	premake5 gmake
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_x64 lambda -j$(JOBS)
+	# suppress warnings but keep errors
+	$(MAKE) -C build/premake config=debug_x64 lambda -j$(JOBS) 2>&1 | grep -v "warning:"
 	@echo "Build completed. Executable: lambda.exe"
 
 print-vars:
@@ -270,29 +265,17 @@ rebuild: clean $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Rebuild completed. Executable: lambda.exe"
 
 # Specific project builds
-lambda: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
-	@echo "Building lambda project using Premake build system..."
-	@echo "Generating Premake configuration..."
-	python3 utils/generate_premake.py
-	@echo "Generating makefiles..."
-	premake5 gmake
-	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_x64 lambda -j$(JOBS)
-	@echo "Lambda build completed. Executable: lambda.exe"
+lambda: build
 
-radiant:
-	@echo "Building radiant project..."
-	$(COMPILE_SCRIPT) $(RADIANT_CONFIG) --jobs=$(JOBS)
+# radiant:
+# 	@echo "Building radiant project..."
+# 	$(COMPILE_SCRIPT) $(RADIANT_CONFIG) --jobs=$(JOBS)
 
-window: radiant
+# window: radiant
 
 # Build all projects
-all: lambda radiant
+all: lambda
 	@echo "All projects built successfully."
-
-test-unicode: build
-	@echo "Running Unicode string comparison tests..."
-	./$(LAMBDA_EXE) test/lambda/unicode_test.ls
 
 # Cross-compilation for Windows
 cross-compile: build-windows

@@ -177,6 +177,7 @@ typedef struct SysFuncInfo {
     int arg_count;  // -1 for variable args
     Type* return_type;
     bool is_proc;   // is procedural
+    bool is_overloaded;
 } SysFuncInfo;
 
 typedef struct AstSysFuncNode : AstNode {

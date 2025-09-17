@@ -384,8 +384,10 @@ Item fn_abs(Item a);
 Item fn_round(Item a);
 Item fn_floor(Item a);
 Item fn_ceil(Item a);
-Item fn_min(Item a, Item b);
-Item fn_max(Item a, Item b);
+Item fn_min1(Item a);
+Item fn_min2(Item a, Item b);
+Item fn_max1(Item a);
+Item fn_max2(Item a, Item b);
 Item fn_sum(Item a);
 Item fn_avg(Item a);
 Item fn_pos(Item a);
@@ -421,9 +423,12 @@ Type* const_type(int type_index);
 // returns the type of the item
 Type* fn_type(Item item);
 
-Item fn_input(Item url, Item type);
+Item fn_input1(Item url);
+Item fn_input2(Item url, Item options);
+String* fn_format1(Item item);
+String* fn_format2(Item item, Item options);
 Item fn_fetch(Item url, Item options);
-String* fn_format(Item item, Item type);
+
 Item fn_typeset_latex(Item input_file, Item output_file, Item options);
 DateTime fn_datetime();
 

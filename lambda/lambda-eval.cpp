@@ -722,7 +722,7 @@ Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
     return input_from_url(url, type, flavor, ctx ? (Url*)ctx->cwd : NULL);
 }
 
-Item fn_input(Item url, Item type) {
+Item fn_input2(Item url, Item type) {
     String* url_str;
     if (url.type_id != LMD_TYPE_STRING && url.type_id != LMD_TYPE_SYMBOL) {
         log_debug("input url must be a string or symbol, got type %d", url.type_id);
@@ -798,14 +798,13 @@ Item fn_input(Item url, Item type) {
     return (input && input->root.item) ? input->root : ItemNull;
 }
 
-extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
-
-// Single-argument format function wrapper - uses default formatting
-extern "C" String* fn_format_simple(Item item) {
-    return fn_format(item, ItemNull);
+Item fn_input1(Item url) {
+    return fn_input2(url, ItemNull);
 }
 
-String* fn_format(Item item, Item type) {
+extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
+
+String* fn_format2(Item item, Item type) {
     TypeId type_id = get_type_id(type);
     String* type_str = NULL;
     String* flavor_str = NULL;
@@ -866,6 +865,10 @@ String* fn_format(Item item, Item type) {
          arraylist_append(context->heap->entries, (void*)s2it(result));
     }
     return result;
+}
+
+String* fn_format1(Item item) {
+    return fn_format2(item, ItemNull);
 }
 
 #include "../lib/utf.h"
