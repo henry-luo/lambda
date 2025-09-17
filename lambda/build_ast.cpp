@@ -12,54 +12,58 @@ AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node);
 
 // todo: properly define fn param types
 SysFuncInfo sys_funcs[] = {
-    {SYSFUNC_LEN, "len", 1, &TYPE_INT64, false},
-    {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false},
-    {SYSFUNC_INT, "int", 1, &TYPE_ANY, false},
-    {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false},
-    {SYSFUNC_FLOAT, "float", 1, &TYPE_FLOAT, false},
-    {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_DECIMAL, false},
-    {SYSFUNC_BINARY, "binary", 1, &TYPE_BINARY, false},
-    {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false},
-    {SYSFUNC_STRING, "string", 1, &TYPE_STRING, false},
-    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false},
-    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false},
-    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME, false},
-    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false},
-    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false},
-    {SYSFUNC_SET, "set", -1, &TYPE_ANY, false},
-    {SYSFUNC_SLICE, "slice", -1, &TYPE_ANY, false},
-    {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false},
-    {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false},
-    {SYSFUNC_MIN, "min", 2, &TYPE_ANY, false}, // TYPE_NUMBER;
-    {SYSFUNC_MAX, "max", 2, &TYPE_ANY, false}, // TYPE_NUMBER;
-    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false}, // TYPE_NUMBER;
-    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false}, // TYPE_NUMBER;
-    {SYSFUNC_ABS, "abs", 1, &TYPE_ANY, false}, // TYPE_NUMBER;
-    {SYSFUNC_ROUND, "round", 1, &TYPE_ANY, false}, // TYPE_NUMBER;
-    {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY, false}, // TYPE_NUMBER;
-    {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY, false}, // TYPE_NUMBER;
-    {SYSFUNC_INPUT, "input", 2, &TYPE_ANY, false},
-    {SYSFUNC_FORMAT, "format", 2, &TYPE_STRING, false},
-    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false},
+    {SYSFUNC_LEN, "len", 1, &TYPE_INT64, false, false},
+    {SYSFUNC_TYPE, "type", 1, &TYPE_TYPE, false, false},
+    {SYSFUNC_INT, "int", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_INT64, "int64", 1, &TYPE_INT64, false, false},
+    {SYSFUNC_FLOAT, "float", 1, &TYPE_FLOAT, false, false},
+    {SYSFUNC_DECIMAL, "decimal", 1, &TYPE_DECIMAL, false, false},
+    {SYSFUNC_BINARY, "binary", 1, &TYPE_BINARY, false, false},
+    {SYSFUNC_NUMBER, "number", 1, &TYPE_ANY, false, false},
+    {SYSFUNC_STRING, "string", 1, &TYPE_STRING, false, false},
+    {SYSFUNC_SYMBOL, "symbol", 1, &TYPE_SYMBOL, false, false},
+    {SYSFUNC_DATETIME, "datetime", 1, &TYPE_DTIME, false, false},
+    {SYSFUNC_DATE, "date", 1, &TYPE_DTIME, false, false},
+    {SYSFUNC_TIME, "time", 1, &TYPE_DTIME, false, false},
+    {SYSFUNC_JUSTNOW, "justnow", 0, &TYPE_DTIME, false, false},
+    {SYSFUNC_SET, "set", -1, &TYPE_ANY, false, false},
+    {SYSFUNC_SLICE, "slice", -1, &TYPE_ANY, false, false},
+    {SYSFUNC_ALL, "all", 1, &TYPE_BOOL, false, false},
+    {SYSFUNC_ANY, "any", 1, &TYPE_BOOL, false, false},
+    {SYSFUNC_MIN1, "min", 1, &TYPE_ANY, false, true}, // TYPE_NUMBER;
+    {SYSFUNC_MIN2, "min", 2, &TYPE_ANY, false, true}, // TYPE_NUMBER;
+    {SYSFUNC_MAX1, "max", 1, &TYPE_ANY, false, true}, // TYPE_NUMBER;
+    {SYSFUNC_MAX2, "max", 2, &TYPE_ANY, false, true}, // TYPE_NUMBER;
+    {SYSFUNC_SUM, "sum", 1, &TYPE_ANY, false, false}, // TYPE_NUMBER;
+    {SYSFUNC_AVG, "avg", 1, &TYPE_ANY, false, false}, // TYPE_NUMBER;
+    {SYSFUNC_ABS, "abs", 1, &TYPE_ANY, false, false}, // TYPE_NUMBER;
+    {SYSFUNC_ROUND, "round", 1, &TYPE_ANY, false, false}, // TYPE_NUMBER;
+    {SYSFUNC_FLOOR, "floor", 1, &TYPE_ANY, false, false}, // TYPE_NUMBER;
+    {SYSFUNC_CEIL, "ceil", 1, &TYPE_ANY, false, false}, // TYPE_NUMBER;
+    {SYSFUNC_INPUT1, "input", 1, &TYPE_ANY, false, true},
+    {SYSFUNC_INPUT2, "input", 2, &TYPE_ANY, false, true},
+    {SYSFUNC_FORMAT1, "format", 1, &TYPE_STRING, false, true},
+    {SYSFUNC_FORMAT2, "format", 2, &TYPE_STRING, false, true},
+    {SYSFUNC_ERROR, "error", 1, &TYPE_ERROR, false, false},
     {SYSFUNC_NORMALIZE, "normalize", 1, &TYPE_STRING, false},
     // {SYSFUNC_SUBSTRING, "substring", 2, &TYPE_ANY},
     // {SYSFUNC_CONTAINS, "contains", 2, &TYPE_ANY},
-    {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true},
-    {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true},
-    {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true},
-    {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true},
-    {SYSPROC_OUTPUT, "output", 2, &TYPE_ANY, true},
-    {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true},
+    {SYSPROC_NOW, "now", 0, &TYPE_DTIME, true, false},
+    {SYSPROC_TODAY, "today", 0, &TYPE_DTIME, true, false},
+    {SYSPROC_PRINT, "print", 1, &TYPE_NULL, true, false},
+    {SYSPROC_FETCH, "fetch", 2, &TYPE_ANY, true, false},
+    {SYSPROC_OUTPUT, "output", 2, &TYPE_ANY, true, false},
+    {SYSPROC_CMD, "cmd", 2, &TYPE_ANY, true, false},
 };
 
-SysFuncInfo* get_sys_func_info(StrView *name) {
+SysFuncInfo* get_sys_func_info(StrView *name, int arg_count) {
     for (size_t i = 0; i < sizeof(sys_funcs)/sizeof(sys_funcs[0]); i++) {
-        if (strview_equal(name, sys_funcs[i].name)) {
-            log_debug("is sys func: %.*s", (int)name->length, name->str);
+        if (strview_equal(name, sys_funcs[i].name) && sys_funcs[i].arg_count == arg_count) {
+            log_debug("is sys func: %.*s, %d", (int)name->length, name->str, arg_count);
             return &sys_funcs[i];
         }
     }
-    log_debug("not sys func: %.*s", (int)name->length, name->str);
+    log_debug("don't have sys func: %.*s, %d", (int)name->length, name->str, arg_count);
     return NULL;
 }
 
@@ -176,9 +180,23 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     log_debug("build call expr: %d", symbol);
     AstCallNode* ast_node = (AstCallNode*)alloc_ast_node(tp, 
         AST_NODE_CALL_EXPR, call_node, sizeof(AstCallNode));
+
+    // count no. of arguments
+    int arg_count = 0;
+    TSTreeCursor cursor = ts_tree_cursor_new(call_node);
+    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    while (has_node) {
+        TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
+        if (field_id == FIELD_ARGUMENT) { arg_count++; }
+        has_node = ts_tree_cursor_goto_next_sibling(&cursor);
+    }
+    ts_tree_cursor_delete(&cursor);
+    log_debug("arg count: %d", arg_count);
+
+    // build function name
     TSNode function_node = ts_node_child_by_field_id(call_node, FIELD_FUNCTION);
     StrView func_name = ts_node_source(tp, function_node);
-    SysFuncInfo* sys_func_info = get_sys_func_info(&func_name);
+    SysFuncInfo* sys_func_info = get_sys_func_info(&func_name, arg_count);
     if (sys_func_info) {
         log_debug("build sys call");
         if (sys_func_info->is_proc) {
@@ -220,11 +238,11 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
     }
 
     // build arguments
-    TSTreeCursor cursor = ts_tree_cursor_new(call_node);
-    bool has_node = ts_tree_cursor_goto_first_child(&cursor);
+    cursor = ts_tree_cursor_new(call_node);
+    has_node = ts_tree_cursor_goto_first_child(&cursor);
     AstNode *prev_argument = NULL;
     while (has_node) {
-        // Check if the current node's field ID matches the target field ID
+        // check if the current node's field ID matches the target field ID
         TSSymbol field_id = ts_tree_cursor_current_field_id(&cursor);
         if (field_id == FIELD_ARGUMENT) {
             TSNode child = ts_tree_cursor_current_node(&cursor);

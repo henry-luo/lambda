@@ -1189,6 +1189,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
         StrView fn = ts_node_source(tp, call_node->function->node);
         strbuf_append_str(tp->code_buf, sys_fn_node->fn_info->is_proc ? "pn_" : "fn_");
         strbuf_append_str_n(tp->code_buf, fn.str, fn.length);
+        if (sys_fn_node->fn_info->is_overloaded) { strbuf_append_int(tp->code_buf, sys_fn_node->fn_info->arg_count); }
     }
     else {
         if (call_node->function->type->type_id == LMD_TYPE_FUNC) {
@@ -1278,24 +1279,6 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
             strbuf_append_char(tp->code_buf, ',');
         }
         arg = arg->next;  param_type = param_type ? param_type->next : NULL;
-    }
-    
-    // Special handling for format function - add default second argument if only one provided
-    if (call_node->function->node_type == AST_NODE_SYS_FUNC) {
-        AstSysFuncNode* sys_fn_node = (AstSysFuncNode*)call_node->function;
-        if (sys_fn_node->fn_info->fn == SYSFUNC_FORMAT || sys_fn_node->fn_info->fn == SYSFUNC_MIN || sys_fn_node->fn_info->fn == SYSFUNC_MAX) {
-            // count arguments
-            int arg_count = 0;
-            AstNode* count_arg = call_node->argument;
-            while (count_arg) {
-                arg_count++;
-                count_arg = count_arg->next;
-            }
-            // if only one argument, add default null second argument
-            if (arg_count == 1) {
-                strbuf_append_str(tp->code_buf, ", ITEM_NULL");
-            }
-        }
     }
     strbuf_append_char(tp->code_buf, ')');
 }
