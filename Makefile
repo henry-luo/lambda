@@ -487,28 +487,11 @@ build-test-catch2-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Generating Linux makefiles..."
 	premake5 gmake
 	@echo "Building Linux Catch2 test executables with $(JOBS) parallel jobs..."
-	/Library/Developer/CommandLineTools/usr/bin/make -C build_linux/test config=debug_linux_x64 test_strbuf_catch2 test_stringbuf_catch2 test_strview_catch2 test_variable_pool_catch2 test_num_stack_catch2 test_datetime_catch2 test_url_catch2 test_url_extra_catch2 -j8
+	/Library/Developer/CommandLineTools/usr/bin/make -C build_linux/test config=debug_linux_x64 test_strbuf_catch2 test_stringbuf_catch2 test_strview_catch2 test_variable_pool_catch2 test_num_stack_catch2 test_datetime_catch2 test_url_catch2 test_url_extra_catch2 test_lambda_catch2 test_lambda_proc_catch2 test_lambda_repl_catch2 -j8
 	@echo "Linux Catch2 test build completed."
 
-# Run Catch2 tests for Linux (requires QEMU)
-test-catch2-linux: build-test-catch2-linux
-	@echo "Running Linux Catch2 test suite using QEMU..."
-	@echo "Note: This requires qemu-x86_64 to be installed for emulation."
-	@if command -v qemu-x86_64 >/dev/null 2>&1; then \
-		for test in test/test_*_catch2.exe; do \
-			if [ -f "$$test" ]; then \
-				echo "Running $$test..."; \
-				qemu-x86_64 "$$test" || echo "Test $$test failed"; \
-			fi; \
-		done; \
-	else \
-		echo "Error: qemu-x86_64 not found. Install with: brew install qemu"; \
-		echo "Alternatively, use 'make test-catch2-linux-docker' to run tests in Docker."; \
-		exit 1; \
-	fi
-
 # Run Catch2 tests for Linux using Docker
-test-catch2-linux-docker: build-test-catch2-linux
+test-catch2-linux-docker: build-linux build-test-catch2-linux
 	@echo "Running Linux Catch2 test suite using Docker..."
 	@if command -v docker >/dev/null 2>&1; then \
 		./docker-test-linux.sh; \
