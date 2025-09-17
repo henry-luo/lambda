@@ -649,7 +649,8 @@
                         "name": "🔄 Input Roundtrip Tests (Catch2)",
                         "dependencies": ["lambda-input-full"],
                         "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_input_roundtrip_catch2.exe"
+                        "binary": "test_input_roundtrip_catch2.exe",
+                        "additional_files": ["test/input_roundtrip_helpers.cpp"]
                     },
                     {
                         "source": "test_dir_catch2.cpp",

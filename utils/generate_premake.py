@@ -867,6 +867,7 @@ class PremakeGenerator:
                 # Avoid subdirectory structure by flattening test names
                 test_name = binary_name.replace('/', '_').replace('test_', '') 
                 test_name = f"test_{test_name}"
+                additional_files = test.get('additional_files', [])
                 
                 # Determine correct file path - use relative paths from project root
                 if source.startswith("test/"):
@@ -881,7 +882,7 @@ class PremakeGenerator:
                     print(f"Warning: Test file not found: {actual_path}")
                     continue
                 
-                self._generate_single_test(test_name, test_file_path, dependencies, special_flags, cpp_flags, libraries, defines)
+                self._generate_single_test(test_name, test_file_path, dependencies, special_flags, cpp_flags, libraries, defines, additional_files)
         else:
             # Old format: parallel arrays (for backward compatibility)
             sources = suite.get('sources', [])
@@ -911,12 +912,14 @@ class PremakeGenerator:
                         print(f"Warning: Test file not found: {actual_path}")
     
     def _generate_single_test(self, test_name: str, test_file_path: str, dependencies: List[str], 
-                             special_flags: str, cpp_flags: str, libraries: List[str] = None, defines: List[str] = None) -> None:
+                             special_flags: str, cpp_flags: str, libraries: List[str] = None, defines: List[str] = None, additional_files: List[str] = None) -> None:
         """Generate a single test project"""
         if libraries is None:
             libraries = []
         if defines is None:
             defines = []
+        if additional_files is None:
+            additional_files = []
             
         source = test_file_path
         language = "C" if source.endswith('.c') else "C++"
@@ -931,6 +934,13 @@ class PremakeGenerator:
             '    ',
             '    files {',
             f'        "{test_file_path}",',
+        ])
+        
+        # Add additional files if specified
+        for additional_file in additional_files:
+            self.premake_content.append(f'        "{additional_file}",')
+        
+        self.premake_content.extend([
             '    }',
             '    '
         ])

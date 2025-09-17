@@ -2,17 +2,100 @@
 #include "../../lib/stringbuf.h"
 
 // Forward declarations
+static const char* get_element_type_name(Element* elem);
 static void format_mdx_item(StringBuf* sb, Item item);
 static void format_mdx_element(StringBuf* sb, Element* elem);
 static void format_mdx_children(StringBuf* sb, Element* elem);
 static bool is_jsx_element(Element* elem);
 static bool is_markdown_element(Element* elem);
+static bool contains_jsx_element(Element* elem);
+static void format_element_with_mdx_awareness(StringBuf* sb, Element* elem);
 
 // External formatters
 void format_markdown(StringBuf* sb, Item root_item);
 String* format_jsx(VariableMemPool* pool, Item root_item);
 
-// Utility function to get element type name
+static bool contains_jsx_element(Element* elem);
+static void format_element_with_mdx_awareness(StringBuf* sb, Element* elem);
+
+// Format individual MDX element
+
+// Check if an element contains JSX elements in its subtree
+static bool contains_jsx_element(Element* elem) {
+    if (!elem) return false;
+    
+    // Check if this element itself is JSX
+    const char* type_name = get_element_type_name(elem);
+    if (type_name && strcmp(type_name, "jsx_element") == 0) {
+        return true;
+    }
+    
+    // Check children
+    List* list = (List*)elem;
+    for (int i = 0; i < list->length; i++) {
+        Item child = list->items[i];
+        if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+            if (contains_jsx_element(child.element)) {
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+// Format element with awareness of JSX elements, delegating appropriately
+static void format_element_with_mdx_awareness(StringBuf* sb, Element* elem) {
+    if (!elem) return;
+    
+    const char* type_name = get_element_type_name(elem);
+    if (type_name && strcmp(type_name, "jsx_element") == 0) {
+        // Handle JSX element directly here
+        printf("DEBUG format_element_with_mdx_awareness: formatting jsx_element directly\n");
+        TypeElmt* elem_type = (TypeElmt*)elem->type;
+        if (elem_type) {
+            TypeMap* map_type = (TypeMap*)elem_type;
+            if (map_type->shape) {
+                ShapeEntry* field = map_type->shape;
+                while (field) {
+                    if (field->name && field->name->length == 7 && 
+                        strncmp(field->name->str, "content", 7) == 0) {
+                        void* field_ptr = ((char*)elem->data) + field->byte_offset;
+                        String* jsx_content = *(String**)field_ptr;
+                        printf("DEBUG format_element_with_mdx_awareness: jsx_content=%p\n", (void*)jsx_content);
+                        if (jsx_content) {
+                            printf("DEBUG format_element_with_mdx_awareness: jsx_content->len=%d\n", jsx_content->len);
+                            printf("DEBUG format_element_with_mdx_awareness: jsx_content->chars=%p\n", (void*)jsx_content->chars);
+                            // Try to access the first character safely
+                            if (jsx_content->chars && jsx_content->len > 0) {
+                                printf("DEBUG format_element_with_mdx_awareness: first char: %c (0x%02x)\n", jsx_content->chars[0], (unsigned char)jsx_content->chars[0]);
+                            }
+                        }
+                        if (jsx_content && jsx_content->chars) {
+                            printf("DEBUG format_element_with_mdx_awareness: outputting JSX content: %s\n", jsx_content->chars);
+                            stringbuf_append_str(sb, jsx_content->chars);
+                        }
+                        return;
+                    }
+                    field = field->next;
+                }
+            }
+        }
+    } else {
+        // For non-JSX elements, format children with MDX awareness
+        List* list = (List*)elem;
+        for (int i = 0; i < list->length; i++) {
+            Item child = list->items[i];
+            if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+                format_element_with_mdx_awareness(sb, child.element);
+            } else {
+                format_mdx_item(sb, child);
+            }
+        }
+    }
+}
+
+// Helper functions to get element type name
 static const char* get_element_type_name(Element* elem) {
     if (!elem || !elem->type) return NULL;
     
@@ -94,37 +177,77 @@ static void format_mdx_children(StringBuf* sb, Element* elem) {
 
 // Format individual MDX element
 static void format_mdx_element(StringBuf* sb, Element* elem) {
-    if (!elem) return;
+    printf("DEBUG format_mdx_element: called with elem=%p\n", elem);
+    if (!elem) {
+        printf("DEBUG format_mdx_element: elem is NULL, returning\n");
+        return;
+    }
     
     const char* type_name = get_element_type_name(elem);
+    printf("DEBUG format_mdx_element: type_name=%s\n", type_name ? type_name : "NULL");
     if (!type_name) return;
     
     if (strcmp(type_name, "mdx_document") == 0) {
-        // Format MDX document root - look for content attribute
-        TypeElmt* elem_type = (TypeElmt*)elem->type;
-        if (elem_type) {
-            TypeMap* map_type = (TypeMap*)elem_type;
-            if (map_type->shape) {
-                ShapeEntry* field = map_type->shape;
-                for (int i = 0; i < map_type->length && field; i++) {
-                    if (field->name && strcmp(field->name->str, "content") == 0) {
-                        void* data = ((char*)elem->data) + field->byte_offset;
-                        if (field->type && field->type->type_id == LMD_TYPE_ELEMENT) {
-                            Element* content_elem = *(Element**)data;
-                            if (content_elem) {
-                                // Format the content element as markdown
-                                format_markdown(sb, (Item){.element = content_elem});
+        // Format MDX document root - look for child elements
+        List* list = (List*)elem;
+        printf("DEBUG format_mdx_element: mdx_document has %ld children\n", list->length);
+        
+        for (int i = 0; i < list->length; i++) {
+            Item child = list->items[i];
+            printf("DEBUG format_mdx_element: processing child %d, type %d\n", i, get_type_id(child));
+            
+            if (get_type_id(child) == LMD_TYPE_ELEMENT) {
+                Element* child_elem = child.element;
+                const char* child_type = get_element_type_name(child_elem);
+                printf("DEBUG format_mdx_element: child element type: %s\n", child_type ? child_type : "NULL");
+                
+                // Check if this is a JSX element that should be formatted specially
+                if (child_type && strcmp(child_type, "jsx_element") == 0) {
+                    printf("DEBUG format_mdx_element: formatting jsx_element directly\n");
+                    // For JSX elements, extract the content attribute and output it directly
+                    TypeElmt* elem_type = (TypeElmt*)child_elem->type;
+                    if (elem_type) {
+                        TypeMap* map_type = (TypeMap*)elem_type;
+                        if (map_type->shape) {
+                            ShapeEntry* field = map_type->shape;
+                            while (field) {
+                                if (field->name && field->name->length == 7 && 
+                                    strncmp(field->name->str, "content", 7) == 0) {
+                                    void* field_ptr = ((char*)child_elem->data) + field->byte_offset;
+                                    String* jsx_content = *(String**)field_ptr;
+                                    if (jsx_content && jsx_content->chars) {
+                                        printf("DEBUG format_mdx_element: outputting JSX content: %s\n", jsx_content->chars);
+                                        stringbuf_append_str(sb, jsx_content->chars);
+                                    }
+                                    break;
+                                }
+                                field = field->next;
                             }
                         }
-                        break;
                     }
-                    field = field->next;
+                } else {
+                    // Format the child element recursively with MDX formatter
+                    // to ensure JSX elements deeper in the tree are handled
+                    format_mdx_element(sb, child_elem);
                 }
+            } else {
+                // Format non-element children directly
+                format_mdx_item(sb, child);
             }
         }
     } else {
-        // For non-MDX elements, format as markdown
-        format_markdown(sb, (Item){.element = elem});
+        // For non-MDX elements, check if it contains JSX elements in its subtree
+        // If it does, we need to process it with MDX formatting to catch them
+        printf("DEBUG format_mdx_element: processing non-MDX element '%s'\n", type_name ? type_name : "NULL");
+        if (contains_jsx_element(elem)) {
+            printf("DEBUG format_mdx_element: non-MDX element contains JSX, delegating to markdown formatter\n");
+            // Instead of custom MDX handling, delegate to markdown formatter 
+            // which has jsx_element handling
+            format_markdown(sb, (Item){.element = elem});
+        } else {
+            printf("DEBUG format_mdx_element: non-MDX element, delegating to markdown\n");
+            format_markdown(sb, (Item){.element = elem});
+        }
     }
 }
 
@@ -146,32 +269,48 @@ static void format_mdx_item(StringBuf* sb, Item item) {
 // Main MDX formatting function
 String* format_mdx(VariableMemPool* pool, Item root_item) {
     if (root_item.item == ITEM_NULL) {
+        printf("DEBUG format_mdx: root_item is NULL\n");
         return &EMPTY_STRING;
     }
     
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) {
+        printf("DEBUG format_mdx: failed to create StringBuf\n");
         return &EMPTY_STRING;
     }
+    
+    printf("DEBUG format_mdx: root_item type: %d *** NEW BUILD ***\n", get_type_id(root_item));
     
     // Check if this is an MDX document element
     if (get_type_id(root_item) == LMD_TYPE_ELEMENT) {
         Element* elem = root_item.element;
         const char* type_name = get_element_type_name(elem);
+        printf("DEBUG format_mdx: element type: %s\n", type_name ? type_name : "NULL");
+        
+        List* list = (List*)elem;
+        printf("DEBUG format_mdx: element has %ld children\n", list->length);
+        
+        printf("DEBUG format_mdx: comparing '%s' with 'mdx_document'\n", type_name);
+        printf("DEBUG format_mdx: strcmp result: %d\n", strcmp(type_name, "mdx_document"));
         
         if (type_name && strcmp(type_name, "mdx_document") == 0) {
             // This is an MDX document, extract and format the content
+            printf("DEBUG format_mdx: about to call format_mdx_element\n");
             format_mdx_element(sb, elem);
+            printf("DEBUG format_mdx: returned from format_mdx_element\n");
         } else {
             // Not an MDX document, format as regular markdown
+            printf("DEBUG format_mdx: formatting as regular markdown (not mdx_document)\n");
             format_markdown(sb, root_item);
         }
     } else {
+        printf("DEBUG format_mdx: formatting as non-element item\n");
         format_mdx_item(sb, root_item);
     }
     
     // Convert to string
     String* result = stringbuf_to_string(sb);
+    printf("DEBUG format_mdx: result: %s\n", result && result->chars ? result->chars : "NULL or empty");
     
     return result ? result : &EMPTY_STRING;
 }

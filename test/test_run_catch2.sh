@@ -227,21 +227,38 @@ parse_catch2_results() {
     local failed=0
     
     if [ $exit_code -eq 0 ]; then
-        # All tests passed - extract from summary line (handle both singular and plural)
-        if grep -q "All tests passed" "$output_file"; then
+        # Tests passed - check both "All tests passed" and "test cases:" formats
+        if grep -q "All tests passed" "$output_file" 2>/dev/null || strings "$output_file" | grep -q "All tests passed"; then
             # Extract test case count (handles both "test case" and "test cases")
-            passed=$(grep -o "All tests passed ([0-9]* assertions in [0-9]* test cases\?)" "$output_file" | grep -o "[0-9]* test cases\?" | grep -o "[0-9]*" || echo "0")
+            # Try direct grep first, then fall back to strings if file contains binary data
+            passed=$(grep -o "All tests passed ([0-9]* assertions in [0-9]* test cases\?)" "$output_file" 2>/dev/null | grep -o "[0-9]* test cases\?" | grep -o "[0-9]*" || \
+                     strings "$output_file" | grep -o "All tests passed ([0-9]* assertions in [0-9]* test cases\?)" | grep -o "[0-9]* test cases\?" | grep -o "[0-9]*" || echo "0")
             failed=0
+        elif grep -q "test cases:" "$output_file" 2>/dev/null || strings "$output_file" | grep -q "test cases:"; then
+            # Handle cases with expected failures - format: "test cases: 5 | 2 passed | 3 failed as expected"
+            # Try direct grep first, then fall back to strings if file contains binary data
+            local total_tests=$(grep "test cases:" "$output_file" 2>/dev/null | grep -o "test cases:[[:space:]]*[0-9]*" | grep -o "[0-9]*" || \
+                               strings "$output_file" | grep "test cases:" | grep -o "test cases:[[:space:]]*[0-9]*" | grep -o "[0-9]*" || echo "0")
+            passed=$(grep "test cases:" "$output_file" 2>/dev/null | grep -o "[0-9]* passed" | grep -o "[0-9]*" || \
+                     strings "$output_file" | grep "test cases:" | grep -o "[0-9]* passed" | grep -o "[0-9]*" || echo "0")
+            failed=0  # Exit code 0 means overall success, even with expected failures
+            # Use total test count if we got it
+            if [ "$total_tests" -gt 0 ]; then
+                passed=$total_tests
+            fi
         else
             passed=0
             failed=0
         fi
     else
         # Some tests failed - try to extract counts
-        if grep -q "test cases:" "$output_file"; then
+        if grep -q "test cases:" "$output_file" 2>/dev/null || strings "$output_file" | grep -q "test cases:"; then
             # Format: "test cases: 15 | 12 passed | 3 failed"
-            passed=$(grep "test cases:" "$output_file" | grep -o "[0-9]* passed" | grep -o "[0-9]*" || echo "0")
-            failed=$(grep "test cases:" "$output_file" | grep -o "[0-9]* failed" | grep -o "[0-9]*" || echo "0")
+            # Try direct grep first, then fall back to strings if file contains binary data
+            passed=$(grep "test cases:" "$output_file" 2>/dev/null | grep -o "[0-9]* passed" | grep -o "[0-9]*" || \
+                     strings "$output_file" | grep "test cases:" | grep -o "[0-9]* passed" | grep -o "[0-9]*" || echo "0")
+            failed=$(grep "test cases:" "$output_file" 2>/dev/null | grep -o "[0-9]* failed" | grep -o "[0-9]*" || \
+                     strings "$output_file" | grep "test cases:" | grep -o "[0-9]* failed" | grep -o "[0-9]*" || echo "0")
         else
             # Fallback - assume at least one failure
             passed=0

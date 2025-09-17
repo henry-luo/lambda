@@ -3452,6 +3452,7 @@ project "test_input_roundtrip_catch2"
     
     files {
         "test/test_input_roundtrip_catch2.cpp",
+        "test/input_roundtrip_helpers.cpp",
     }
     
     includedirs {
