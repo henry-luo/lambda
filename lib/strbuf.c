@@ -225,8 +225,12 @@ void strbuf_append_ulong(StrBuf *buf, unsigned long value) {
     size_t num_digits = num_of_digits(value);
     size_t pos = num_digits - 1;
 
-    strbuf_ensure_cap(buf, buf->length + num_digits);
-    char *dst = buf->str + buf->length; // Updated to use buf->s instead of buf->b
+    if (!strbuf_ensure_cap(buf, buf->length + num_digits + 1)) {
+        // failed to allocate enough memory, early return
+        log_error("strbuf_append_ulong: Memory allocation failed: %d, %lu", buf->length + num_digits + 1, value);
+        return;
+    }
+    char *dst = buf->str + buf->length;
 
     while(value >= 100) {
         size_t v = value % 100;
@@ -244,7 +248,7 @@ void strbuf_append_ulong(StrBuf *buf, unsigned long value) {
         dst[pos - 1] = digits[value * 2];
     }
     buf->length += num_digits;
-    buf->str[buf->length] = '\0'; // Updated to use buf->str instead of buf->b
+    buf->str[buf->length] = '\0';
 }
 
 void strbuf_append_int(StrBuf *buf, int value) {
