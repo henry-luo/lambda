@@ -115,17 +115,14 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             // loop through the public functions in the module
             AstNode *node = import->script->ast_root;
             assert(node->node_type == AST_SCRIPT);
-            node = ((AstScript*)node)->child;
-            log_debug("finding content node");
+            node = ((AstScript*)node)->child; 
             while (node) {
-                if (node->node_type == AST_NODE_CONTENT) break;
-                node = node->next;
-            }
-            if (!node) { log_error("Error: Missing content node");  goto RETURN; }
-            node = ((AstListNode*)node)->item; 
-            while (node) {
-                log_debug("checking content node: %d", node->node_type);
-                if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) {
+                log_debug("checking node: %d", node->node_type);
+                if (node->node_type == AST_NODE_CONTENT) {
+                    node = ((AstListNode*)node)->item;  // drill down
+                    continue;
+                }
+                else if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) {
                     AstFuncNode *func_node = (AstFuncNode*)node;
                     if (((TypeFunc*)func_node->type)->is_public) {
                         // get func addr
