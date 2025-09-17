@@ -1571,16 +1571,13 @@ void define_module_import(Transpiler* tp, AstImportNode *import_node) {
     if (!node) { log_error("Error: Missing root node in module_import");  return; }
     assert(node->node_type == AST_SCRIPT);
     node = ((AstScript*)node)->child;
-    log_debug("finding content node");
-    while (node) {
-        if (node->node_type == AST_NODE_CONTENT) break;
-        node = node->next;
-    }
-    if (!node) { log_error("Error: Missing content node");  return; }
     strbuf_append_format(tp->code_buf, "struct Mod%d {\n", import_node->script->index);
-    node = ((AstListNode*)node)->item;
     while (node) {
-        if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) {
+        if (node->node_type == AST_NODE_CONTENT) {
+            node = ((AstListNode*)node)->item;
+            continue;
+        } 
+        else if (node->node_type == AST_NODE_FUNC || node->node_type == AST_NODE_FUNC_EXPR || node->node_type == AST_NODE_PROC) {
             AstFuncNode *func_node = (AstFuncNode*)node;
             log_debug("got imported fn: %.*s, is_public: %d", (int)func_node->name->len, func_node->name->chars,
                 ((TypeFunc*)func_node->type)->is_public);
