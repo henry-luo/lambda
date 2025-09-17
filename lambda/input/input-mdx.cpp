@@ -58,15 +58,47 @@ static Element* parse_jsx_component(Input* input, const char** pos, const char* 
     // Find the end of this JSX component
     int bracket_count = 0;
     const char* jsx_end = jsx_start;
+    bool in_opening_tag = true;
+    bool is_self_closing = false;
+    const char* tag_name_start = NULL;
+    size_t tag_name_len = 0;
+    
+    // Skip initial '<'
+    if (*jsx_end == '<') {
+        jsx_end++;
+        tag_name_start = jsx_end;
+        
+        // Extract tag name
+        while (jsx_end < end && *jsx_end != '>' && *jsx_end != '/' && !isspace(*jsx_end)) {
+            jsx_end++;
+        }
+        tag_name_len = jsx_end - tag_name_start;
+        jsx_end = jsx_start; // Reset for full parsing
+    }
     
     while (jsx_end < end) {
         if (*jsx_end == '<') {
+            if (jsx_end + 1 < end && jsx_end[1] == '/') {
+                // Closing tag - check if it matches our tag name
+                const char* closing_tag_start = jsx_end + 2;
+                if (tag_name_len > 0 && strncmp(closing_tag_start, tag_name_start, tag_name_len) == 0 &&
+                    closing_tag_start[tag_name_len] == '>') {
+                    jsx_end = closing_tag_start + tag_name_len + 1; // Include </TagName>
+                    break;
+                }
+            }
             bracket_count++;
         } else if (*jsx_end == '>') {
-            bracket_count--;
-            if (bracket_count == 0) {
-                jsx_end++; // Include the closing >
+            if (in_opening_tag && jsx_end > jsx_start && jsx_end[-1] == '/') {
+                // Self-closing tag like <Button />
+                jsx_end++;
                 break;
+            }
+            bracket_count--;
+            if (bracket_count == 0 && in_opening_tag) {
+                in_opening_tag = false;
+                jsx_end++; // Include the closing >
+                continue;
             }
         }
         jsx_end++;
@@ -82,7 +114,7 @@ static Element* parse_jsx_component(Input* input, const char** pos, const char* 
         strncpy(jsx_buffer, jsx_start, jsx_len);
         jsx_buffer[jsx_len] = '\0';
         String* jsx_content = input_create_string(input, jsx_buffer);
-        Item jsx_item = {.raw_pointer = jsx_content};
+        Item jsx_item = {.item = s2it(jsx_content)};
         input_add_attribute_item_to_element(input, jsx_elem, "content", jsx_item);
         free(jsx_buffer);
     }
@@ -176,8 +208,8 @@ static Element* parse_mdx_content(Input* input, const char* content) {
                     // Parse the text as markdown
                     Item markdown_item = input_markup(input, text_buffer);
                     if (markdown_item.item != ITEM_NULL && get_type_id(markdown_item) == LMD_TYPE_ELEMENT) {
-                        // Add markdown content to body as an attribute
-                        input_add_attribute_item_to_element(input, body, "markdown_content", markdown_item);
+                        // Add markdown content to body as children
+                        list_push((List*)body, markdown_item);
                     }
                     
                     free(text_buffer);
@@ -188,11 +220,8 @@ static Element* parse_mdx_content(Input* input, const char* content) {
             Element* element = parse_mdx_element(input, &pos, end);
             if (element) {
                 Item element_item = {.element = element};
-                // Add element as attribute for now
-                static int element_count = 0;
-                char attr_name[32];
-                snprintf(attr_name, sizeof(attr_name), "element_%d", element_count++);
-                input_add_attribute_item_to_element(input, body, attr_name, element_item);
+                // Add element as child
+                list_push((List*)body, element_item);
             } else {
                 // If parsing failed, treat as regular text
                 pos++;
@@ -215,17 +244,17 @@ static Element* parse_mdx_content(Input* input, const char* content) {
             // Parse the text as markdown
             Item markdown_item = input_markup(input, text_buffer);
             if (markdown_item.item != ITEM_NULL && get_type_id(markdown_item) == LMD_TYPE_ELEMENT) {
-                // Add final markdown content to body
-                input_add_attribute_item_to_element(input, body, "final_markdown", markdown_item);
+                // Add final markdown content to body as child
+                list_push((List*)body, markdown_item);
             }
             
             free(text_buffer);
         }
     }
     
-    // Add body to root
+    // Add body to root as child
     Item body_item = {.element = body};
-    input_add_attribute_item_to_element(input, root, "content", body_item);
+    list_push((List*)root, body_item);
     
     return root;
 }

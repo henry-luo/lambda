@@ -831,6 +831,33 @@ static void format_element(StringBuf* sb, Element* elem) {
     } else {
         // for unknown elements, just format children
         printf("DEBUG format_element: unknown element '%s', formatting children\n", tag_name);
+        
+        // Special case for jsx_element: try to output the content directly
+        if (strcmp(tag_name, "jsx_element") == 0) {
+            // jsx_element uses elmt_put to store Items in data with ShapeEntry offsets
+            TypeElmt* elmt_type = (TypeElmt*)elem->type;
+            if (elmt_type && elmt_type->shape) {
+                ShapeEntry* field = elmt_type->shape;
+                while (field) {
+                    if (field->name && field->name->length == 7 && 
+                        strncmp(field->name->str, "content", 7) == 0) {
+                        // Get the Item stored at this field's byte offset
+                        void* field_ptr = ((char*)elem->data) + field->byte_offset;
+                        String* jsx_content = *(String**)field_ptr;  // String stored directly via elmt_put
+                        
+                        if (jsx_content && jsx_content->chars) {
+                            stringbuf_append_str(sb, jsx_content->chars);
+                            // Add a space after JSX element to preserve spacing
+                            stringbuf_append_char(sb, ' ');
+                        }
+                        return;
+                    }
+                    field = field->next;
+                }
+            }
+            return;
+        }
+        
         format_element_children(sb, elem);
     }
 }
