@@ -385,7 +385,7 @@ intellisense:
 generate-grammar: $(TS_ENUM_H)
 	@echo "Grammar generation complete."
 
-clean-all:
+clean-all: clean-premake
 	@echo "Removing all build directories..."
 	@rm -rf $(BUILD_DIR)
 	@rm -rf $(BUILD_DEBUG_DIR)
