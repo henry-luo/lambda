@@ -1822,7 +1822,7 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
     strbuf_append_str(tp->code_buf, "\nItem main(Context *runtime) {\n rt = runtime;\n");
 
     // transpile body content
-    strbuf_append_str(tp->code_buf, " Item result = ");
+    strbuf_append_str(tp->code_buf, " Item result = ({");
     child = script->child;
     bool has_content = false;
     while (child) {
@@ -1844,7 +1844,7 @@ void transpile_ast_root(Transpiler* tp, AstScript *script) {
         child = child->next;
     }    
     if (!has_content) { strbuf_append_str(tp->code_buf, "ITEM_NULL"); }
-    strbuf_append_str(tp->code_buf, ";\n");
+    strbuf_append_str(tp->code_buf, ";});\n");
 
     // transpile invocation of main procedure if defined
     log_debug("transpiling main proc (if any)...");

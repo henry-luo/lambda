@@ -202,6 +202,17 @@ double it2d(Item itm) {
     else if (itm.type_id == LMD_TYPE_FLOAT) {
         return *(double*)itm.pointer;
     }
+    else if (itm.type_id == LMD_TYPE_DECIMAL) {
+        Decimal* dec = (Decimal*)itm.pointer;
+        char* endptr;
+        char* dec_str = mpd_to_sci(dec->dec_val, 0); 
+        double val = strtod(dec_str, &endptr);
+        if (!dec_str || endptr == dec_str) {
+            log_error("it2d: failed to convert decimal to double");
+            return NAN; // conversion error
+        }
+        return val;
+    }
     log_debug("invalid type %d", itm.type_id);
     // todo: push error
     return 0;
