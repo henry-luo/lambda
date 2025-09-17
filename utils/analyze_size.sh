@@ -26,33 +26,44 @@ echo "Total object files size: ${TOTAL_OBJ_SIZE} MB"
 echo ""
 
 # Static libraries breakdown
-echo "=== STATIC LIBRARIES SIZES ==="
-printf "%-50s %10s\n" "Library" "Size (MB)"
-printf "%-50s %10s\n" "--------------------------------------------------" "----------"
+echo "=== STATIC LIBRARIES ANALYSIS ==="
+echo "Note: This shows library file sizes on disk, not what's actually linked into lambda.exe"
+printf "%-50s %10s %12s\n" "Library" "Size (MB)" "Status"
+printf "%-50s %10s %12s\n" "--------------------------------------------------" "----------" "------------"
 
-# Function to get library size
-get_lib_size() {
-    if [ -f "$1" ]; then
-        ls -la "$1" | awk '{printf "%10.1f\n", $5/1024/1024}'
+# Function to get library size and check if actually linked
+get_lib_info() {
+    local lib_file="$1"
+    local lib_name="$2"
+    local search_pattern="$3"
+    
+    if [ -f "$lib_file" ]; then
+        local size=$(ls -la "$lib_file" | awk '{printf "%.1f", $5/1024/1024}')
+        # Check if symbols from this library are actually in the binary
+        if nm lambda.exe 2>/dev/null | grep -q "$search_pattern"; then
+            printf "%10s %12s\n" "$size" "LINKED"
+        else
+            printf "%10s %12s\n" "$size" "NOT LINKED"
+        fi
     else
-        echo "      N/A"
+        printf "%10s %12s\n" "N/A" "NOT FOUND"
     fi
 }
 
-echo "libcrypto.a (OpenSSL encryption)                 $(get_lib_size "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a")"
-echo "libginac.a (symbolic computation)                $(get_lib_size "/opt/homebrew/Cellar/ginac/1.8.9/lib/libginac.a")"
-echo "libcln.a (number theory)                         $(get_lib_size "/opt/homebrew/Cellar/cln/1.3.7/lib/libcln.a")"
-echo "libmir.a (JIT compiler)                          $(get_lib_size "/usr/local/lib/libmir.a")"
-echo "libssl.a (OpenSSL TLS)                           $(get_lib_size "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a")"
-echo "libgmp.a (big integer math)                      $(get_lib_size "/opt/homebrew/Cellar/gmp/6.3.0/lib/libgmp.a")"
-echo "libcurl.a (HTTP client)                          $(get_lib_size "mac-deps/curl-8.10.1/lib/libcurl.a")"
-echo "libtree-sitter-lambda.a (Lambda parser)          $(get_lib_size "lambda/tree-sitter-lambda/libtree-sitter-lambda.a")"
-echo "libutf8proc.a (Unicode processing)               $(get_lib_size "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a")"
-echo "libnghttp2.a (HTTP/2 support)                    $(get_lib_size "mac-deps/nghttp2/lib/libnghttp2.a")"
-echo "libedit.a (command line editing)                 $(get_lib_size "/opt/homebrew/opt/libedit/lib/libedit.a")"
-echo "libcriterion.a (unit testing)                    $(get_lib_size "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a")"
-echo "libtree-sitter.a (parsing framework)             $(get_lib_size "lambda/tree-sitter/libtree-sitter.a")"
-echo "libmpdec.a (decimal arithmetic)                  $(get_lib_size "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a")"
+echo "libcrypto.a (OpenSSL encryption)                 $(get_lib_info "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a" "crypto" "SSL_")"
+echo "libginac.a (symbolic computation)                $(get_lib_info "/opt/homebrew/Cellar/ginac/1.8.9/lib/libginac.a" "ginac" "GiNaC")"
+echo "libcln.a (number theory)                         $(get_lib_info "/opt/homebrew/Cellar/cln/1.3.7/lib/libcln.a" "cln" "cln::")"
+echo "libmir.a (JIT compiler)                          $(get_lib_info "/usr/local/lib/libmir.a" "mir" "MIR_")"
+echo "libssl.a (OpenSSL TLS)                           $(get_lib_info "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a" "ssl" "SSL_")"
+echo "libgmp.a (big integer math)                      $(get_lib_info "/opt/homebrew/Cellar/gmp/6.3.0/lib/libgmp.a" "gmp" "mpz_")"
+echo "libcurl.a (HTTP client)                          $(get_lib_info "mac-deps/curl-8.10.1/lib/libcurl.a" "curl" "curl_")"
+echo "libtree-sitter-lambda.a (Lambda parser)          $(get_lib_info "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" "ts-lambda" "ts_language_lambda")"
+echo "libutf8proc.a (Unicode processing)               $(get_lib_info "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a" "utf8proc" "utf8proc_")"
+echo "libnghttp2.a (HTTP/2 support)                    $(get_lib_info "mac-deps/nghttp2/lib/libnghttp2.a" "nghttp2" "nghttp2_")"
+echo "libedit.a (command line editing)                 $(get_lib_info "/opt/homebrew/opt/libedit/lib/libedit.a" "edit" "readline")"
+echo "libcriterion.a (unit testing)                    $(get_lib_info "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a" "criterion" "criterion_")"
+echo "libtree-sitter.a (parsing framework)             $(get_lib_info "lambda/tree-sitter/libtree-sitter.a" "ts" "ts_node_")"
+echo "libmpdec.a (decimal arithmetic)                  $(get_lib_info "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a" "mpdec" "mpd_")"
 echo ""
 
 # Component grouping

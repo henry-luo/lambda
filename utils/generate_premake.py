@@ -1234,14 +1234,8 @@ class PremakeGenerator:
                 if lib_name not in ['criterion']:  # Exclude test-only libraries
                     dependencies.append(lib_name)
         
-        # Add dev_libraries for main program
-        for lib in self.config.get('dev_libraries', []):
-            # Handle both string and object formats
-            if isinstance(lib, str):
-                dependencies.append(lib)
-            elif isinstance(lib, dict):
-                lib_name = lib.get('name', '')
-                dependencies.append(lib_name)
+        # NOTE: dev_libraries (ginac, cln, gmp, criterion, catch2) are NOT included 
+        # in the main program - they are only for development and testing
         
         # Remove .exe extension for project name and adjust for platform
         project_name = output.replace('.exe', '')
@@ -1295,9 +1289,12 @@ class PremakeGenerator:
             '        "lib/mem-pool/include",',
         ])
         
-        # Add external library include paths
+        # Add external library include paths (excluding dev_libraries)
+        dev_lib_names = {lib.get('name', '') if isinstance(lib, dict) else lib 
+                        for lib in self.config.get('dev_libraries', [])}
+        
         for lib_name, lib_info in self.external_libraries.items():
-            if lib_info['include'] and lib_name != 'criterion':
+            if lib_info['include'] and lib_name not in dev_lib_names:
                 self.premake_content.append(f'        "{lib_info["include"]}",')
         
         self.premake_content.extend([

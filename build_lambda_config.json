@@ -102,18 +102,6 @@
             "link": "static"
         },
         {
-            "name": "criterion",
-            "include": "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-            "lib": "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
-            "link": "static"
-        },
-        {
-            "name": "catch2",
-            "include": "/opt/homebrew/Cellar/catch2/3.10.0/include",
-            "lib": "/opt/homebrew/Cellar/catch2/3.10.0/lib/libCatch2Main.a",
-            "link": "static"
-        },
-        {
             "name": "ssl",
             "include": "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
             "lib": "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
@@ -169,6 +157,18 @@
         }
     ],
     "dev_libraries": [
+        {
+            "name": "criterion",
+            "include": "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+            "lib": "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+            "link": "static"
+        },
+        {
+            "name": "catch2",
+            "include": "/opt/homebrew/Cellar/catch2/3.10.0/include",
+            "lib": "/opt/homebrew/Cellar/catch2/3.10.0/lib/libCatch2Main.a",
+            "link": "static"
+        },        
         {
             "name": "ginac",
             "include": "/opt/homebrew/Cellar/ginac/1.8.9/include",
