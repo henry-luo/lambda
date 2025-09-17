@@ -1980,7 +1980,6 @@ Item fn_float(Item item) {
             log_debug("Failed to convert decimal to string");
             return ItemError;
         }
-        
         char* endptr;
         errno = 0;
         double dval = strtod(dec_str, &endptr);

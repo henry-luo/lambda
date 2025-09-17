@@ -269,3 +269,7 @@ Test(lambda_tests, test_complex_data_science_report) {
 Test(lambda_tests, test_complex_iot_report) {
     test_lambda_script_against_file("test/lambda/complex_iot_report.ls", "test/lambda/complex_iot_report.txt");
 }
+
+Test(lambda_tests, test_single_let) {
+    test_lambda_script_against_file("test/lambda/single_let.ls", "test/lambda/single_let.txt");
+}

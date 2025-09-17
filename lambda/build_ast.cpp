@@ -338,21 +338,12 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
                 log_warn("Warning: entry->node->type is null for identifier %.*s, using TYPE_ANY", 
                     (int)entry->name->len, entry->name->chars);
                 ast_node->type = &TYPE_ANY;
-            } else if ((uintptr_t)ast_node->type < 0x1000 || (uintptr_t)ast_node->type > 0x7FFFFFFFFFFF) {
-                log_warn("Warning: entry->node->type appears to be invalid pointer %p for identifier %.*s, using TYPE_ANY", 
-                    ast_node->type, (int)entry->name->len, entry->name->chars);
-                ast_node->type = &TYPE_ANY;
             }
         }
         if (ast_node->type) {
-            // Defensive check: verify the pointer is in a reasonable range
-            if ((uintptr_t)ast_node->type < 0x1000 || (uintptr_t)ast_node->type > 0x7FFFFFFFFFFF) {
-        log_debug("Warning: ast_node->type appears to be invalid pointer %p for identifier, using TYPE_ANY", ast_node->type);
-                ast_node->type = &TYPE_ANY;
-            }
-        log_debug("ident %p type: %d", ast_node->type, ast_node->type->type_id);
+            log_debug("ident %p type: %d", ast_node->type, ast_node->type->type_id);
         } else {
-        log_debug("ident %p type: null", ast_node);
+            log_debug("ident %p type: null", ast_node);
         }
     }
     return (AstNode*)ast_node;
