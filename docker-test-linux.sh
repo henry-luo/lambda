@@ -36,7 +36,7 @@ TEST_EXECUTABLES=(
 )
 
 # Check for lambda runtime executable
-LAMBDA_EXE="$TEST_DIR/lambda-linux.exe"
+LAMBDA_EXE="$PROJECT_ROOT/lambda-linux.exe"
 
 echo "Checking for test executables..."
 MISSING_TESTS=()
@@ -224,6 +224,7 @@ chmod +x "$TEMP_SCRIPT"
 docker run --rm --platform linux/amd64 \
     -v "$PROJECT_ROOT/test:/workspace/test:ro" \
     -v "$PROJECT_ROOT/test/lambda:/workspace/test/lambda:ro" \
+    -v "$PROJECT_ROOT/lambda-linux.exe:/workspace/lambda-linux.exe:ro" \
     -v "$TEMP_SCRIPT:/workspace/run_tests.sh:ro" \
     "$IMAGE_NAME" \
     /workspace/run_tests.sh
