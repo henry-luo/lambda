@@ -30,7 +30,13 @@ TEST_EXECUTABLES=(
     "test_datetime_catch2.exe"
     "test_url_catch2.exe"
     "test_url_extra_catch2.exe"
+    "test_lambda_catch2.exe"
+    "test_lambda_proc_catch2.exe"
+    "test_lambda_repl_catch2.exe"
 )
+
+# Check for lambda runtime executable
+LAMBDA_EXE="$TEST_DIR/lambda-linux.exe"
 
 echo "Checking for test executables..."
 MISSING_TESTS=()
@@ -41,6 +47,14 @@ for test_exe in "${TEST_EXECUTABLES[@]}"; do
         echo "✓ Found $test_exe"
     fi
 done
+
+echo "Checking for Lambda runtime executable..."
+if [ ! -f "$LAMBDA_EXE" ]; then
+    echo "❌ Missing Lambda runtime: $LAMBDA_EXE"
+    MISSING_TESTS+=("lambda-linux.exe")
+else
+    echo "✓ Found lambda-linux.exe"
+fi
 
 if [ ${#MISSING_TESTS[@]} -gt 0 ]; then
     echo "❌ Missing test executables:"
@@ -58,10 +72,13 @@ echo ""
 # Build Docker image if it doesn't exist
 IMAGE_NAME="lambda-linux-test-runner"
 echo "Building Docker image..."
-docker build -f Dockerfile.test-linux -t "$IMAGE_NAME" .
+docker build --platform linux/amd64 -f Dockerfile.test-linux -t "$IMAGE_NAME" .
 
 echo "Running tests in Docker container..."
 echo ""
+
+# Ensure test_output directory exists
+mkdir -p "$PROJECT_ROOT/test_output"
 
 # Create a temporary script to run all tests
 TEMP_SCRIPT=$(mktemp)
@@ -73,7 +90,23 @@ echo "Environment: $(uname -a)"
 echo "Container user: $(whoami)"
 echo ""
 
-cd /workspace/test
+# Change to a writable temporary directory for test execution
+cd /tmp
+echo "Working directory: $(pwd)"
+
+# Copy test files to writable location but keep lambda scripts mounted read-only
+cp -r /workspace/test/* . 2>/dev/null || echo "Some files could not be copied (expected for read-only mounts)"
+
+# Copy entire workspace to writable location, preserving directory structure
+echo "Copying workspace files..."
+cp -r /workspace/* . 2>/dev/null || echo "Some files may already exist"
+
+# Ensure lambda test scripts are accessible  
+if [ ! -d "test/lambda" ]; then
+    echo "Creating test directory structure..."
+    mkdir -p test
+    cp -r /workspace/test/lambda test/ 2>/dev/null || echo "Lambda test directory already exists"
+fi
 
 TOTAL_TESTS=0
 PASSED_TESTS=0
@@ -91,7 +124,49 @@ TESTS=(
     "test_datetime_catch2.exe"
     "test_url_catch2.exe"
     "test_url_extra_catch2.exe"
+    "test_lambda_catch2.exe"
+    "test_lambda_proc_catch2.exe"
+    "test_lambda_repl_catch2.exe"
 )
+
+# Make sure Lambda executable is executable
+if [ -f "lambda-linux.exe" ]; then
+    # Copy executable to /tmp (writable) and make it executable
+    cp lambda-linux.exe /tmp/lambda-linux.exe
+    chmod +x /tmp/lambda-linux.exe
+    
+    # Create wrapper script in /tmp that calls the actual executable
+    echo '#!/bin/bash' > /tmp/lambda.exe
+    echo 'exec /tmp/lambda-linux.exe "$@"' >> /tmp/lambda.exe
+    chmod +x /tmp/lambda.exe
+    
+    # Add /tmp to PATH so tests can find lambda.exe
+    export PATH="/tmp:$PATH"
+    
+    echo "✓ Lambda runtime executable found and made executable"
+    echo "✓ Created lambda.exe wrapper in /tmp"
+else
+    echo "❌ Lambda runtime executable not found"
+fi
+
+# Test lambda executable
+echo "Testing lambda executable..."
+if lambda.exe --help >/dev/null 2>&1; then
+    echo "✓ Lambda executable working"
+else
+    echo "❌ Lambda executable not working, trying direct path..."
+    if /tmp/lambda.exe --help >/dev/null 2>&1; then
+        echo "✓ Lambda executable working via direct path"
+    else
+        echo "❌ Lambda executable not working at all"
+        echo "Debugging info:"
+        ls -la /tmp/lambda*
+        file /tmp/lambda-linux.exe 2>/dev/null || echo "File not found"
+    fi
+fi
+
+# Create test_output directory for Lambda tests
+mkdir -p test_output
 
 for test_exe in "${TESTS[@]}"; do
     echo "----------------------------------------"
@@ -146,8 +221,9 @@ EOF
 chmod +x "$TEMP_SCRIPT"
 
 # Run Docker container with the test script
-docker run --rm \
+docker run --rm --platform linux/amd64 \
     -v "$PROJECT_ROOT/test:/workspace/test:ro" \
+    -v "$PROJECT_ROOT/test/lambda:/workspace/test/lambda:ro" \
     -v "$TEMP_SCRIPT:/workspace/run_tests.sh:ro" \
     "$IMAGE_NAME" \
     /workspace/run_tests.sh

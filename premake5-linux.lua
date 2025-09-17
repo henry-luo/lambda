@@ -7,7 +7,7 @@ workspace "Lambda"
     platforms { "x64", "Linux_x64" }
     location "build/premake"
     startproject "lambda-linux"
-    toolset "clang"
+    toolset "gcc"
     
     -- Global settings
     cppdialect "C++17"
@@ -18,6 +18,9 @@ workspace "Lambda"
         defines { "DEBUG" }
         symbols "On"
         optimize "Off"
+    
+    -- AddressSanitizer for non-Linux platforms only (conflicts with -static)
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
         buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
         linkoptions { "-fsanitize=address" }
     

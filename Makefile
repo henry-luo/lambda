@@ -122,7 +122,7 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-input run help install uninstall \
         lambda radiant window cross-compile format lint check docs intellisense analyze-size \
-        build-windows build-linux build-debug build-release build-test-legacy clean-all distclean \
+        build-windows build-linux build-debug build-release clean-all distclean \
         build-windows build-linux build-debug build-release clean-all distclean \
         verify-windows verify-linux test-windows test-linux tree-sitter-libs \
         generate-premake clean-premake build-test build-test-linux build-catch2 test-catch2 \
@@ -134,7 +134,6 @@ help:
 	@echo ""
 	@echo "Build Targets (Premake-based):"
 	@echo "  build         - Build lambda project using Premake build system (incremental, default)"
-	@echo "  build-ascii   - Build lambda project with ASCII-only support (legacy, same as build)"
 	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
 	@echo "  release       - Build optimized release version using Premake"
 	@echo "  rebuild       - Force complete rebuild using Premake"
@@ -229,9 +228,6 @@ build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	$(MAKE) -C build/premake config=debug_x64 lambda -j$(JOBS)
 	@echo "Build completed. Executable: lambda.exe"
-
-# Legacy ASCII-only target (now same as regular build since Unicode is always enabled)
-build-ascii: build
 
 print-vars:
 	@echo "Unicode support: Always enabled (utf8proc)"
@@ -463,15 +459,6 @@ test-parallel: build
 		./test/test_run.sh --parallel; \
 	else \
 		echo "Error: No test suite found"; \
-		exit 1; \
-	fi
-
-build-test-legacy: build
-	@echo "Building all test executables..."
-	@if [ -f "test/test_build.sh" ]; then \
-		PARALLEL_JOBS=$(NPROCS) ./test/test_build.sh all; \
-	else \
-		echo "Error: test_build.sh not found"; \
 		exit 1; \
 	fi
 

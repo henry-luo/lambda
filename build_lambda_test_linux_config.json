@@ -19,6 +19,11 @@
     "libraries": [
         "Catch2Maind",
         "Catch2d", 
+        "tree-sitter-lambda",
+        "tree-sitter",
+        "mir",
+        "mpdec",
+        "utf8proc",
         "curl",
         "z",
         "ssl",
@@ -40,6 +45,42 @@
             "name": "Catch2d",
             "include": "linux-deps/include",
             "lib": "linux-deps/lib/libCatch2d.a",
+            "link": "static"
+        },
+        {
+            "name": "tree-sitter",
+            "include": "linux-deps/include",
+            "lib": "linux-deps/lib/libtree-sitter.a",
+            "link": "static"
+        },
+        {
+            "name": "tree-sitter-lambda",
+            "include": "lambda/tree-sitter-lambda/bindings/c",
+            "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+            "link": "static"
+        },
+        {
+            "name": "mir",
+            "include": "linux-deps/include",
+            "lib": "linux-deps/lib/libmir.a",
+            "link": "static"
+        },
+        {
+            "name": "mpdec",
+            "include": "linux-deps/include",
+            "lib": "linux-deps/lib/libmpdec.a",
+            "link": "static"
+        },
+        {
+            "name": "utf8proc",
+            "include": "linux-deps/include",
+            "lib": "linux-deps/lib/libutf8proc.a",
+            "link": "static"
+        },
+        {
+            "name": "curl",
+            "include": "linux-deps/include",
+            "lib": "linux-deps/lib/libcurl.a",
             "link": "static"
         }
     ],
@@ -159,6 +200,27 @@
                         "dependencies": ["lambda-lib"],
                         "libraries": ["Catch2Maind", "Catch2d"],
                         "binary": "test_url_extra_catch2"
+                    },
+                    {
+                        "source": "test_lambda_catch2.cpp",
+                        "name": "🧮 Lambda Script Runtime Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Maind", "Catch2d"],
+                        "binary": "test_lambda_catch2"
+                    },
+                    {
+                        "source": "test_lambda_proc_catch2.cpp",
+                        "name": "⚙️ Lambda Procedural Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Maind", "Catch2d"],
+                        "binary": "test_lambda_proc_catch2"
+                    },
+                    {
+                        "source": "test_lambda_repl_catch2.cpp",
+                        "name": "💬 Lambda REPL Tests (Catch2)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["Catch2Maind", "Catch2d"],
+                        "binary": "test_lambda_repl_catch2"
                     }
                 ],
                 "type": "catch2"

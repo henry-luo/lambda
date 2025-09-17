@@ -7,13 +7,6 @@
 #include <sys/types.h>
 #include <fcntl.h>
 
-extern "C" {
-// Forward declarations for C standard library functions
-extern void* memcpy(void* dest, const void* src, size_t n);
-extern char* strstr(const char* haystack, const char* needle);
-extern size_t strlen(const char* s);
-}
-
 /**
  * Lambda REPL CLI Interface Tests using Catch2
  *
@@ -43,11 +36,11 @@ void free_test_result(struct test_result* result) {
 }
 
 struct test_result run_lambda_repl(const char* input) {
-    struct test_result result = {0};
+    struct test_result result = {nullptr, 0, 0};
     
     // Use printf instead of echo to handle newlines properly
     char command[2048];
-    snprintf(command, sizeof(command), "printf \"%s\" | timeout 10 ./lambda.exe 2>&1", input);
+    snprintf(command, sizeof(command), "printf \"%s\" | timeout 10 lambda.exe", input);
     
     FILE* proc = popen(command, "r");
     if (!proc) {
@@ -111,12 +104,12 @@ bool output_contains_clean(const char* output, const char* expected) {
 
 // Helper to run Lambda REPL in interactive mode using script command (pseudo-TTY)
 struct test_result run_lambda_repl_interactive(const char* input) {
-    struct test_result result = {0};
+    struct test_result result = {nullptr, 0, 0};
     
     // Use script command with echo to simulate TTY
     char command[2048];
     snprintf(command, sizeof(command), 
-             "echo \"%s\" | script -q /dev/null ./lambda.exe 2>&1", 
+             "echo \"%s\" | script -q /dev/null lambda.exe", 
              input);
     
     FILE* proc = popen(command, "r");
@@ -144,7 +137,7 @@ struct test_result run_lambda_repl_interactive(const char* input) {
 // ============================================================================
 
 TEST_CASE("executable_exists", "[lambda][repl][basic]") {
-    int result = system("test -x ./lambda.exe");
+    int result = system("test -x lambda.exe");
     REQUIRE(result == 0);
 }
 
