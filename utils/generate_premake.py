@@ -692,22 +692,25 @@ class PremakeGenerator:
             suite_name = suite.get('suite', '')
             suite_type = suite.get('type', '')
             
-            # Check if this suite contains Catch2 tests (either type=catch2 or has Catch2 libraries)
-            has_catch2_tests = False
+            # Determine test framework type for this suite
+            is_catch2_suite = False
+            is_criterion_suite = False
+            
             if suite_type == 'catch2':
-                has_catch2_tests = True
+                is_catch2_suite = True
+            elif suite_type == 'library':
+                is_criterion_suite = True
             else:
                 # Check if any test in this suite uses Catch2 libraries
                 tests = suite.get('tests', [])
                 for test in tests:
                     libraries = test.get('libraries', [])
                     if any(lib in ['Catch2Main', 'Catch2'] for lib in libraries):
-                        has_catch2_tests = True
+                        is_catch2_suite = True
                         break
-            
-            # Skip suites that don't have Catch2 tests
-            if not has_catch2_tests:
-                continue
+                # If not Catch2, assume it's Criterion/library tests
+                if not is_catch2_suite:
+                    is_criterion_suite = True
             
             # Skip problematic test suites that have linking issues in the old test system
             problematic_suites = ['validator-catch2', 'input_catch2']  # These have missing dependencies
@@ -1055,10 +1058,21 @@ class PremakeGenerator:
                     test_frameworks_added.append('catch2')
                 elif lib == 'criterion':
                     self.premake_content.append('        "criterion",')
+                    # Add Criterion dependencies (required on macOS with Homebrew)
+                    self.premake_content.append('        "nanomsg",')
+                    self.premake_content.append('        "git2",')
                     test_frameworks_added.append('criterion')
                 else:
                     # Handle other libraries
-                    self.premake_content.append(f'        "{lib}",')
+                    if lib == 'c++fs':
+                        # On macOS with modern Clang, filesystem is part of libc++ and doesn't need separate linking
+                        # Only add if not on macOS
+                        platform = self.config.get('platform', 'macOS')
+                        if platform != 'macOS' and 'darwin' not in platform.lower():
+                            self.premake_content.append('        "stdc++fs",')
+                        # On macOS, we don't need to link anything for filesystem
+                    else:
+                        self.premake_content.append(f'        "{lib}",')
                     
             # Special handling for lambda tests that use Catch2
             if (test_name and 'lambda' in test_name.lower() and 'catch2' in test_name.lower() and 
@@ -1070,6 +1084,9 @@ class PremakeGenerator:
         # Only add criterion to test executables if no other test framework is specified
         if 'criterion' not in test_frameworks_added and 'catch2' not in test_frameworks_added:
             self.premake_content.append('        "criterion",')
+            # Add Criterion dependencies (required on macOS with Homebrew)
+            self.premake_content.append('        "nanomsg",')
+            self.premake_content.append('        "git2",')
         
         # Close the links block
         self.premake_content.extend([
