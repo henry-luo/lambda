@@ -713,7 +713,8 @@ class PremakeGenerator:
                     is_criterion_suite = True
             
             # Skip problematic test suites that have linking issues in the old test system
-            problematic_suites = ['validator-catch2', 'input_catch2']  # These have missing dependencies
+            # Note: Enable input_catch2 and validator-catch2 tests since dependencies are supported
+            problematic_suites = []  # All test suites now enabled
             if suite_name in problematic_suites:
                 continue
                 

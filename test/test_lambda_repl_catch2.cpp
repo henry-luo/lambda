@@ -40,7 +40,7 @@ struct test_result run_lambda_repl(const char* input) {
     
     // Use printf instead of echo to handle newlines properly
     char command[2048];
-    snprintf(command, sizeof(command), "printf \"%s\" | timeout 10 lambda.exe", input);
+    snprintf(command, sizeof(command), "printf \"%s\" | timeout 10 ./lambda.exe 2>&1", input);
     
     FILE* proc = popen(command, "r");
     if (!proc) {
@@ -109,7 +109,7 @@ struct test_result run_lambda_repl_interactive(const char* input) {
     // Use script command with echo to simulate TTY
     char command[2048];
     snprintf(command, sizeof(command), 
-             "echo \"%s\" | script -q /dev/null lambda.exe", 
+             "echo \"%s\" | script -q /dev/null ./lambda.exe 2>&1", 
              input);
     
     FILE* proc = popen(command, "r");
@@ -137,7 +137,7 @@ struct test_result run_lambda_repl_interactive(const char* input) {
 // ============================================================================
 
 TEST_CASE("executable_exists", "[lambda][repl][basic]") {
-    int result = system("test -x lambda.exe");
+    int result = system("test -x ./lambda.exe");
     REQUIRE(result == 0);
 }
 

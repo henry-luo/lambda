@@ -452,8 +452,20 @@ build-catch2: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	python3 utils/generate_premake.py
 	@echo "Generating makefiles..."
 	premake5 gmake
-	@echo "Building Catch2 test executables with $(JOBS) parallel jobs..."
-	/Library/Developer/CommandLineTools/usr/bin/make -C build/premake config=debug_x64 test_strbuf_catch2 test_stringbuf_catch2 test_strview_catch2 test_variable_pool_catch2 test_num_stack_catch2 test_datetime_catch2 test_url_catch2 test_url_extra_catch2 -j8
+	@echo "Discovering available Catch2 test targets..."
+	@CATCH2_TARGETS=$$(ls build/premake/*.make 2>/dev/null | grep catch2 | sed 's|build/premake/||' | sed 's|\.make$$||' | tr '\n' ' '); \
+	if [ -n "$$CATCH2_TARGETS" ]; then \
+		echo "Found Catch2 targets: $$CATCH2_TARGETS"; \
+		echo "Building Catch2 test executables with $(JOBS) parallel jobs..."; \
+		/Library/Developer/CommandLineTools/usr/bin/make -C build/premake config=debug_x64 $$CATCH2_TARGETS -j$(JOBS); \
+		echo "Creating dynamic Catch2 test list for test runner..."; \
+		mkdir -p test_output; \
+		echo "$$CATCH2_TARGETS" | tr ' ' '\n' | grep -v '^$$' > test_output/available_catch2_tests.txt; \
+		echo "Available Catch2 tests saved to test_output/available_catch2_tests.txt"; \
+	else \
+		echo "No Catch2 test targets found in build/premake/"; \
+		exit 1; \
+	fi
 	@echo "Catch2 test build completed."
 
 # Run Catch2 tests
