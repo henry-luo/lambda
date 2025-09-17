@@ -182,7 +182,7 @@ int main() {
 EOF
 
     # Try to compile it
-    if "$DEPS_DIR/bin/${TARGET}-clang" -o "$DEPS_DIR/test-linux" "$DEPS_DIR/test.c"; then
+    if "$DEPS_DIR/bin/x86_64-linux-gnu-gcc" -o "$DEPS_DIR/test-linux" "$DEPS_DIR/test.c"; then
         print_success "Test compilation successful"
         
         # Check if the binary was created and is for Linux
@@ -217,18 +217,18 @@ DEPS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PATH="$DEPS_DIR/bin:$PATH"
 
 # Set cross-compilation environment variables
-export CC="x86_64-unknown-linux-musl-clang"
-export CXX="x86_64-unknown-linux-musl-clang++"
-export AR="x86_64-unknown-linux-musl-ar"
-export RANLIB="x86_64-unknown-linux-musl-ranlib"
-export STRIP="x86_64-unknown-linux-musl-strip"
+export CC="x86_64-linux-gnu-gcc"
+export CXX="x86_64-linux-gnu-g++"
+export AR="x86_64-linux-gnu-ar"
+export RANLIB="x86_64-linux-gnu-ranlib"
+export STRIP="x86_64-linux-gnu-strip"
 
 # Set target
-export CROSS_COMPILE_TARGET="x86_64-unknown-linux-musl"
+export CROSS_COMPILE_TARGET="x86_64-unknown-linux-gnu"
 
-# Add LLVM tools to PATH
-if [[ -d "/opt/homebrew/opt/llvm/bin" ]]; then
-    export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+# Add glibc toolchain to PATH
+if [[ -d "/opt/homebrew/Cellar/x86_64-unknown-linux-gnu/13.3.0/bin" ]]; then
+    export PATH="/opt/homebrew/Cellar/x86_64-unknown-linux-gnu/13.3.0/bin:$PATH"
 fi
 
 echo "Linux cross-compilation environment loaded"
@@ -485,6 +485,21 @@ build_curl() {
         --with-mbedtls=no \
         --with-gnutls=no \
         --without-ssl \
+        --without-libpsl \
+        --without-zlib \
+        --without-brotli \
+        --without-zstd \
+        --without-librtmp \
+        --without-libssh2 \
+        --without-libssh \
+        --without-libgsasl \
+        --without-winidn \
+        --without-libidn2 \
+        --without-nghttp2 \
+        --without-ngtcp2 \
+        --without-nghttp3 \
+        --without-quiche \
+        --without-msh3 \
         --disable-ftp \
         --disable-ldap \
         --disable-ldaps \
@@ -502,6 +517,11 @@ build_curl() {
         --disable-manual \
         --disable-ipv6 \
         --disable-versioned-symbols \
+        --disable-cookies \
+        --disable-crypto-auth \
+        --disable-tls-srp \
+        --disable-unix-sockets \
+        --disable-doh \
         --prefix="$(pwd)/../../../" \
         CFLAGS="-O2 -DNDEBUG -static" \
         LDFLAGS="-static" || {
@@ -583,61 +603,113 @@ build_utf8proc() {
     cd "$SCRIPT_DIR"
 }
 
-# Function to build ncurses library for Linux
+# Function to build minimal ncurses stub for Linux
 build_ncurses() {
-    print_info "Building ncurses library for Linux..."
+    print_info "Creating minimal ncurses stub for Linux..."
     
-    local VERSION="6.4"
-    local URL="https://invisible-mirror.net/archives/ncurses/ncurses-${VERSION}.tar.gz"
+    # Check if already built
+    if [[ -f "$SCRIPT_DIR/$DEPS_DIR/lib/libncurses.a" ]]; then
+        print_success "ncurses stub already built"
+        return 0
+    fi
     
-    cd /tmp
-    rm -rf ncurses-*
+    # Create minimal ncurses stub implementation
+    mkdir -p "$SCRIPT_DIR/$DEPS_DIR/include/ncurses"
+    mkdir -p "$SCRIPT_DIR/$DEPS_DIR/lib"
     
-    print_info "Downloading ncurses ${VERSION}..."
-    curl -LO "$URL"
-    
-    print_info "Extracting ncurses..."
-    tar -xzf "ncurses-${VERSION}.tar.gz"
-    cd "ncurses-${VERSION}"
-    
-    print_info "Configuring ncurses for cross-compilation..."
-    CC="$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-gcc" \
-    CXX="$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-g++" \
-    LDFLAGS="-L$SCRIPT_DIR/$DEPS_DIR/lib" \
-    CPPFLAGS="-I$SCRIPT_DIR/$DEPS_DIR/include" \
-    ./configure \
-        --host=x86_64-linux-gnu \
-        --prefix="$SCRIPT_DIR/$DEPS_DIR" \
-        --enable-static \
-        --disable-shared \
-        --without-debug \
-        --without-ada \
-        --without-manpages \
-        --with-fallbacks=vt100,xterm \
-        --without-progs \
-        --disable-database \
-        --with-default-terminfo-dir=/usr/share/terminfo \
-        --enable-termcap
-    
-    print_info "Building ncurses..."
-    make -j$(nproc 2>/dev/null || echo 4)
-    
-    print_info "Installing ncurses..."
-    make install
-    
-    # Fix missing _nc_fallback symbol
-    print_info "Adding ncurses fallback symbol fix..."
-    echo '// Minimal fallback implementation for ncurses
+    # Create minimal curses.h header
+    cat > "$SCRIPT_DIR/$DEPS_DIR/include/curses.h" << 'EOF'
+#ifndef _CURSES_H
+#define _CURSES_H
+
+// Minimal curses.h stub for cross-compilation
+typedef struct _win_st WINDOW;
+typedef unsigned long chtype;
+
+#define OK (0)
+#define ERR (-1)
+#define TRUE 1
+#define FALSE 0
+
+// Terminal capability functions (stubs)
+extern int setupterm(const char *term, int filedes, int *errret);
+extern int tigetflag(const char *capname);
+extern int tigetnum(const char *capname);
+extern char *tigetstr(const char *capname);
+extern char *tparm(const char *str, ...);
+extern int putp(const char *str);
+extern int tputs(const char *str, int affcnt, int (*putc)(int));
+
+// Basic terminal functions
+extern WINDOW *initscr(void);
+extern int endwin(void);
+extern int cbreak(void);
+extern int nocbreak(void);
+extern int echo(void);
+extern int noecho(void);
+extern int keypad(WINDOW *win, int bf);
+extern int nodelay(WINDOW *win, int bf);
+
+#endif /* _CURSES_H */
+EOF
+
+    # Create minimal ncurses stub library
+    cat > "$SCRIPT_DIR/$DEPS_DIR/lib/ncurses_stub.c" << 'EOF'
+// Minimal ncurses stub implementation for cross-compilation
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct _win_st WINDOW;
+typedef unsigned long chtype;
+
+// Terminal capability stubs
+int setupterm(const char *term, int filedes, int *errret) {
+    if (errret) *errret = 1;
+    return -1;
+}
+
+int tigetflag(const char *capname) { return 0; }
+int tigetnum(const char *capname) { return -1; }
+char *tigetstr(const char *capname) { return (char*)-1; }
+
+char *tparm(const char *str, ...) { return NULL; }
+int putp(const char *str) { return -1; }
+int tputs(const char *str, int affcnt, int (*putc)(int)) { return -1; }
+
+// Terminal entry function (required by libedit)
+int tgetent(char *bp, const char *name) { return 1; }
+int tgetflag(const char *id) { return 0; }
+int tgetnum(const char *id) { return -1; }
+char *tgetstr(const char *id, char **area) { return NULL; }
+char *tgoto(const char *cap, int col, int row) { return NULL; }
+
+// Basic terminal function stubs
+WINDOW *initscr(void) { return NULL; }
+int endwin(void) { return 0; }
+int cbreak(void) { return 0; }
+int nocbreak(void) { return 0; }
+int echo(void) { return 0; }
+int noecho(void) { return 0; }
+int keypad(WINDOW *win, int bf) { return 0; }
+int nodelay(WINDOW *win, int bf) { return 0; }
+
+// Fallback function for missing symbol
 const char* _nc_fallback(const char* term) {
-    return (const char*)0;  // Return NULL for no fallback
-}' > "$SCRIPT_DIR/$DEPS_DIR/lib/nc_fallback.c"
-    
-    "$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-gcc" -c "$SCRIPT_DIR/$DEPS_DIR/lib/nc_fallback.c" -o "$SCRIPT_DIR/$DEPS_DIR/lib/nc_fallback.o"
-    "$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-ar" r "$SCRIPT_DIR/$DEPS_DIR/lib/libncurses.a" "$SCRIPT_DIR/$DEPS_DIR/lib/nc_fallback.o"
+    return (const char*)0;
+}
+EOF
+
+    # Compile the stub library
+    print_info "Compiling ncurses stub..."
+    "$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-gcc" -c "$SCRIPT_DIR/$DEPS_DIR/lib/ncurses_stub.c" -o "$SCRIPT_DIR/$DEPS_DIR/lib/ncurses_stub.o"
+    "$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-ar" rcs "$SCRIPT_DIR/$DEPS_DIR/lib/libncurses.a" "$SCRIPT_DIR/$DEPS_DIR/lib/ncurses_stub.o"
     "$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-ranlib" "$SCRIPT_DIR/$DEPS_DIR/lib/libncurses.a"
     
-    print_success "ncurses build completed"
-    cd "$SCRIPT_DIR"
+    # Also create libncursesw.a (wide character version)
+    cp "$SCRIPT_DIR/$DEPS_DIR/lib/libncurses.a" "$SCRIPT_DIR/$DEPS_DIR/lib/libncursesw.a"
+    
+    print_success "ncurses stub created successfully"
 }
 
 # Function to build criterion testing framework for Linux
