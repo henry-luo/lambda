@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Enhanced Lambda Catch2 Test Suite Runner - Test Results Breakdown
-# Groups Catch2 tests by their test suite categories from build_lambda_config.json
+# Groups Catch2 tests by their test suite categories using dynamic discovery
 
 set -e
 
@@ -42,7 +42,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             echo "Usage: $0 [--target=SUITE] [--raw] [--sequential] [--parallel]"
-            echo "  --target=SUITE   Run only tests from specified suite (catch2, input_catch2, validator-catch2, lambda-catch2)"
+            echo "  --target=SUITE   Run only tests from specified suite (library, input, lambda, validator, catch2)"
             echo "  --raw           Show raw test output without formatting"
             echo "  --sequential    Run tests sequentially (default: parallel)"
             echo "  --parallel      Run tests in parallel (default)"
@@ -85,7 +85,7 @@ total_passed=0
 total_failed=0
 failed_test_names=()
 
-# Test suite tracking (Level 1: from build_lambda_config.json)
+# Test suite tracking (Level 1: using dynamic discovery)
 declare -a suite_category_names=()
 declare -a suite_category_totals=()
 declare -a suite_category_passed=()
@@ -100,38 +100,28 @@ declare -a c_test_failed=()
 declare -a c_test_status=()
 declare -a c_test_suites=()  # Maps Catch2 test to its suite category
 
-# Function to map executable name to test suite category (from build_lambda_config.json)
+# Function to map executable name to test suite category (using dynamic categorization)
 get_suite_category() {
     local exe_name="$1"
     
-    # Try to get suite category from build configuration
-    local suite_category=$(jq -r --arg exe "$exe_name" '
-        .test.test_suites[] | 
-        select(.tests[]? | select(. == $exe)) | 
-        .suite
-    ' build_lambda_config.json 2>/dev/null | head -1)
-    
-    # If found in config, return it
-    if [ -n "$suite_category" ] && [ "$suite_category" != "null" ]; then
-        echo "$suite_category"
-        return
-    fi
-    
-    # Fallback categorization based on test name (matching old test system logic)
+    # Dynamic categorization based on test name patterns
     case "$exe_name" in
-        # Library Tests
+        # Library Tests - basic utility and core functionality tests
         "test_datetime_catch2"|"test_num_stack_catch2"|"test_strbuf_catch2"|"test_stringbuf_catch2"|"test_strview_catch2"|"test_url_catch2"|"test_url_extra_catch2"|"test_variable_pool_catch2")
             echo "library" ;;
-        # Input Processing Tests  
+        # Input Processing Tests - file format parsing and processing
         "test_css_"*"_catch2"|"test_dir_catch2"|"test_http_catch2"|"test_input_roundtrip_catch2"|"test_jsx_roundtrip_catch2"|"test_markup_roundtrip_catch2"|"test_math_catch2"|"test_math_ascii_catch2"|"test_mdx_roundtrip_catch2"|"test_mime_detect_catch2"|"test_sysinfo_catch2")
             echo "input" ;;
-        # Lambda Runtime Tests
+        # Lambda Runtime Tests - language runtime and evaluation
         "test_lambda_catch2"|"test_lambda_proc_catch2"|"test_lambda_repl_catch2")
             echo "lambda" ;;
-        # Validator Tests
+        # Validator Tests - schema and document validation
         "test_validator_catch2")
             echo "validator" ;;
-        # Default to unknown
+        # Catch anything with _catch2 suffix as generic
+        *"_catch2")
+            echo "catch2" ;;
+        # Default for unknown
         *)
             echo "unknown" ;;
     esac
@@ -141,31 +131,14 @@ get_suite_category() {
 get_suite_category_display_name() {
     local category="$1"
     
-    # Get display name from build configuration
-    local display_name=$(jq -r --arg suite "$category" '
-        .test.test_suites[] | 
-        select(.suite == $suite) | 
-        .name
-    ' build_lambda_config.json 2>/dev/null | head -1)
-    
-    # If found in config, return it
-    if [ -n "$display_name" ] && [ "$display_name" != "null" ]; then
-        echo "$display_name"
-        return
-    fi
-    
-    # Fallback for hardcoded display names (matching old test system structure)
+    # Dynamic display names based on category
     case "$category" in
         "library") echo "📚 Library Tests" ;;
         "input") echo "📄 Input Processing Tests" ;;
         "lambda") echo "🐑 Lambda Runtime Tests" ;;
         "validator") echo "🔍 Validator Tests" ;;
-        "unknown") echo "🧪 Other Tests" ;;
-        # Legacy Catch2 categories for backward compatibility
         "catch2") echo "🧪 Catch2 Tests" ;;
-        "input_catch2") echo "📄 Input Processing Tests" ;;
-        "validator-catch2") echo "🔍 Validator Tests" ;;
-        "lambda-catch2") echo "🐑 Lambda Runtime Tests" ;;
+        "unknown") echo "🧪 Other Tests" ;;
         *) echo "🧪 $category Tests" ;;
     esac
 }
@@ -174,22 +147,7 @@ get_suite_category_display_name() {
 get_c_test_display_name() {
     local exe_name="$1"
     
-    # Try to get custom display name from build configuration
-    local display_name=$(jq -r --arg exe "$exe_name" '
-        .test.test_suites[] | 
-        .tests[] | 
-        select(. == $exe) | 
-        . as $test | 
-        "Custom Test: " + $test
-    ' build_lambda_config.json 2>/dev/null | head -1)
-    
-    # If found in config, return it
-    if [ -n "$display_name" ] && [ "$display_name" != "null" ] && [ "$display_name" != "Custom Test: $exe_name" ]; then
-        echo "$display_name"
-        return
-    fi
-    
-    # Fallback for hardcoded display names (matching old test system names)
+    # Dynamic display names based on test name patterns
     case "$exe_name" in
         "test_css_files_safe_catch2") echo "🎨 CSS Files Safe Tests" ;;
         "test_css_frameworks_catch2") echo "🎨 CSS Framework Tests" ;;
@@ -314,32 +272,37 @@ extract_failed_test_names() {
 
 echo "🔍 Finding Catch2 test executables..."
 
-# Get list of valid Catch2 test sources from build configuration
-get_valid_catch2_test_sources() {
-    # Extract Catch2 test sources from the JSON configuration
-    jq -r '.test.test_suites[] | select(.type == "catch2" or (.suite | type == "string" and test("catch2"))) | .tests[]?.source' build_lambda_config.json 2>/dev/null | while IFS= read -r source; do
-        if [ -n "$source" ] && [ "$source" != "null" ]; then
-            # Remove test/ prefix if it exists, we'll add it back later
-            source_clean=$(echo "$source" | sed 's|^test/||')
-            echo "$source_clean"
-        fi
-    done
+# Dynamic discovery approach: find all actually built Catch2 test executables
+# First try to use the list generated by build-catch2, then fall back to discovery
+get_available_catch2_tests() {
+    # Check if we have a list from the build system
+    if [ -f "test_output/available_catch2_tests.txt" ]; then
+        echo "Using dynamically generated test list from build system..."
+        cat test_output/available_catch2_tests.txt | grep -v '^$'
+    else
+        echo "Discovering Catch2 tests by scanning build directory..."
+        # Fallback: discover by scanning the build directory for catch2 executables
+        find build/premake -name "*catch2*" -executable -type f 2>/dev/null | \
+            xargs -I {} basename {} | \
+            sed 's/\.exe$//' | \
+            sort -u
+    fi
 }
 
-# Get array of valid Catch2 test sources
-valid_test_sources=()
-while IFS= read -r source; do
-    if [ -n "$source" ]; then
-        valid_test_sources+=("$source")
+# Get array of available Catch2 tests
+available_tests=()
+while IFS= read -r test_name; do
+    if [ -n "$test_name" ]; then
+        available_tests+=("$test_name")
     fi
-done < <(get_valid_catch2_test_sources)
+done < <(get_available_catch2_tests)
 
-echo "Valid Catch2 test sources from config: ${valid_test_sources[*]}"
+echo "Available Catch2 tests: ${available_tests[*]}"
 
-# Find existing executables that correspond to valid test sources
+# Find existing executables for the available tests
 test_executables=()
-for source_file in "${valid_test_sources[@]}"; do
-    base_name=$(basename "$source_file" .cpp)
+for test_name in "${available_tests[@]}"; do
+    base_name=$(basename "$test_name" .cpp)
     exe_file="test/${base_name}.exe"
     
     # Check if executable exists in test/ directory
@@ -376,7 +339,7 @@ if [ -n "$TARGET_SUITE" ]; then
     
     if [ ${#test_executables[@]} -eq 0 ]; then
         echo "❌ No Catch2 test executables found for target suite: $TARGET_SUITE"
-        echo "   Available suites: catch2, input_catch2, validator-catch2, lambda-catch2"
+        echo "   Available suites: library, input, lambda, validator, catch2"
         exit 1
     fi
 fi
