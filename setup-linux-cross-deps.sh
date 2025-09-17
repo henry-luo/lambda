@@ -13,6 +13,7 @@ GLIBC_TOOLCHAIN_PATH="/opt/homebrew/Cellar/x86_64-unknown-linux-gnu/13.3.0"
 MPDECIMAL_VERSION="4.0.1"
 UTF8PROC_VERSION="2.10.0"
 LIBEDIT_VERSION="20240808-3.1"
+CATCH2_VERSION="3.10.0"
 
 # Colors for output
 RED='\033[0;31m'
@@ -834,6 +835,87 @@ build_libedit() {
     cd "$SCRIPT_DIR"
 }
 
+# Function to build Catch2 testing framework for Linux
+build_catch2() {
+    print_info "Building Catch2 testing framework for Linux..."
+    
+    cd "$DEPS_DIR"
+    
+    # Download Catch2 if not already present
+    if [[ ! -f "Catch2-${CATCH2_VERSION}.tar.gz" ]]; then
+        print_info "Downloading Catch2 v${CATCH2_VERSION}..."
+        curl -L -o "Catch2-${CATCH2_VERSION}.tar.gz" "https://github.com/catchorg/Catch2/archive/v${CATCH2_VERSION}.tar.gz"
+    fi
+    
+    # Extract Catch2
+    if [[ ! -d "Catch2-${CATCH2_VERSION}" ]]; then
+        print_info "Extracting Catch2..."
+        tar -xzf "Catch2-${CATCH2_VERSION}.tar.gz"
+    fi
+    
+    cd "Catch2-${CATCH2_VERSION}"
+    
+    # Check if already built
+    if [[ -f "../../lib/libCatch2Maind.a" ]] && [[ -f "../../lib/libCatch2d.a" ]]; then
+        print_success "Catch2 already built"
+        cd "$SCRIPT_DIR"
+        return 0
+    fi
+    
+    # Create build directory
+    mkdir -p build-linux
+    cd build-linux
+    
+    print_info "Configuring Catch2 for Linux cross-compilation..."
+    
+    # Set cross-compilation environment
+    export CC="$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-gcc"
+    export CXX="$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-g++"
+    export AR="$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-ar"
+    export RANLIB="$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-ranlib"
+    export STRIP="$GLIBC_TOOLCHAIN_PATH/bin/x86_64-linux-gnu-strip"
+    
+    # Configure with CMake for cross-compilation
+    cmake .. \
+        -DCMAKE_SYSTEM_NAME=Linux \
+        -DCMAKE_SYSTEM_PROCESSOR=x86_64 \
+        -DCMAKE_C_COMPILER="${CC}" \
+        -DCMAKE_CXX_COMPILER="${CXX}" \
+        -DCMAKE_AR="${AR}" \
+        -DCMAKE_RANLIB="${RANLIB}" \
+        -DCMAKE_STRIP="${STRIP}" \
+        -DCMAKE_INSTALL_PREFIX="$SCRIPT_DIR/$DEPS_DIR" \
+        -DCMAKE_BUILD_TYPE=Debug \
+        -DBUILD_TESTING=OFF \
+        -DCATCH_INSTALL_DOCS=OFF \
+        -DCATCH_INSTALL_EXTRAS=OFF \
+        -DCMAKE_CXX_FLAGS="-static" \
+        -DCMAKE_C_FLAGS="-static"
+    
+    print_info "Building Catch2..."
+    make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+    
+    print_info "Installing Catch2..."
+    make install
+    
+    # Create debug versions with 'd' suffix as expected by the test config
+    cd "$SCRIPT_DIR/$DEPS_DIR"
+    if [[ -f "lib/libCatch2Main.a" ]] && [[ -f "lib/libCatch2.a" ]]; then
+        cp lib/libCatch2Main.a lib/libCatch2Maind.a
+        cp lib/libCatch2.a lib/libCatch2d.a
+        
+        print_success "Catch2 installed successfully for Linux cross-compilation!"
+        print_info "Libraries available:"
+        ls -la lib/libCatch2*.a
+    else
+        print_error "Catch2 installation failed - libraries not found"
+        cd "$SCRIPT_DIR"
+        return 1
+    fi
+    
+    cd "$SCRIPT_DIR"
+}
+
 # Main function
 main() {
     print_info "Setting up simplified Linux cross-compilation for Lambda Script..."
@@ -858,6 +940,7 @@ main() {
     build_ncurses
     build_libedit
     build_criterion
+    build_catch2
     
     create_env_script
     
@@ -873,6 +956,7 @@ main() {
         print_info "Libraries built:"
         print_info "  - mpdecimal ${MPDECIMAL_VERSION} (static)"
         print_info "  - utf8proc ${UTF8PROC_VERSION} (static)"
+        print_info "  - catch2 ${CATCH2_VERSION} (static)"
         echo
     else
         print_warning "Setup completed but test had issues - proceeding anyway"
