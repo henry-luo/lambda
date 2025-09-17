@@ -900,18 +900,25 @@ build_catch2() {
     
     # Create debug versions with 'd' suffix as expected by the test config
     cd "$SCRIPT_DIR/$DEPS_DIR"
+    
+    # Check if we have the original libraries to copy
     if [[ -f "lib/libCatch2Main.a" ]] && [[ -f "lib/libCatch2.a" ]]; then
         cp lib/libCatch2Main.a lib/libCatch2Maind.a
         cp lib/libCatch2.a lib/libCatch2d.a
-        
         print_success "Catch2 installed successfully for Linux cross-compilation!"
-        print_info "Libraries available:"
-        ls -la lib/libCatch2*.a
+    # Check if we already have the 'd' versions (from previous build)
+    elif [[ -f "lib/libCatch2Maind.a" ]] && [[ -f "lib/libCatch2d.a" ]]; then
+        print_success "Catch2 already installed for Linux cross-compilation!"
     else
         print_error "Catch2 installation failed - libraries not found"
+        print_info "Expected files: lib/libCatch2Main.a and lib/libCatch2.a"
+        print_info "Or: lib/libCatch2Maind.a and lib/libCatch2d.a"
         cd "$SCRIPT_DIR"
         return 1
     fi
+    
+    print_info "Libraries available:"
+    ls -la lib/libCatch2*.a
     
     cd "$SCRIPT_DIR"
 }

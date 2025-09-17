@@ -392,6 +392,7 @@ project "lambda"
         links {
             "z",
             "ncurses",
+            "pthread",
         }
     
         linkoptions {

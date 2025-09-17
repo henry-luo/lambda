@@ -154,6 +154,12 @@
             "include": "",
             "lib": "-lncurses",
             "link": "dynamic"
+        },
+        {
+            "name": "pthread",
+            "include": "",
+            "lib": "-lpthread",
+            "link": "dynamic"
         }
     ],
     "dev_libraries": [
@@ -333,6 +339,60 @@
             "build_dir": "build_windows",
             "cross_compile": true,
             "target_triplet": "x86_64-w64-mingw32"
+        },
+        "linux": {
+            "output": "lambda-linux.exe",
+            "libraries": [
+                {
+                    "name": "curl",
+                    "include": "linux-deps/include",
+                    "lib": "linux-deps/lib/libcurl.a",
+                    "link": "static"
+                },
+                {
+                    "name": "tree-sitter",
+                    "include": "linux-deps/include",
+                    "lib": "linux-deps/lib/libtree-sitter.a",
+                    "link": "static"
+                },
+                {
+                    "name": "mir",
+                    "include": "linux-deps/include",
+                    "lib": "linux-deps/lib/libmir.a",
+                    "link": "static"
+                },
+                {
+                    "name": "mpdec",
+                    "include": "linux-deps/include",
+                    "lib": "linux-deps/lib/libmpdec.a",
+                    "link": "static"
+                },
+                {
+                    "name": "utf8proc",
+                    "include": "linux-deps/include",
+                    "lib": "linux-deps/lib/libutf8proc.a",
+                    "link": "static"
+                },
+                {
+                    "name": "libedit",
+                    "include": "linux-deps/include",
+                    "lib": "linux-deps/lib/libedit.a",
+                    "link": "static"
+                }
+            ],
+            "flags": [
+                "std=c++17",
+                "static",
+                "DCROSS_COMPILE"
+            ],
+            "linker_flags": [
+                "static-libgcc",
+                "static-libstdc++",
+                "lpthread"
+            ],
+            "build_dir": "build_linux",
+            "cross_compile": true,
+            "target_triplet": "x86_64-linux-gnu"
         }
     },
     "test": {
@@ -822,7 +882,7 @@
                         "cxx_flags": ["-std=c++17", "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES", "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0"]
                     },
                     "linux": {
-                        "libraries": ["stdc++fs"]
+                        "libraries": ["stdc++fs", "pthread"]
                     }
                 },
                 "test_runner": {
