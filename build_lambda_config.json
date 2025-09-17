@@ -168,24 +168,6 @@
             "include": "/opt/homebrew/Cellar/catch2/3.10.0/include",
             "lib": "/opt/homebrew/Cellar/catch2/3.10.0/lib/libCatch2Main.a",
             "link": "static"
-        },        
-        {
-            "name": "ginac",
-            "include": "/opt/homebrew/Cellar/ginac/1.8.9/include",
-            "lib": "/opt/homebrew/lib/libginac.a",
-            "link": "static"
-        },
-        {
-            "name": "cln",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib/libcln.a",
-            "link": "static"
-        },
-        {
-            "name": "gmp",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib/libgmp.a",
-            "link": "static"
         }
     ],
     "targets": [
@@ -492,17 +474,13 @@
                         "source": "test_math.cpp",
                         "name": "🔢 Math Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_math.exe",
-                        "libraries": ["ginac", "cln", "gmp"],
-                        "defines": ["GINAC_AVAILABLE"]
+                        "binary": "test_math.exe"
                     },
                     {
                         "source": "test_math_ascii.cpp",
                         "name": "🔤 ASCII Math Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_math_ascii.exe",
-                        "libraries": ["ginac", "cln", "gmp"],
-                        "defines": ["GINAC_AVAILABLE"]
+                        "binary": "test_math_ascii.exe"
                     },
                     {
                         "source": "test_markup_roundtrip.cpp",
@@ -625,16 +603,14 @@
                         "source": "test_math_catch2.cpp",
                         "name": "🔢 Math Roundtrip Tests (Catch2)",
                         "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2", "ginac", "cln", "gmp"],
-                        "defines": ["GINAC_AVAILABLE"],
+                        "libraries": ["Catch2Main", "Catch2"],
                         "binary": "test_math_catch2.exe"
                     },
                     {
                         "source": "test_math_ascii_catch2.cpp",
                         "name": "🔤 ASCII Math Roundtrip Tests (Catch2)",
                         "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2", "ginac", "cln", "gmp"],
-                        "defines": ["GINAC_AVAILABLE"],
+                        "libraries": ["Catch2Main", "Catch2"],
                         "binary": "test_math_ascii_catch2.exe"
                     },
                     {
