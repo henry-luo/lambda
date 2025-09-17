@@ -146,11 +146,117 @@ std::string ascii_to_ginac(const std::string& ascii_expr) {
 }
 
 /**
+ * Normalize mathematical expression spacing for comparison
+ */
+std::string normalize_math_expression_spacing(const std::string& expr) {
+    std::string result = expr;
+    
+    // First pass: normalize all spacing to consistent form (no spaces around operators)
+    
+    // Division: both "a/b" and "a / b" → "a/b" 
+    std::regex div_spaced(R"(\s*/\s*)");
+    result = std::regex_replace(result, div_spaced, "/");
+    
+    // Equals: both "i=1" and "i = 1" → "i=1"
+    std::regex equals_spaced(R"(\s*=\s*)");
+    result = std::regex_replace(result, equals_spaced, "=");
+    
+    // Plus/minus: both "a+b" and "a + b" → "a+b" 
+    std::regex plus_spaced(R"(\s*\+\s*)");
+    result = std::regex_replace(result, plus_spaced, "+");
+    std::regex minus_spaced(R"(\s*-\s*)");
+    result = std::regex_replace(result, minus_spaced, "-");
+    
+    // Multiplication: both "a*b" and "a * b" → "a*b"
+    std::regex mult_spaced(R"(\s*\*\s*)");
+    result = std::regex_replace(result, mult_spaced, "*");
+    
+    // Subscripts and superscripts: normalize "sum_(i = 1)" and "sum_(i=1)" → "sum_(i=1)"
+    std::regex sub_equals(R"((_\([^=]*)\s*=\s*([^)]*\)))");
+    result = std::regex_replace(result, sub_equals, "$1=$2)");
+    
+    // Function calls: normalize spacing inside parentheses
+    std::regex func_args(R"((\w+\()[^)]*\))");
+    std::sregex_iterator func_matches_begin(result.begin(), result.end(), func_args);
+    std::sregex_iterator func_matches_end;
+    
+    // Process each function call match
+    for (std::sregex_iterator i = func_matches_begin; i != func_matches_end; ++i) {
+        std::smatch match = *i;
+        std::string full_match = match[0].str();
+        std::string normalized_match = full_match;
+        
+        // Remove spaces around operators within function calls
+        normalized_match = std::regex_replace(normalized_match, std::regex(R"(\s*\+\s*)"), "+");
+        normalized_match = std::regex_replace(normalized_match, std::regex(R"(\s*-\s*)"), "-");
+        normalized_match = std::regex_replace(normalized_match, std::regex(R"(\s*\*\s*)"), "*");
+        normalized_match = std::regex_replace(normalized_match, std::regex(R"(\s*/\s*)"), "/");
+        
+        // Replace the original match with normalized version
+        size_t pos = result.find(full_match);
+        if (pos != std::string::npos) {
+            result.replace(pos, full_match.length(), normalized_match);
+        }
+    }
+    
+    return result;
+}
+
+/**
  * Check semantic equivalence for ASCII math expressions
  */
 bool are_ascii_expressions_semantically_equivalent(const std::string& expr1, const std::string& expr2) {
     std::string s1 = expr1;
     std::string s2 = expr2;
+    
+    // First try with mathematical spacing normalization
+    std::string normalized1 = normalize_math_expression_spacing(s1);
+    std::string normalized2 = normalize_math_expression_spacing(s2);
+    
+    if (normalized1 == normalized2) {
+        return true;
+    }
+    
+    // Handle abs(expr) ↔ |expr| equivalence
+    // Check if one is abs() function and other is absolute value bars
+    std::regex abs_function(R"(abs\s*\(\s*([^)]+)\s*\))");
+    std::regex abs_bars(R"(\|\s*([^|]+)\s*\|)");
+    
+    std::smatch abs_func_match, abs_bars_match;
+    bool s1_has_abs_func = std::regex_search(s1, abs_func_match, abs_function);
+    bool s2_has_abs_func = std::regex_search(s2, abs_func_match, abs_function);
+    bool s1_has_abs_bars = std::regex_search(s1, abs_bars_match, abs_bars);
+    bool s2_has_abs_bars = std::regex_search(s2, abs_bars_match, abs_bars);
+    
+    // Case 1: s1 has abs() function, s2 has |...| bars
+    if (s1_has_abs_func && !s2_has_abs_func && s2_has_abs_bars && !s1_has_abs_bars) {
+        std::smatch s1_match, s2_match;
+        if (std::regex_search(s1, s1_match, abs_function) && std::regex_search(s2, s2_match, abs_bars)) {
+            std::string s1_content = s1_match[1].str();
+            std::string s2_content = s2_match[1].str();
+            // Remove spaces and compare the inner expressions
+            s1_content = std::regex_replace(s1_content, std::regex(R"(\s+)"), "");
+            s2_content = std::regex_replace(s2_content, std::regex(R"(\s+)"), "");
+            if (s1_content == s2_content) {
+                return true;
+            }
+        }
+    }
+    
+    // Case 2: s2 has abs() function, s1 has |...| bars  
+    if (s2_has_abs_func && !s1_has_abs_func && s1_has_abs_bars && !s2_has_abs_bars) {
+        std::smatch s1_match, s2_match;
+        if (std::regex_search(s1, s1_match, abs_bars) && std::regex_search(s2, s2_match, abs_function)) {
+            std::string s1_content = s1_match[1].str();
+            std::string s2_content = s2_match[1].str();
+            // Remove spaces and compare the inner expressions
+            s1_content = std::regex_replace(s1_content, std::regex(R"(\s+)"), "");
+            s2_content = std::regex_replace(s2_content, std::regex(R"(\s+)"), "");
+            if (s1_content == s2_content) {
+                return true;
+            }
+        }
+    }
     
     // Handle single digit exponent parentheses FIRST before any other processing: ^(2) ↔ ^2
     std::regex single_digit_exponent(R"(\^\s*\(\s*([0-9])\s*\))");

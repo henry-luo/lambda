@@ -12,9 +12,7 @@
 #include <cstdint>
 
 // Include validator headers for ValidationResult and run_validation
-extern "C" {
-    #include "../lambda/validator.hpp"
-}
+#include "../lambda/validator.hpp"
 
 // External function declarations for memory pool
 extern "C" {

@@ -469,7 +469,7 @@ build-catch2: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Catch2 test build completed."
 
 # Run Catch2 tests
-test-catch2: build-catch2
+test-catch2: build build-catch2
 	@echo "Running Catch2 test suite using test_run_catch2.sh..."
 	@if [ -f "test/test_run_catch2.sh" ]; then \
 		./test/test_run_catch2.sh; \
