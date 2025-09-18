@@ -419,11 +419,11 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
             log_debug("map set field: %.*s, type: %d", (int)field->name->length, field->name->str, field->type->type_id);
             switch (field->type->type_id) {
             case LMD_TYPE_NULL: {
-                *(bool*)field_ptr = va_arg(args, bool);
+                *(bool*)field_ptr = (bool)va_arg(args, int);
                 break;
             }
             case LMD_TYPE_BOOL: {
-                *(bool*)field_ptr = va_arg(args, bool);
+                *(bool*)field_ptr = (bool)va_arg(args, int);
                 break;
             }
             case LMD_TYPE_INT: {
