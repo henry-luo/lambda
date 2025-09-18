@@ -276,6 +276,14 @@ else
     echo "✅ pkg-config already available"
 fi
 
+# Check for meson (needed for building Criterion from source if needed)
+if ! command -v meson >/dev/null 2>&1; then
+    echo "Installing meson..."
+    install_if_missing "meson" "meson"
+else
+    echo "✅ meson already available"
+fi
+
 # Install additional development tools if not present
 echo "Installing additional development dependencies..."
 sudo apt update
@@ -291,6 +299,16 @@ build_criterion_for_linux() {
         echo "Criterion already installed in system location"
         return 0
     fi
+    
+    # Check if meson is available for building
+    if ! command -v meson >/dev/null 2>&1; then
+        echo "❌ Meson not available, cannot build Criterion from source"
+        echo "Please install meson: sudo apt install meson"
+        return 1
+    fi
+    
+    # Create build_temp directory if it doesn't exist
+    mkdir -p "build_temp"
     
     # Build from source
     if [ ! -d "build_temp/Criterion" ]; then
@@ -426,10 +444,19 @@ if ! pkg-config --exists catch2; then
     build_catch2_for_linux
 fi
 
-# Build Criterion if not available  
-if ! dpkg -l | grep -q libcriterion-dev; then
-    if ! build_criterion_for_linux; then
-        echo "Warning: criterion build failed"
+# Install Criterion testing framework via apt, build from source as fallback
+echo "Installing Criterion testing framework..."
+if dpkg -l | grep -q libcriterion-dev; then
+    echo "✅ Criterion already installed via apt"
+else
+    echo "Installing Criterion via apt..."
+    if sudo apt install -y libcriterion-dev libcriterion3; then
+        echo "✅ Criterion installed successfully via apt"
+    else
+        echo "❌ Failed to install Criterion via apt, trying build from source..."
+        if ! build_criterion_for_linux; then
+            echo "Warning: criterion build failed"
+        fi
     fi
 fi
 
@@ -846,12 +873,20 @@ build_mir_for_linux() {
         fi
         
         # Copy c2mir.h specifically (critical for compilation)
-        if [ -f "c2mir.h" ]; then
-            sudo cp c2mir.h "$SYSTEM_PREFIX/include/"
-            echo "✅ c2mir.h copied to $SYSTEM_PREFIX/include/"
+        C2MIR_PATH=$(find . -name "c2mir.h" | head -1)
+        if [ -n "$C2MIR_PATH" ] && [ -f "$C2MIR_PATH" ]; then
+            sudo cp "$C2MIR_PATH" "$SYSTEM_PREFIX/include/"
+            echo "✅ c2mir.h copied from $C2MIR_PATH to $SYSTEM_PREFIX/include/"
         else
-            echo "Warning: c2mir.h not found"
-            find . -name "c2mir.h" | head -5
+            echo "Warning: c2mir.h not found in MIR build directory"
+            # Fallback: check if c2mir.h exists in project include directory
+            if [ -f "$SCRIPT_DIR/include/c2mir.h" ]; then
+                sudo cp "$SCRIPT_DIR/include/c2mir.h" "$SYSTEM_PREFIX/include/"
+                echo "✅ c2mir.h copied from project include/ to $SYSTEM_PREFIX/include/"
+            else
+                echo "Warning: c2mir.h not found in project include/ either"
+                find . -name "c2mir.h" | head -5
+            fi
         fi
         
         # Copy all MIR-related headers
@@ -986,8 +1021,24 @@ elif [ -f "/usr/include/mir.h" ] && [ -f "/usr/include/c2mir.h" ]; then
     echo "✅ mir.h and c2mir.h found at /usr/include/"
 elif [ -f "$SYSTEM_PREFIX/include/mir.h" ]; then
     echo "⚠️ mir.h found but c2mir.h missing at $SYSTEM_PREFIX/include/"
+    # Try to copy c2mir.h from project include directory as fallback
+    if [ -f "$SCRIPT_DIR/include/c2mir.h" ]; then
+        echo "Copying c2mir.h from project include/ directory..."
+        sudo cp "$SCRIPT_DIR/include/c2mir.h" "$SYSTEM_PREFIX/include/"
+        echo "✅ c2mir.h copied from project include/ to $SYSTEM_PREFIX/include/"
+    else
+        echo "Warning: c2mir.h not found in project include/ directory either"
+    fi
 elif [ -f "/usr/include/mir.h" ]; then
     echo "⚠️ mir.h found but c2mir.h missing at /usr/include/"
+    # Try to copy c2mir.h from project include directory as fallback
+    if [ -f "$SCRIPT_DIR/include/c2mir.h" ]; then
+        echo "Copying c2mir.h from project include/ directory..."
+        sudo cp "$SCRIPT_DIR/include/c2mir.h" "$SYSTEM_PREFIX/include/"
+        echo "✅ c2mir.h copied from project include/ to $SYSTEM_PREFIX/include/"
+    else
+        echo "Warning: c2mir.h not found in project include/ directory either"
+    fi
 else
     echo "⚠️ MIR headers not found - MIR may need to be built during compilation"
     echo "Searching for MIR headers..."
@@ -995,6 +1046,14 @@ else
     find "$SYSTEM_PREFIX" -name "mir.h" 2>/dev/null || echo "No mir.h files found in $SYSTEM_PREFIX"
     find /usr -name "c2mir.h" 2>/dev/null || echo "No c2mir.h files found"
     find "$SYSTEM_PREFIX" -name "c2mir.h" 2>/dev/null || echo "No c2mir.h files found in $SYSTEM_PREFIX"
+    # Try to copy c2mir.h from project include directory as fallback
+    if [ -f "$SCRIPT_DIR/include/c2mir.h" ]; then
+        echo "Copying c2mir.h from project include/ directory..."
+        sudo cp "$SCRIPT_DIR/include/c2mir.h" "$SYSTEM_PREFIX/include/"
+        echo "✅ c2mir.h copied from project include/ to $SYSTEM_PREFIX/include/"
+    else
+        echo "Warning: c2mir.h not found in project include/ directory either"
+    fi
 fi
 
 
@@ -1069,14 +1128,21 @@ else
 fi
 
 
-# Build criterion for Linux (build from source if apt package not available)
+# Install criterion for Linux (prefer apt package over building from source)
+echo "Verifying Criterion installation..."
 if [ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ] || dpkg -l | grep -q libcriterion-dev; then
-    echo "criterion already available"
+    echo "✅ criterion already available"
 else
-    if ! build_criterion_for_linux; then
-        echo "Warning: criterion build failed"
+    echo "Installing Criterion via apt..."
+    if sudo apt install -y libcriterion-dev libcriterion3; then
+        echo "✅ Criterion installed successfully via apt"
     else
-        echo "criterion built successfully"
+        echo "❌ Failed to install Criterion via apt, trying build from source..."
+        if ! build_criterion_for_linux; then
+            echo "Warning: criterion build failed"
+        else
+            echo "criterion built successfully"
+        fi
     fi
 fi
 
