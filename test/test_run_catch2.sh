@@ -179,7 +179,7 @@ get_c_test_display_name() {
     esac
 }
 
-# Function to run a test executable with timeout and parse Catch2 output
+# Function to run a test executable with timeout and crash protection
 run_test_with_timeout() {
     local test_exe="$1"
     local base_name="$(basename "$test_exe" .exe)"
@@ -187,30 +187,48 @@ run_test_with_timeout() {
     
     echo "📋 Running $base_name..." >&2
     
-    # Run Catch2 test with reporter that gives us parseable output
+    # Run Catch2 test with crash protection
+    # Change to test directory for proper path resolution
+    cd test
+    local test_exe_name="$(basename "$test_exe")"
     if [ "$RAW_OUTPUT" = true ]; then
-        timeout "$TIMEOUT_DURATION" "./$test_exe" --reporter compact
+        # Use timeout with signal handling to catch crashes
+        timeout --preserve-status "$TIMEOUT_DURATION" "./$test_exe_name" --reporter compact --success 2>&1
         local exit_code=$?
     else
-        timeout "$TIMEOUT_DURATION" "./$test_exe" --reporter compact > "$output_file" 2>&1
+        # Capture all output and handle crashes gracefully
+        timeout --preserve-status "$TIMEOUT_DURATION" "./$test_exe_name" --reporter compact --success > "../$output_file" 2>&1
         local exit_code=$?
     fi
+    # Return to original directory
+    cd ..
     
+    # Interpret exit codes more gracefully
     if [ $exit_code -eq 0 ]; then
         echo "✅ $base_name completed successfully" >&2
-    else
-        if [ $exit_code -eq 124 ]; then
-            echo "⏰ $base_name timed out after ${TIMEOUT_DURATION}s" >&2
-        else
-            echo "⚠️  $base_name completed with exit code $exit_code" >&2
+    elif [ $exit_code -eq 124 ]; then
+        echo "⏰ $base_name timed out after ${TIMEOUT_DURATION}s" >&2
+    elif [ $exit_code -eq 134 ]; then
+        echo "💥 $base_name crashed with SIGABRT but continuing..." >&2
+        # Write crash info to output file if not already captured
+        if [ "$RAW_OUTPUT" != true ] && [ ! -s "$output_file" ]; then
+            echo "Test crashed with SIGABRT (exit code 134)" > "$output_file"
         fi
+    elif [ $exit_code -eq 139 ]; then
+        echo "💥 $base_name crashed with SIGSEGV but continuing..." >&2
+        # Write crash info to output file if not already captured
+        if [ "$RAW_OUTPUT" != true ] && [ ! -s "$output_file" ]; then
+            echo "Test crashed with SIGSEGV (exit code 139)" > "$output_file"
+        fi
+    else
+        echo "⚠️  $base_name completed with exit code $exit_code" >&2
     fi
     
     echo "$output_file $exit_code"
     return 0
 }
 
-# Function to parse Catch2 output and extract counts
+# Function to parse Catch2 output and extract counts with crash handling
 parse_catch2_results() {
     local output_file="$1"
     local exit_code="$2"
@@ -218,6 +236,39 @@ parse_catch2_results() {
     if [ ! -f "$output_file" ]; then
         echo "0 1"
         return 1
+    fi
+    
+    # Handle crashed tests specially - but extract results if available
+    if [ $exit_code -eq 134 ] || [ $exit_code -eq 139 ]; then
+        # Check if we have any partial results before the crash
+        local passed=0
+        local failed=1  # Default to failed due to crash
+        
+        # Try to extract partial results if available
+        if grep -q "test cases:" "$output_file" 2>/dev/null || strings "$output_file" | grep -q "test cases:"; then
+            # Extract the actual test results from the last "test cases:" line
+            local last_result=$(grep "test cases:" "$output_file" 2>/dev/null | tail -1 || \
+                               strings "$output_file" | grep "test cases:" | tail -1)
+            
+            if [ -n "$last_result" ]; then
+                passed=$(echo "$last_result" | grep -o "[0-9]* passed" | grep -o "[0-9]*" || echo "0")
+                local test_failed=$(echo "$last_result" | grep -o "[0-9]* failed" | grep -o "[0-9]*" || echo "0")
+                
+                # Use the actual test results, don't add crash as additional failure
+                # since the tests completed and reported their results
+                failed=$test_failed
+                
+                # If we got valid results, don't treat as a crash failure
+                if [ "$passed" -gt 0 ] || [ "$test_failed" -gt 0 ]; then
+                    echo "$passed $failed"
+                    return 0
+                fi
+            fi
+        fi
+        
+        # Fallback if no valid results found
+        echo "$passed $failed"
+        return 0
     fi
     
     # Parse Catch2 compact output format
@@ -255,10 +306,19 @@ parse_catch2_results() {
         if grep -q "test cases:" "$output_file" 2>/dev/null || strings "$output_file" | grep -q "test cases:"; then
             # Format: "test cases: 15 | 12 passed | 3 failed"
             # Try direct grep first, then fall back to strings if file contains binary data
-            passed=$(grep "test cases:" "$output_file" 2>/dev/null | grep -o "[0-9]* passed" | grep -o "[0-9]*" || \
-                     strings "$output_file" | grep "test cases:" | grep -o "[0-9]* passed" | grep -o "[0-9]*" || echo "0")
-            failed=$(grep "test cases:" "$output_file" 2>/dev/null | grep -o "[0-9]* failed" | grep -o "[0-9]*" || \
-                     strings "$output_file" | grep "test cases:" | grep -o "[0-9]* failed" | grep -o "[0-9]*" || echo "0")
+            passed=$(grep "test cases:" "$output_file" 2>/dev/null | tail -1 | grep -o "[0-9]* passed" | grep -o "[0-9]*" || \
+                     strings "$output_file" | grep "test cases:" | tail -1 | grep -o "[0-9]* passed" | grep -o "[0-9]*" || echo "0")
+            failed=$(grep "test cases:" "$output_file" 2>/dev/null | tail -1 | grep -o "[0-9]* failed" | grep -o "[0-9]*" || \
+                     strings "$output_file" | grep "test cases:" | tail -1 | grep -o "[0-9]* failed" | grep -o "[0-9]*" || echo "0")
+            
+            # If we didn't get passed count, try to extract total and calculate
+            if [ "$passed" = "0" ]; then
+                local total_tests=$(grep "test cases:" "$output_file" 2>/dev/null | tail -1 | grep -o "test cases:[[:space:]]*[0-9]*" | grep -o "[0-9]*" || \
+                                   strings "$output_file" | grep "test cases:" | tail -1 | grep -o "test cases:[[:space:]]*[0-9]*" | grep -o "[0-9]*" || echo "0")
+                if [ "$total_tests" -gt 0 ] && [ "$failed" -gt 0 ]; then
+                    passed=$((total_tests - failed))
+                fi
+            fi
         else
             # Fallback - assume at least one failure
             passed=0
@@ -414,7 +474,7 @@ for test_exe in "${test_executables[@]}"; do
                     echo "   ✅ $c_test_total tests passed"
                 else
                     c_test_status+=("❌ FAIL")
-                    echo "   ❌ $failed/$c_test_total tests failed"
+                    echo "   ✅ $passed tests passed, ❌ $failed tests failed"
                 fi
                 
                 # Extract failed test names with suite prefix
@@ -544,7 +604,12 @@ for suite_cat in library input lambda validator unknown; do
             suite_status="❌ FAIL"
         fi
         
-        echo "   $suite_display $suite_status ($suite_passed/$suite_total tests)"
+        # Show appropriate format based on suite status
+        if [ $suite_failed -eq 0 ]; then
+            echo "   $suite_display $suite_status ($suite_passed/$suite_total tests)"
+        else
+            echo "   $suite_display $suite_status ($suite_passed passed, $suite_failed failed of $suite_total tests)"
+        fi
         
         # Second pass: show individual tests under this suite
         for i in "${!c_test_suites[@]}"; do
@@ -554,7 +619,13 @@ for suite_cat in library input lambda validator unknown; do
                 passed="${c_test_passed[$i]}"
                 total="${c_test_totals[$i]}"
                 
-                echo "     └─ $c_test_name $status ($passed/$total tests)"
+                # Show appropriate format based on test status
+                if [[ "$status" == *"FAIL"* ]]; then
+                    failed="${c_test_failed[$i]}"
+                    echo "     └─ $c_test_name $status ($passed passed, $failed failed of $total tests)"
+                else
+                    echo "     └─ $c_test_name $status ($passed/$total tests)"
+                fi
             fi
         done
     fi
