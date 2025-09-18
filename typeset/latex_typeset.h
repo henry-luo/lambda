@@ -11,7 +11,9 @@
 ViewTree* typeset_latex_to_view_tree(TypesetEngine* engine, Item latex_ast, TypesetOptions* options);
 
 // LaTeX to PDF pipeline (new functionality)
+#ifndef _WIN32
 bool typeset_latex_to_pdf(TypesetEngine* engine, Item latex_ast, const char* output_path, TypesetOptions* options);
+#endif
 
 // LaTeX to other formats (extensible)
 bool typeset_latex_to_svg(TypesetEngine* engine, Item latex_ast, const char* output_path, TypesetOptions* options);

@@ -5,6 +5,7 @@
 #include <string.h>
 #include <math.h>
 
+#ifndef _WIN32
 // Enhanced PDF renderer implementation with advanced typography and layout
 
 // =============================================================================
@@ -705,3 +706,5 @@ void pdf_set_text_alignment_enhanced(PDFRendererEnhanced* renderer, int alignmen
     
     renderer->text_ctx.alignment = alignment;
 }
+
+#endif // !_WIN32

@@ -3,13 +3,16 @@
 
 #include "pdf_renderer.h"
 #include "../view/view_tree.h"
+#ifndef _WIN32
 #include <hpdf.h>
+#endif
 #include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#ifndef _WIN32
 // Enhanced PDF renderer with advanced layout and typography support
 
 // Advanced font management
@@ -147,6 +150,8 @@ double pdf_measure_text_width_enhanced(PDFRendererEnhanced* renderer, const char
                                       bool bold, bool italic);
 double pdf_get_font_line_height_enhanced(PDFRendererEnhanced* renderer, double font_size);
 void pdf_set_text_alignment_enhanced(PDFRendererEnhanced* renderer, int alignment);
+
+#endif // !_WIN32
 
 #ifdef __cplusplus
 }

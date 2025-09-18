@@ -1,20 +1,42 @@
 
 #include "../lib/strbuf.h"
+#ifndef _WIN32
 #include <unistd.h>  // for isatty()
+#else
+#include <io.h>      // for _isatty() on Windows
+#include <fcntl.h>   // for file descriptor constants
+#include <windows.h> // for Windows console functions
+#define isatty _isatty
+// Don't redefine if already defined
+#ifndef STDIN_FILENO
+#define STDIN_FILENO _fileno(stdin)
+#endif
+#ifndef STDOUT_FILENO
+#define STDOUT_FILENO _fileno(stdout)
+#endif
+#endif
 #include <signal.h>  // for signal handling
 #include <setjmp.h>  // for setjmp/longjmp
 
-// Include libedit header for line editing functionality
+// Include readline header for line editing functionality
+#ifdef _WIN32
+#include <readline/readline.h>
+#include <readline/history.h>
+#else
 #include <editline/readline.h>
 #include <histedit.h>
+#endif
 
-// Forward declare libedit functions to avoid header conflicts
+// Forward declare readline functions to avoid header conflicts (only for non-Windows)
+#ifndef _WIN32
 extern "C" {
     char *readline(const char *);
     int add_history(const char *);
 }
+#endif
 
-// Global EditLine state
+// Global EditLine state (only for non-Windows systems using libedit)
+#ifndef _WIN32
 static EditLine *el = NULL;
 static History *hist = NULL;
 static volatile sig_atomic_t editline_failed = 0;
@@ -26,17 +48,20 @@ static void editline_crash_handler(int sig) {
     editline_failed = 1;
     longjmp(editline_jmp_buf, 1);
 }
+#endif
 
 // Global prompt storage for EditLine
 static const char *current_prompt = "λ> ";
 
+#ifndef _WIN32
 // Prompt function for EditLine
 static const char *prompt_func(EditLine *el) {
     (void)el; // Suppress unused parameter warning
     return current_prompt;
 }
+#endif
 
-// Initialize libedit
+// Initialize libedit (non-Windows) or setup readline (Windows)
 int repl_init() {
     // Only try EditLine for truly interactive terminals
     if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {
@@ -44,6 +69,11 @@ int repl_init() {
         return 0;  // Success, but no EditLine
     }
     
+#ifdef _WIN32
+    // Windows console setup - simplified
+    printf("Debug: Using readline for Windows\n");
+    return 0; // Success
+#else
     // Check for specific terminal types that might not work well with EditLine
     const char* term = getenv("TERM");
     if (term && (strcmp(term, "dumb") == 0 || strstr(term, "emacs") != NULL)) {
@@ -92,10 +122,12 @@ int repl_init() {
     
     printf("Debug: libedit initialized successfully\n");
     return 0;
+#endif
 }
 
 // Clean up libedit
 void repl_cleanup() {
+#ifndef _WIN32
     if (el) {
         el_end(el);
         el = NULL;
@@ -104,6 +136,7 @@ void repl_cleanup() {
         history_end(hist);
         hist = NULL;
     }
+#endif
 }
 
 void print_help() {
@@ -135,27 +168,8 @@ void print_help() {
 // Function to determine the best REPL prompt based on system capabilities
 const char* get_repl_prompt() {
 #ifdef _WIN32
-    // Try to enable UTF-8 support on Windows
-    UINT old_cp = GetConsoleOutputCP();
-    UINT old_input_cp = GetConsoleCP();
-    
-    if (SetConsoleOutputCP(CP_UTF8) && SetConsoleCP(CP_UTF8)) {
-        // Check Windows version - lambda works reliably on Windows 10+
-        DWORD version = GetVersion();
-        DWORD major = (DWORD)(LOBYTE(LOWORD(version)));
-        
-        if (major >= 10) {
-            return "λ> ";  // Use lambda on Windows 10+
-        } else {
-            // Restore old code pages and use fallback
-            SetConsoleOutputCP(old_cp);
-            SetConsoleCP(old_input_cp);
-            return "> ";
-        }
-    } else {
-        // Failed to set UTF-8, use safe ASCII prompt
-        return "> ";
-    }
+    // Simplified Windows prompt - avoid complex console API calls
+    return "> ";
 #else
     // On Unix-like systems, UTF-8 is usually supported
     // Check if LANG/LC_ALL suggests UTF-8 support
@@ -172,6 +186,14 @@ const char* get_repl_prompt() {
 }
 
 char *repl_readline(const char *prompt) {
+#ifdef _WIN32
+    // Windows: use readline library
+    char *line = readline(prompt);
+    if (line && strlen(line) > 0) {
+        add_history(line);
+    }
+    return line;
+#else
     // If EditLine failed before or is not initialized, use basic input
     if (!el || editline_failed) {
         printf("%s", prompt);
@@ -265,9 +287,16 @@ char *repl_readline(const char *prompt) {
     sigaction(SIGSEGV, &old_action, NULL);
     
     return result;
+#endif
 }
 
 int repl_add_history(const char *line) {
+#ifdef _WIN32
+    // Windows: readline automatically handles history in repl_readline
+    // This function is a no-op for Windows
+    (void)line; // Suppress unused parameter warning
+    return 0;
+#else
     if (!hist) {
         // If history is not initialized, just return success silently
         return 0;
@@ -285,4 +314,5 @@ int repl_add_history(const char *line) {
     }
     
     return 0;
+#endif
 }
