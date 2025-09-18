@@ -6,7 +6,6 @@
         "lambda/format"
     ],
     "source_files": [
-        "lambda/tree-sitter-lambda/src/parser.c",
         "lambda/parse.c",
         "lib/strbuf.c",
         "lib/stringbuf.c",

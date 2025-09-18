@@ -1300,15 +1300,18 @@ class PremakeGenerator:
             
             # Add tree-sitter libraries directly within the group using normal linking
             # This should work for all tests without needing --whole-archive
-            tree_sitter_libs = ['tree-sitter', 'tree-sitter-lambda']
+            # NOTE: Skip tree-sitter libraries here - they are handled in the links section
+            # tree_sitter_libs = ['tree-sitter', 'tree-sitter-lambda']
                 
-            for lib_name in tree_sitter_libs:
-                if lib_name in self.external_libraries:
-                    lib_path = self.external_libraries[lib_name]['lib']
-                    # Convert to relative path from build directory
-                    if not lib_path.startswith('/'):
-                        lib_path = f"../../{lib_path}"
-                    self.premake_content.append(f'        "{lib_path}",')
+            # for lib_name in tree_sitter_libs:
+            #     if lib_name in self.external_libraries:
+            #         lib_path = self.external_libraries[lib_name]['lib']
+            #         # Convert to relative path from build directory
+            #         if not lib_path.startswith('/'):
+            #             lib_path = f"../../{lib_path}"
+            #         self.premake_content.append(f'        "{lib_path}",')
+            
+            # NOTE: Tree-sitter libraries will be added at the end via buildoptions for proper order
             
             # Add --end-group only on Linux for circular dependency resolution  
             if self.use_linux_config:
@@ -1385,11 +1388,33 @@ class PremakeGenerator:
         ])
         for opt in build_opts:
             self.premake_content.append(f'        "{opt}",')
+        
         self.premake_content.extend([
             '    }',
             '    ',
-            ''
         ])
+        
+        # Add tree-sitter libraries as linker options for tests with lambda-input-full dependencies
+        # Use whole-archive to force inclusion of all symbols from tree-sitter libraries
+        if any(dep == 'lambda-input-full' for dep in dependencies):
+            self.premake_content.extend([
+                '    filter {}',
+                '    linkoptions {',
+                '        "-Wl,--whole-archive",',
+            ])
+            for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
+                if lib_name in self.external_libraries:
+                    lib_path = self.external_libraries[lib_name]['lib']
+                    if not lib_path.startswith('/'):
+                        lib_path = f"../../{lib_path}"
+                    self.premake_content.append(f'        "{lib_path}",')
+            self.premake_content.extend([
+                '        "-Wl,--no-whole-archive",',
+                '    }',
+                '    ',
+            ])
+        
+        self.premake_content.append('')
     
     def generate_main_program(self) -> None:
         """Generate the main Lambda program executable"""
