@@ -574,7 +574,7 @@
                     },
                     {
                         "source": "test/test_jsx_roundtrip.cpp",
-                        "name": "⚛️ JSX Roundtrip Tests",
+                        "name": "🔢 JSX Roundtrip Tests",
                         "dependencies": ["lambda-input-full"],
                         "binary": "test_jsx_roundtrip.exe"
                     },
@@ -711,7 +711,7 @@
                     },
                     {
                         "source": "test_jsx_roundtrip_catch2.cpp",
-                        "name": "⚛️ JSX Roundtrip Tests (Catch2)",
+                        "name": "🔢 JSX Roundtrip Tests (Catch2)",
                         "dependencies": ["lambda-input-full"],
                         "libraries": ["Catch2Main", "Catch2"],
                         "binary": "test_jsx_roundtrip_catch2.exe"

@@ -143,40 +143,98 @@ get_suite_category_display_name() {
     esac
 }
 
-# Function to map executable name to friendly Catch2 test name (removing "(Catch2)" suffix to match old system)
+# Global arrays to cache test name mappings
+test_name_keys=()
+test_name_values=()
+
+# Function to build test name lookup from build config
+build_test_name_lookup() {
+    local config_file="build_lambda_config.json"
+    
+    # Clear existing lookup
+    test_name_keys=()
+    test_name_values=()
+    
+    if [ ! -f "$config_file" ]; then
+        echo "Warning: build_lambda_config.json not found, falling back to defaults" >&2
+        return 1
+    fi
+    
+    # Extract test configurations from JSON using simple parsing
+    # Look for test entries that have both "source" and "name" fields
+    while IFS= read -r line; do
+        # Check if this line contains a source field for catch2 tests
+        if echo "$line" | grep -q '"source".*".*_catch2'; then
+            # Extract the source filename
+            local source=$(echo "$line" | sed 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+            # Convert source to binary name (remove .cpp/.c extension)
+            local binary_name=$(basename "$source" .cpp)
+            binary_name=$(basename "$binary_name" .c)
+            
+            # Look for the corresponding name field in the next few lines
+            local name=""
+            local found_name=false
+            local line_count=0
+            while IFS= read -r next_line && [ $line_count -lt 10 ]; do
+                if echo "$next_line" | grep -q '"name"[[:space:]]*:'; then
+                    name=$(echo "$next_line" | sed 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+                    # Remove "(Catch2)" suffix to match old system
+                    name=$(echo "$name" | sed 's/ (Catch2)$//')
+                    found_name=true
+                    break
+                fi
+                # Stop if we hit another test entry or end of current test
+                if echo "$next_line" | grep -q '"source"\|^[[:space:]]*}[[:space:]]*$'; then
+                    break
+                fi
+                ((line_count++))
+            done
+            
+            if [ "$found_name" = true ] && [ -n "$name" ]; then
+                # Store mapping from binary name to display name
+                test_name_keys+=("$binary_name")
+                test_name_values+=("$name")
+            fi
+        fi
+    done < "$config_file"
+    
+    return 0
+}
+
+# Function to lookup test name from arrays
+lookup_test_name() {
+    local key="$1"
+    
+    for i in "${!test_name_keys[@]}"; do
+        if [ "${test_name_keys[$i]}" = "$key" ]; then
+            echo "${test_name_values[$i]}"
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
+# Function to map executable name to friendly Catch2 test name (lookup from build config)
 get_c_test_display_name() {
     local exe_name="$1"
     
-    # Dynamic display names based on test name patterns
-    case "$exe_name" in
-        "test_css_files_safe_catch2") echo "🎨 CSS Files Safe Tests" ;;
-        "test_css_frameworks_catch2") echo "🎨 CSS Framework Tests" ;;
-        "test_css_integration_catch2") echo "🎨 CSS Integration Tests" ;;
-        "test_css_parser_catch2") echo "🎨 CSS Parser Tests" ;;
-        "test_css_tokenizer_catch2") echo "🎨 CSS Tokenizer Tests" ;;
-        "test_datetime_catch2") echo "📅 DateTime Tests" ;;
-        "test_dir_catch2") echo "📁 Directory Listing Tests" ;;
-        "test_http_catch2") echo "🌐 HTTP/HTTPS Tests" ;;
-        "test_jsx_roundtrip_catch2") echo "⚛️ JSX Roundtrip Tests" ;;
-        "test_lambda_catch2") echo "🐑 Lambda Runtime Tests" ;;
-        "test_lambda_proc_catch2") echo "🐑 Lambda Procedural Tests" ;;
-        "test_lambda_repl_catch2") echo "🎮 Lambda REPL Interface Tests" ;;
-        "test_markup_roundtrip_catch2") echo "📝 Markup Roundtrip Tests" ;;
-        "test_math_ascii_catch2") echo "🔤 ASCII Math Roundtrip Tests" ;;
-        "test_math_catch2") echo "🔢 Math Roundtrip Tests" ;;
-        "test_mdx_roundtrip_catch2") echo "📝 MDX Roundtrip Tests" ;;
-        "test_mime_detect_catch2") echo "📎 MIME Detection Tests" ;;
-        "test_num_stack_catch2") echo "🔢 Number Stack Tests" ;;
-        "test_strbuf_catch2") echo "📝 String Buffer Tests" ;;
-        "test_stringbuf_catch2") echo "🧵 StringBuf Tests" ;;
-        "test_strview_catch2") echo "👀 String View Tests" ;;
-        "test_sysinfo_catch2") echo "🖥️ System Information Tests" ;;
-        "test_url_catch2") echo "🌐 URL Parser Tests" ;;
-        "test_url_extra_catch2") echo "🌐 URL Parser Extended Tests" ;;
-        "test_validator_catch2") echo "🔍 Validator Tests" ;;
-        "test_variable_pool_catch2") echo "🏊 Variable Pool Tests" ;;
-        *) echo "🧪 $exe_name" ;;
-    esac
+    # Build lookup table if not already done
+    if [ ${#test_name_keys[@]} -eq 0 ]; then
+        build_test_name_lookup
+    fi
+    
+    # Remove .exe suffix for lookup
+    local lookup_key=$(basename "$exe_name" .exe)
+    
+    # Try to find in lookup table
+    local result
+    if result=$(lookup_test_name "$lookup_key"); then
+        echo "$result"
+    else
+        # Fallback to default format if not found in config
+        echo "🧪 $lookup_key"
+    fi
 }
 
 # Function to run a test executable with timeout and crash protection
@@ -203,6 +261,10 @@ run_test_with_timeout() {
         echo "✅ $base_name completed successfully" >&2
     elif [ $exit_code -eq 124 ]; then
         echo "⏰ $base_name timed out after ${TIMEOUT_DURATION}s" >&2
+        # Write timeout info to output file if not already captured
+        if [ "$RAW_OUTPUT" != true ] && [ ! -s "$output_file" ]; then
+            echo "Test timed out after ${TIMEOUT_DURATION}s" > "$output_file"
+        fi
     elif [ $exit_code -eq 134 ]; then
         echo "💥 $base_name crashed with SIGABRT but continuing..." >&2
         # Write crash info to output file if not already captured
@@ -217,6 +279,10 @@ run_test_with_timeout() {
         fi
     else
         echo "⚠️  $base_name completed with exit code $exit_code" >&2
+        # Write exit code info to output file if not already captured
+        if [ "$RAW_OUTPUT" != true ] && [ ! -s "$output_file" ]; then
+            echo "Test completed with exit code $exit_code" > "$output_file"
+        fi
     fi
     
     echo "$output_file $exit_code"
@@ -321,7 +387,117 @@ parse_catch2_results() {
         fi
     fi
     
+    # Ensure we always return valid numbers
+    if ! [[ "$passed" =~ ^[0-9]+$ ]]; then
+        passed=0
+    fi
+    if ! [[ "$failed" =~ ^[0-9]+$ ]]; then
+        failed=1
+    fi
+    
+    # If both are 0, default to 1 failed for safety
+    if [ "$passed" -eq 0 ] && [ "$failed" -eq 0 ]; then
+        failed=1
+    fi
+    
     echo "$passed $failed"
+}
+
+# Function to run a single Catch2 test and create JSON result file
+run_single_catch2_test() {
+    local test_exe="$1"
+    local base_name=$(basename "$test_exe" .exe)
+    local c_test_display_name=$(get_c_test_display_name "$base_name")
+    local suite_category=$(get_suite_category "$base_name")
+    local result_file="$TEST_OUTPUT_DIR/${base_name}_catch2_result.json"
+    
+    if [ "$RAW_OUTPUT" != true ]; then
+        echo "🏃 Running $c_test_display_name..." >&2
+    fi
+    
+    # Handle test execution with proper error handling
+    set +e  # Temporarily disable exit on error for test execution
+    result=$(run_test_with_timeout "$test_exe")
+    output_file=$(echo "$result" | cut -d' ' -f1)
+    exit_code=$(echo "$result" | cut -d' ' -f2)
+    
+    local passed=0
+    local failed=0
+    local total=0
+    local status="❌ ERROR"
+    
+    if [ -n "$output_file" ]; then
+        # Parse results
+        results=$(parse_catch2_results "$output_file" "$exit_code")
+        if [ -n "$results" ]; then
+            passed=$(echo "$results" | cut -d' ' -f1)
+            failed=$(echo "$results" | cut -d' ' -f2)
+            total=$((passed + failed))
+            
+            # Determine Catch2 test status
+            if [ $failed -eq 0 ]; then
+                status="✅ PASS"
+                if [ "$RAW_OUTPUT" != true ]; then
+                    echo "   ✅ $total tests passed" >&2
+                fi
+            else
+                status="❌ FAIL"
+                if [ "$RAW_OUTPUT" != true ]; then
+                    echo "   ✅ $passed tests passed, ❌ $failed tests failed" >&2
+                fi
+            fi
+        else
+            # No valid results
+            status="⚠️ NO OUTPUT"
+            if [ "$RAW_OUTPUT" != true ]; then
+                echo "   ⚠️ No valid test results" >&2
+            fi
+        fi
+    else
+        # Test execution failed
+        failed=1
+        total=1
+        status="❌ ERROR"
+        if [ "$RAW_OUTPUT" != true ]; then
+            echo "   ❌ Test execution failed" >&2
+        fi
+    fi
+    
+    # Create JSON result file
+    {
+        echo "{"
+        echo "  \"test_exe\": \"$test_exe\","
+        echo "  \"base_name\": \"$base_name\","
+        echo "  \"display_name\": \"$c_test_display_name\","
+        echo "  \"suite_category\": \"$suite_category\","
+        echo "  \"passed\": $passed,"
+        echo "  \"failed\": $failed,"
+        echo "  \"total\": $total,"
+        echo "  \"status\": \"$status\","
+        echo "  \"output_file\": \"$output_file\","
+        echo "  \"failed_tests\": ["
+        
+        # Extract failed test names
+        local first_failed=true
+        if [ -n "$output_file" ] && [ -f "$output_file" ]; then
+            while IFS= read -r failed_name; do
+                if [ -n "$failed_name" ]; then
+                    if [ "$first_failed" = true ]; then
+                        echo -n "    \"[$base_name] $failed_name\""
+                        first_failed=false
+                    else
+                        echo ","
+                        echo -n "    \"[$base_name] $failed_name\""
+                    fi
+                fi
+            done < <(extract_failed_test_names "$output_file" "$base_name")
+        fi
+        echo ""
+        echo "  ]"
+        echo "}"
+    } > "$result_file"
+    
+    return 0
 }
 
 # Function to extract failed test names from Catch2 output
@@ -334,12 +510,37 @@ extract_failed_test_names() {
     fi
     
     # Extract failed test names from Catch2 output
-    # Look for lines starting with test file path and FAILED
-    grep "FAILED:" "$output_file" | sed 's/.*FAILED: //' | while IFS= read -r line; do
-        if [ -n "$line" ]; then
-            echo "[$base_name] $line"
+    # Look for multiple patterns to catch different failure formats
+    
+    # Pattern 1: Lines starting with test file path and FAILED
+    if grep -q "FAILED:" "$output_file" 2>/dev/null; then
+        grep "FAILED:" "$output_file" | sed 's/.*FAILED: //' | while IFS= read -r line; do
+            if [ -n "$line" ]; then
+                echo "[$base_name] $line"
+            fi
+        done
+    fi
+    
+    # Pattern 2: Catch2 assertion failures
+    if grep -q "CHECK\|REQUIRE" "$output_file" 2>/dev/null; then
+        grep -E "(CHECK|REQUIRE).*for:|with expansion:" "$output_file" | while IFS= read -r line; do
+            if [ -n "$line" ]; then
+                # Clean up the assertion line
+                clean_line=$(echo "$line" | sed 's/^[[:space:]]*//' | sed 's/.*\/\///')
+                if [ -n "$clean_line" ]; then
+                    echo "[$base_name] $clean_line"
+                fi
+            fi
+        done
+    fi
+    
+    # Pattern 3: Generic failure indicators if nothing else found
+    if ! grep -q "FAILED:\|CHECK\|REQUIRE" "$output_file" 2>/dev/null; then
+        # Look for any error indicators
+        if grep -qi "error\|fail\|abort\|crash" "$output_file" 2>/dev/null; then
+            echo "[$base_name] Test failed with errors (check output file for details)"
         fi
-    done
+    fi
 }
 
 echo "🔍 Finding Catch2 test executables..."
@@ -419,89 +620,227 @@ fi
 echo "📋 Found ${#test_executables[@]} Catch2 test executable(s)"
 echo ""
 
-# Execute tests (sequential for now - Catch2 tests are fast)
-echo "🔄 Running Catch2 tests sequentially..."
-echo ""
-
-# Run each test executable sequentially
-for test_exe in "${test_executables[@]}"; do
-    base_name=$(basename "$test_exe" .exe)
+# Execute tests (parallel or sequential)
+if [ "$PARALLEL_EXECUTION" = true ] && [ "$RAW_OUTPUT" != true ]; then
+    echo "⚡ Running Catch2 tests in parallel..."
+    echo ""
     
-    # Check if executable exists
-    if [ -f "$test_exe" ] && [ -x "$test_exe" ]; then
-        c_test_display_name=$(get_c_test_display_name "$base_name")
-        suite_category=$(get_suite_category "$base_name")
+    # Start all tests in parallel
+    test_pids=()
+    result_files=()
+    
+    for test_exe in "${test_executables[@]}"; do
+        base_name=$(basename "$test_exe" .exe)
         
-        echo "🏃 Running $c_test_display_name..."
+        # Check if executable exists
+        if [ -f "$test_exe" ] && [ -x "$test_exe" ]; then
+            # Calculate result file path
+            result_file="$TEST_OUTPUT_DIR/${base_name}_catch2_result.json"
+            result_files+=("$result_file")
+            
+            echo "   Starting $base_name..."
+            
+            # Run test in background and collect PID
+            temp_output="$TEST_OUTPUT_DIR/${base_name}_temp_output.log"
+            run_single_catch2_test "$test_exe" > "$temp_output" 2>&1 &
+            pid=$!
+            test_pids+=($pid)
+            
+            echo "   Started $base_name with PID $pid"
+        else
+            echo "⚠️  Skipping $test_exe (not executable)"
+        fi
+    done
+    
+    echo ""
+    echo "Started ${#test_pids[@]} parallel processes"
+    echo "Expected result files: ${#result_files[@]}"
+    
+    # Wait for all tests to complete
+    echo "⏳ Waiting for ${#test_pids[@]} parallel test(s) to complete..."
+    
+    # Wait for each process with timeout
+    wait_timeout=300  # 5 minutes total timeout
+    start_time=$(date +%s)
+    
+    for i in "${!test_pids[@]}"; do
+        pid="${test_pids[$i]}"
+        echo "   Waiting for PID $pid..."
         
-        # Handle test execution with proper error handling
-        set +e  # Temporarily disable exit on error for test execution
-        result=$(run_test_with_timeout "$test_exe")
-        output_file=$(echo "$result" | cut -d' ' -f1)
-        exit_code=$(echo "$result" | cut -d' ' -f2)
-        if [ "$RAW_OUTPUT" != true ]; then
-            set -e  # Re-enable exit on error only in non-raw mode
+        # Check if process is still running
+        if kill -0 "$pid" 2>/dev/null; then
+            # Wait for this specific process with timeout
+            elapsed=0
+            while kill -0 "$pid" 2>/dev/null && [ $elapsed -lt $wait_timeout ]; do
+                sleep 1
+                elapsed=$(($(date +%s) - start_time))
+            done
+            
+            # If still running after timeout, kill it
+            if kill -0 "$pid" 2>/dev/null; then
+                echo "   ⚠️ Process $pid timed out, killing..."
+                kill -TERM "$pid" 2>/dev/null || true
+                sleep 2
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
         fi
         
-        if [ -n "$output_file" ]; then
-            # Parse results
-            results=$(parse_catch2_results "$output_file" "$exit_code")
-            if [ -n "$results" ]; then
-                passed=$(echo "$results" | cut -d' ' -f1)
-                failed=$(echo "$results" | cut -d' ' -f2)
-                c_test_total=$((passed + failed))
-                
-                # Add to overall totals
-                total_tests=$((total_tests + c_test_total))
-                total_passed=$((total_passed + passed))
-                total_failed=$((total_failed + failed))
-                
-                # Track individual Catch2 test results
-                c_test_names+=("$c_test_display_name")
-                c_test_totals+=("$c_test_total")
-                c_test_passed+=("$passed")
-                c_test_failed+=("$failed")
-                c_test_suites+=("$suite_category")
-                
-                # Determine Catch2 test status
-                if [ $failed -eq 0 ]; then
-                    c_test_status+=("✅ PASS")
-                    echo "   ✅ $c_test_total tests passed"
-                else
-                    c_test_status+=("❌ FAIL")
-                    echo "   ✅ $passed tests passed, ❌ $failed tests failed"
-                fi
-                
-                # Extract failed test names with suite prefix
-                while IFS= read -r failed_name; do
-                    if [ -n "$failed_name" ]; then
-                        failed_test_names+=("$failed_name")
-                    fi
-                done < <(extract_failed_test_names "$output_file" "$base_name")
+        # Final wait to collect exit status
+        wait "$pid" 2>/dev/null || true
+    done
+    
+    echo "✅ All parallel tests completed!"
+    echo ""
+    
+    # Process results from all test files
+    echo "🔍 Processing test results..."
+    for i in "${!result_files[@]}"; do
+        result_file="${result_files[$i]}"
+        base_name=$(basename "$result_file" "_catch2_result.json")
+        
+        if [ -f "$result_file" ]; then
+            # Parse JSON result file
+            display_name=$(jq -r '.display_name' "$result_file" 2>/dev/null)
+            suite_category=$(jq -r '.suite_category' "$result_file" 2>/dev/null)
+            passed=$(jq -r '.passed' "$result_file" 2>/dev/null)
+            failed=$(jq -r '.failed' "$result_file" 2>/dev/null)
+            total=$(jq -r '.total' "$result_file" 2>/dev/null)
+            status=$(jq -r '.status' "$result_file" 2>/dev/null)
+            
+            # Validate parsed values
+            if [ "$display_name" = "null" ] || [ -z "$display_name" ]; then display_name="🧪 $base_name"; fi
+            if [ "$suite_category" = "null" ] || [ -z "$suite_category" ]; then suite_category="unknown"; fi
+            if [ "$passed" = "null" ] || [ -z "$passed" ]; then passed=0; fi
+            if [ "$failed" = "null" ] || [ -z "$failed" ]; then failed=0; fi
+            if [ "$total" = "null" ] || [ -z "$total" ]; then total=$((passed + failed)); fi
+            if [ "$status" = "null" ] || [ -z "$status" ]; then status="❌ ERROR"; fi
+            
+            # Show individual test results as we process them
+            echo "   $status $display_name ($passed/$total tests)"
+            
+            # Add to overall totals
+            total_tests=$((total_tests + total))
+            total_passed=$((total_passed + passed))
+            total_failed=$((total_failed + failed))
+            
+            # Track individual Catch2 test results
+            c_test_names+=("$display_name")
+            c_test_totals+=("$total")
+            c_test_passed+=("$passed")
+            c_test_failed+=("$failed")
+            c_test_suites+=("$suite_category")
+            
+            # Determine Catch2 test status
+            if [ $failed -eq 0 ]; then
+                c_test_status+=("✅ PASS")
             else
-                # No valid results
-                c_test_names+=("$c_test_display_name")
-                c_test_totals+=(0)
-                c_test_passed+=(0)
-                c_test_failed+=(0)
-                c_test_suites+=("$suite_category")
-                c_test_status+=("⚠️ NO OUTPUT")
-                echo "   ⚠️ No valid test results"
+                c_test_status+=("❌ FAIL")
             fi
+            
+            # Extract failed test names from JSON array
+            while IFS= read -r failed_name; do
+                if [ -n "$failed_name" ] && [ "$failed_name" != "null" ]; then
+                    failed_test_names+=("$failed_name")
+                fi
+            done < <(jq -r '.failed_tests[]?' "$result_file" 2>/dev/null)
         else
-            # Test execution failed completely
-            c_test_names+=("$c_test_display_name")
-            c_test_totals+=(1)
+            echo "   ⚠️ No result file found for $base_name"
+            # Add placeholder data for missing results
+            c_test_names+=("🧪 $base_name")
+            c_test_totals+=(0)
             c_test_passed+=(0)
             c_test_failed+=(1)
-            c_test_suites+=("$suite_category")
+            c_test_suites+=("unknown")
             c_test_status+=("❌ ERROR")
-            echo "   ❌ Test execution failed"
+            total_failed=$((total_failed + 1))
         fi
-    else
-        echo "⚠️  Skipping $test_exe (not executable or missing)"
-    fi
-done
+    done
+    
+else
+    # Sequential execution fallback
+    echo "🔄 Running Catch2 tests sequentially..."
+    echo ""
+    
+    # Run each test executable sequentially
+    for test_exe in "${test_executables[@]}"; do
+        base_name=$(basename "$test_exe" .exe)
+        
+        # Check if executable exists
+        if [ -f "$test_exe" ] && [ -x "$test_exe" ]; then
+            c_test_display_name=$(get_c_test_display_name "$base_name")
+            suite_category=$(get_suite_category "$base_name")
+            
+            echo "🏃 Running $c_test_display_name..."
+            
+            # Handle test execution with proper error handling
+            set +e  # Temporarily disable exit on error for test execution
+            result=$(run_test_with_timeout "$test_exe")
+            output_file=$(echo "$result" | cut -d' ' -f1)
+            exit_code=$(echo "$result" | cut -d' ' -f2)
+            if [ "$RAW_OUTPUT" != true ]; then
+                set -e  # Re-enable exit on error only in non-raw mode
+            fi
+            
+            if [ -n "$output_file" ]; then
+                # Parse results
+                results=$(parse_catch2_results "$output_file" "$exit_code")
+                if [ -n "$results" ]; then
+                    passed=$(echo "$results" | cut -d' ' -f1)
+                    failed=$(echo "$results" | cut -d' ' -f2)
+                    c_test_total=$((passed + failed))
+                    
+                    # Add to overall totals
+                    total_tests=$((total_tests + c_test_total))
+                    total_passed=$((total_passed + passed))
+                    total_failed=$((total_failed + failed))
+                    
+                    # Track individual Catch2 test results
+                    c_test_names+=("$c_test_display_name")
+                    c_test_totals+=("$c_test_total")
+                    c_test_passed+=("$passed")
+                    c_test_failed+=("$failed")
+                    c_test_suites+=("$suite_category")
+                    
+                    # Determine Catch2 test status
+                    if [ $failed -eq 0 ]; then
+                        c_test_status+=("✅ PASS")
+                        echo "   ✅ $c_test_total tests passed"
+                    else
+                        c_test_status+=("❌ FAIL")
+                        echo "   ✅ $passed tests passed, ❌ $failed tests failed"
+                    fi
+                    
+                    # Extract failed test names with suite prefix
+                    while IFS= read -r failed_name; do
+                        if [ -n "$failed_name" ]; then
+                            failed_test_names+=("$failed_name")
+                        fi
+                    done < <(extract_failed_test_names "$output_file" "$base_name")
+                else
+                    # No valid results
+                    c_test_names+=("$c_test_display_name")
+                    c_test_totals+=(0)
+                    c_test_passed+=(0)
+                    c_test_failed+=(0)
+                    c_test_suites+=("$suite_category")
+                    c_test_status+=("⚠️ NO OUTPUT")
+                    echo "   ⚠️ No valid test results"
+                fi
+            else
+                # Test execution failed completely
+                c_test_names+=("$c_test_display_name")
+                c_test_totals+=(1)
+                c_test_passed+=(0)
+                c_test_failed+=(1)
+                c_test_suites+=("$suite_category")
+                c_test_status+=("❌ ERROR")
+                echo "   ❌ Test execution failed"
+            fi
+        else
+            echo "⚠️  Skipping $test_exe (not executable or missing)"
+        fi
+    done
+fi
 
 # Group tests by suite category and calculate suite totals
 echo ""
@@ -533,9 +872,14 @@ for suite in "${suite_categories[@]}"; do
     
     for i in "${!c_test_suites[@]}"; do
         if [ "${c_test_suites[$i]}" = "$suite" ]; then
-            suite_total=$((suite_total + c_test_totals[$i]))
-            suite_passed=$((suite_passed + c_test_passed[$i]))
-            suite_failed=$((suite_failed + c_test_failed[$i]))
+            # Add bounds checking to prevent array index errors
+            if [ $i -lt ${#c_test_totals[@]} ] && [ $i -lt ${#c_test_passed[@]} ] && [ $i -lt ${#c_test_failed[@]} ]; then
+                suite_total=$((suite_total + c_test_totals[$i]))
+                suite_passed=$((suite_passed + c_test_passed[$i]))
+                suite_failed=$((suite_failed + c_test_failed[$i]))
+            else
+                echo "Warning: Array index mismatch detected for test $i, skipping..." >&2
+            fi
         fi
     done
     
@@ -609,17 +953,22 @@ for suite_cat in library input lambda validator unknown; do
         # Second pass: show individual tests under this suite
         for i in "${!c_test_suites[@]}"; do
             if [ "${c_test_suites[$i]}" = "$suite_cat" ]; then
-                c_test_name="${c_test_names[$i]}"
-                status="${c_test_status[$i]}"
-                passed="${c_test_passed[$i]}"
-                total="${c_test_totals[$i]}"
-                
-                # Show appropriate format based on test status
-                if [[ "$status" == *"FAIL"* ]]; then
-                    failed="${c_test_failed[$i]}"
-                    echo "     └─ $c_test_name $status ($passed passed, $failed failed of $total tests)"
+                # Add bounds checking to prevent array index errors
+                if [ $i -lt ${#c_test_names[@]} ] && [ $i -lt ${#c_test_status[@]} ] && [ $i -lt ${#c_test_passed[@]} ] && [ $i -lt ${#c_test_totals[@]} ]; then
+                    c_test_name="${c_test_names[$i]}"
+                    status="${c_test_status[$i]}"
+                    passed="${c_test_passed[$i]}"
+                    total="${c_test_totals[$i]}"
+                    
+                    # Show appropriate format based on test status
+                    if [[ "$status" == *"FAIL"* ]] && [ $i -lt ${#c_test_failed[@]} ]; then
+                        failed="${c_test_failed[$i]}"
+                        echo "     └─ $c_test_name $status ($passed passed, $failed failed of $total tests)"
+                    else
+                        echo "     └─ $c_test_name $status ($passed/$total tests)"
+                    fi
                 else
-                    echo "     └─ $c_test_name $status ($passed/$total tests)"
+                    echo "Warning: Array index mismatch detected for test display $i, skipping..." >&2
                 fi
             fi
         done
@@ -675,12 +1024,22 @@ summary_file="$TEST_OUTPUT_DIR/test_summary_catch2.json"
     
     echo "    \"level2_c_tests\": ["
     for i in "${!c_test_names[@]}"; do
-        printf '        {"name": "%s", "suite": "%s", "total": %d, "passed": %d, "failed": %d, "status": "%s"}' \
-            "${c_test_names[$i]}" "${c_test_suites[$i]}" "${c_test_totals[$i]}" "${c_test_passed[$i]}" "${c_test_failed[$i]}" "${c_test_status[$i]}"
-        if [ $i -lt $((${#c_test_names[@]} - 1)) ]; then
-            echo ","
+        # Add bounds checking to prevent array index errors in JSON generation
+        if [ $i -lt ${#c_test_suites[@]} ] && [ $i -lt ${#c_test_totals[@]} ] && [ $i -lt ${#c_test_passed[@]} ] && [ $i -lt ${#c_test_failed[@]} ] && [ $i -lt ${#c_test_status[@]} ]; then
+            printf '        {"name": "%s", "suite": "%s", "total": %d, "passed": %d, "failed": %d, "status": "%s"}' \
+                "${c_test_names[$i]}" "${c_test_suites[$i]}" "${c_test_totals[$i]}" "${c_test_passed[$i]}" "${c_test_failed[$i]}" "${c_test_status[$i]}"
+            if [ $i -lt $((${#c_test_names[@]} - 1)) ]; then
+                echo ","
+            else
+                echo ""
+            fi
         else
-            echo ""
+            echo "        {\"name\": \"Error: Array index mismatch\", \"suite\": \"unknown\", \"total\": 0, \"passed\": 0, \"failed\": 1, \"status\": \"❌ ERROR\"}"
+            if [ $i -lt $((${#c_test_names[@]} - 1)) ]; then
+                echo ","
+            else
+                echo ""
+            fi
         fi
     done
     echo "    ]"
