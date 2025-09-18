@@ -327,7 +327,7 @@ TEST_CASE("html5_schema_features", "[validator_tests]") {
         "primitive types", "optional fields", "zero-or-more occurrences", 
         "union types", "element types", "type definitions", "nested structures"
     };
-    test_schema_features_helper("lambda/input/html5_schema.ls", 
+    test_schema_features_helper("../lambda/input/html5_schema.ls", 
                                expected_features, 7);
 }
 
@@ -499,7 +499,7 @@ TEST_CASE("html_auto_detection", "[validator_tests]") {
 TEST_CASE("html_explicit_format_specification", "[validator_tests]") {
     // Test explicitly specifying HTML format
     test_cli_validation_helper("test/input/test_html5.html",
-                              "lambda/input/html5_schema.ls", 
+                              "../lambda/input/html5_schema.ls", 
                               "html", true);
 }
 
@@ -658,7 +658,7 @@ TEST_CASE("invalid_html5_validation", "[validator_tests]") {
         
         // Test with HTML5 schema - should fail due to missing title and invalid nesting
         test_cli_validation_helper("test/lambda/validator/test_invalid_html5.html",
-                                   "lambda/input/html5_schema.ls", 
+                                   "../lambda/input/html5_schema.ls", 
                                    "html", false);
         
         // Cleanup
@@ -668,7 +668,7 @@ TEST_CASE("invalid_html5_validation", "[validator_tests]") {
 
 TEST_CASE("invalid_markdown_validation", "[validator_tests]") {
     test_cli_validation_helper("test/lambda/validator/test_invalid.md",
-                              "lambda/input/doc_schema.ls", 
+                              "../lambda/input/doc_schema.ls", 
                               "markdown", false);
 }
 
@@ -681,7 +681,7 @@ TEST_CASE("html_vs_markdown_schema_mismatch", "[validator_tests]") {
 TEST_CASE("html5_schema_override_test", "[validator_tests]") {
     // Test that users can override HTML5 schema selection with -s option
     test_cli_validation_helper("test/input/test_html5.html",
-                              "lambda/input/doc_schema.ls", 
+                              "../lambda/input/doc_schema.ls", 
                               "html", false);  // Should fail because HTML5 doesn't match doc schema
 }
 
