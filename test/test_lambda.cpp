@@ -169,9 +169,10 @@ void test_lambda_script_against_file(const char* script_path, const char* expect
     trim_trailing_whitespace(expected_output);
 
     // Verify the expected output matches the actual output
+    // Use simple error message to avoid JSON escaping issues with complex output
     cr_assert_eq(strcmp(expected_output, actual_output), 0,
-                 "Output does not match expected output for script: %s\nExpected:\n'%s'\nGot:\n'%s'",
-                 script_path, expected_output, actual_output);
+                 "Output mismatch for script: %s (expected %zu chars, got %zu chars)",
+                 script_path, strlen(expected_output), strlen(actual_output));
     printf("Expected length: %d, got length: %d\n", (int)strlen(expected_output), (int)strlen(actual_output));
     
     free(expected_output);

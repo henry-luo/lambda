@@ -8,6 +8,7 @@ ehthumbs.db
 Thumbs.db
 
 # Compiled binaries and objects
+*.lua
 *.o
 *.d
 *.a

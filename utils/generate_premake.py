@@ -90,6 +90,34 @@ class PremakeGenerator:
         
         return libraries
 
+    def _is_lambda_input_full_dependent_test(self, target_name: str) -> bool:
+        """Check if a test target depends on lambda-input-full libraries"""
+        # Try to match by binary name (with or without .exe and with or without test/ prefix)
+        target_binary = target_name + '.exe' if not target_name.endswith('.exe') else target_name
+        target_binary_with_path = 'test/' + target_binary
+        
+        # Check test_suites
+        if 'test_suites' in self.config:
+            for suite in self.config['test_suites']:
+                if 'tests' in suite:
+                    for test in suite['tests']:
+                        binary = test.get('binary', '')
+                        name = test.get('name', '')
+                        # Check multiple variations: exact binary match, binary with path, or name match
+                        if (binary == target_binary or 
+                            binary == target_binary_with_path or 
+                            name == target_name):
+                            dependencies = test.get('dependencies', [])
+                            result = any(dep in ['lambda-runtime-full', 'lambda-input-full'] or 
+                                      dep.startswith('lambda-runtime-full-') or 
+                                      dep.startswith('lambda-input-full-') 
+                                      for dep in dependencies)
+                            return result
+        
+        return False
+        
+        return False
+
     def _get_compiler_info(self) -> tuple[str, str]:
         """Get compiler and toolset information based on platform configuration"""
         # Get compiler from config - check for platform-specific config first
@@ -588,10 +616,17 @@ class PremakeGenerator:
                             else:
                                 dynamic_libs.append(lib_path)
                         else:
-                            # Static library
-                            if not lib_path.startswith('/') and not lib_path.startswith('-l'):
-                                lib_path = f"../../{lib_path}"
-                            static_libs.append(lib_path)
+                            # Static library - special handling for tree-sitter libraries
+                            # Tree-sitter libraries need to come after libraries that depend on them
+                            if dep in ['tree-sitter', 'tree-sitter-lambda']:
+                                # Add tree-sitter libraries to dynamic_libs so they go in links (LIBS)
+                                # instead of linkoptions (ALL_LDFLAGS) for proper linking order
+                                dynamic_libs.append(lib_path)
+                            else:
+                                # Regular static library
+                                if not lib_path.startswith('/') and not lib_path.startswith('-l'):
+                                    lib_path = f"../../{lib_path}"
+                                static_libs.append(lib_path)
                 
                 # Add static libraries to linkoptions
                 if static_libs:
@@ -1176,6 +1211,7 @@ class PremakeGenerator:
         # Add external library linkoptions for test-specific libraries
         if libraries:
             external_static_libs = []
+            tree_sitter_libs = []  # Track tree-sitter libraries separately
             for lib_name in libraries:
                 if lib_name in self.external_libraries:
                     lib_info = self.external_libraries[lib_name]
@@ -1183,7 +1219,28 @@ class PremakeGenerator:
                         lib_path = lib_info['lib']
                         if not lib_path.startswith('/'):
                             lib_path = f"../../{lib_path}"
-                        external_static_libs.append(lib_path)
+                        
+                        # Special handling for tree-sitter libraries - add them to links instead of linkoptions
+                        if lib_name in ['tree-sitter', 'tree-sitter-lambda']:
+                            tree_sitter_libs.append(lib_path)
+                        else:
+                            external_static_libs.append(lib_path)
+            
+            # Add tree-sitter libraries to links (they need to come after libraries that depend on them)
+            if tree_sitter_libs:
+                # Re-open the links block to add tree-sitter libraries
+                self.premake_content[-2] = '    '  # Remove the closing brace line 
+                self.premake_content.pop()  # Remove the empty line
+                
+                # Add tree-sitter libraries to links
+                for lib_path in tree_sitter_libs:
+                    self.premake_content.append(f'        "{lib_path}",')
+                
+                # Close the links block again
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
             
             if external_static_libs:
                 self.premake_content.append('    linkoptions {')
@@ -1198,16 +1255,11 @@ class PremakeGenerator:
         if any(dep in ['lambda-runtime-full', 'lambda-input-full'] or dep.startswith('lambda-runtime-full-') or dep.startswith('lambda-input-full-') for dep in dependencies):
             self.premake_content.extend([
                 '    linkoptions {',
+                '        "-Wl,--start-group",',  # Start group for circular dependency resolution
             ])
             
-            # Add tree-sitter libraries using parsed definitions
-            for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
-                if lib_name in self.external_libraries:
-                    lib_path = self.external_libraries[lib_name]['lib']
-                    # Convert to relative path from build directory
-                    if not lib_path.startswith('/'):
-                        lib_path = f"../../{lib_path}"
-                    self.premake_content.append(f'        "{lib_path}",')
+            # NOTE: Tree-sitter libraries moved to links section for proper linking order
+            # (they need to come after libraries that depend on them)
             
             # Add static external libraries
             # If lambda-input-full is a dependency, we need to include curl/ssl/crypto/nghttp2 for proper linking
@@ -1223,7 +1275,24 @@ class PremakeGenerator:
                         lib_path = f"../../{lib_path}"
                     self.premake_content.append(f'        "{lib_path}",')
             
+            # Add tree-sitter libraries directly within the group
+            # For lambda-input-full dependent tests, exclude tree-sitter from regular linking
+            # since it's added via --whole-archive to resolve undefined symbols
+            tree_sitter_libs = ['tree-sitter-lambda']
+            is_lambda_input_full = self._is_lambda_input_full_dependent_test(test_name)
+            if not is_lambda_input_full:
+                tree_sitter_libs.append('tree-sitter')
+                
+            for lib_name in tree_sitter_libs:
+                if lib_name in self.external_libraries:
+                    lib_path = self.external_libraries[lib_name]['lib']
+                    # Convert to relative path from build directory
+                    if not lib_path.startswith('/'):
+                        lib_path = f"../../{lib_path}"
+                    self.premake_content.append(f'        "{lib_path}",')
+            
             self.premake_content.extend([
+                '        "-Wl,--end-group",',    # End group for circular dependency resolution
                 '    }',
                 '    ',
                 '    -- Add dynamic libraries',
@@ -1243,6 +1312,23 @@ class PremakeGenerator:
             
             # Add system libraries that libedit depends on
             self.premake_content.append('        "ncurses",')
+            
+            self.premake_content.extend([
+                '    }',
+                '    ',
+                '    -- Add tree-sitter libraries using linkoptions to append to LIBS section',
+                '    linkoptions {',
+            ])
+            
+            # Add tree-sitter libraries using --whole-archive only for lambda-input-full dependent tests
+            # to resolve undefined symbols while avoiding duplicate symbols
+            if self._is_lambda_input_full_dependent_test(test_name) and 'tree-sitter' in self.external_libraries:
+                lib_path = self.external_libraries['tree-sitter']['lib']
+                # Convert to relative path from build directory
+                if not lib_path.startswith('/'):
+                    lib_path = f"../../{lib_path}"
+                # Add using -Wl to pass directly to linker and append to command line
+                self.premake_content.append(f'        "-Wl,--whole-archive,{lib_path},--no-whole-archive",')
             
             self.premake_content.extend([
                 '    }',

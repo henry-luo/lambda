@@ -416,6 +416,8 @@ distclean: clean-all clean-grammar clean-test
 
 # Development targets
 test: build-test
+	@echo "Clearing HTTP cache for clean test runs..."
+	@rm -rf temp/cache
 	@echo "Running old test suite (excluding Catch2 tests)..."
 	@if [ -f "test/test_run.sh" ]; then \
 		./test/test_run.sh --parallel; \
