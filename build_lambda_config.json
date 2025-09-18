@@ -84,57 +84,41 @@
         },
         {
             "name": "mpdec",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-            "link": "static"
+            "include": "/usr/include",
+            "lib": "mpdec",
+            "link": "dynamic",
+            "optional": true
         },
         {
             "name": "utf8proc",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+            "include": "/usr/include",
+            "lib": "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
             "link": "static"
         },
         {
             "name": "hpdf",
             "description": "libharu PDF generation library",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/Cellar/libharu/2.4.5/lib/libhpdf.a",
-            "link": "static"
+            "include": "/usr/include",
+            "lib": "hpdf",
+            "link": "dynamic",
+            "optional": true
         },
         {
             "name": "ssl",
-            "include": "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-            "lib": "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-            "link": "static"
+            "include": "/usr/include/openssl",
+            "lib": "ssl",
+            "link": "dynamic"
         },
         {
             "name": "crypto",
-            "include": "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-            "lib": "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
-            "link": "static"
+            "include": "/usr/include/openssl",
+            "lib": "crypto",
+            "link": "dynamic"
         },
         {
             "name": "z",
             "include": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
             "lib": "-lz",
-            "link": "dynamic"
-        },
-        {
-            "name": "CoreFoundation",
-            "include": "",
-            "lib": "-framework CoreFoundation",
-            "link": "dynamic"
-        },
-        {
-            "name": "CoreServices",
-            "include": "",
-            "lib": "-framework CoreServices",
-            "link": "dynamic"
-        },
-        {
-            "name": "SystemConfiguration",
-            "include": "",
-            "lib": "-framework SystemConfiguration",
             "link": "dynamic"
         },
         {
@@ -145,9 +129,33 @@
         },
         {
             "name": "libedit",
-            "include": "/opt/homebrew/opt/libedit/include",
-            "lib": "/opt/homebrew/opt/libedit/lib/libedit.a",
-            "link": "static"
+            "include": "/usr/include/editline",
+            "lib": "edit",
+            "link": "dynamic"
+        },
+        {
+            "name": "tinfo",
+            "include": "",
+            "lib": "tinfo",
+            "link": "dynamic"
+        },
+        {
+            "name": "bsd",
+            "include": "",
+            "lib": "bsd",
+            "link": "dynamic"
+        },
+        {
+            "name": "md",
+            "include": "",
+            "lib": "md",
+            "link": "dynamic"
+        },
+        {
+            "name": "curl",
+            "include": "/usr/include/curl",
+            "lib": "curl",
+            "link": "dynamic"
         },
         {
             "name": "ncurses",
@@ -341,58 +349,121 @@
             "target_triplet": "x86_64-w64-mingw32"
         },
         "linux": {
-            "output": "lambda-linux.exe",
+            "output": "lambda.exe",
+            "compiler": "gcc",
             "libraries": [
                 {
                     "name": "curl",
-                    "include": "linux-deps/include",
-                    "lib": "linux-deps/lib/libcurl.a",
-                    "link": "static"
+                    "include": "/usr/include",
+                    "lib": "curl",
+                    "link": "dynamic"
                 },
                 {
                     "name": "tree-sitter",
-                    "include": "linux-deps/include",
-                    "lib": "linux-deps/lib/libtree-sitter.a",
+                    "include": "/workspaces/jubily/lambda/tree-sitter/lib/include",
+                    "lib": "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+                    "link": "static"
+                },
+                {
+                    "name": "tree-sitter-lambda",
+                    "include": "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
+                    "lib": "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
                     "link": "static"
                 },
                 {
                     "name": "mir",
-                    "include": "linux-deps/include",
-                    "lib": "linux-deps/lib/libmir.a",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/libmir.a",
                     "link": "static"
                 },
                 {
                     "name": "mpdec",
-                    "include": "linux-deps/include",
-                    "lib": "linux-deps/lib/libmpdec.a",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/libmpdec.a",
                     "link": "static"
                 },
                 {
                     "name": "utf8proc",
-                    "include": "linux-deps/include",
-                    "lib": "linux-deps/lib/libutf8proc.a",
+                    "include": "/usr/include",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
                     "link": "static"
                 },
                 {
                     "name": "libedit",
-                    "include": "linux-deps/include",
-                    "lib": "linux-deps/lib/libedit.a",
+                    "include": "/usr/include/editline",
+                    "lib": "edit",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "tinfo",
+                    "lib": "tinfo",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "bsd",
+                    "lib": "bsd",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "md",
+                    "lib": "md",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "haru",
+                    "include": "/usr/local/include",
+                    "lib": "hpdf",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "criterion",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/libcriterion.a",
+                    "link": "static"
+                },
+                {
+                    "name": "lexbor",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/liblexbor_static.a",
                     "link": "static"
                 }
             ],
             "flags": [
                 "std=c++17",
-                "static",
-                "DCROSS_COMPILE"
+                "fno-omit-frame-pointer",
+                "g"
             ],
             "linker_flags": [
-                "static-libgcc",
-                "static-libstdc++",
-                "lpthread"
+                "lpthread",
+                "lm",
+                "ldl",
+                "lz"
             ],
-            "build_dir": "build_linux",
-            "cross_compile": true,
-            "target_triplet": "x86_64-linux-gnu"
+            "build_dir": "build",
+            "cross_compile": false,
+            "disable_sanitizer": true
+        },
+        "macos": {
+            "libraries": [
+                {
+                    "name": "CoreFoundation",
+                    "include": "",
+                    "lib": "-framework CoreFoundation",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "CoreServices",
+                    "include": "",
+                    "lib": "-framework CoreServices",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "SystemConfiguration",
+                    "include": "",
+                    "lib": "-framework SystemConfiguration",
+                    "link": "dynamic"
+                }
+            ]
         }
     },
     "test": {

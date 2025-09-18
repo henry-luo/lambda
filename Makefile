@@ -222,7 +222,7 @@ build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	premake5 gmake
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	# suppress warnings but keep errors
-	$(MAKE) -C build/premake config=debug_x64 lambda -j$(JOBS) 2>&1 | grep -v "warning:"
+	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) 2>&1 | grep -v "warning:"
 	@echo "Build completed. Executable: lambda.exe"
 
 print-vars:
@@ -238,7 +238,7 @@ debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Generating makefiles..."
 	premake5 gmake
 	@echo "Building lambda executable (debug) with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_x64 lambda -j$(JOBS)
+	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS)
 	@echo "Debug build completed. Executable: lambda.exe"
 
 # Release build (optimized)
@@ -262,7 +262,7 @@ rebuild: clean $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Generating makefiles..."
 	premake5 gmake
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_x64 lambda -j$(JOBS)
+	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS)
 	@echo "Rebuild completed. Executable: lambda.exe"
 
 # Specific project builds
@@ -458,7 +458,7 @@ build-catch2: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	if [ -n "$$CATCH2_TARGETS" ]; then \
 		echo "Found Catch2 targets: $$CATCH2_TARGETS"; \
 		echo "Building Catch2 test executables with $(JOBS) parallel jobs..."; \
-		/Library/Developer/CommandLineTools/usr/bin/make -C build/premake config=debug_x64 $$CATCH2_TARGETS -j$(JOBS); \
+		/Library/Developer/CommandLineTools/usr/bin/make -C build/premake config=debug_native $$CATCH2_TARGETS -j$(JOBS); \
 		echo "Creating dynamic Catch2 test list for test runner..."; \
 		mkdir -p test_output; \
 		echo "$$CATCH2_TARGETS" | tr ' ' '\n' | grep -v '^$$' > test_output/available_catch2_tests.txt; \
@@ -1219,7 +1219,7 @@ build-test: generate-premake
 	cd build/premake && premake5 gmake --file=../../premake5.lua
 	@mv build/premake/Makefile build/premake/PremakeMakefile 2>/dev/null || true
 	@echo "Building tests with $(JOBS) parallel jobs..."
-	@$(MAKE) -C build/premake -f PremakeMakefile config=debug_x64 -j$(JOBS)
+	@$(MAKE) -C build/premake -f PremakeMakefile config=debug_native -j$(JOBS)
 
 build-test-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Cross-compiling tests for Linux using Premake5..."

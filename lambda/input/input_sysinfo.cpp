@@ -2,7 +2,6 @@
 #include <cstring>
 #include <ctime>
 #include <sys/utsname.h>
-#include <sys/sysctl.h>
 #include <unistd.h>
 #include "input.h"
 #include "input-common.h"
@@ -13,6 +12,7 @@
 #include "../../lib/datetime.h"
 
 #ifdef __APPLE__
+#include <sys/sysctl.h>
 #include <mach/mach.h>
 #include <mach/mach_host.h>
 #include <sys/mount.h>

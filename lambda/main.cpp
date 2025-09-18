@@ -23,6 +23,10 @@ extern "C" {
 // ValidationResult* run_ast_validation(const char *data_file, const char *schema_file, const char *input_format);
 extern "C" AstValidationResult* exec_validation(int argc, char* argv[]);
 int exec_convert(int argc, char* argv[]);
+
+// REPL functions from main-repl.cpp
+extern int repl_init();
+extern void repl_cleanup();
 void transpile_ast_root(Transpiler* tp, AstScript *script);
 
 // External function declarations
@@ -91,6 +95,11 @@ void run_repl(Runtime *runtime, bool use_mir) {
     printf("Lambda Script REPL v1.0%s\n", use_mir ? " (MIR JIT)" : "");
     printf("Type .help for commands, .quit to exit\n");
     
+    // Initialize libedit
+    if (repl_init() != 0) {
+        printf("Warning: Failed to initialize readline, using basic input\n");
+    }
+    
     // Get the best prompt for this system
     const char* prompt = get_repl_prompt();
     
@@ -153,6 +162,9 @@ void run_repl(Runtime *runtime, bool use_mir) {
         
         free(line);
     }
+    
+    // Cleanup libedit
+    repl_cleanup();
     
     strbuf_free(repl_history);
 }
