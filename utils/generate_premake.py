@@ -47,10 +47,14 @@ class PremakeGenerator:
         use_linux_config = (current_platform == 'Linux' or 
                            self.config.get('platform') == 'Linux_x64' or
                            self.config.get('platform') == 'Linux')
+        use_macos_config = (current_platform == 'Darwin' or 
+                           self.config.get('platform') == 'macOS' or
+                           self.config.get('platform') == 'Darwin')
         
-        # Override with platform-specific libraries if on Linux
+        platforms_config = self.config.get('platforms', {})
+        
+        # Override with Linux-specific libraries if on Linux
         if use_linux_config:
-            platforms_config = self.config.get('platforms', {})
             linux_config = platforms_config.get('linux', {})
             
             # Override with Linux-specific libraries
@@ -69,6 +73,19 @@ class PremakeGenerator:
                         'include': lib.get('include', ''),
                         'lib': lib.get('lib', ''),
                         'link': lib.get('link', 'static')
+                    }
+        
+        # Override with macOS-specific libraries if on macOS
+        if use_macos_config:
+            macos_config = platforms_config.get('macos', {})
+            
+            # Override with macOS-specific libraries
+            for lib in macos_config.get('libraries', []):
+                if 'lib' in lib:
+                    libraries[lib['name']] = {
+                        'include': lib.get('include', ''),
+                        'lib': lib.get('lib', ''),
+                        'link': lib.get('link', 'dynamic')
                     }
         
         return libraries
@@ -1287,6 +1304,17 @@ class PremakeGenerator:
             elif isinstance(lib, dict):
                 lib_name = lib.get('name', '')
                 if lib_name not in ['criterion']:  # Exclude test-only libraries
+                    dependencies.append(lib_name)
+        
+        # Add platform-specific libraries for macOS
+        import platform
+        current_platform = platform.system()
+        if current_platform == 'Darwin':
+            platforms_config = self.config.get('platforms', {})
+            macos_config = platforms_config.get('macos', {})
+            for lib in macos_config.get('libraries', []):
+                lib_name = lib.get('name', '')
+                if lib_name and lib_name not in dependencies:
                     dependencies.append(lib_name)
         
         # NOTE: dev_libraries (ginac, cln, gmp, criterion, catch2) are NOT included 

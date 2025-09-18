@@ -84,35 +84,35 @@
         },
         {
             "name": "mpdec",
-            "include": "/usr/include",
-            "lib": "mpdec",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libmpdec.a",
             "link": "static"
         },
         {
             "name": "utf8proc",
-            "include": "/usr/include",
-            "lib": "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libutf8proc.a",
             "link": "static"
         },
         {
             "name": "hpdf",
             "description": "libharu PDF generation library",
-            "include": "/usr/include",
-            "lib": "hpdf",
-            "link": "dynamic",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libhpdf.a",
+            "link": "static",
             "optional": true
         },
         {
             "name": "ssl",
-            "include": "/usr/include/openssl",
-            "lib": "ssl",
-            "link": "dynamic"
+            "include": "/opt/homebrew/include/openssl",
+            "lib": "/opt/homebrew/lib/libssl.a",
+            "link": "static"
         },
         {
             "name": "crypto",
-            "include": "/usr/include/openssl",
-            "lib": "crypto",
-            "link": "dynamic"
+            "include": "/opt/homebrew/include/openssl",
+            "lib": "/opt/homebrew/lib/libcrypto.a",
+            "link": "static"
         },
         {
             "name": "z",
@@ -128,14 +128,8 @@
         },
         {
             "name": "libedit",
-            "include": "/usr/include/editline",
-            "lib": "edit",
-            "link": "static"
-        },
-        {
-            "name": "curl",
-            "include": "/usr/include/curl",
-            "lib": "curl",
+            "include": "/opt/homebrew/opt/libedit/include",
+            "lib": "/opt/homebrew/opt/libedit/lib/libedit.a",
             "link": "static"
         },
         {

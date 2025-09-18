@@ -4,10 +4,10 @@
 
 workspace "Lambda"
     configurations { "Debug", "Release" }
-    platforms { "x64" }
+    platforms { "native" }
     location "build/premake"
     startproject "lambda"
-    toolset "clang"
+    toolset "gcc"
     
     -- Global settings
     cppdialect "C++17"
@@ -19,19 +19,16 @@ workspace "Lambda"
         symbols "On"
         optimize "Off"
     
-    -- AddressSanitizer for non-Linux platforms only (conflicts with -static)
-    filter { "configurations:Debug", "not platforms:Linux_x64" }
-        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
-        linkoptions { "-fsanitize=address" }
+    -- AddressSanitizer disabled for Linux platform
     
     filter "configurations:Release"
         defines { "NDEBUG" }
         optimize "On"
     
-    -- Linux cross-compilation settings
-    filter "platforms:Linux_x64"
-        system "linux"
-        architecture "x64"
+    -- Native Linux build settings
+    toolset "gcc"
+    defines { "LINUX", "_GNU_SOURCE", "NATIVE_LINUX_BUILD" }
+    
     
     filter {}
 
@@ -74,9 +71,8 @@ project "lambda-lib"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
     }
     
 
@@ -109,9 +105,8 @@ project "lambda-input-full-c"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics"
+        "-fdiagnostics-color=auto"
     }
     
     libdirs {
@@ -124,12 +119,12 @@ project "lambda-input-full-c"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
     }
     
@@ -179,9 +174,8 @@ project "lambda-input-full-cpp"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17"
     }
     
@@ -195,12 +189,12 @@ project "lambda-input-full-cpp"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
     }
     
@@ -358,8 +352,8 @@ project "lambda"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -378,17 +372,17 @@ project "lambda"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "/usr/local/lib/libmir.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
-        "/opt/homebrew/Cellar/libharu/2.4.5/lib/libhpdf.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libhpdf.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
-    -- macOS dynamic libraries
-    filter "platforms:x64"
+    -- Dynamic libraries
+    filter "platforms:native"
         links {
             "z",
             "ncurses",
@@ -404,9 +398,8 @@ project "lambda"
     filter {}
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
     }
     
     -- C++ specific options
@@ -444,8 +437,8 @@ project "test_strbuf"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -473,9 +466,8 @@ project "test_strbuf"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c99",
     }
     
@@ -500,8 +492,8 @@ project "test_stringbuf"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -529,9 +521,8 @@ project "test_stringbuf"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
     }
     
 
@@ -555,8 +546,8 @@ project "test_strview"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -584,9 +575,8 @@ project "test_strview"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c99",
     }
     
@@ -611,8 +601,8 @@ project "test_variable_pool"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -640,9 +630,8 @@ project "test_variable_pool"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c99",
     }
     
@@ -667,8 +656,8 @@ project "test_num_stack"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -696,9 +685,8 @@ project "test_num_stack"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c99",
     }
     
@@ -723,8 +711,8 @@ project "test_datetime"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -752,9 +740,8 @@ project "test_datetime"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c99",
     }
     
@@ -779,8 +766,8 @@ project "test_url"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -808,9 +795,8 @@ project "test_url"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c99",
     }
     
@@ -835,8 +821,8 @@ project "test_url_extra"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -864,9 +850,8 @@ project "test_url_extra"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c99",
     }
     
@@ -891,8 +876,8 @@ project "test_strbuf_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -919,9 +904,8 @@ project "test_strbuf_catch2"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -946,8 +930,8 @@ project "test_stringbuf_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -974,9 +958,8 @@ project "test_stringbuf_catch2"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1001,8 +984,8 @@ project "test_strview_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1029,9 +1012,8 @@ project "test_strview_catch2"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1056,8 +1038,8 @@ project "test_variable_pool_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1084,9 +1066,8 @@ project "test_variable_pool_catch2"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1111,8 +1092,8 @@ project "test_num_stack_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1139,9 +1120,8 @@ project "test_num_stack_catch2"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1166,8 +1146,8 @@ project "test_datetime_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1194,9 +1174,8 @@ project "test_datetime_catch2"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1221,8 +1200,8 @@ project "test_url_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1249,9 +1228,8 @@ project "test_url_catch2"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1276,8 +1254,8 @@ project "test_url_extra_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1304,9 +1282,8 @@ project "test_url_extra_catch2"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1331,8 +1308,8 @@ project "test_mime_detect"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1363,13 +1340,13 @@ project "test_mime_detect"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -1387,9 +1364,8 @@ project "test_mime_detect"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c99",
     }
     
@@ -1414,8 +1390,8 @@ project "test_math"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1447,13 +1423,13 @@ project "test_math"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -1473,9 +1449,8 @@ project "test_math"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1500,8 +1475,8 @@ project "test_math_ascii"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1533,13 +1508,13 @@ project "test_math_ascii"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -1559,9 +1534,8 @@ project "test_math_ascii"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1586,8 +1560,8 @@ project "test_markup_roundtrip"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1619,13 +1593,13 @@ project "test_markup_roundtrip"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -1645,9 +1619,8 @@ project "test_markup_roundtrip"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1672,8 +1645,8 @@ project "test_input_roundtrip"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1705,13 +1678,13 @@ project "test_input_roundtrip"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -1731,9 +1704,8 @@ project "test_input_roundtrip"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1758,8 +1730,8 @@ project "test_dir"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1791,13 +1763,13 @@ project "test_dir"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -1817,9 +1789,8 @@ project "test_dir"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1844,8 +1815,8 @@ project "test_http"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1877,13 +1848,13 @@ project "test_http"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -1903,9 +1874,8 @@ project "test_http"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -1930,8 +1900,8 @@ project "test_sysinfo"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -1963,13 +1933,13 @@ project "test_sysinfo"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -1989,9 +1959,8 @@ project "test_sysinfo"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -2016,8 +1985,8 @@ project "test_jsx_roundtrip"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -2049,13 +2018,13 @@ project "test_jsx_roundtrip"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -2075,9 +2044,8 @@ project "test_jsx_roundtrip"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -2102,8 +2070,8 @@ project "test_mdx_roundtrip"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -2135,13 +2103,13 @@ project "test_mdx_roundtrip"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -2161,9 +2129,8 @@ project "test_mdx_roundtrip"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -2188,8 +2155,8 @@ project "test_css_tokenizer"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -2221,13 +2188,13 @@ project "test_css_tokenizer"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -2247,9 +2214,8 @@ project "test_css_tokenizer"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -2274,8 +2240,8 @@ project "test_css_parser"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -2307,13 +2273,13 @@ project "test_css_parser"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -2333,9 +2299,8 @@ project "test_css_parser"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -2360,8 +2325,8 @@ project "test_css_integration"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -2393,13 +2358,13 @@ project "test_css_integration"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -2419,9 +2384,8 @@ project "test_css_integration"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -2446,8 +2410,8 @@ project "test_css_files_safe"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -2478,13 +2442,13 @@ project "test_css_files_safe"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -2502,9 +2466,8 @@ project "test_css_files_safe"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c99",
     }
     
@@ -2529,8 +2492,8 @@ project "test_css_frameworks"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -2562,13 +2525,13 @@ project "test_css_frameworks"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -2588,9 +2551,8 @@ project "test_css_frameworks"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -2615,8 +2577,8 @@ project "test_mime_detect_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -2647,13 +2609,13 @@ project "test_mime_detect_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -2673,9 +2635,8 @@ project "test_mime_detect_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -2700,8 +2661,8 @@ project "test_css_tokenizer_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -2732,13 +2693,13 @@ project "test_css_tokenizer_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -2758,9 +2719,8 @@ project "test_css_tokenizer_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -2785,8 +2745,8 @@ project "test_css_parser_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -2817,13 +2777,13 @@ project "test_css_parser_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -2843,9 +2803,8 @@ project "test_css_parser_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -2870,8 +2829,8 @@ project "test_css_integration_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -2902,13 +2861,13 @@ project "test_css_integration_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -2928,9 +2887,8 @@ project "test_css_integration_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -2955,8 +2913,8 @@ project "test_css_frameworks_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -2987,13 +2945,13 @@ project "test_css_frameworks_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -3013,9 +2971,8 @@ project "test_css_frameworks_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -3040,8 +2997,8 @@ project "test_math_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -3072,13 +3029,13 @@ project "test_math_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -3098,9 +3055,8 @@ project "test_math_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -3125,8 +3081,8 @@ project "test_math_ascii_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -3157,13 +3113,13 @@ project "test_math_ascii_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -3183,9 +3139,8 @@ project "test_math_ascii_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -3210,8 +3165,8 @@ project "test_markup_roundtrip_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -3242,13 +3197,13 @@ project "test_markup_roundtrip_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -3268,9 +3223,8 @@ project "test_markup_roundtrip_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -3296,8 +3250,8 @@ project "test_input_roundtrip_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -3328,13 +3282,13 @@ project "test_input_roundtrip_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -3354,9 +3308,8 @@ project "test_input_roundtrip_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -3381,8 +3334,8 @@ project "test_dir_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -3413,13 +3366,13 @@ project "test_dir_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -3439,9 +3392,8 @@ project "test_dir_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -3466,8 +3418,8 @@ project "test_http_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -3498,13 +3450,13 @@ project "test_http_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -3524,9 +3476,8 @@ project "test_http_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -3551,8 +3502,8 @@ project "test_sysinfo_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -3583,13 +3534,13 @@ project "test_sysinfo_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -3609,9 +3560,8 @@ project "test_sysinfo_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -3636,8 +3586,8 @@ project "test_jsx_roundtrip_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -3668,13 +3618,13 @@ project "test_jsx_roundtrip_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -3694,9 +3644,8 @@ project "test_jsx_roundtrip_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -3721,8 +3670,8 @@ project "test_mdx_roundtrip_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -3753,13 +3702,13 @@ project "test_mdx_roundtrip_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -3779,9 +3728,8 @@ project "test_mdx_roundtrip_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -3806,8 +3754,8 @@ project "test_css_files_safe_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -3838,13 +3786,13 @@ project "test_css_files_safe_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -3864,9 +3812,8 @@ project "test_css_files_safe_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -3891,8 +3838,8 @@ project "test_validator"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -3924,13 +3871,13 @@ project "test_validator"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -3950,9 +3897,8 @@ project "test_validator"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -3977,8 +3923,8 @@ project "test_ast_validator"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -4010,13 +3956,13 @@ project "test_ast_validator"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -4036,9 +3982,8 @@ project "test_ast_validator"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -4063,8 +4008,8 @@ project "test_lambda"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -4097,9 +4042,8 @@ project "test_lambda"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
     }
     
 
@@ -4123,8 +4067,8 @@ project "test_lambda_repl"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -4153,9 +4097,8 @@ project "test_lambda_repl"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
     }
     
 
@@ -4179,8 +4122,8 @@ project "test_lambda_proc"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -4213,9 +4156,8 @@ project "test_lambda_proc"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
     }
     
 
@@ -4239,8 +4181,8 @@ project "test_validator_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -4271,13 +4213,13 @@ project "test_validator_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -4297,9 +4239,8 @@ project "test_validator_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -4324,8 +4265,8 @@ project "test_ast_validator_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -4356,13 +4297,13 @@ project "test_ast_validator_catch2"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/Cellar/mpdecimal/4.0.1/lib/libmpdec.a",
-        "/opt/homebrew/Cellar/utf8proc/2.10.0/lib/libutf8proc.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libssl.a",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/lib/libcrypto.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
@@ -4382,9 +4323,8 @@ project "test_ast_validator_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
@@ -4409,8 +4349,8 @@ project "test_lambda_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -4438,9 +4378,8 @@ project "test_lambda_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
     }
     
 
@@ -4464,8 +4403,8 @@ project "test_lambda_repl_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -4493,9 +4432,8 @@ project "test_lambda_repl_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
     }
     
 
@@ -4519,8 +4457,8 @@ project "test_lambda_proc_catch2"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -4548,9 +4486,8 @@ project "test_lambda_proc_catch2"
     links { "stdc++" }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
     }
     
 
@@ -4574,8 +4511,8 @@ project "test_lambda_runner"
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
-        "/opt/homebrew/Cellar/openssl@3/3.5.2/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/opt/homebrew/opt/libedit/include",
@@ -4602,9 +4539,8 @@ project "test_lambda_runner"
     }
     
     buildoptions {
-        "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
         "-std=c++17",
     }
     
