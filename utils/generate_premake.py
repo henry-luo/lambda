@@ -589,7 +589,7 @@ class PremakeGenerator:
                                 dynamic_libs.append(lib_path)
                         else:
                             # Static library
-                            if not lib_path.startswith('/'):
+                            if not lib_path.startswith('/') and not lib_path.startswith('-l'):
                                 lib_path = f"../../{lib_path}"
                             static_libs.append(lib_path)
                 
@@ -1209,11 +1209,14 @@ class PremakeGenerator:
                         lib_path = f"../../{lib_path}"
                     self.premake_content.append(f'        "{lib_path}",')
             
-            # Add other external libraries
+            # Add static external libraries
             # If lambda-input-full is a dependency, we need to include curl/ssl/crypto/nghttp2 for proper linking
             # since static libraries don't propagate their dependencies in Premake
             for lib_name in ['mpdec', 'utf8proc', 'mir', 'curl', 'nghttp2', 'ssl', 'crypto', 'libedit']:
                 if lib_name in self.external_libraries:
+                    # Skip if this library should be dynamic
+                    if self.external_libraries[lib_name].get('link') == 'dynamic':
+                        continue
                     lib_path = self.external_libraries[lib_name]['lib']
                     # Convert to relative path from build directory
                     if not lib_path.startswith('/'):
@@ -1228,9 +1231,12 @@ class PremakeGenerator:
             ])
             
             # Add dynamic libraries (not frameworks)
-            for lib_name in ['z']:
-                if lib_name in self.external_libraries and self.external_libraries[lib_name].get('link') == 'dynamic':
+            for lib_name in self.external_libraries:
+                if self.external_libraries[lib_name].get('link') == 'dynamic':
                     lib_flag = self.external_libraries[lib_name]['lib']
+                    # Skip frameworks (they go in linkoptions)
+                    if lib_flag.startswith('-framework '):
+                        continue
                     if lib_flag.startswith('-l'):
                         lib_flag = lib_flag[2:]  # Remove -l prefix
                     self.premake_content.append(f'        "{lib_flag}",')
@@ -1246,8 +1252,8 @@ class PremakeGenerator:
             ])
             
             # Add macOS frameworks using linkoptions
-            for lib_name in ['CoreFoundation', 'CoreServices', 'SystemConfiguration']:
-                if lib_name in self.external_libraries and self.external_libraries[lib_name].get('link') == 'dynamic':
+            for lib_name in self.external_libraries:
+                if self.external_libraries[lib_name].get('link') == 'dynamic':
                     lib_flag = self.external_libraries[lib_name]['lib']
                     if lib_flag.startswith('-framework '):
                         self.premake_content.append(f'        "{lib_flag}",')
@@ -1412,7 +1418,7 @@ class PremakeGenerator:
                         dynamic_libs.append(lib_path)
                 else:
                     # Static library
-                    if not lib_path.startswith('/'):
+                    if not lib_path.startswith('/') and not lib_path.startswith('-l'):
                         lib_path = f"../../{lib_path}"
                     static_libs.append(lib_path)
         

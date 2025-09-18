@@ -10,7 +10,6 @@
 extern "C" {
 // Forward declarations for C standard library functions
 extern void* memcpy(void* dest, const void* src, size_t n);
-extern char* strstr(const char* haystack, const char* needle);
 extern size_t strlen(const char* s);
 }
 
