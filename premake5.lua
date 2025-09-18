@@ -117,19 +117,19 @@ project "lambda-input-full-c"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "/usr/local/lib/libcriterion.a",
     }
     
     links {
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "mpdec",
         "curl",
         "z",
+        "criterion",
         "lambda-lib",
         "CoreFoundation",
         "CoreServices",
@@ -187,19 +187,19 @@ project "lambda-input-full-cpp"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "/usr/local/lib/libcriterion.a",
     }
     
     links {
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "mpdec",
         "curl",
         "z",
+        "criterion",
         "lambda-lib",
         "CoreFoundation",
         "CoreServices",
@@ -372,7 +372,6 @@ project "lambda"
         "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
         "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "/usr/local/lib/libmir.a",
-        "/usr/local/lib/libmpdec.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
@@ -383,6 +382,7 @@ project "lambda"
     filter "platforms:native"
         links {
             "curl",
+            "mpdec",
             "hpdf",
             "z",
             "edit",
@@ -437,7 +437,7 @@ project "test_strbuf"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -493,7 +493,7 @@ project "test_stringbuf"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -548,7 +548,7 @@ project "test_strview"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -604,7 +604,7 @@ project "test_variable_pool"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -660,7 +660,7 @@ project "test_num_stack"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -716,7 +716,7 @@ project "test_datetime"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -772,7 +772,7 @@ project "test_url"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -828,7 +828,7 @@ project "test_url_extra"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -884,7 +884,7 @@ project "test_strbuf_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -939,7 +939,7 @@ project "test_stringbuf_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -994,7 +994,7 @@ project "test_strview_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1049,7 +1049,7 @@ project "test_variable_pool_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1104,7 +1104,7 @@ project "test_num_stack_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1159,7 +1159,7 @@ project "test_datetime_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1214,7 +1214,7 @@ project "test_url_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1269,7 +1269,7 @@ project "test_url_extra_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1324,7 +1324,7 @@ project "test_mime_detect"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1350,22 +1350,36 @@ project "test_mime_detect"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -1404,7 +1418,7 @@ project "test_math"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1431,22 +1445,36 @@ project "test_math"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -1487,7 +1515,7 @@ project "test_math_ascii"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1514,22 +1542,36 @@ project "test_math_ascii"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -1570,7 +1612,7 @@ project "test_markup_roundtrip"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1597,22 +1639,36 @@ project "test_markup_roundtrip"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -1653,7 +1709,7 @@ project "test_input_roundtrip"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1680,22 +1736,36 @@ project "test_input_roundtrip"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -1736,7 +1806,7 @@ project "test_dir"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1763,22 +1833,36 @@ project "test_dir"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -1819,7 +1903,7 @@ project "test_http"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1846,22 +1930,36 @@ project "test_http"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -1902,7 +2000,7 @@ project "test_sysinfo"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -1929,22 +2027,36 @@ project "test_sysinfo"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -1985,7 +2097,7 @@ project "test_jsx_roundtrip"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -2012,22 +2124,36 @@ project "test_jsx_roundtrip"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -2068,7 +2194,7 @@ project "test_mdx_roundtrip"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -2095,22 +2221,36 @@ project "test_mdx_roundtrip"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -2151,7 +2291,7 @@ project "test_css_tokenizer"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -2178,22 +2318,36 @@ project "test_css_tokenizer"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -2234,7 +2388,7 @@ project "test_css_parser"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -2261,22 +2415,36 @@ project "test_css_parser"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -2317,7 +2485,7 @@ project "test_css_integration"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -2344,22 +2512,36 @@ project "test_css_integration"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -2400,7 +2582,7 @@ project "test_css_files_safe"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -2426,22 +2608,36 @@ project "test_css_files_safe"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -2480,7 +2676,7 @@ project "test_css_frameworks"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -2507,22 +2703,36 @@ project "test_css_frameworks"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -2563,7 +2773,7 @@ project "test_mime_detect_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -2589,22 +2799,36 @@ project "test_mime_detect_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -2645,7 +2869,7 @@ project "test_css_tokenizer_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -2671,22 +2895,36 @@ project "test_css_tokenizer_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -2727,7 +2965,7 @@ project "test_css_parser_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -2753,22 +2991,36 @@ project "test_css_parser_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -2809,7 +3061,7 @@ project "test_css_integration_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -2835,22 +3087,36 @@ project "test_css_integration_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -2891,7 +3157,7 @@ project "test_css_frameworks_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -2917,104 +3183,36 @@ project "test_css_frameworks_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
+        "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
         "ncurses",
     }
     
-    -- Add macOS frameworks
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-    }
-    
-
-project "test_math_catch2"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_math_catch2.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
-        "/workspaces/jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/local/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/usr/include/editline",
-        "/usr/local/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "Catch2Main",
-        "Catch2",
-    }
-    
-    linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../curl",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -3055,7 +3253,7 @@ project "test_math_ascii_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -3081,22 +3279,36 @@ project "test_math_ascii_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -3137,7 +3349,7 @@ project "test_markup_roundtrip_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -3163,22 +3375,36 @@ project "test_markup_roundtrip_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -3220,7 +3446,7 @@ project "test_input_roundtrip_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -3246,22 +3472,36 @@ project "test_input_roundtrip_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -3302,7 +3542,7 @@ project "test_dir_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -3328,22 +3568,36 @@ project "test_dir_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -3384,7 +3638,7 @@ project "test_http_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -3410,22 +3664,36 @@ project "test_http_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -3466,7 +3734,7 @@ project "test_sysinfo_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -3492,22 +3760,36 @@ project "test_sysinfo_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -3548,7 +3830,7 @@ project "test_jsx_roundtrip_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -3574,22 +3856,36 @@ project "test_jsx_roundtrip_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -3630,7 +3926,7 @@ project "test_mdx_roundtrip_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -3656,22 +3952,36 @@ project "test_mdx_roundtrip_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -3712,7 +4022,7 @@ project "test_css_files_safe_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -3738,22 +4048,36 @@ project "test_css_files_safe_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -3794,7 +4118,7 @@ project "test_validator"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -3821,22 +4145,36 @@ project "test_validator"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -3877,7 +4215,7 @@ project "test_ast_validator"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -3904,22 +4242,36 @@ project "test_ast_validator"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
         "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
     }
     
     -- Add macOS frameworks
@@ -3960,7 +4312,7 @@ project "test_lambda"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -3981,10 +4333,6 @@ project "test_lambda"
         "criterion",
         "nanomsg",
         "git2",
-    }
-    
-    linkoptions {
-        "/usr/local/lib/libcriterion.a",
     }
     
     links { "stdc++" }
@@ -4020,7 +4368,7 @@ project "test_lambda_repl"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -4076,7 +4424,7 @@ project "test_lambda_proc"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -4097,10 +4445,6 @@ project "test_lambda_proc"
         "criterion",
         "nanomsg",
         "git2",
-    }
-    
-    linkoptions {
-        "/usr/local/lib/libcriterion.a",
     }
     
     links { "stdc++" }
@@ -4136,7 +4480,7 @@ project "test_validator_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -4162,104 +4506,36 @@ project "test_validator_catch2"
     }
     
     linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
+        "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--end-group",
     }
     
     -- Add dynamic libraries
     links {
+        "curl",
+        "mpdec",
+        "hpdf",
         "z",
+        "edit",
+        "ncurses",
+        "pthread",
+        "criterion",
+        "tinfo",
+        "bsd",
+        "md",
+        "stdc++fs",
         "ncurses",
     }
     
-    -- Add macOS frameworks
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-    }
-    
-
-project "test_ast_validator_catch2"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_ast_validator_catch2.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
-        "/workspaces/jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/local/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "mac-deps/nghttp2/include",
-        "/usr/include/editline",
-        "/usr/local/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "Catch2Main",
-        "Catch2",
-    }
-    
-    linkoptions {
-        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/usr/local/lib/libmpdec.a",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "../../curl",
-        "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "../../edit",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "ncurses",
     }
     
     -- Add macOS frameworks
@@ -4300,7 +4576,7 @@ project "test_lambda_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -4355,7 +4631,7 @@ project "test_lambda_repl_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -4410,7 +4686,7 @@ project "test_lambda_proc_catch2"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
@@ -4465,7 +4741,7 @@ project "test_lambda_runner"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
         "/usr/include/editline",
-        "/usr/local/include",
+        "/usr/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
         "/usr/local/include",
         "/usr/local/include",
