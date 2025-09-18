@@ -187,21 +187,16 @@ run_test_with_timeout() {
     
     echo "📋 Running $base_name..." >&2
     
-    # Run Catch2 test with crash protection
-    # Change to test directory for proper path resolution
-    cd test
-    local test_exe_name="$(basename "$test_exe")"
+    # Run Catch2 test with crash protection from project root directory
     if [ "$RAW_OUTPUT" = true ]; then
         # Use timeout with signal handling to catch crashes
-        timeout --preserve-status "$TIMEOUT_DURATION" "./$test_exe_name" --reporter compact --success 2>&1
+        timeout --preserve-status "$TIMEOUT_DURATION" "$test_exe" --reporter compact --success 2>&1
         local exit_code=$?
     else
         # Capture all output and handle crashes gracefully
-        timeout --preserve-status "$TIMEOUT_DURATION" "./$test_exe_name" --reporter compact --success > "../$output_file" 2>&1
+        timeout --preserve-status "$TIMEOUT_DURATION" "$test_exe" --reporter compact --success > "$output_file" 2>&1
         local exit_code=$?
     fi
-    # Return to original directory
-    cd ..
     
     # Interpret exit codes more gracefully
     if [ $exit_code -eq 0 ]; then
