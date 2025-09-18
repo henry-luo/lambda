@@ -1,11 +1,79 @@
 #!/bin/bash
 
 # Linux (Ubuntu) native compilation dependency setup script
+# Updated: Installs/builds all libraries and dev_libraries from build config
 set -e
 
 SCRIPT_DIR="$(pwd)"
 # Install dependencies to system locations that build_lambda_config.json expects
 SYSTEM_PREFIX="/usr/local"
+
+# List of libraries and dev_libraries from build_lambda_config.json
+ALL_LIBS=(
+    "libcurl4-openssl-dev"   # curl
+    "libedit-dev"            # libedit
+    "libmpdec-dev"           # mpdecimal
+    "libutf8proc-dev"        # utf8proc
+    "libssl-dev"             # ssl
+    "zlib1g-dev"             # z
+    "libnghttp2-dev"         # nghttp2
+    "libncurses5-dev"        # ncurses (provides tinfo)
+    "libbsd-dev"             # bsd
+    "libmd-dev"              # md
+    "build-essential"        # includes pthread
+)
+
+# Function to build libharu from source
+build_libharu_for_linux() {
+    echo "Building libharu from source..."
+    mkdir -p build_temp
+    cd build_temp
+    if [ ! -d "libharu" ]; then
+        git clone https://github.com/libharu/libharu.git || {
+            echo "Failed to clone libharu repository."
+            cd - > /dev/null
+            return 1
+        }
+    fi
+    cd libharu
+    mkdir -p build
+    cd build
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" .. && \
+    make -j$(nproc) && \
+    sudo make install && \
+    sudo ldconfig
+    cd - > /dev/null
+    cd - > /dev/null
+    cd - > /dev/null
+    echo "libharu built and installed."
+}
+
+# Catch2 is not available via apt, build from source
+CATCH2_VERSION="3.10.0"
+CATCH2_REPO="https://github.com/catchorg/Catch2.git"
+build_catch2_for_linux() {
+    echo "Building Catch2 for Linux..."
+    mkdir -p build_temp
+    if [ ! -d "build_temp/Catch2" ]; then
+        cd build_temp
+        git clone --branch v$CATCH2_VERSION $CATCH2_REPO Catch2 || {
+            echo "Warning: Could not clone Catch2 repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+    cd build_temp/Catch2
+    mkdir -p build
+    cd build
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" .. && \
+    make -j$(nproc) && \
+    sudo make install && \
+    sudo ldconfig
+    cd - > /dev/null
+    cd - > /dev/null
+    echo "Catch2 built and installed."
+}
 
 # Check for cleanup option
 if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
@@ -56,11 +124,54 @@ verify_installation() {
     fi
 }
 
+
+# Function to check if a package is installed
+is_package_installed() {
+    local package="$1"
+    dpkg -l | grep -q "^ii.*$package" 2>/dev/null
+}
+
+# Function to install package if not already installed
+install_if_missing() {
+    local package="$1"
+    local description="${2:-$package}"
+    # For certain packages, check if the command is available first
+    case "$package" in
+        "cmake"|"git"|"curl"|"wget"|"python3"|"vim-common"|"clang"|"nodejs"|"npm")
+            local command_name="$package"
+            if [ "$package" = "python3-pip" ]; then
+                command_name="pip3"
+            elif [ "$package" = "vim-common" ]; then
+                command_name="xxd"
+            elif [ "$package" = "nodejs" ]; then
+                command_name="node"
+            fi
+            if command -v "$command_name" >/dev/null 2>&1; then
+                echo "✅ $description already available"
+                return 0
+            fi
+            ;;
+    esac
+    # Check if package is installed via apt
+    if is_package_installed "$package"; then
+        echo "✅ $description already installed"
+        return 0
+    else
+        echo "Installing $description..."
+        if sudo apt install -y "$package"; then
+            echo "✅ $description installed successfully"
+            return 0
+        else
+            echo "❌ Failed to install $description"
+            return 1
+        fi
+    fi
+}
+
 # Check for required tools
 check_and_install_tool() {
     local tool="$1"
     local package="$2"
-    
     if command -v "$tool" >/dev/null 2>&1; then
         echo "✅ $tool already available"
         return 0
@@ -88,20 +199,57 @@ echo "Setting up essential build tools..."
 check_and_install_tool "make" "build-essential" || exit 1
 check_and_install_tool "gcc" "build-essential" || exit 1
 check_and_install_tool "g++" "build-essential" || exit 1
-check_and_install_tool "clang" "clang" || exit 1
-# clang++ is installed together with clang
-if ! command -v clang++ >/dev/null 2>&1; then
-    echo "❌ clang++ not available after clang installation"
-    exit 1
-else
-    echo "✅ clang++ available"
-fi
 check_and_install_tool "git" "git" || exit 1
 
 # Check for Node.js and npm (needed for tree-sitter CLI via npx)
 echo "Setting up Node.js and npm for tree-sitter CLI..."
-check_and_install_tool "node" "nodejs" || exit 1
-check_and_install_tool "npm" "npm" || exit 1
+
+# Node.js install: try apt, then fallback to NodeSource setup script if needed
+echo "Checking for Node.js (node)..."
+if command -v node >/dev/null 2>&1; then
+    echo "✅ node already available"
+else
+    echo "Trying to install nodejs via apt..."
+    if sudo apt update && sudo apt install -y nodejs npm; then
+        if command -v node >/dev/null 2>&1; then
+            echo "✅ node installed via apt"
+        else
+            echo "❌ nodejs package installed but 'node' command not found. Trying NodeSource setup..."
+            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+            sudo apt install -y nodejs
+        fi
+    else
+        echo "❌ Failed to install nodejs via apt. Trying NodeSource setup..."
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+        sudo apt install -y nodejs
+    fi
+    if command -v node >/dev/null 2>&1; then
+        echo "✅ node available after NodeSource setup"
+    else
+        echo "❌ Node.js installation failed. Please install manually."
+        exit 1
+    fi
+fi
+
+echo "Checking for npm..."
+if command -v npm >/dev/null 2>&1; then
+    echo "✅ npm already available"
+else
+    echo "Trying to install npm via apt..."
+    if sudo apt install -y npm; then
+        echo "✅ npm installed via apt"
+    else
+        echo "❌ Failed to install npm via apt. Trying NodeSource setup..."
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+        sudo apt install -y npm
+    fi
+    if command -v npm >/dev/null 2>&1; then
+        echo "✅ npm available after NodeSource setup"
+    else
+        echo "❌ npm installation failed. Please install manually."
+        exit 1
+    fi
+fi
 
 # Verify npx can access tree-sitter CLI
 echo "Verifying tree-sitter CLI access via npx..."
@@ -109,59 +257,6 @@ if timeout 10 npx tree-sitter-cli@0.24.7 --version >/dev/null 2>&1; then
     echo "✅ Tree-sitter CLI 0.24.7 accessible via npx"
 else
     echo "Warning: tree-sitter CLI may need to be downloaded on first use"
-fi
-
-# Function to check if a package is installed
-is_package_installed() {
-    local package="$1"
-    dpkg -l | grep -q "^ii.*$package" 2>/dev/null
-}
-
-# Function to install package if not already installed
-install_if_missing() {
-    local package="$1"
-    local description="${2:-$package}"
-    
-    # For certain packages, check if the command is available first
-    case "$package" in
-        "cmake"|"git"|"curl"|"wget"|"python3"|"vim-common"|"clang"|"nodejs"|"npm")
-            local command_name="$package"
-            if [ "$package" = "python3-pip" ]; then
-                command_name="pip3"
-            elif [ "$package" = "vim-common" ]; then
-                command_name="xxd"
-            elif [ "$package" = "nodejs" ]; then
-                command_name="node"
-            fi
-            
-            if command -v "$command_name" >/dev/null 2>&1; then
-                echo "✅ $description already available"
-                return 0
-            fi
-            ;;
-    esac
-    
-    # Check if package is installed via apt
-    if is_package_installed "$package"; then
-        echo "✅ $description already installed"
-        return 0
-    else
-        echo "Installing $description..."
-        if sudo apt install -y "$package"; then
-            echo "✅ $description installed successfully"
-            return 0
-        else
-            echo "❌ Failed to install $description"
-            return 1
-        fi
-    fi
-}
-
-# Install clang if not present
-if ! command -v clang >/dev/null 2>&1; then
-    echo "Installing clang..."
-    sudo apt update
-    sudo apt install -y clang
 fi
 
 # Check for cmake (needed for some dependencies)
@@ -185,26 +280,106 @@ fi
 echo "Installing additional development dependencies..."
 sudo apt update
 
-# Install essential packages with smart detection
-install_if_missing "curl" "curl"
-install_if_missing "wget" "wget"
-install_if_missing "build-essential" "build-essential"
-install_if_missing "git" "git"
-install_if_missing "clang" "clang"
-install_if_missing "nodejs" "nodejs"
-install_if_missing "npm" "npm"
-install_if_missing "libtool" "libtool"
-install_if_missing "autoconf" "autoconf"
-install_if_missing "automake" "automake"
-install_if_missing "python3" "python3"
-install_if_missing "python3-pip" "python3-pip"
-install_if_missing "vim-common" "vim-common (for xxd command)"
-install_if_missing "libmpdec-dev" "mpdecimal development headers"
-install_if_missing "libedit-dev" "libedit development headers"
-install_if_missing "libcurl4-openssl-dev" "libcurl development headers"
-install_if_missing "libutf8proc-dev" "utf8proc development headers"
-install_if_missing "pkg-config" "pkg-config"
-install_if_missing "coreutils" "coreutils"
+
+
+# Function to build mpdecimal for Linux
+build_mpdecimal_for_linux() {
+    echo "Building mpdecimal for Linux..."
+    # Check if already installed in system location
+    if [ -f "$SYSTEM_PREFIX/include/mpdecimal.h" ]; then
+        echo "mpdecimal already installed in system location"
+        return 0
+    fi
+    # Create build_temp directory if it doesn't exist
+    mkdir -p "build_temp"
+    # Build from source
+    if [ ! -d "build_temp/mpdecimal" ]; then
+        cd build_temp
+        echo "Downloading mpdecimal..."
+        curl -L "https://www.bytereef.org/software/mpdecimal/releases/mpdecimal-2.5.1.tar.gz" -o "mpdecimal-2.5.1.tar.gz"
+        tar -xzf "mpdecimal-2.5.1.tar.gz"
+        mv "mpdecimal-2.5.1" "mpdecimal"
+        rm "mpdecimal-2.5.1.tar.gz"
+        cd - > /dev/null
+    fi
+    cd "build_temp/mpdecimal"
+    echo "Configuring mpdecimal..."
+    if ./configure --prefix="$SYSTEM_PREFIX"; then
+        echo "Building mpdecimal..."
+        if make -j$(nproc); then
+            echo "Installing mpdecimal to system location (requires sudo)..."
+            sudo make install
+            # Update library cache
+            sudo ldconfig
+            # Verify the build
+            if [ -f "$SYSTEM_PREFIX/include/mpdecimal.h" ]; then
+                echo "✅ mpdecimal built and installed successfully"
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+    echo "❌ mpdecimal build failed"
+    cd - > /dev/null
+    return 1
+}
+
+# Install all libraries and dev_libraries from config
+
+# Install all libraries and dev_libraries from config
+for lib in "${ALL_LIBS[@]}"; do
+    if [ "$lib" = "libmpdec-dev" ]; then
+        if ! install_if_missing "$lib" "$lib"; then
+            echo "Falling back to building mpdecimal from source..."
+            build_mpdecimal_for_linux
+        fi
+    else
+        install_if_missing "$lib" "$lib"
+    fi
+done
+
+# Build libharu from source (not available in repos)
+if ! build_libharu_for_linux; then
+    echo "Warning: libharu build failed"
+fi
+
+
+# Function to build libharu from source
+build_libharu_for_linux() {
+    echo "Building libharu from source..."
+    mkdir -p build_temp
+    cd build_temp
+    if [ ! -d "libharu" ]; then
+        git clone https://github.com/libharu/libharu.git || {
+            echo "Failed to clone libharu repository."
+            cd - > /dev/null
+            return 1
+        }
+    fi
+    cd libharu
+    mkdir -p build
+    cd build
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" .. && \
+    make -j$(nproc) && \
+    sudo make install && \
+    sudo ldconfig
+    cd - > /dev/null
+    cd - > /dev/null
+    cd - > /dev/null
+    echo "libharu built and installed."
+}
+
+# Build Catch2 if not available
+if ! pkg-config --exists catch2; then
+    build_catch2_for_linux
+fi
+
+# Build Criterion if not available  
+if ! dpkg -l | grep -q libcriterion-dev; then
+    if ! build_criterion_for_linux; then
+        echo "Warning: criterion build failed"
+    fi
+fi
 
 # Verify mpdecimal header installation
 echo "Verifying mpdecimal header installation..."
@@ -214,24 +389,20 @@ elif [ -f "/usr/include/mpdec/mpdecimal.h" ]; then
     echo "✅ mpdecimal.h found at /usr/include/mpdec/mpdecimal.h"
     echo "Creating symlink for standard location..."
     sudo ln -sf /usr/include/mpdec/mpdecimal.h /usr/include/mpdecimal.h
+elif [ -f "/usr/local/include/mpdecimal.h" ]; then
+    echo "✅ mpdecimal.h found at /usr/local/include/mpdecimal.h"
 else
     echo "❌ mpdecimal.h not found after installation"
     echo "Searching for mpdecimal headers..."
     find /usr -name "*mpdec*" -type f 2>/dev/null || echo "No mpdecimal files found"
-    echo "Installing alternative mpdecimal package..."
-    sudo apt update
-    install_if_missing "libmpdecimal-dev" "alternative mpdecimal development headers"
-    
-    # If still not found, build from source
-    if [ ! -f "/usr/include/mpdecimal.h" ] && [ ! -f "/usr/include/mpdec/mpdecimal.h" ]; then
-        echo "Building mpdecimal from source..."
-        build_mpdecimal_for_linux
-    fi
+    # Directly build from source if header is missing
+    echo "Building mpdecimal from source..."
+    build_mpdecimal_for_linux
 fi
 
 # Try to install criterion via apt, build from source if not available
 echo "Installing criterion testing framework..."
-install_if_missing "libcriterion-dev" "libcriterion-dev"
+# Note: libcriterion-dev package installation is handled by build function below
 
 # Create temporary build directory
 mkdir -p "build_temp"
@@ -717,40 +888,44 @@ echo "System: $(uname -a)"
 
 # Build tree-sitter for Linux
 if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
-    echo "Building tree-sitter for Linux..."
-    cd lambda/tree-sitter
-    
-    # Clean previous builds
-    make clean || true
-    
-    # Build static library for Linux
-    make libtree-sitter.a
-    
-    cd - > /dev/null
-    echo "Tree-sitter built successfully"
+    if [ -d "lambda/tree-sitter" ]; then
+        echo "Building tree-sitter for Linux..."
+        cd lambda/tree-sitter
+        # Clean previous builds
+        make clean || true
+        # Build static library for Linux
+        make libtree-sitter.a
+        cd - > /dev/null
+        echo "Tree-sitter built successfully"
+    else
+        echo "❌ Directory lambda/tree-sitter does not exist. Skipping tree-sitter build."
+        echo "Please ensure the tree-sitter source is present at lambda/tree-sitter."
+    fi
 else
     echo "Tree-sitter already built for Linux"
 fi
 
 # Build tree-sitter-lambda for Linux
 if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
-    echo "Building tree-sitter-lambda for Linux..."
-    cd lambda/tree-sitter-lambda
-    
-    # Clean previous builds
-    make clean || true
-    
-    # Build static library for Linux (creates libtree-sitter-lambda.a)
-    make libtree-sitter-lambda.a
-    
-    cd - > /dev/null
-    echo "Tree-sitter-lambda built successfully"
+    if [ -d "lambda/tree-sitter-lambda" ]; then
+        echo "Building tree-sitter-lambda for Linux..."
+        cd lambda/tree-sitter-lambda
+        # Clean previous builds
+        make clean || true
+        # Build static library for Linux (creates libtree-sitter-lambda.a)
+        make libtree-sitter-lambda.a
+        cd - > /dev/null
+        echo "Tree-sitter-lambda built successfully"
+    else
+        echo "❌ Directory lambda/tree-sitter-lambda does not exist. Skipping tree-sitter-lambda build."
+        echo "Please ensure the tree-sitter-lambda source is present at lambda/tree-sitter-lambda."
+    fi
 else
     echo "Tree-sitter-lambda already built for Linux"
 fi
 
-# Build lexbor for Linux
-echo "Setting up lexbor..."
+
+# Build lexbor for Linux (if used, not in config but referenced in mac script)
 if [ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ]; then
     echo "lexbor already available"
 elif dpkg -l | grep -q liblexbor-dev; then
@@ -758,14 +933,13 @@ elif dpkg -l | grep -q liblexbor-dev; then
 else
     if ! build_lexbor_for_linux; then
         echo "Warning: lexbor build failed"
-        exit 1
     else
         echo "lexbor built successfully"
     fi
 fi
 
-# Build GMP for Linux  
-echo "Setting up GMP..."
+
+# Build GMP for Linux (if used)
 if [ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.so" ]; then
     echo "GMP already available"
 elif dpkg -l | grep -q libgmp-dev; then
@@ -773,20 +947,18 @@ elif dpkg -l | grep -q libgmp-dev; then
 else
     if ! build_gmp_for_linux; then
         echo "Warning: GMP build failed"
-        exit 1
     else
         echo "GMP built successfully"
     fi
 fi
 
+
 # Build MIR for Linux
-echo "Setting up MIR..."
 if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ]; then
     echo "MIR already available"
 else
     if ! build_mir_for_linux; then
-        echo "Warning: MIR build failed, but continuing - compile.sh may handle this"
-        # Don't exit, as some systems might have MIR available differently
+        echo "Warning: MIR build failed"
     else
         echo "MIR built successfully"
     fi
@@ -805,14 +977,13 @@ else
     find "$SYSTEM_PREFIX" -name "mir.h" 2>/dev/null || echo "No mir.h files found in $SYSTEM_PREFIX"
 fi
 
+
 # Build utf8proc for Linux
-echo "Setting up utf8proc..."
 if [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] || [ -f "/usr/lib/x86_64-linux-gnu/libutf8proc.so" ] || dpkg -l | grep -q libutf8proc-dev; then
     echo "utf8proc already available"
 else
     if ! build_utf8proc_for_linux; then
-        echo "Warning: utf8proc build failed, but continuing with system package"
-        # Don't exit, as the system package might work
+        echo "Warning: utf8proc build failed"
     else
         echo "utf8proc built successfully"
     fi
@@ -829,25 +1000,56 @@ APT_DEPS=(
 for dep in "${APT_DEPS[@]}"; do
     echo "Installing $dep..."
     if dpkg -l | grep -q "$dep"; then
-        echo "$dep already installed"
+        echo "✅ $dep already installed"
     else
-        if sudo apt install -y "$dep"; then
-            echo "✅ $dep installed successfully"
-        else
-            echo "❌ Failed to install $dep"
-            exit 1
-        fi
+        install_if_missing "$dep" "$dep"
     fi
 done
 
+# Install premake5 from source if not available
+if command -v premake5 >/dev/null 2>&1; then
+    echo "✅ premake5 already available"
+else
+    echo "Installing premake5 from source..."
+    PREMAKE_BUILD_DIR="build_temp/premake5"
+    if [ ! -d "$PREMAKE_BUILD_DIR" ]; then
+        mkdir -p build_temp
+        cd build_temp
+        
+        # Clone and build premake5 from source (works on all architectures)
+        echo "Cloning premake5 source..."
+        if git clone --recurse-submodules https://github.com/premake/premake-core.git premake5; then
+            cd premake5
+            
+            # Build premake5 using make
+            echo "Building premake5..."
+            if make -f Bootstrap.mak linux; then
+                # Install the binary
+                if sudo cp bin/release/premake5 /usr/local/bin/ && sudo chmod +x /usr/local/bin/premake5; then
+                    echo "✅ premake5 installed successfully"
+                else
+                    echo "❌ Failed to install premake5"
+                fi
+            else
+                echo "❌ Failed to build premake5"
+            fi
+        else
+            echo "❌ Failed to clone premake5"
+        fi
+        
+        cd "$SCRIPT_DIR"
+    else
+        echo "✅ premake5 build directory already exists"
+    fi
+fi
+
+
 # Build criterion for Linux (build from source if apt package not available)
-echo "Setting up criterion..."
 if [ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ] || dpkg -l | grep -q libcriterion-dev; then
     echo "criterion already available"
 else
     if ! build_criterion_for_linux; then
-        echo "Warning: criterion build failed, but continuing - tests may not work"
-        # Don't exit, as criterion is primarily for testing
+        echo "Warning: criterion build failed"
     else
         echo "criterion built successfully"
     fi
@@ -870,9 +1072,12 @@ echo "- curl: $([ -f "/usr/lib/x86_64-linux-gnu/libcurl.so" ] || dpkg -l | grep 
 echo "- mpdecimal: $([ -f "/usr/lib/x86_64-linux-gnu/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- libedit: $([ -f "/usr/lib/x86_64-linux-gnu/libedit.so" ] || dpkg -l | grep -q libedit-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- utf8proc: $([ -f "/usr/lib/x86_64-linux-gnu/libutf8proc.so" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] || dpkg -l | grep -q libutf8proc-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- libedit: $([ -f "/usr/lib/x86_64-linux-gnu/libedit.so" ] || dpkg -l | grep -q libedit-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- tinfo: $([ -f "/usr/lib/x86_64-linux-gnu/libtinfo.so" ] || dpkg -l | grep -q libncurses && echo "✓ Available" || echo "✗ Missing")"
+echo "- bsd: $([ -f "/usr/lib/x86_64-linux-gnu/libbsd.so" ] || dpkg -l | grep -q libbsd-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- md: $([ -f "/usr/lib/x86_64-linux-gnu/libmd.so" ] || dpkg -l | grep -q libmd-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- criterion: $([ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ] || dpkg -l | grep -q libcriterion-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+echo "- premake5: $(command -v premake5 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo ""
 echo "Next steps:"
 echo "1. Run: ./compile.sh"

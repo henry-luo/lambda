@@ -21,6 +21,7 @@ class PremakeGenerator:
 
     def _parse_external_libraries(self) -> Dict[str, Dict[str, str]]:
         """Parse external library definitions from JSON config"""
+        import platform
         libraries = {}
         
         # Parse regular libraries
@@ -41,28 +42,48 @@ class PremakeGenerator:
                     'link': lib.get('link', 'static')
                 }
         
+        # Check if we should use platform-specific libraries
+        current_platform = platform.system()
+        use_linux_config = (current_platform == 'Linux' or 
+                           self.config.get('platform') == 'Linux_x64' or
+                           self.config.get('platform') == 'Linux')
+        
+        # Override with platform-specific libraries if on Linux
+        if use_linux_config:
+            platforms_config = self.config.get('platforms', {})
+            linux_config = platforms_config.get('linux', {})
+            
+            # Override with Linux-specific libraries
+            for lib in linux_config.get('libraries', []):
+                if 'lib' in lib:
+                    libraries[lib['name']] = {
+                        'include': lib.get('include', ''),
+                        'lib': lib.get('lib', ''),
+                        'link': lib.get('link', 'static')
+                    }
+            
+            # Override with Linux-specific dev_libraries  
+            for lib in linux_config.get('dev_libraries', []):
+                if 'lib' in lib:
+                    libraries[lib['name']] = {
+                        'include': lib.get('include', ''),
+                        'lib': lib.get('lib', ''),
+                        'link': lib.get('link', 'static')
+                    }
+        
         return libraries
 
-    def parse_config(self) -> Dict[str, Any]:
-        """Parse build_lambda_config.json and extract configuration"""
-        try:
-            return self.config
-        except FileNotFoundError:
-            print(f"Error: Configuration file not found")
-            sys.exit(1)
-        except json.JSONDecodeError as e:
-            print(f"Error: Invalid JSON: {e}")
-            sys.exit(1)
-    
-    def generate_workspace(self) -> None:
-        """Generate the main workspace configuration"""
-        # Get workspace name from config or default
-        workspace_name = self.config.get('workspace_name', 'Lambda')
-        output = self.config.get('output', 'lambda.exe')
-        startup_project = output.replace('.exe', '')
+    def _get_compiler_info(self) -> tuple[str, str]:
+        """Get compiler and toolset information based on platform configuration"""
+        # Get compiler from config - check for platform-specific config first
+        platforms_config = self.config.get('platforms', {})
+        linux_config = platforms_config.get('linux', {})
         
-        # Get compiler from config
-        compiler = self.config.get('compiler', 'clang')
+        # Use Linux-specific compiler if available, otherwise use global
+        if linux_config:
+            compiler = linux_config.get('compiler', self.config.get('compiler', 'clang'))
+        else:
+            compiler = self.config.get('compiler', 'clang')
         
         # Extract compiler name from path
         compiler_name = os.path.basename(compiler)
@@ -83,20 +104,57 @@ class PremakeGenerator:
         }
         toolset = toolset_map.get(base_compiler, 'clang')
         
-        # Determine platforms based on config or compiler and output
-        platform = self.config.get('platform', '')
-        if platform:
-            platforms = ['x64', platform]
-        elif 'linux' in output.lower() or 'linux-gnu' in compiler:
-            platforms = ['x64', 'Linux_x64']
-        else:
-            platforms = ['x64']
+        return base_compiler, toolset
+    
+    def _get_build_options(self, base_compiler: str) -> List[str]:
+        """Get compiler-specific build options"""
+        build_opts = ['-pedantic']
+        
+        # Add compiler-specific flags
+        if base_compiler in ['gcc', 'g++']:
+            build_opts.extend(['-fdiagnostics-color=auto'])
+            # gcc doesn't need -fms-extensions and doesn't support -fcolor-diagnostics
+        elif base_compiler == 'clang':
+            build_opts.extend(['-fms-extensions', '-fcolor-diagnostics'])
+        
+        return build_opts
+
+    def parse_config(self) -> Dict[str, Any]:
+        """Parse build_lambda_config.json and extract configuration"""
+        try:
+            return self.config
+        except FileNotFoundError:
+            print(f"Error: Configuration file not found")
+            sys.exit(1)
+        except json.JSONDecodeError as e:
+            print(f"Error: Invalid JSON: {e}")
+            sys.exit(1)
+    
+    def _get_platform_info(self) -> tuple[str, List[str]]:
+        """Get platform and architecture information"""
+        # For simplicity, don't specify architecture to avoid -m64 issues on ARM64
+        platforms = ['native']
+        
+        return 'native', platforms
+
+    def generate_workspace(self) -> None:
+        """Generate the main workspace configuration"""
+        # Get workspace name from config or default
+        workspace_name = self.config.get('workspace_name', 'Lambda')
+        output = self.config.get('output', 'lambda.exe')
+        startup_project = output.replace('.exe', '')
+        
+        # Get compiler information
+        base_compiler, toolset = self._get_compiler_info()
+        
+        # Get platform and architecture information
+        arch, platforms = self._get_platform_info()
         
         platform_str = ', '.join([f'"{p}"' for p in platforms])
         
         # Set location based on platform
-        platform = self.config.get('platform', 'macOS')
-        if platform == 'Linux_x64':
+        platform_config = self.config.get('platform', 'macOS')
+        if platform_config == 'Linux_x64':
             location = 'build_linux/test'
         else:
             location = 'build/premake'
@@ -119,29 +177,42 @@ class PremakeGenerator:
             '        symbols "On"',
             '        optimize "Off"',
             '    ',
-            '    -- AddressSanitizer for non-Linux platforms only (conflicts with -static)',
-            '    filter { "configurations:Debug", "not platforms:Linux_x64" }',
-            '        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }',
-            '        linkoptions { "-fsanitize=address" }',
-            '    ',
+        ])
+        
+        # Check if sanitizer should be disabled for linux platform
+        platforms_config = self.config.get('platforms', {})
+        linux_config = platforms_config.get('linux', {})
+        disable_sanitizer = linux_config.get('disable_sanitizer', False)
+        
+        if not disable_sanitizer:
+            self.premake_content.extend([
+                '    -- AddressSanitizer for non-Linux platforms only (conflicts with -static)',
+                '    filter { "configurations:Debug", "not platforms:Linux_x64" }',
+                '        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }',
+                '        linkoptions { "-fsanitize=address" }',
+                '    ',
+            ])
+        else:
+            self.premake_content.extend([
+                '    -- AddressSanitizer disabled for Linux platform',
+                '    ',
+            ])
+        
+        self.premake_content.extend([
             '    filter "configurations:Release"',
             '        defines { "NDEBUG" }',
             '        optimize "On"',
             '    ',
-            '    -- Linux cross-compilation settings',
-            '    filter "platforms:Linux_x64"',
-            '        system "linux"',
-            '        architecture "x64"',
         ])
         
         # Add Linux-specific compiler and flags if this is a Linux build
-        if platform == 'Linux_x64' or 'linux' in output.lower() or 'linux-gnu' in compiler:
+        platform_config = self.config.get('platform', '')
+        if platform_config == 'Linux_x64' or 'linux' in output.lower() or base_compiler in ['gcc', 'g++']:
             self.premake_content.extend([
-                f'        toolset "gcc"',
-                f'        gccprefix "x86_64-linux-gnu-"',
-                '        defines { "LINUX", "_GNU_SOURCE", "NATIVE_LINUX_BUILD" }',
-                '        buildoptions { "-static", "-O2", "-g", "-pedantic", "-fno-omit-frame-pointer" }',
-                '        linkoptions { "-static" }',
+                '    -- Native Linux build settings',
+                f'    toolset "{toolset}"',
+                '    defines { "LINUX", "_GNU_SOURCE", "NATIVE_LINUX_BUILD" }',
+                '    ',
             ])
             
             # Add library search paths for Linux dependencies
@@ -328,15 +399,8 @@ class PremakeGenerator:
             ])
         
         # Add special build options
-        output = self.config.get('output', 'lambda.exe')
-        compiler = self.config.get('compiler', '')
-        build_opts = ['-fms-extensions', '-pedantic']
-        
-        # Use different color diagnostic flags based on target platform
-        if 'linux' in output.lower() or 'linux-gnu' in compiler:
-            build_opts.append('-fdiagnostics-color=auto')
-        else:
-            build_opts.append('-fcolor-diagnostics')
+        base_compiler, _ = self._get_compiler_info()
+        build_opts = self._get_build_options(base_compiler)
         
         self.premake_content.extend([
             '    buildoptions {',
@@ -448,15 +512,8 @@ class PremakeGenerator:
             ])
         
         # Add build options
-        output = self.config.get('output', 'lambda.exe')
-        compiler = self.config.get('compiler', '')
-        build_opts = ['-fms-extensions', '-pedantic']
-        
-        # Use different color diagnostic flags based on target platform
-        if 'linux' in output.lower() or 'linux-gnu' in compiler:
-            build_opts.append('-fdiagnostics-color=auto')
-        else:
-            build_opts.append('-fcolor-diagnostics')
+        base_compiler, _ = self._get_compiler_info()
+        build_opts = self._get_build_options(base_compiler)
         
         if language == "C++":
             build_opts.append('-std=c++17')
@@ -652,15 +709,9 @@ class PremakeGenerator:
             '    buildoptions {',
         ])
         
-        # Use different color diagnostic flags based on target platform
-        output = self.config.get('output', 'lambda.exe')
-        compiler = self.config.get('compiler', '')
-        build_opts = ['-fms-extensions', '-pedantic']
-        
-        if 'linux' in output.lower() or 'linux-gnu' in compiler:
-            build_opts.append('-fdiagnostics-color=auto')
-        else:
-            build_opts.append('-fcolor-diagnostics')
+        # Get compiler-specific build options
+        base_compiler, _ = self._get_compiler_info()
+        build_opts = self._get_build_options(base_compiler)
         
         for opt in build_opts:
             self.premake_content.append(f'        "{opt}",')
@@ -1191,15 +1242,8 @@ class PremakeGenerator:
         
         # Add build options based on source file type
         is_cpp_test = source.endswith('.cpp')
-        output = self.config.get('output', 'lambda.exe')
-        compiler = self.config.get('compiler', '')
-        build_opts = ['-fms-extensions', '-pedantic']
-        
-        # Use different color diagnostic flags based on target platform
-        if 'linux' in output.lower() or 'linux-gnu' in compiler:
-            build_opts.append('-fdiagnostics-color=auto')
-        else:
-            build_opts.append('-fcolor-diagnostics')
+        base_compiler, _ = self._get_compiler_info()
+        build_opts = self._get_build_options(base_compiler)
         
         if is_cpp_test:
             if cpp_flags:
@@ -1387,9 +1431,12 @@ class PremakeGenerator:
         
         # Add dynamic libraries and frameworks (macOS only)
         if frameworks or dynamic_libs:
+            import platform
+            current_platform = platform.system()
+            
             self.premake_content.extend([
-                '    -- macOS dynamic libraries',
-                '    filter "platforms:x64"',
+                '    -- Dynamic libraries',
+                '    filter "platforms:native"',
                 '        links {',
             ])
             for lib in dynamic_libs:
@@ -1399,7 +1446,8 @@ class PremakeGenerator:
                 '    '
             ])
             
-            if frameworks:
+            # Only add frameworks on macOS
+            if frameworks and current_platform == 'Darwin':
                 self.premake_content.extend([
                     '        linkoptions {',
                 ])
@@ -1418,17 +1466,8 @@ class PremakeGenerator:
                 ])
         
         # Add build options with separate handling for C and C++ files
-        output = self.config.get('output', 'lambda.exe')
-        compiler = self.config.get('compiler', '')
-        build_opts = ['-fms-extensions', '-pedantic']
-        
-        # Use different color diagnostic flags based on target platform
-        if 'linux' in output.lower() or 'linux-gnu' in compiler:
-            # GCC-specific flags for Linux cross-compilation
-            build_opts.append('-fdiagnostics-color=auto')
-        else:
-            # Clang-specific flags for macOS
-            build_opts.append('-fcolor-diagnostics')
+        base_compiler, _ = self._get_compiler_info()
+        build_opts = self._get_build_options(base_compiler)
         
         self.premake_content.extend([
             '    buildoptions {',
