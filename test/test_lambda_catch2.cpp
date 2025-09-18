@@ -265,3 +265,7 @@ TEST_CASE("test_complex_data_science_report", "[lambda][runtime]") {
 TEST_CASE("test_complex_iot_report", "[lambda][runtime]") {
     test_lambda_script_against_file("test/lambda/complex_iot_report.ls", "test/lambda/complex_iot_report.txt");
 }
+
+TEST_CASE("test_single_let", "[lambda][runtime]") {
+    test_lambda_script_against_file("test/lambda/single_let.ls", "test/lambda/single_let.txt");
+}
