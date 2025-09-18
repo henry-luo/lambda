@@ -44,14 +44,24 @@ void write_text_file(const char* file_path, const char* content) {
     fclose(file);
 }
 
-// Execute lambda.exe and capture its output
+// Execute lambda executable and capture its output
 char* execute_lambda_script(const char* script_path) {
     char command[512];
-    snprintf(command, sizeof(command), "./lambda.exe %s 2>/dev/null", script_path);
+    
+    // Check which lambda executable exists
+    const char* lambda_exe = "./lambda.exe";
+    if (access("./lambda-linux.exe", F_OK) == 0) {
+        lambda_exe = "./lambda-linux.exe";
+    } else if (access("./lambda.exe", F_OK) != 0) {
+        fprintf(stderr, "Error: No lambda executable found (tried lambda.exe and lambda-linux.exe)\n");
+        return NULL;
+    }
+    
+    snprintf(command, sizeof(command), "%s %s 2>/dev/null", lambda_exe, script_path);
     
     FILE* pipe = popen(command, "r");
     if (!pipe) {
-        fprintf(stderr, "Error: Failed to execute lambda.exe with script: %s\n", script_path);
+        fprintf(stderr, "Error: Failed to execute lambda executable with script: %s\n", script_path);
         return NULL;
     }
     
@@ -87,7 +97,7 @@ char* execute_lambda_script(const char* script_path) {
     
     int exit_code = pclose(pipe);
     if (exit_code != 0) {
-        fprintf(stderr, "Error: lambda.exe exited with code %d for script: %s\n", exit_code, script_path);
+        fprintf(stderr, "Error: lambda executable exited with code %d for script: %s\n", exit_code, script_path);
         free(full_output);
         return NULL;
     }

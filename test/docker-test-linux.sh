@@ -101,11 +101,19 @@ cp -r /workspace/test/* . 2>/dev/null || echo "Some files could not be copied (e
 echo "Copying workspace files..."
 cp -r /workspace/* . 2>/dev/null || echo "Some files may already exist"
 
-# Ensure lambda test scripts are accessible  
-if [ ! -d "test/lambda" ]; then
-    echo "Creating test directory structure..."
-    mkdir -p test
-    cp -r /workspace/test/lambda test/ 2>/dev/null || echo "Lambda test directory already exists"
+# Ensure test directory structure is properly available
+echo "Setting up test directory structure..."
+mkdir -p test/lambda test/input
+cp -r /workspace/test/lambda/* test/lambda/ 2>/dev/null || echo "Lambda test scripts copied"
+cp -r /workspace/test/input/* test/input/ 2>/dev/null || echo "Test input files copied"
+
+# Verify critical test directories exist
+if [ ! -d "test/input/dir" ]; then
+    echo "Warning: test/input/dir not found, creating minimal structure..."
+    mkdir -p test/input/dir/child_dir
+    echo "test file" > test/input/dir/test.txt
+    echo "readme content" > test/input/dir/readme_link
+    echo "child content" > test/input/dir/child_dir/child.txt
 fi
 
 TOTAL_TESTS=0
@@ -224,6 +232,7 @@ chmod +x "$TEMP_SCRIPT"
 docker run --rm --platform linux/amd64 \
     -v "$PROJECT_ROOT/test:/workspace/test:ro" \
     -v "$PROJECT_ROOT/test/lambda:/workspace/test/lambda:ro" \
+    -v "$PROJECT_ROOT/test/input:/workspace/test/input:ro" \
     -v "$PROJECT_ROOT/lambda-linux.exe:/workspace/lambda-linux.exe:ro" \
     -v "$TEMP_SCRIPT:/workspace/run_tests.sh:ro" \
     "$IMAGE_NAME" \
