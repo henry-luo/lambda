@@ -17,11 +17,21 @@ class PremakeGenerator:
         with open(config_path, 'r') as f:
             self.config = json.load(f)
         self.premake_content = []
+        
+        # Add platform detection for use throughout the generator
+        import platform
+        current_platform = platform.system()
+        self.use_linux_config = (current_platform == 'Linux' or 
+                                 self.config.get('platform') == 'Linux_x64' or
+                                 self.config.get('platform') == 'Linux')
+        self.use_macos_config = (current_platform == 'Darwin' or 
+                                self.config.get('platform') == 'macOS' or
+                                self.config.get('platform') == 'Darwin')
+        
         self.external_libraries = self._parse_external_libraries()
 
     def _parse_external_libraries(self) -> Dict[str, Dict[str, str]]:
         """Parse external library definitions from JSON config"""
-        import platform
         libraries = {}
         
         # Parse regular libraries
@@ -42,19 +52,11 @@ class PremakeGenerator:
                     'link': lib.get('link', 'static')
                 }
         
-        # Check if we should use platform-specific libraries
-        current_platform = platform.system()
-        use_linux_config = (current_platform == 'Linux' or 
-                           self.config.get('platform') == 'Linux_x64' or
-                           self.config.get('platform') == 'Linux')
-        use_macos_config = (current_platform == 'Darwin' or 
-                           self.config.get('platform') == 'macOS' or
-                           self.config.get('platform') == 'Darwin')
-        
+        # Use class platform detection variables
         platforms_config = self.config.get('platforms', {})
         
         # Override with Linux-specific libraries if on Linux
-        if use_linux_config:
+        if self.use_linux_config:
             linux_config = platforms_config.get('linux', {})
             
             # Override with Linux-specific libraries
@@ -76,7 +78,7 @@ class PremakeGenerator:
                     }
         
         # Override with macOS-specific libraries if on macOS
-        if use_macos_config:
+        if self.use_macos_config:
             macos_config = platforms_config.get('macos', {})
             
             # Override with macOS-specific libraries
@@ -1273,8 +1275,11 @@ class PremakeGenerator:
         if any(dep in ['lambda-runtime-full', 'lambda-input-full'] or dep.startswith('lambda-runtime-full-') or dep.startswith('lambda-input-full-') for dep in dependencies):
             self.premake_content.extend([
                 '    linkoptions {',
-                '        "-Wl,--start-group",',  # Start group for circular dependency resolution
             ])
+            
+            # Add --start-group only on Linux for circular dependency resolution
+            if self.use_linux_config:
+                self.premake_content.append('        "-Wl,--start-group",')
             
             # NOTE: Tree-sitter libraries moved to links section for proper linking order
             # (they need to come after libraries that depend on them)
@@ -1305,8 +1310,11 @@ class PremakeGenerator:
                         lib_path = f"../../{lib_path}"
                     self.premake_content.append(f'        "{lib_path}",')
             
+            # Add --end-group only on Linux for circular dependency resolution  
+            if self.use_linux_config:
+                self.premake_content.append('        "-Wl,--end-group",')
+            
             self.premake_content.extend([
-                '        "-Wl,--end-group",',    # End group for circular dependency resolution
                 '    }',
                 '    ',
                 '    -- Add dynamic libraries',
