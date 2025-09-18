@@ -57,7 +57,7 @@ char* execute_lambda_script(const char* script_path) {
         return NULL;
     }
     
-    snprintf(command, sizeof(command), "%s %s 2>/dev/null", lambda_exe, script_path);
+    snprintf(command, sizeof(command), "%s %s 2>&1", lambda_exe, script_path);
     
     FILE* pipe = popen(command, "r");
     if (!pipe) {
