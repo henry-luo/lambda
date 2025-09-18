@@ -48,7 +48,7 @@ void write_text_file(const char* file_path, const char* content) {
 char* execute_lambda_script(const char* script_path) {
     char command[512];
     
-    // Check which lambda executable exists
+    // Check which lambda executable exists (in project root)
     const char* lambda_exe = "./lambda.exe";
     if (access("./lambda-linux.exe", F_OK) == 0) {
         lambda_exe = "./lambda-linux.exe";
