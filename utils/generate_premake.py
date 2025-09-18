@@ -96,7 +96,27 @@ class PremakeGenerator:
         target_binary = target_name + '.exe' if not target_name.endswith('.exe') else target_name
         target_binary_with_path = 'test/' + target_binary
         
-        # Check test_suites
+        # Check test_suites - first check if we have 'test' section
+        test_config = self.config.get('test', {})
+        if 'test_suites' in test_config:
+            for suite in test_config['test_suites']:
+                if 'tests' in suite:
+                    for test in suite['tests']:
+                        binary = test.get('binary', '')
+                        name = test.get('name', '')
+                        dependencies = test.get('dependencies', [])
+                        
+                        # Check multiple variations: exact binary match, binary with path, or name match
+                        if (binary == target_binary or 
+                            binary == target_binary_with_path or 
+                            name == target_name):
+                            result = any(dep in ['lambda-runtime-full', 'lambda-input-full'] or 
+                                      dep.startswith('lambda-runtime-full-') or 
+                                      dep.startswith('lambda-input-full-') 
+                                      for dep in dependencies)
+                            return result
+        
+        # Also check top-level test_suites (if any)
         if 'test_suites' in self.config:
             for suite in self.config['test_suites']:
                 if 'tests' in suite:
@@ -113,8 +133,6 @@ class PremakeGenerator:
                                       dep.startswith('lambda-input-full-') 
                                       for dep in dependencies)
                             return result
-        
-        return False
         
         return False
 
@@ -1322,13 +1340,17 @@ class PremakeGenerator:
             
             # Add tree-sitter libraries using --whole-archive only for lambda-input-full dependent tests
             # to resolve undefined symbols while avoiding duplicate symbols
-            if self._is_lambda_input_full_dependent_test(test_name) and 'tree-sitter' in self.external_libraries:
-                lib_path = self.external_libraries['tree-sitter']['lib']
-                # Convert to relative path from build directory
-                if not lib_path.startswith('/'):
-                    lib_path = f"../../{lib_path}"
-                # Add using -Wl to pass directly to linker and append to command line
-                self.premake_content.append(f'        "-Wl,--whole-archive,{lib_path},--no-whole-archive",')
+            is_dependent = self._is_lambda_input_full_dependent_test(test_name)
+            if is_dependent:
+                # Add tree-sitter libraries with --whole-archive
+                for lib_name in ['tree-sitter', 'tree-sitter-lambda']:
+                    if lib_name in self.external_libraries:
+                        lib_path = self.external_libraries[lib_name]['lib']
+                        # Convert to relative path from build directory
+                        if not lib_path.startswith('/'):
+                            lib_path = f"../../{lib_path}"
+                        # Add using -Wl to pass directly to linker and append to command line
+                        self.premake_content.append(f'        "-Wl,--whole-archive,{lib_path},--no-whole-archive",')
             
             self.premake_content.extend([
                 '    }',
