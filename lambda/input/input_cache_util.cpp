@@ -16,7 +16,11 @@ int ensure_cache_directory(const char* cache_dir) {
         return -1;
     }
     // Try to create
+#ifdef _WIN32
+    if (mkdir(cache_dir) == 0) return 0;
+#else
     if (mkdir(cache_dir, 0755) == 0) return 0;
+#endif
     fprintf(stderr, "Failed to create cache directory %s: %s\n", cache_dir, strerror(errno));
     return -1;
 }

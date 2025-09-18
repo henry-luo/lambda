@@ -6,14 +6,11 @@
 #include <ctype.h>
 #include <stdlib.h>
 
-// Declare memmem if not available
-#ifndef __GLIBC__
-void *memmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen);
-#endif
-
-// Define memmem if not available on some older platforms
+// Declare and define memmem if not available on some platforms
 #if !defined(__GLIBC__) && !defined(__APPLE__) && !defined(__FreeBSD__)
-static void* memmem(const void* haystack, size_t haystack_len, const void* needle, size_t needle_len) {
+void *memmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen);
+
+void* memmem(const void* haystack, size_t haystack_len, const void* needle, size_t needle_len) {
     if (needle_len == 0) return (void*)haystack;
     if (needle_len > haystack_len) return NULL;
     

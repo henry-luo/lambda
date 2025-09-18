@@ -57,6 +57,19 @@ endif
 # Limit parallel jobs to reasonable maximum
 JOBS := $(shell echo $$(($(NPROCS) > 8 ? 8 : $(NPROCS))))
 
+# Detect Python executable
+# On MSYS2/Windows, python3 may be in /clang64/bin/
+PYTHON := $(shell command -v python3 2>/dev/null || command -v /clang64/bin/python3 2>/dev/null || echo python3)
+
+# Detect Premake5 executable
+# On MSYS2/Windows, premake5 may be in /clang64/bin/
+PREMAKE5 := $(shell command -v premake5 2>/dev/null || command -v /clang64/bin/premake5 2>/dev/null || echo premake5)
+
+# Detect C/C++ compilers
+# On MSYS2/Windows with clang64, use clang instead of gcc
+CC := $(shell command -v gcc 2>/dev/null || command -v /clang64/bin/clang 2>/dev/null || echo gcc)
+CXX := $(shell command -v g++ 2>/dev/null || command -v /clang64/bin/clang++ 2>/dev/null || echo g++)
+
 # Tree-sitter grammar dependencies
 # This system automatically manages the dependency chain:
 # grammar.js -> parser.c -> ts-enum.h -> C/C++ source files
@@ -217,12 +230,12 @@ help:
 build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building $(PROJECT_NAME) using Premake build system..."
 	@echo "Generating Premake configuration..."
-	python3 utils/generate_premake.py
+	$(PYTHON) utils/generate_premake.py
 	@echo "Generating makefiles..."
-	premake5 gmake
+	$(PREMAKE5) gmake
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	# suppress warnings but keep errors
-	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) 2>&1 | grep -v "warning:"
+	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)" 2>&1 | grep -v "warning:"
 	@echo "Build completed. Executable: lambda.exe"
 
 print-vars:
@@ -234,11 +247,11 @@ $(LAMBDA_EXE): build
 debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building debug version using Premake build system..."
 	@echo "Generating Premake configuration..."
-	python3 utils/generate_premake.py
+	$(PYTHON) utils/generate_premake.py
 	@echo "Generating makefiles..."
-	premake5 gmake
+	$(PREMAKE5) gmake
 	@echo "Building lambda executable (debug) with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS)
+	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 	@echo "Debug build completed. Executable: lambda.exe"
 
 # Release build (optimized)
@@ -247,22 +260,22 @@ release: build-release
 build-release: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building release version using Premake build system..."
 	@echo "Generating Premake configuration..."
-	python3 utils/generate_premake.py
+	$(PYTHON) utils/generate_premake.py
 	@echo "Generating makefiles..."
-	premake5 gmake
+	$(PREMAKE5) gmake
 	@echo "Building lambda executable (release) with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=release_x64 lambda -j$(JOBS)
+	$(MAKE) -C build/premake config=release_x64 lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 	@echo "Release build completed. Executable: lambda.exe"
 
 # Force rebuild (clean + build)
 rebuild: clean $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Force rebuilding $(PROJECT_NAME) using Premake build system..."
 	@echo "Generating Premake configuration..."
-	python3 utils/generate_premake.py
+	$(PYTHON) utils/generate_premake.py
 	@echo "Generating makefiles..."
-	premake5 gmake
+	$(PREMAKE5) gmake
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS)
+	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 	@echo "Rebuild completed. Executable: lambda.exe"
 
 # Specific project builds
@@ -296,9 +309,9 @@ build-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 		exit 1; \
 	fi
 	@echo "Generating Premake5 configuration for Linux build..."
-	python3 utils/generate_premake.py build_lambda_linux_config.json premake5-linux.lua
+	$(PYTHON) utils/generate_premake.py build_lambda_linux_config.json premake5-linux.lua
 	@echo "Building lambda-linux.exe with $(JOBS) parallel jobs using Premake5..."
-	premake5 --file=premake5-linux.lua gmake2
+	$(PREMAKE5) --file=premake5-linux.lua gmake2
 	$(MAKE) -C build/premake config=release_linux_x64 -j$(JOBS)
 	@if [ -f "lambda-linux.exe" ]; then \
 		echo "Linux cross-compilation completed successfully!"; \
@@ -459,9 +472,9 @@ test-parallel: build
 build-catch2: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building Catch2 test projects using Premake build system..."
 	@echo "Generating Premake configuration..."
-	python3 utils/generate_premake.py
+	$(PYTHON) utils/generate_premake.py
 	@echo "Generating makefiles..."
-	premake5 gmake
+	$(PREMAKE5) gmake
 	@echo "Discovering available Catch2 test targets..."
 	@CATCH2_TARGETS=$$(ls build/premake/*.make 2>/dev/null | grep catch2 | sed 's|build/premake/||' | sed 's|\.make$$||' | tr '\n' ' '); \
 	if [ -n "$$CATCH2_TARGETS" ]; then \
@@ -493,9 +506,9 @@ test-catch2: build build-catch2
 build-test-catch2-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building Catch2 test projects for Linux using Premake build system..."
 	@echo "Generating Premake configuration for Linux..."
-	python3 utils/generate_premake.py build_lambda_test_linux_config.json
+	$(PYTHON) utils/generate_premake.py build_lambda_test_linux_config.json
 	@echo "Generating Linux makefiles..."
-	premake5 gmake
+	$(PREMAKE5) gmake
 	@echo "Building Linux Catch2 test executables with $(JOBS) parallel jobs..."
 	/Library/Developer/CommandLineTools/usr/bin/make -C build_linux/test config=debug_linux_x64 test_strbuf_catch2 test_stringbuf_catch2 test_strview_catch2 test_variable_pool_catch2 test_num_stack_catch2 test_datetime_catch2 test_url_catch2 test_url_extra_catch2 test_lambda_catch2 test_lambda_proc_catch2 test_lambda_repl_catch2 -j8
 	@echo "Linux Catch2 test build completed."
@@ -1210,7 +1223,7 @@ benchmark:
 # Premake5 Build System Targets
 generate-premake:
 	@echo "Generating Premake5 configuration from JSON..."
-	python3 utils/generate_premake.py
+	$(PYTHON) utils/generate_premake.py
 
 clean-premake:
 	@echo "Cleaning Premake5 build artifacts..."
@@ -1240,9 +1253,9 @@ build-test-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 		exit 1; \
 	fi
 	@echo "Generating Premake5 configuration for Linux test build..."
-	python3 utils/generate_premake.py build_lambda_test_linux_config.json premake5-test-linux.lua
+	$(PYTHON) utils/generate_premake.py build_lambda_test_linux_config.json premake5-test-linux.lua
 	@echo "Building Linux tests with $(JOBS) parallel jobs using Premake5..."
-	premake5 --file=premake5-test-linux.lua gmake2
+	$(PREMAKE5) --file=premake5-test-linux.lua gmake2
 	$(MAKE) -C build/premake config=release_linux_x64 -j$(JOBS)
 	@if [ -d "test" ] && [ "$(shell find test -name '*.exe' 2>/dev/null | wc -l)" -gt 0 ]; then \
 		echo "Linux test cross-compilation completed successfully!"; \
