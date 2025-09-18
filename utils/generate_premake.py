@@ -1395,21 +1395,41 @@ class PremakeGenerator:
         ])
         
         # Add tree-sitter libraries as linker options for tests with lambda-input-full dependencies
-        # Use whole-archive to force inclusion of all symbols from tree-sitter libraries
+        # Use platform-specific flags to force inclusion of all symbols from tree-sitter libraries
         if any(dep == 'lambda-input-full' for dep in dependencies):
             self.premake_content.extend([
                 '    filter {}',
                 '    linkoptions {',
-                '        "-Wl,--whole-archive",',
             ])
-            for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
-                if lib_name in self.external_libraries:
-                    lib_path = self.external_libraries[lib_name]['lib']
-                    if not lib_path.startswith('/'):
-                        lib_path = f"../../{lib_path}"
-                    self.premake_content.append(f'        "{lib_path}",')
+            
+            if self.use_linux_config:
+                # Linux: use --whole-archive
+                self.premake_content.append('        "-Wl,--whole-archive",')
+                for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
+                    if lib_name in self.external_libraries:
+                        lib_path = self.external_libraries[lib_name]['lib']
+                        if not lib_path.startswith('/'):
+                            lib_path = f"../../{lib_path}"
+                        self.premake_content.append(f'        "{lib_path}",')
+                self.premake_content.append('        "-Wl,--no-whole-archive",')
+            elif self.use_macos_config:
+                # macOS: use -force_load for each library
+                for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
+                    if lib_name in self.external_libraries:
+                        lib_path = self.external_libraries[lib_name]['lib']
+                        if not lib_path.startswith('/'):
+                            lib_path = f"../../{lib_path}"
+                        self.premake_content.append(f'        "-Wl,-force_load,{lib_path}",')
+            else:
+                # Default: just link normally without forcing symbol inclusion
+                for lib_name in ['tree-sitter-lambda', 'tree-sitter']:
+                    if lib_name in self.external_libraries:
+                        lib_path = self.external_libraries[lib_name]['lib']
+                        if not lib_path.startswith('/'):
+                            lib_path = f"../../{lib_path}"
+                        self.premake_content.append(f'        "{lib_path}",')
+            
             self.premake_content.extend([
-                '        "-Wl,--no-whole-archive",',
                 '    }',
                 '    ',
             ])
