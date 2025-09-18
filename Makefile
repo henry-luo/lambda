@@ -52,10 +52,14 @@ ifeq ($(OS),Darwin)
 	NPROCS := $(shell sysctl -n hw.ncpu)
 else ifeq ($(OS),Linux)
 	NPROCS := $(shell nproc)
+else
+	# Windows/MSYS2 detection
+	NPROCS := $(shell nproc 2>/dev/null || echo 4)
 endif
 
-# Limit parallel jobs to reasonable maximum
-JOBS := $(shell echo $$(($(NPROCS) > 8 ? 8 : $(NPROCS))))
+# Optimize parallel jobs: use all cores for compilation, limit linking to 1
+JOBS := $(NPROCS)
+LINK_JOBS := 1
 
 # Detect Python executable
 # On MSYS2/Windows, python3 may be in /clang64/bin/
@@ -234,8 +238,8 @@ build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Generating makefiles..."
 	$(PREMAKE5) gmake
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	# suppress warnings but keep errors
-	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)" 2>&1 | grep -v "warning:"
+	# Use optimized parallel compilation with separate linking
+	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)" LINK_JOBS="$(LINK_JOBS)" 2>&1 | grep -v "warning:"
 	@echo "Build completed. Executable: lambda.exe"
 
 print-vars:
@@ -291,36 +295,7 @@ lambda: build
 all: lambda
 	@echo "All projects built successfully."
 
-# Cross-compilation for Windows
-cross-compile: build-windows
 
-build-windows:
-	@echo "Cross-compiling for Windows..."
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --platform=windows --jobs=$(JOBS)
-
-# Cross-compilation for Linux
-build-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
-	@echo "Cross-compiling for Linux using Premake5..."
-	@if [ ! -f "/opt/homebrew/Cellar/x86_64-unknown-linux-gnu/13.3.0/bin/x86_64-linux-gnu-gcc" ]; then \
-		echo "Linux cross-compilation toolchain not found."; \
-		echo "Please install it with:"; \
-		echo "  brew tap messense/macos-cross-toolchains"; \
-		echo "  brew install x86_64-unknown-linux-gnu"; \
-		exit 1; \
-	fi
-	@echo "Generating Premake5 configuration for Linux build..."
-	$(PYTHON) utils/generate_premake.py build_lambda_linux_config.json premake5-linux.lua
-	@echo "Building lambda-linux.exe with $(JOBS) parallel jobs using Premake5..."
-	$(PREMAKE5) --file=premake5-linux.lua gmake2
-	$(MAKE) -C build/premake config=release_linux_x64 -j$(JOBS)
-	@if [ -f "lambda-linux.exe" ]; then \
-		echo "Linux cross-compilation completed successfully!"; \
-		echo "Executable: lambda-linux.exe"; \
-		file lambda-linux.exe; \
-	else \
-		echo "Linux cross-compilation failed - executable not found"; \
-		exit 1; \
-	fi
 
 # Debugging builds with specific directories
 build-debug:
@@ -468,81 +443,6 @@ test-parallel: build
 		exit 1; \
 	fi
 
-# Build Catch2 test projects
-build-catch2: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
-	@echo "Building Catch2 test projects using Premake build system..."
-	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py
-	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake
-	@echo "Discovering available Catch2 test targets..."
-	@CATCH2_TARGETS=$$(ls build/premake/*.make 2>/dev/null | grep catch2 | sed 's|build/premake/||' | sed 's|\.make$$||' | tr '\n' ' '); \
-	if [ -n "$$CATCH2_TARGETS" ]; then \
-		echo "Found Catch2 targets: $$CATCH2_TARGETS"; \
-		echo "Building Catch2 test executables with $(JOBS) parallel jobs..."; \
-		/Library/Developer/CommandLineTools/usr/bin/make -C build/premake config=debug_native $$CATCH2_TARGETS -j$(JOBS); \
-		echo "Creating dynamic Catch2 test list for test runner..."; \
-		mkdir -p test_output; \
-		echo "$$CATCH2_TARGETS" | tr ' ' '\n' | grep -v '^$$' > test_output/available_catch2_tests.txt; \
-		echo "Available Catch2 tests saved to test_output/available_catch2_tests.txt"; \
-	else \
-		echo "No Catch2 test targets found in build/premake/"; \
-		exit 1; \
-	fi
-	@echo "Catch2 test build completed."
-
-# Run Catch2 tests
-test-catch2: build build-catch2
-	@echo "Running Catch2 test suite using test_run_catch2.sh..."
-	@if [ -f "test/test_run_catch2.sh" ]; then \
-		./test/test_run_catch2.sh; \
-	else \
-		echo "Error: Catch2 test runner script not found at test/test_run_catch2.sh"; \
-		echo "Please ensure the test runner script exists and is executable."; \
-		exit 1; \
-	fi
-
-# Build Catch2 test projects for Linux cross-compilation
-build-test-catch2-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
-	@echo "Building Catch2 test projects for Linux using Premake build system..."
-	@echo "Generating Premake configuration for Linux..."
-	$(PYTHON) utils/generate_premake.py build_lambda_test_linux_config.json
-	@echo "Generating Linux makefiles..."
-	$(PREMAKE5) gmake
-	@echo "Building Linux Catch2 test executables with $(JOBS) parallel jobs..."
-	/Library/Developer/CommandLineTools/usr/bin/make -C build_linux/test config=debug_linux_x64 test_strbuf_catch2 test_stringbuf_catch2 test_strview_catch2 test_variable_pool_catch2 test_num_stack_catch2 test_datetime_catch2 test_url_catch2 test_url_extra_catch2 test_lambda_catch2 test_lambda_proc_catch2 test_lambda_repl_catch2 -j8
-	@echo "Linux Catch2 test build completed."
-
-# Run Catch2 tests for Linux using Docker
-test-catch2-linux-docker: build-linux build-test-catch2-linux
-	@echo "Running Linux Catch2 test suite using Docker..."
-	@if [ -f "test/test_run_linux.sh" ]; then \
-		./test/test_run_linux.sh --docker; \
-	else \
-		echo "Error: Linux test runner not found at test/test_run_linux.sh"; \
-		exit 1; \
-	fi
-
-# Run Catch2 tests for Linux using comprehensive test runner
-test-catch2-linux: build-linux build-test-catch2-linux
-	@echo "Running Linux Catch2 test suite using comprehensive test runner..."
-	@if [ -f "test/test_run_linux.sh" ]; then \
-		./test/test_run_linux.sh; \
-	else \
-		echo "Error: Linux test runner not found at test/test_run_linux.sh"; \
-		exit 1; \
-	fi
-
-# Run Catch2 tests for Linux using QEMU (alternative method)
-test-catch2-linux-qemu: build-linux build-test-catch2-linux
-	@echo "Running Linux Catch2 test suite using QEMU..."
-	@if [ -f "test/test_run_linux.sh" ]; then \
-		./test/test_run_linux.sh --qemu; \
-	else \
-		echo "Error: Linux test runner not found at test/test_run_linux.sh"; \
-		exit 1; \
-	fi
-
 test-library: build
 	@echo "Running library test suite..."
 	@echo "Pre-compiling URL test with correct dependencies..."
@@ -554,14 +454,6 @@ test-library: build
 		exit 1; \
 	fi
 
-test-mir: build
-	@echo "Running MIR test suite..."
-	@if [ -f "test/test_run.sh" ]; then \
-		./test/test_run.sh --target=mir --raw; \
-	else \
-		echo "Error: No test script found"; \
-		exit 1; \
-	fi
 
 test-input: build
 	@echo "Running input processing test suite..."
@@ -772,78 +664,6 @@ test-ci:
 	@$(MAKE) test
 	@$(MAKE) test-memory
 	@$(MAKE) test-integration
-
-# Windows verification targets
-verify-windows:
-	@echo "Verifying Windows cross-compiled executable..."
-	@if [ ! -f "lambda-windows.exe" ]; then \
-		echo "Windows executable not found. Building..."; \
-		$(MAKE) build-windows; \
-	fi
-	@if [ ! -f "test/verify-windows-exe.sh" ]; then \
-		echo "Error: Windows verification script not found at test/verify-windows-exe.sh"; \
-		exit 1; \
-	fi
-	@cd test && ./verify-windows-exe.sh
-
-test-windows:
-	@echo "Running CI tests for Windows executable..."
-	@if [ ! -f "lambda-windows.exe" ]; then \
-		echo "Windows executable not found. Building..."; \
-		$(MAKE) build-windows; \
-	fi
-	@if [ ! -f "test/test-windows-exe-ci.sh" ]; then \
-		echo "Error: Windows CI test script not found at test/test-windows-exe-ci.sh"; \
-		exit 1; \
-	fi
-	@cd test && ./test-windows-exe-ci.sh
-
-# Linux verification targets
-verify-linux:
-	@echo "Verifying Linux cross-compiled executable..."
-	@if [ ! -f "lambda-linux.exe" ]; then \
-		echo "Linux executable not found. Building..."; \
-		$(MAKE) build-linux; \
-	fi
-	@echo "Checking Linux executable..."
-	@file lambda-linux.exe
-	@if command -v objdump >/dev/null 2>&1; then \
-		echo "Checking dynamic libraries (should be none for static build):"; \
-		objdump -p lambda-linux.exe | grep NEEDED || echo "✅ No dynamic library dependencies (static build)"; \
-	fi
-	@echo "Testing basic functionality with QEMU (if available)..."
-	@if command -v qemu-x86_64-static >/dev/null 2>&1; then \
-		echo "Testing lambda-linux.exe --version:"; \
-		qemu-x86_64-static ./lambda-linux.exe --version || echo "Version test failed"; \
-		echo "Testing lambda-linux.exe --help:"; \
-		qemu-x86_64-static ./lambda-linux.exe --help | head -5 || echo "Help test failed"; \
-	else \
-		echo "QEMU not available - skipping runtime tests"; \
-	fi
-	@echo "✅ Linux executable verification complete"
-
-test-linux:
-	@echo "Running CI tests for Linux executable..."
-	@if [ ! -f "lambda-linux.exe" ]; then \
-		echo "Linux executable not found. Building..."; \
-		$(MAKE) build-linux; \
-	fi
-	@echo "Testing basic execution with QEMU emulation..."
-	@if command -v qemu-x86_64-static >/dev/null 2>&1; then \
-		echo "Testing lambda-linux.exe --version:"; \
-		qemu-x86_64-static ./lambda-linux.exe --version; \
-		echo "Testing simple Lambda script:"; \
-		echo 'print(\"Hello from Linux!\")' > temp_test.ls; \
-		qemu-x86_64-static ./lambda-linux.exe temp_test.ls || echo "Script test failed"; \
-		rm -f temp_test.ls; \
-		echo "✅ Linux executable tests passed"; \
-	else \
-		echo "QEMU not available - manual testing required:"; \
-		echo "Copy lambda-linux.exe to a Linux system and run:"; \
-		echo "  ./lambda-linux.exe --version"; \
-		echo "  ./lambda-linux.exe -c 'print(\"Hello from Linux!\")'"; \
-	fi
-	@echo "✅ Linux executable CI check complete"
 
 run: build
 	@echo "Running $(LAMBDA_EXE)..."
@@ -1210,13 +1030,13 @@ what-will-build:
 # Performance targets
 time-build:
 	@echo "Timing build performance..."
-	@time $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --force --jobs=$(JOBS)
+	@time $(MAKE) rebuild JOBS=$(JOBS)
 
 benchmark:
-	@echo "Build benchmark (3 runs)..."
+	@echo "Build benchmark (3 runs with $(JOBS) parallel jobs)..."
 	@for i in 1 2 3; do \
 		echo "Run $$i:"; \
-		time $(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --force --jobs=$(JOBS) >/dev/null; \
+		time $(MAKE) rebuild JOBS=$(JOBS) >/dev/null 2>&1; \
 		echo ""; \
 	done
 
@@ -1243,31 +1063,6 @@ build-test: generate-premake
 	@echo "Building tests with $(JOBS) parallel jobs..."
 	@$(MAKE) -C build/premake -f PremakeMakefile config=debug_native -j$(JOBS)
 
-build-test-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
-	@echo "Cross-compiling tests for Linux using Premake5..."
-	@if [ ! -f "/opt/homebrew/Cellar/x86_64-unknown-linux-gnu/13.3.0/bin/x86_64-linux-gnu-gcc" ]; then \
-		echo "Linux cross-compilation toolchain not found."; \
-		echo "Please install it with:"; \
-		echo "  brew tap messense/macos-cross-toolchains"; \
-		echo "  brew install x86_64-unknown-linux-gnu"; \
-		exit 1; \
-	fi
-	@echo "Generating Premake5 configuration for Linux test build..."
-	$(PYTHON) utils/generate_premake.py build_lambda_test_linux_config.json premake5-test-linux.lua
-	@echo "Building Linux tests with $(JOBS) parallel jobs using Premake5..."
-	$(PREMAKE5) --file=premake5-test-linux.lua gmake2
-	$(MAKE) -C build/premake config=release_linux_x64 -j$(JOBS)
-	@if [ -d "test" ] && [ "$(shell find test -name '*.exe' 2>/dev/null | wc -l)" -gt 0 ]; then \
-		echo "Linux test cross-compilation completed successfully!"; \
-		echo "Test executables:"; \
-		find test -name "*.exe" -type f | head -10; \
-		echo "Verifying test executables are Linux binaries:"; \
-		for exe in $$(find test -name "*catch2.exe" -type f | head -3); do \
-			echo "$$exe: $$(file $$exe | grep -o 'ELF.*')"; \
-		done; \
-	else \
-		echo "Warning: No test executables found in test/ directory"; \
-	fi
 
 # Include KLEE analysis targets
 
