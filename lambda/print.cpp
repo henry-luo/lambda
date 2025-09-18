@@ -57,11 +57,6 @@ void write_type(StrBuf* code_buf, Type *type) {
         strbuf_append_str(code_buf, "void*");
         return;
     }
-    // Defensive check: verify the pointer is in a reasonable range
-    if ((uintptr_t)type < 0x1000 || (uintptr_t)type > 0x7FFFFFFFFFFF) {
-        strbuf_append_str(code_buf, "invalid*");
-        return;
-    }
     TypeId type_id = type->type_id;
     switch (type_id) {
     case LMD_TYPE_NULL:
@@ -614,10 +609,6 @@ extern "C" void format_item(StrBuf *strbuf, Item item, int depth, char* indent) 
 // print the type of the AST node
 char* format_type(Type *type) {
     if (!type) { return "null*"; }
-    // Defensive check: verify the pointer is in a reasonable range
-    if ((uintptr_t)type < 0x1000 || (uintptr_t)type > 0x7FFFFFFFFFFF) {
-        return "invalid*";
-    }
     TypeId type_id = type->type_id;
     switch (type_id) {
     case LMD_TYPE_NULL:
@@ -653,10 +644,7 @@ char* format_type(Type *type) {
         return "Range*";
     case LMD_TYPE_ARRAY: {
         TypeArray *array_type = (TypeArray*)type;
-        if (array_type->nested && 
-            (uintptr_t)array_type->nested >= 0x1000 && 
-            (uintptr_t)array_type->nested < 0x7FFFFFFFFFFF &&
-            array_type->nested->type_id == LMD_TYPE_INT) {
+        if (array_type->nested && array_type->nested->type_id == LMD_TYPE_INT) {
             return "ArrayInt*";
         } else {
             return "Array*";
