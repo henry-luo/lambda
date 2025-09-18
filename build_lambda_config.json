@@ -330,7 +330,7 @@
                 {
                     "name": "curl",
                     "include": "/usr/include",
-                    "lib": "curl",
+                    "lib": "-lcurl",
                     "link": "dynamic"
                 },
                 {
@@ -354,8 +354,8 @@
                 {
                     "name": "mpdec",
                     "include": "/usr/local/include",
-                    "lib": "/usr/local/lib/libmpdec.a",
-                    "link": "static"
+                    "lib": "-lmpdec",
+                    "link": "dynamic"
                 },
                 {
                     "name": "utf8proc",
@@ -366,28 +366,28 @@
                 {
                     "name": "libedit",
                     "include": "/usr/include/editline",
-                    "lib": "edit",
+                    "lib": "-ledit",
                     "link": "dynamic"
                 },
                 {
                     "name": "tinfo",
-                    "lib": "tinfo",
+                    "lib": "-ltinfo",
                     "link": "dynamic"
                 },
                 {
                     "name": "bsd",
-                    "lib": "bsd",
+                    "lib": "-lbsd",
                     "link": "dynamic"
                 },
                 {
                     "name": "md",
-                    "lib": "md",
+                    "lib": "-lmd",
                     "link": "dynamic"
                 },
                 {
                     "name": "hpdf",
                     "include": "/usr/local/include",
-                    "lib": "hpdf",
+                    "lib": "-lhpdf",
                     "link": "dynamic"
                 },
                 {
@@ -404,15 +404,20 @@
                 },
                 {
                     "name": "criterion",
-                    "include": "/usr/local/include",
-                    "lib": "/usr/local/lib/libcriterion.a",
-                    "link": "static"
+                    "include": "/usr/include",
+                    "lib": "-lcriterion",
+                    "link": "dynamic"
                 },
                 {
                     "name": "lexbor",
                     "include": "/usr/local/include",
                     "lib": "/usr/local/lib/liblexbor_static.a",
                     "link": "static"
+                },
+                {
+                    "name": "stdc++fs",
+                    "lib": "-lstdc++fs",
+                    "link": "dynamic"
                 }
             ],
             "flags": [
@@ -424,7 +429,8 @@
                 "lpthread",
                 "lm",
                 "ldl",
-                "lz"
+                "lz",
+                "lstdc++fs"
             ],
             "build_dir": "build",
             "cross_compile": false,

@@ -9,6 +9,7 @@
 #include <sstream>
 #include <thread>
 #include <future>
+#include <filesystem>
 #include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
