@@ -6,13 +6,21 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <string.h>
 #include <errno.h>
 #include <time.h>
 #include <stdlib.h>
 #include "../../lib/datetime.h"
 #include <sys/stat.h>
+
+// Windows compatibility definitions
+#ifdef _WIN32
+#define lstat stat
+#define S_ISLNK(mode) (0)  // Windows doesn't have symbolic links in the same way
+#endif
 
 // Helper: check if path is a directory
 static int is_directory(const char* path) {

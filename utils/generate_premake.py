@@ -14,7 +14,7 @@ from typing import Dict, List, Any, Optional
 
 class PremakeGenerator:
     def __init__(self, config_path: str = "build_lambda_config.json"):
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             self.config = json.load(f)
         self.premake_content = []
         
@@ -27,6 +27,11 @@ class PremakeGenerator:
         self.use_macos_config = (current_platform == 'Darwin' or 
                                 self.config.get('platform') == 'macOS' or
                                 self.config.get('platform') == 'Darwin')
+        self.use_windows_config = (current_platform == 'Windows' or 
+                                  current_platform.startswith('MINGW') or
+                                  current_platform.startswith('MSYS') or
+                                  current_platform.startswith('CYGWIN') or
+                                  self.config.get('platform') == 'Windows')
         
         self.external_libraries = self._parse_external_libraries()
 
@@ -88,6 +93,28 @@ class PremakeGenerator:
                         'include': lib.get('include', ''),
                         'lib': lib.get('lib', ''),
                         'link': lib.get('link', 'dynamic')
+                    }
+        
+        # Override with Windows-specific libraries if on Windows
+        if self.use_windows_config:
+            windows_config = platforms_config.get('windows', {})
+            
+            # Override with Windows-specific libraries
+            for lib in windows_config.get('libraries', []):
+                if 'lib' in lib:
+                    libraries[lib['name']] = {
+                        'include': lib.get('include', ''),
+                        'lib': lib.get('lib', ''),
+                        'link': lib.get('link', 'static')
+                    }
+            
+            # Override with Windows-specific dev_libraries  
+            for lib in windows_config.get('dev_libraries', []):
+                if 'lib' in lib:
+                    libraries[lib['name']] = {
+                        'include': lib.get('include', ''),
+                        'lib': lib.get('lib', ''),
+                        'link': lib.get('link', 'static')
                     }
         
         return libraries
@@ -566,12 +593,23 @@ class PremakeGenerator:
             self.premake_content.extend([
                 '    includedirs {',
                 f'        "{lib["include"]}",',
-                '        "lambda/tree-sitter/lib/include",',
-                '        "lambda/tree-sitter-lambda/bindings/c",',
-                '        "/usr/local/include",',
-                '        "/opt/homebrew/include",',
-                '        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",',
-                '        "/opt/homebrew/Cellar/mpdecimal/4.0.1/include",',
+            ])
+            
+            # Add tree-sitter includes
+            for lib_name in ['tree-sitter', 'tree-sitter-lambda']:
+                if lib_name in self.external_libraries:
+                    include_path = self.external_libraries[lib_name]['include']
+                    if include_path:
+                        self.premake_content.append(f'        "{include_path}",')
+            
+            # Add other external library includes
+            for lib_name in dependencies:
+                if lib_name in self.external_libraries:
+                    include_path = self.external_libraries[lib_name]['include']
+                    if include_path:
+                        self.premake_content.append(f'        "{include_path}",')
+            
+            self.premake_content.extend([
                 '    }',
                 '    '
             ])

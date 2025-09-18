@@ -1,8 +1,14 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#ifdef _WIN32
+#include <windows.h>
+#include <winsock2.h>
+#include <iphlpapi.h>
+#else
 #include <sys/utsname.h>
 #include <unistd.h>
+#endif
 #include "input.h"
 #include "input-common.h"
 #include "../lambda-data.hpp"
@@ -144,12 +150,55 @@ static Element* create_system_info_element(SysInfoManager* manager, Input* input
         return nullptr;
     }
     
-    // Get system information using uname
+    // Get system information using platform-specific APIs
+#ifdef _WIN32
+    // Windows system information
+    OSVERSIONINFOW osvi;
+    ZeroMemory(&osvi, sizeof(OSVERSIONINFOW));
+    osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFOW);
+    
+    SYSTEM_INFO sysinfo;
+    GetSystemInfo(&sysinfo);
+    
+    // For Windows, we'll use basic info since uname is not available
+    const char* sysname = "Windows";
+    char release[64];
+    snprintf(release, sizeof(release), "%lu.%lu", osvi.dwMajorVersion, osvi.dwMinorVersion);
+    
+    const char* machine;
+    switch (sysinfo.wProcessorArchitecture) {
+        case PROCESSOR_ARCHITECTURE_AMD64:
+            machine = "x86_64";
+            break;
+        case PROCESSOR_ARCHITECTURE_INTEL:
+            machine = "i386";
+            break;
+        case PROCESSOR_ARCHITECTURE_ARM64:
+            machine = "arm64";
+            break;
+        default:
+            machine = "unknown";
+            break;
+    }
+    
+    char nodename[256];
+    DWORD nodename_size = sizeof(nodename);
+    if (!GetComputerNameA(nodename, &nodename_size)) {
+        strcpy(nodename, "unknown");
+    }
+#else
+    // Unix/Linux system information using uname
     struct utsname uname_info;
     if (uname(&uname_info) != 0) {
         log_error("Failed to get system information via uname");
         return nullptr;
     }
+    
+    const char* sysname = uname_info.sysname;
+    const char* release = uname_info.release;
+    const char* machine = uname_info.machine;
+    const char* nodename = uname_info.nodename;
+#endif
     
     // Create system element
     Element* system_elem = input_create_element(input, "system");
@@ -169,17 +218,22 @@ static Element* create_system_info_element(SysInfoManager* manager, Input* input
     // Add OS information
     Element* os_elem = input_create_element(input, "os");
     if (os_elem) {
-        input_add_attribute_to_element(input, os_elem, "name", uname_info.sysname);
+        input_add_attribute_to_element(input, os_elem, "name", sysname);
         input_add_attribute_to_element(input, os_elem, "version", get_os_version());
-        input_add_attribute_to_element(input, os_elem, "kernel", uname_info.release);
-        input_add_attribute_to_element(input, os_elem, "machine", uname_info.machine);
-        input_add_attribute_to_element(input, os_elem, "nodename", uname_info.nodename);
+        input_add_attribute_to_element(input, os_elem, "kernel", release);
+        input_add_attribute_to_element(input, os_elem, "machine", machine);
+        input_add_attribute_to_element(input, os_elem, "nodename", nodename);
         input_add_attribute_item_to_element(input, system_elem, "os", {.item = (uint64_t)os_elem});
     }
     
     // Add hostname information
     char hostname[256];
+#ifdef _WIN32
+    DWORD hostname_size = sizeof(hostname);
+    if (GetComputerNameA(hostname, &hostname_size)) {
+#else
     if (gethostname(hostname, sizeof(hostname)) == 0) {
+#endif
         Element* hostname_elem = input_create_element(input, "hostname");
         if (hostname_elem) {
             input_add_attribute_to_element(input, hostname_elem, "value", hostname);
@@ -216,7 +270,7 @@ static Element* create_system_info_element(SysInfoManager* manager, Input* input
     // Add architecture information
     Element* arch_elem = input_create_element(input, "architecture");
     if (arch_elem) {
-        input_add_attribute_to_element(input, arch_elem, "value", uname_info.machine);
+        input_add_attribute_to_element(input, arch_elem, "value", machine);
         input_add_attribute_item_to_element(input, system_elem, "architecture", {.item = (uint64_t)arch_elem});
     }
     

@@ -293,6 +293,12 @@
                     "link": "static"
                 },
                 {
+                    "name": "utf8proc",
+                    "include": "win-native-deps/include",
+                    "lib": "win-native-deps/lib/libutf8proc.a",
+                    "link": "static"
+                },
+                {
                     "name": "clock_compat",
                     "lib": "clock_compat_windows.o",
                     "link": "static"
