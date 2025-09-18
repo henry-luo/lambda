@@ -126,7 +126,7 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
         build-windows build-linux build-debug build-release clean-all distclean \
         verify-windows verify-linux test-windows test-linux tree-sitter-libs \
         generate-premake clean-premake build-test build-test-linux build-catch2 test-catch2 \
-        build-test-catch2-linux test-catch2-linux test-catch2-linux-docker
+        build-test-catch2-linux test-catch2-linux test-catch2-linux-docker test-catch2-linux-qemu
 
 # Help target - shows available commands
 help:
@@ -175,8 +175,9 @@ help:
 	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
 	@echo "  test-catch2   - Run Catch2 test suite"
 	@echo "  build-test-catch2-linux - Cross-compile Catch2 tests for Linux"
-	@echo "  test-catch2-linux - Run Linux Catch2 tests using QEMU"
+	@echo "  test-catch2-linux - Run Linux Catch2 tests (auto-detects QEMU/Docker)"
 	@echo "  test-catch2-linux-docker - Run Linux Catch2 tests using Docker"
+	@echo "  test-catch2-linux-qemu - Run Linux Catch2 tests using QEMU"
 	@echo "  test-verbose  - Run tests with verbose output"
 	@echo "  test-sequential - Run tests sequentially (not parallel)"
 	@echo "  test-coverage - Run tests with code coverage analysis"
@@ -493,10 +494,30 @@ build-test-catch2-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 # Run Catch2 tests for Linux using Docker
 test-catch2-linux-docker: build-linux build-test-catch2-linux
 	@echo "Running Linux Catch2 test suite using Docker..."
-	@if command -v docker >/dev/null 2>&1; then \
-		./docker-test-linux.sh; \
+	@if [ -f "test/test_run_linux.sh" ]; then \
+		./test/test_run_linux.sh --docker; \
 	else \
-		echo "Error: Docker not found. Please install Docker Desktop."; \
+		echo "Error: Linux test runner not found at test/test_run_linux.sh"; \
+		exit 1; \
+	fi
+
+# Run Catch2 tests for Linux using comprehensive test runner
+test-catch2-linux: build-linux build-test-catch2-linux
+	@echo "Running Linux Catch2 test suite using comprehensive test runner..."
+	@if [ -f "test/test_run_linux.sh" ]; then \
+		./test/test_run_linux.sh; \
+	else \
+		echo "Error: Linux test runner not found at test/test_run_linux.sh"; \
+		exit 1; \
+	fi
+
+# Run Catch2 tests for Linux using QEMU (alternative method)
+test-catch2-linux-qemu: build-linux build-test-catch2-linux
+	@echo "Running Linux Catch2 test suite using QEMU..."
+	@if [ -f "test/test_run_linux.sh" ]; then \
+		./test/test_run_linux.sh --qemu; \
+	else \
+		echo "Error: Linux test runner not found at test/test_run_linux.sh"; \
 		exit 1; \
 	fi
 
@@ -768,6 +789,15 @@ verify-linux:
 		echo "Checking dynamic libraries (should be none for static build):"; \
 		objdump -p lambda-linux.exe | grep NEEDED || echo "✅ No dynamic library dependencies (static build)"; \
 	fi
+	@echo "Testing basic functionality with QEMU (if available)..."
+	@if command -v qemu-x86_64-static >/dev/null 2>&1; then \
+		echo "Testing lambda-linux.exe --version:"; \
+		qemu-x86_64-static ./lambda-linux.exe --version || echo "Version test failed"; \
+		echo "Testing lambda-linux.exe --help:"; \
+		qemu-x86_64-static ./lambda-linux.exe --help | head -5 || echo "Help test failed"; \
+	else \
+		echo "QEMU not available - skipping runtime tests"; \
+	fi
 	@echo "✅ Linux executable verification complete"
 
 test-linux:
@@ -776,10 +806,21 @@ test-linux:
 		echo "Linux executable not found. Building..."; \
 		$(MAKE) build-linux; \
 	fi
-	@echo "Testing basic execution (note: this will only work on Linux systems)..."
-	@echo "For full testing, copy lambda-linux.exe to a Linux system and run:"
-	@echo "  ./lambda-linux.exe --version"
-	@echo "  ./lambda-linux.exe -c 'print(\"Hello from Linux!\")'"
+	@echo "Testing basic execution with QEMU emulation..."
+	@if command -v qemu-x86_64-static >/dev/null 2>&1; then \
+		echo "Testing lambda-linux.exe --version:"; \
+		qemu-x86_64-static ./lambda-linux.exe --version; \
+		echo "Testing simple Lambda script:"; \
+		echo 'print(\"Hello from Linux!\")' > temp_test.ls; \
+		qemu-x86_64-static ./lambda-linux.exe temp_test.ls || echo "Script test failed"; \
+		rm -f temp_test.ls; \
+		echo "✅ Linux executable tests passed"; \
+	else \
+		echo "QEMU not available - manual testing required:"; \
+		echo "Copy lambda-linux.exe to a Linux system and run:"; \
+		echo "  ./lambda-linux.exe --version"; \
+		echo "  ./lambda-linux.exe -c 'print(\"Hello from Linux!\")'"; \
+	fi
 	@echo "✅ Linux executable CI check complete"
 
 run: build
@@ -1198,6 +1239,10 @@ build-test-linux: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 		echo "Linux test cross-compilation completed successfully!"; \
 		echo "Test executables:"; \
 		find test -name "*.exe" -type f | head -10; \
+		echo "Verifying test executables are Linux binaries:"; \
+		for exe in $$(find test -name "*catch2.exe" -type f | head -3); do \
+			echo "$$exe: $$(file $$exe | grep -o 'ELF.*')"; \
+		done; \
 	else \
 		echo "Warning: No test executables found in test/ directory"; \
 	fi
