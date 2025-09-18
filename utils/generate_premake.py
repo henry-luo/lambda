@@ -169,13 +169,17 @@ class PremakeGenerator:
         """Get compiler and toolset information based on platform configuration"""
         # Get compiler from config - check for platform-specific config first
         platforms_config = self.config.get('platforms', {})
-        linux_config = platforms_config.get('linux', {})
         
-        # Use Linux-specific compiler if available, otherwise use global
-        if linux_config:
-            compiler = linux_config.get('compiler', self.config.get('compiler', 'clang'))
+        # Use platform-specific compiler if available, otherwise use global
+        if self.use_windows_config:
+            windows_config = platforms_config.get('windows', {})
+            compiler = windows_config.get('compiler', self.config.get('compiler', 'clang'))
         else:
-            compiler = self.config.get('compiler', 'clang')
+            linux_config = platforms_config.get('linux', {})
+            if linux_config:
+                compiler = linux_config.get('compiler', self.config.get('compiler', 'clang'))
+            else:
+                compiler = self.config.get('compiler', 'clang')
         
         # Extract compiler name from path
         compiler_name = os.path.basename(compiler)
@@ -297,9 +301,16 @@ class PremakeGenerator:
             '    ',
         ])
         
-        # Add Linux-specific compiler and flags if this is a Linux build
+        # Add platform-specific compiler and flags
         platform_config = self.config.get('platform', '')
-        if platform_config == 'Linux_x64' or 'linux' in output.lower() or base_compiler in ['gcc', 'g++']:
+        if self.use_windows_config:
+            self.premake_content.extend([
+                '    -- Native Windows build settings',
+                f'    toolset "{toolset}"',
+                '    defines { "WIN32", "_WIN32", "NATIVE_WINDOWS_BUILD" }',
+                '    ',
+            ])
+        elif platform_config == 'Linux_x64' or 'linux' in output.lower() or base_compiler in ['gcc', 'g++']:
             self.premake_content.extend([
                 '    -- Native Linux build settings',
                 f'    toolset "{toolset}"',

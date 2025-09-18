@@ -275,9 +275,15 @@
             "output": "lambda-windows.exe",
             "libraries": [
                 {
+                    "name": "curl",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libcurl.a",
+                    "link": "static"
+                },
+                {
                     "name": "tree-sitter",
                     "include": "lambda/tree-sitter/lib/include",
-                    "lib": "lambda/tree-sitter/libtree-sitter-windows.a",
+                    "lib": "lambda/tree-sitter/libtree-sitter.a",
                     "link": "static"
                 },
                 {
@@ -288,8 +294,8 @@
                 },
                 {
                     "name": "mir",
-                    "include": "windows-deps/include",
-                    "lib": "windows-deps/lib/libmir.a",
+                    "include": "win-native-deps/include",
+                    "lib": "win-native-deps/lib/libmir.a",
                     "link": "static"
                 },
                 {
@@ -299,8 +305,72 @@
                     "link": "static"
                 },
                 {
+                    "name": "ssl",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libssl.a",
+                    "link": "static"
+                },
+                {
+                    "name": "crypto",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libcrypto.a",
+                    "link": "static"
+                },
+                {
+                    "name": "z",
+                    "lib": "-lz",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "nghttp2",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libnghttp2.a",
+                    "link": "static"
+                },
+                {
+                    "name": "readline",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libreadline.a",
+                    "link": "static"
+                },
+                {
+                    "name": "ncurses",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libncurses.a",
+                    "link": "static"
+                },
+                {
                     "name": "clock_compat",
                     "lib": "clock_compat_windows.o",
+                    "link": "static"
+                },
+                {
+                    "name": "mpdec",
+                    "lib": "",
+                    "link": "none"
+                },
+                {
+                    "name": "hpdf",
+                    "lib": "",
+                    "link": "none"
+                },
+                {
+                    "name": "libedit",
+                    "lib": "",
+                    "link": "none"
+                }
+            ],
+            "dev_libraries": [
+                {
+                    "name": "criterion",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libcriterion.a",
+                    "link": "static"
+                },
+                {
+                    "name": "catch2",
+                    "include": "/clang64/include",
+                    "lib": "/clang64/lib/libCatch2Main.a",
                     "link": "static"
                 }
             ],

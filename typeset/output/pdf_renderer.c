@@ -5,6 +5,7 @@
 #include <string.h>
 #include <math.h>
 
+#ifndef _WIN32
 // libharu error handler
 void pdf_error_handler(HPDF_STATUS error_no, HPDF_STATUS detail_no, void* user_data) {
     PDFRenderer* renderer = (PDFRenderer*)user_data;
@@ -497,3 +498,5 @@ const char* pdf_get_last_error(PDFRenderer* renderer) {
     if (!renderer) return "Invalid renderer";
     return renderer->last_error ? renderer->last_error : "No error";
 }
+
+#endif // !_WIN32

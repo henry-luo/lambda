@@ -1,7 +1,9 @@
 #include "latex_typeset.h"
 #include "integration/latex_bridge.h"
 #include "typeset.h"
+#ifndef _WIN32
 #include "output/pdf_renderer.h"
+#endif
 #include "../lib/log.h"
 #include "../lib/string.h"
 #include "../lambda/input/input.h"
@@ -108,6 +110,7 @@ ViewTree* typeset_latex_to_view_tree(TypesetEngine* engine, Item latex_ast, Type
     return tree;
 }
 
+#ifndef _WIN32
 // LaTeX to PDF conversion using existing engine
 bool typeset_latex_to_pdf(TypesetEngine* engine, Item latex_ast, 
                          const char* output_path, TypesetOptions* options) {
@@ -168,6 +171,7 @@ bool typeset_latex_to_pdf(TypesetEngine* engine, Item latex_ast,
     
     return true;
 }
+#endif
 
 // LaTeX to SVG conversion using existing engine
 bool typeset_latex_to_svg(TypesetEngine* engine, Item latex_ast, 
@@ -428,8 +432,13 @@ bool fn_typeset_latex_standalone(const char* input_file, const char* output_file
     
     // Step 3: Call appropriate function based on extension
     if (strcmp(ext, ".pdf") == 0) {
+#ifndef _WIN32
         log_info("Generating PDF through typeset pipeline...");
         result = typeset_latex_to_pdf(engine, input->root, output_file, (TypesetOptions*)options);
+#else
+        log_error("PDF generation not supported on Windows");
+        result = false;
+#endif
     } else if (strcmp(ext, ".svg") == 0) {
         log_info("Generating SVG through typeset pipeline...");
         result = typeset_latex_to_svg(engine, input->root, output_file, (TypesetOptions*)options);

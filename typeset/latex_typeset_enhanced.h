@@ -20,7 +20,9 @@ extern "C" {
 ViewTree* typeset_latex_to_view_tree_enhanced(TypesetEngine* engine, Item latex_ast, TypesetOptions* options);
 
 // Enhanced LaTeX to PDF with sophisticated typography and layout
+#ifndef _WIN32
 bool typeset_latex_to_pdf_enhanced(TypesetEngine* engine, Item latex_ast, const char* output_path, TypesetOptions* options);
+#endif
 
 // Enhanced standalone LaTeX processing (main entry point for Phase 3)
 bool fn_typeset_latex_enhanced_standalone(const char* input_file, const char* output_file);

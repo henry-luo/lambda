@@ -1,6 +1,8 @@
 #include "latex_typeset.h"
 #include "integration/latex_bridge_enhanced.h"
+#ifndef _WIN32
 #include "output/pdf_renderer_enhanced.h"
+#endif
 #include "../lambda/input/input.h"
 #include "../lambda/lambda-data.hpp"
 #include "../lib/log.h"
@@ -51,6 +53,7 @@ ViewTree* typeset_latex_to_view_tree_enhanced(TypesetEngine* engine, Item latex_
     return tree;
 }
 
+#ifndef _WIN32
 bool typeset_latex_to_pdf_enhanced(TypesetEngine* engine, Item latex_ast, const char* output_path, TypesetOptions* options) {
     if (!engine || get_type_id(latex_ast) == LMD_TYPE_NULL || !output_path) {
         log_error("Invalid parameters for enhanced LaTeX to PDF typesetting");
@@ -109,6 +112,7 @@ bool typeset_latex_to_pdf_enhanced(TypesetEngine* engine, Item latex_ast, const 
     
     return true;
 }
+#endif
 
 // =============================================================================
 // Enhanced Standalone LaTeX Processing Function
@@ -211,8 +215,13 @@ bool fn_typeset_latex_enhanced_standalone(const char* input_file, const char* ou
     
     if (ext && strcmp(ext, ".pdf") == 0) {
         // Enhanced PDF output
+#ifndef _WIN32
         log_info("Generating enhanced PDF output");
         success = typeset_latex_to_pdf_enhanced(engine, latex_ast, output_file, NULL);
+#else
+        log_error("Enhanced PDF generation not supported on Windows");
+        success = false;
+#endif
     } else if (ext && strcmp(ext, ".svg") == 0) {
         // Enhanced SVG output (fallback to standard for now)
         log_info("Generating SVG output (using standard renderer)");

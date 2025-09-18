@@ -5,7 +5,15 @@
 #include <stdarg.h>
 #include <time.h>
 #include <errno.h>  // for errno checking
+#ifdef _WIN32
+#include <windows.h>
+#include <process.h>
+// Windows doesn't have these macros, provide simple equivalents
+#define WIFEXITED(status) (1)
+#define WEXITSTATUS(status) (status)
+#else
 #include <sys/wait.h>  // for WIFEXITED, WEXITSTATUS
+#endif
 #include <string.h>  // for strlen
 #include "input/input.h"
 

@@ -1,6 +1,8 @@
 #include "renderer.h"
 #include "svg_renderer.h"
+#ifndef _WIN32
 #include "pdf_renderer.h"
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,6 +18,7 @@ ViewRenderer* view_renderer_create(const char* format_name) {
             free(renderer);
             return NULL;
         }
+#ifndef _WIN32
     } else if (strcmp(format_name, "pdf") == 0) {
         renderer->format = VIEW_FORMAT_PDF;
         renderer->renderer_data = pdf_renderer_create(NULL); // Use default options
@@ -23,6 +26,7 @@ ViewRenderer* view_renderer_create(const char* format_name) {
             free(renderer);
             return NULL;
         }
+#endif
     } else {
         free(renderer);
         return NULL; // Unsupported format
@@ -40,8 +44,10 @@ void view_renderer_destroy(ViewRenderer* renderer) {
     
     if (renderer->format == VIEW_FORMAT_SVG && renderer->renderer_data) {
         svg_renderer_destroy((SVGRenderer*)renderer->renderer_data);
+#ifndef _WIN32
     } else if (renderer->format == VIEW_FORMAT_PDF && renderer->renderer_data) {
         pdf_renderer_destroy((PDFRenderer*)renderer->renderer_data);
+#endif
     }
     
     free(renderer);
@@ -55,10 +61,12 @@ bool view_render_tree(ViewRenderer* renderer, ViewTree* tree, StrBuf* output, Vi
         // Use the SVG renderer
         SVGRenderer* svg_renderer = (SVGRenderer*)renderer->renderer_data;
         return svg_render_view_tree(svg_renderer, tree, output);
+#ifndef _WIN32
     } else if (renderer->format == VIEW_FORMAT_PDF) {
         // PDF doesn't use StrBuf output - it saves directly to file
         PDFRenderer* pdf_renderer = (PDFRenderer*)renderer->renderer_data;
         return pdf_render_view_tree(pdf_renderer, tree);
+#endif
     }
     
     return false;
@@ -88,6 +96,7 @@ StrBuf* render_view_tree_to_svg(ViewTree* tree, ViewRenderOptions* options) {
     return output;
 }
 
+#ifndef _WIN32
 bool render_view_tree_to_pdf_file(ViewTree* tree, const char* filename, ViewRenderOptions* options) {
     if (!tree || !filename) return false;
     
@@ -106,6 +115,7 @@ bool render_view_tree_to_pdf_file(ViewTree* tree, const char* filename, ViewRend
     view_renderer_destroy(renderer);
     return success;
 }
+#endif
 
 ViewRenderOptions* view_render_options_create_default(void) {
     ViewRenderOptions* options = calloc(1, sizeof(ViewRenderOptions));
