@@ -86,8 +86,7 @@
             "name": "mpdec",
             "include": "/usr/include",
             "lib": "mpdec",
-            "link": "dynamic",
-            "optional": true
+            "link": "static"
         },
         {
             "name": "utf8proc",
@@ -131,31 +130,13 @@
             "name": "libedit",
             "include": "/usr/include/editline",
             "lib": "edit",
-            "link": "dynamic"
-        },
-        {
-            "name": "tinfo",
-            "include": "",
-            "lib": "tinfo",
-            "link": "dynamic"
-        },
-        {
-            "name": "bsd",
-            "include": "",
-            "lib": "bsd",
-            "link": "dynamic"
-        },
-        {
-            "name": "md",
-            "include": "",
-            "lib": "md",
-            "link": "dynamic"
+            "link": "static"
         },
         {
             "name": "curl",
             "include": "/usr/include/curl",
             "lib": "curl",
-            "link": "dynamic"
+            "link": "static"
         },
         {
             "name": "ncurses",
