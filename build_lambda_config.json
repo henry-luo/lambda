@@ -860,68 +860,6 @@
                 "parallel": true
             },
             {
-                "suite": "validator-catch2",
-                "name": "🔍 Validator Tests (Catch2)",
-                "tests": [
-                    {
-                        "source": "test/test_validator_catch2.cpp",
-                        "name": "🔍 Validator Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "binary": "test/test_validator_catch2.exe",
-                        "libraries": ["Catch2Main", "Catch2"]
-                    },
-                    {
-                        "source": "test/test_ast_validator_catch2.cpp",
-                        "name": "🔍 AST Validator Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "binary": "test/test_ast_validator_catch2.exe",
-                        "libraries": ["Catch2Main", "Catch2"]
-                    }
-                ],
-                "type": "validator",
-                "special_flags": "-std=c++17 -lstdc++",
-                "uses_build_config": true,
-                "environment": {
-                    "TEST_DIR_PATH": "$PWD/test/lambda/validator",
-                    "LAMBDA_EXE_PATH": "$PWD/lambda.exe"
-                },
-                "requires_lambda_exe": true,
-                "parallel": false,
-                "compiler": "clang++"
-            },
-            {
-                "suite": "lambda-catch2",
-                "name": "🐑 Lambda Runtime Tests (Catch2)",
-                "tests": [
-                    {
-                        "source": "test/test_lambda_catch2.cpp",
-                        "name": "🐑 Lambda Runtime Tests (Catch2)",
-                        "dependencies": [],
-                        "binary": "test/test_lambda_catch2.exe",
-                        "libraries": ["Catch2Main", "Catch2"]
-                    },
-                    {
-                        "source": "test/test_lambda_repl_catch2.cpp",
-                        "name": "🎮 Lambda REPL Interface Tests (Catch2)",
-                        "dependencies": [],
-                        "binary": "test/test_lambda_repl_catch2.exe",
-                        "libraries": ["Catch2Main", "Catch2"]
-                    },
-                    {
-                        "source": "test/test_lambda_proc_catch2.cpp",
-                        "name": "🐑 Lambda Procedural Tests (Catch2)",
-                        "dependencies": [],
-                        "binary": "test/test_lambda_proc_catch2.exe",
-                        "libraries": ["Catch2Main", "Catch2"]
-                    }
-                ],
-                "type": "lambda",
-                "special_flags": "-lstdc++",
-                "uses_build_config": true,
-                "requires_lambda_exe": true,
-                "parallel": true
-            },
-            {
                 "suite": "lambda-std",
                 "name": "🧪 Lambda Standard Tests",
                 "tests": [

@@ -1293,13 +1293,9 @@ class PremakeGenerator:
                         lib_path = f"../../{lib_path}"
                     self.premake_content.append(f'        "{lib_path}",')
             
-            # Add tree-sitter libraries directly within the group
-            # For lambda-input-full dependent tests, exclude tree-sitter from regular linking
-            # since it's added via --whole-archive to resolve undefined symbols
-            tree_sitter_libs = ['tree-sitter-lambda']
-            is_lambda_input_full = self._is_lambda_input_full_dependent_test(test_name)
-            if not is_lambda_input_full:
-                tree_sitter_libs.append('tree-sitter')
+            # Add tree-sitter libraries directly within the group using normal linking
+            # This should work for all tests without needing --whole-archive
+            tree_sitter_libs = ['tree-sitter', 'tree-sitter-lambda']
                 
             for lib_name in tree_sitter_libs:
                 if lib_name in self.external_libraries:
@@ -1337,20 +1333,6 @@ class PremakeGenerator:
                 '    -- Add tree-sitter libraries using linkoptions to append to LIBS section',
                 '    linkoptions {',
             ])
-            
-            # Add tree-sitter libraries using --whole-archive only for lambda-input-full dependent tests
-            # to resolve undefined symbols while avoiding duplicate symbols
-            is_dependent = self._is_lambda_input_full_dependent_test(test_name)
-            if is_dependent:
-                # Add tree-sitter libraries with --whole-archive
-                for lib_name in ['tree-sitter', 'tree-sitter-lambda']:
-                    if lib_name in self.external_libraries:
-                        lib_path = self.external_libraries[lib_name]['lib']
-                        # Convert to relative path from build directory
-                        if not lib_path.startswith('/'):
-                            lib_path = f"../../{lib_path}"
-                        # Add using -Wl to pass directly to linker and append to command line
-                        self.premake_content.append(f'        "-Wl,--whole-archive,{lib_path},--no-whole-archive",')
             
             self.premake_content.extend([
                 '    }',
@@ -1703,7 +1685,7 @@ def main():
     print(f"Premake5 migration completed successfully!")
     print(f"Next steps:")
     print(f"  1. Run: premake5 gmake2")
-    print(f"  2. Run: make -C build/premake config=debug")
+    print(f"  2. Run: make -C build/premake config=debug_native")
 
 if __name__ == "__main__":
     main()

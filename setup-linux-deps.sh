@@ -282,6 +282,58 @@ sudo apt update
 
 
 
+# Function to build criterion for Linux
+build_criterion_for_linux() {
+    echo "Building Criterion for Linux..."
+    
+    # Check if already installed in system location
+    if [ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ]; then
+        echo "Criterion already installed in system location"
+        return 0
+    fi
+    
+    # Build from source
+    if [ ! -d "build_temp/Criterion" ]; then
+        cd build_temp
+        echo "Cloning Criterion repository..."
+        git clone https://github.com/Snaipe/Criterion.git || {
+            echo "Warning: Could not clone Criterion repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+    
+    cd "build_temp/Criterion"
+    
+    # Create build directory
+    mkdir -p builddir
+    
+    echo "Configuring Criterion with Meson..."
+    if meson setup builddir --buildtype=release --prefix="$SYSTEM_PREFIX"; then
+        
+        echo "Building Criterion..."
+        if meson compile -C builddir; then
+            echo "Installing Criterion to system location (requires sudo)..."
+            sudo meson install -C builddir
+            
+            # Update library cache
+            sudo ldconfig
+            
+            # Verify the build
+            if [ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ]; then
+                echo "✅ Criterion built successfully"
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+    
+    echo "❌ Criterion build failed"
+    cd - > /dev/null
+    return 1
+}
+
 # Function to build mpdecimal for Linux
 build_mpdecimal_for_linux() {
     echo "Building mpdecimal for Linux..."
@@ -793,6 +845,15 @@ build_mir_for_linux() {
             find . -name "mir.h" | head -5
         fi
         
+        # Copy c2mir.h specifically (critical for compilation)
+        if [ -f "c2mir.h" ]; then
+            sudo cp c2mir.h "$SYSTEM_PREFIX/include/"
+            echo "✅ c2mir.h copied to $SYSTEM_PREFIX/include/"
+        else
+            echo "Warning: c2mir.h not found"
+            find . -name "c2mir.h" | head -5
+        fi
+        
         # Copy all MIR-related headers
         for header in mir-*.h; do
             if [ -f "$header" ]; then
@@ -805,12 +866,16 @@ build_mir_for_linux() {
         sudo ldconfig
         
         # Verify the build
-        if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ]; then
+        if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && [ -f "$SYSTEM_PREFIX/include/c2mir.h" ]; then
             echo "✅ MIR built successfully"
             cd - > /dev/null
             return 0
+        elif [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ]; then
+            echo "⚠️ MIR library and mir.h built but c2mir.h header missing"
+            cd - > /dev/null
+            return 1
         elif [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
-            echo "⚠️ MIR library built but mir.h header missing"
+            echo "⚠️ MIR library built but header files missing"
             cd - > /dev/null
             return 1
         else
@@ -825,66 +890,11 @@ build_mir_for_linux() {
     return 1
 }
 
-# Function to build criterion for Linux
-build_criterion_for_linux() {
-    echo "Building Criterion for Linux..."
-    
-    # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ]; then
-        echo "Criterion already installed in system location"
-        return 0
-    fi
-    
-    # Build from source
-    if [ ! -d "build_temp/Criterion" ]; then
-        cd build_temp
-        echo "Cloning Criterion repository..."
-        git clone https://github.com/Snaipe/Criterion.git || {
-            echo "Warning: Could not clone Criterion repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    fi
-    
-    cd "build_temp/Criterion"
-    
-    # Create build directory
-    mkdir -p build
-    cd build
-    
-    echo "Configuring Criterion with CMake..."
-    if cmake \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" \
-        ..; then
-        
-        echo "Building Criterion..."
-        if make -j$(nproc); then
-            echo "Installing Criterion to system location (requires sudo)..."
-            sudo make install
-            
-            # Update library cache
-            sudo ldconfig
-            
-            # Verify the build
-            if [ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ]; then
-                echo "✅ Criterion built successfully"
-                cd - > /dev/null
-                cd - > /dev/null
-                return 0
-            fi
-        fi
-    fi
-    
-    echo "❌ Criterion build failed"
-    cd - > /dev/null
-    cd - > /dev/null
-    return 1
-}
-
 echo "Found native compiler: $(which gcc)"
 echo "System: $(uname -a)"
+
+# Ensure we're in the workspace root for tree-sitter builds
+cd "$SCRIPT_DIR"
 
 # Build tree-sitter for Linux
 if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
@@ -900,6 +910,8 @@ if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
     else
         echo "❌ Directory lambda/tree-sitter does not exist. Skipping tree-sitter build."
         echo "Please ensure the tree-sitter source is present at lambda/tree-sitter."
+        echo "Current directory: $(pwd)"
+        echo "Directory contents: $(ls -la | head -5)"
     fi
 else
     echo "Tree-sitter already built for Linux"
@@ -919,6 +931,8 @@ if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
     else
         echo "❌ Directory lambda/tree-sitter-lambda does not exist. Skipping tree-sitter-lambda build."
         echo "Please ensure the tree-sitter-lambda source is present at lambda/tree-sitter-lambda."
+        echo "Current directory: $(pwd)"
+        echo "Directory contents: $(ls -la | head -5)"
     fi
 else
     echo "Tree-sitter-lambda already built for Linux"
@@ -954,7 +968,7 @@ fi
 
 
 # Build MIR for Linux
-if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ]; then
+if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && [ -f "$SYSTEM_PREFIX/include/c2mir.h" ]; then
     echo "MIR already available"
 else
     if ! build_mir_for_linux; then
@@ -966,15 +980,21 @@ fi
 
 # Verify MIR header installation (but don't exit on failure)
 echo "Verifying MIR header installation..."
-if [ -f "$SYSTEM_PREFIX/include/mir.h" ]; then
-    echo "✅ mir.h found at $SYSTEM_PREFIX/include/mir.h"
+if [ -f "$SYSTEM_PREFIX/include/mir.h" ] && [ -f "$SYSTEM_PREFIX/include/c2mir.h" ]; then
+    echo "✅ mir.h and c2mir.h found at $SYSTEM_PREFIX/include/"
+elif [ -f "/usr/include/mir.h" ] && [ -f "/usr/include/c2mir.h" ]; then
+    echo "✅ mir.h and c2mir.h found at /usr/include/"
+elif [ -f "$SYSTEM_PREFIX/include/mir.h" ]; then
+    echo "⚠️ mir.h found but c2mir.h missing at $SYSTEM_PREFIX/include/"
 elif [ -f "/usr/include/mir.h" ]; then
-    echo "✅ mir.h found at /usr/include/mir.h"
+    echo "⚠️ mir.h found but c2mir.h missing at /usr/include/"
 else
-    echo "⚠️ mir.h not found - MIR may need to be built during compilation"
+    echo "⚠️ MIR headers not found - MIR may need to be built during compilation"
     echo "Searching for MIR headers..."
     find /usr -name "mir.h" 2>/dev/null || echo "No mir.h files found"
     find "$SYSTEM_PREFIX" -name "mir.h" 2>/dev/null || echo "No mir.h files found in $SYSTEM_PREFIX"
+    find /usr -name "c2mir.h" 2>/dev/null || echo "No c2mir.h files found"
+    find "$SYSTEM_PREFIX" -name "c2mir.h" 2>/dev/null || echo "No c2mir.h files found in $SYSTEM_PREFIX"
 fi
 
 
@@ -1011,6 +1031,11 @@ if command -v premake5 >/dev/null 2>&1; then
     echo "✅ premake5 already available"
 else
     echo "Installing premake5 from source..."
+    
+    # Install uuid-dev dependency for premake5 build
+    echo "Installing uuid-dev dependency for premake5..."
+    install_if_missing "uuid-dev" "uuid-dev"
+    
     PREMAKE_BUILD_DIR="build_temp/premake5"
     if [ ! -d "$PREMAKE_BUILD_DIR" ]; then
         mkdir -p build_temp
@@ -1065,11 +1090,11 @@ echo "- Tree-sitter: $([ -f "lambda/tree-sitter/libtree-sitter.a" ] && echo "✓
 echo "- Tree-sitter-lambda: $([ -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ] && echo "✓ Built" || echo "✗ Missing")"
 
 # Check system locations and apt packages
-echo "- GMP: $([ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.so" ] || [ -f "/usr/lib/x86_64-linux-gnu/libgmp.so" ] && echo "✓ Available" || echo "✗ Missing")"
+echo "- GMP: $([ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.so" ] || [ -f "/usr/lib/x86_64-linux-gnu/libgmp.so" ] || [ -f "/usr/lib/aarch64-linux-gnu/libgmp.so.10" ] && echo "✓ Available" || echo "✗ Missing")"
 echo "- lexbor: $([ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.so" ] && echo "✓ Available" || echo "✗ Missing")"
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- curl: $([ -f "/usr/lib/x86_64-linux-gnu/libcurl.so" ] || dpkg -l | grep -q libcurl && echo "✓ Available" || echo "✗ Missing")"
-echo "- mpdecimal: $([ -f "/usr/lib/x86_64-linux-gnu/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- mpdecimal: $([ -f "/usr/lib/x86_64-linux-gnu/libmpdec.so" ] || [ -f "/usr/lib/aarch64-linux-gnu/libmpdec.so" ] || [ -f "$SYSTEM_PREFIX/lib/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- libedit: $([ -f "/usr/lib/x86_64-linux-gnu/libedit.so" ] || dpkg -l | grep -q libedit-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- utf8proc: $([ -f "/usr/lib/x86_64-linux-gnu/libutf8proc.so" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] || dpkg -l | grep -q libutf8proc-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- tinfo: $([ -f "/usr/lib/x86_64-linux-gnu/libtinfo.so" ] || dpkg -l | grep -q libncurses && echo "✓ Available" || echo "✗ Missing")"
@@ -1080,7 +1105,6 @@ echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" 
 echo "- premake5: $(command -v premake5 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo ""
 echo "Next steps:"
-echo "1. Run: ./compile.sh"
+echo "1. Run: make"
 echo ""
-echo "Note: This script now intelligently skips already-installed dependencies."
 echo "To clean up intermediate files, run: ./setup-linux-deps.sh clean"

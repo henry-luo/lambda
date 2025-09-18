@@ -1,12 +1,13 @@
 #pragma once
 
+#include <string.h>  // moved outside extern "C" block to fix C++ compatibility
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #include <assert.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
 #include <stdint.h>
