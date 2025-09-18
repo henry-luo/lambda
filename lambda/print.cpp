@@ -1,5 +1,6 @@
 #include "lambda-data.hpp"
 #include "../lib/log.h"
+#include <math.h>
 
 #include "ast.hpp"
 
@@ -139,6 +140,11 @@ void write_type(StrBuf* code_buf, Type *type) {
 void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int depth = 0, char* indent = NULL, bool is_attrs = false);
 
 void print_double(StrBuf *strbuf, double num) {
+    // Handle special cases: NaN should always be printed as "nan" (never "-nan")
+    if (isnan(num)) {
+        strbuf_append_str(strbuf, "nan");
+        return;
+    }
     int exponent;
     double mantissa = frexp(num, &exponent);
     if (-20 < exponent && exponent < 30) {
