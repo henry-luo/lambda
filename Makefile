@@ -150,7 +150,7 @@ help:
 	@echo "  clean         - Remove build artifacts"
 	@echo "  clean-test    - Remove test output and temporary files"
 	@echo "  clean-grammar - Remove generated grammar and embed files (parser.c, ts-enum.h, lambda-embed.h)"
-	@echo "  clean-all     - Remove all build directories"
+	@echo "  clean-all     - Remove all build directories and tree-sitter libraries"
 	@echo "  distclean     - Complete cleanup (build dirs + executables + tests)"
 	@echo "  intellisense  - Update VS Code IntelliSense database (compile_commands.json)"
 	@echo ""
@@ -393,7 +393,14 @@ clean-all: clean-premake
 	@rm -rf $(BUILD_RELEASE_DIR)
 	@rm -rf $(BUILD_WINDOWS_DIR)
 	@rm -rf $(BUILD_LINUX_DIR)
-	@echo "All build directories removed."
+	@echo "Cleaning tree-sitter libraries..."
+	@if [ -d "lambda/tree-sitter" ]; then \
+		cd lambda/tree-sitter && $(MAKE) clean; \
+	fi
+	@if [ -d "lambda/tree-sitter-lambda" ]; then \
+		cd lambda/tree-sitter-lambda && $(MAKE) clean; \
+	fi
+	@echo "All build directories and tree-sitter libraries cleaned."
 
 distclean: clean-all clean-grammar clean-test
 	@echo "Complete cleanup..."

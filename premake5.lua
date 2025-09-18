@@ -117,23 +117,23 @@ project "lambda-input-full-c"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "/usr/local/lib/libcriterion.a",
     }
     
     links {
-        "CoreFoundation.framework",
-        "CoreServices.framework",
-        "SystemConfiguration.framework",
+        "curl",
         "z",
         "lambda-lib",
+        "CoreFoundation",
+        "CoreServices",
+        "SystemConfiguration",
     }
     
 
@@ -187,23 +187,23 @@ project "lambda-input-full-cpp"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "/usr/local/lib/libcriterion.a",
     }
     
     links {
-        "CoreFoundation.framework",
-        "CoreServices.framework",
-        "SystemConfiguration.framework",
+        "curl",
         "z",
         "lambda-lib",
+        "CoreFoundation",
+        "CoreServices",
+        "SystemConfiguration",
     }
     
 
@@ -345,18 +345,19 @@ project "lambda"
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -368,31 +369,25 @@ project "lambda"
     }
     
     linkoptions {
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "/usr/local/lib/libmir.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
-        "/opt/homebrew/lib/libhpdf.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
     }
     
     -- Dynamic libraries
     filter "platforms:native"
         links {
+            "curl",
+            "hpdf",
             "z",
+            "edit",
             "ncurses",
             "pthread",
-        }
-    
-        linkoptions {
-            "-framework CoreFoundation",
-            "-framework CoreServices",
-            "-framework SystemConfiguration",
         }
     
     filter {}
@@ -430,20 +425,21 @@ project "test_strbuf"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -485,20 +481,21 @@ project "test_stringbuf"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -539,20 +536,21 @@ project "test_strview"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -594,20 +592,21 @@ project "test_variable_pool"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -649,20 +648,21 @@ project "test_num_stack"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -704,20 +704,21 @@ project "test_datetime"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -759,20 +760,21 @@ project "test_url"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -814,20 +816,21 @@ project "test_url_extra"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -869,20 +872,21 @@ project "test_strbuf_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -923,20 +927,21 @@ project "test_stringbuf_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -977,20 +982,21 @@ project "test_strview_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1031,20 +1037,21 @@ project "test_variable_pool_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1085,20 +1092,21 @@ project "test_num_stack_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1139,20 +1147,21 @@ project "test_datetime_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1193,20 +1202,21 @@ project "test_url_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1247,20 +1257,21 @@ project "test_url_extra_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1301,20 +1312,21 @@ project "test_mime_detect"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1338,16 +1350,16 @@ project "test_mime_detect"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -1358,9 +1370,6 @@ project "test_mime_detect"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     buildoptions {
@@ -1383,20 +1392,21 @@ project "test_math"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1421,16 +1431,16 @@ project "test_math"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -1441,9 +1451,6 @@ project "test_math"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -1468,20 +1475,21 @@ project "test_math_ascii"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1506,16 +1514,16 @@ project "test_math_ascii"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -1526,9 +1534,6 @@ project "test_math_ascii"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -1553,20 +1558,21 @@ project "test_markup_roundtrip"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1591,16 +1597,16 @@ project "test_markup_roundtrip"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -1611,9 +1617,6 @@ project "test_markup_roundtrip"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -1638,20 +1641,21 @@ project "test_input_roundtrip"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1676,16 +1680,16 @@ project "test_input_roundtrip"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -1696,9 +1700,6 @@ project "test_input_roundtrip"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -1723,20 +1724,21 @@ project "test_dir"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1761,16 +1763,16 @@ project "test_dir"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -1781,9 +1783,6 @@ project "test_dir"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -1808,20 +1807,21 @@ project "test_http"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1846,16 +1846,16 @@ project "test_http"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -1866,9 +1866,6 @@ project "test_http"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -1893,20 +1890,21 @@ project "test_sysinfo"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1931,16 +1929,16 @@ project "test_sysinfo"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -1951,9 +1949,6 @@ project "test_sysinfo"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -1978,20 +1973,21 @@ project "test_jsx_roundtrip"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2016,16 +2012,16 @@ project "test_jsx_roundtrip"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -2036,9 +2032,6 @@ project "test_jsx_roundtrip"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -2063,20 +2056,21 @@ project "test_mdx_roundtrip"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2101,16 +2095,16 @@ project "test_mdx_roundtrip"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -2121,9 +2115,6 @@ project "test_mdx_roundtrip"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -2148,20 +2139,21 @@ project "test_css_tokenizer"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2186,16 +2178,16 @@ project "test_css_tokenizer"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -2206,9 +2198,6 @@ project "test_css_tokenizer"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -2233,20 +2222,21 @@ project "test_css_parser"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2271,16 +2261,16 @@ project "test_css_parser"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -2291,9 +2281,6 @@ project "test_css_parser"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -2318,20 +2305,21 @@ project "test_css_integration"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2356,16 +2344,16 @@ project "test_css_integration"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -2376,9 +2364,6 @@ project "test_css_integration"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -2403,20 +2388,21 @@ project "test_css_files_safe"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2440,16 +2426,16 @@ project "test_css_files_safe"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -2460,9 +2446,6 @@ project "test_css_files_safe"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     buildoptions {
@@ -2485,20 +2468,21 @@ project "test_css_frameworks"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2523,16 +2507,16 @@ project "test_css_frameworks"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -2543,9 +2527,6 @@ project "test_css_frameworks"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -2570,20 +2551,21 @@ project "test_mime_detect_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2607,16 +2589,16 @@ project "test_mime_detect_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -2627,9 +2609,6 @@ project "test_mime_detect_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -2654,20 +2633,21 @@ project "test_css_tokenizer_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2691,16 +2671,16 @@ project "test_css_tokenizer_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -2711,9 +2691,6 @@ project "test_css_tokenizer_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -2738,20 +2715,21 @@ project "test_css_parser_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2775,16 +2753,16 @@ project "test_css_parser_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -2795,9 +2773,6 @@ project "test_css_parser_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -2822,20 +2797,21 @@ project "test_css_integration_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2859,16 +2835,16 @@ project "test_css_integration_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -2879,9 +2855,6 @@ project "test_css_integration_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -2906,20 +2879,21 @@ project "test_css_frameworks_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2943,16 +2917,16 @@ project "test_css_frameworks_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -2963,9 +2937,6 @@ project "test_css_frameworks_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -2990,20 +2961,21 @@ project "test_math_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -3027,16 +2999,16 @@ project "test_math_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -3047,9 +3019,6 @@ project "test_math_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -3074,20 +3043,21 @@ project "test_math_ascii_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -3111,16 +3081,16 @@ project "test_math_ascii_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -3131,9 +3101,6 @@ project "test_math_ascii_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -3158,20 +3125,21 @@ project "test_markup_roundtrip_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -3195,16 +3163,16 @@ project "test_markup_roundtrip_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -3215,9 +3183,6 @@ project "test_markup_roundtrip_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -3243,20 +3208,21 @@ project "test_input_roundtrip_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -3280,16 +3246,16 @@ project "test_input_roundtrip_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -3300,9 +3266,6 @@ project "test_input_roundtrip_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -3327,20 +3290,21 @@ project "test_dir_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -3364,16 +3328,16 @@ project "test_dir_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -3384,9 +3348,6 @@ project "test_dir_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -3411,20 +3372,21 @@ project "test_http_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -3448,16 +3410,16 @@ project "test_http_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -3468,9 +3430,6 @@ project "test_http_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -3495,20 +3454,21 @@ project "test_sysinfo_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -3532,16 +3492,16 @@ project "test_sysinfo_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -3552,9 +3512,6 @@ project "test_sysinfo_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -3579,20 +3536,21 @@ project "test_jsx_roundtrip_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -3616,16 +3574,16 @@ project "test_jsx_roundtrip_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -3636,9 +3594,6 @@ project "test_jsx_roundtrip_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -3663,20 +3618,21 @@ project "test_mdx_roundtrip_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -3700,16 +3656,16 @@ project "test_mdx_roundtrip_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -3720,9 +3676,6 @@ project "test_mdx_roundtrip_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -3747,20 +3700,21 @@ project "test_css_files_safe_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -3784,16 +3738,16 @@ project "test_css_files_safe_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -3804,9 +3758,6 @@ project "test_css_files_safe_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -3831,20 +3782,21 @@ project "test_validator"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -3869,16 +3821,16 @@ project "test_validator"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -3889,9 +3841,6 @@ project "test_validator"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -3916,20 +3865,21 @@ project "test_ast_validator"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -3954,16 +3904,16 @@ project "test_ast_validator"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -3974,9 +3924,6 @@ project "test_ast_validator"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -4001,20 +3948,21 @@ project "test_lambda"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -4036,7 +3984,7 @@ project "test_lambda"
     }
     
     linkoptions {
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/usr/local/lib/libcriterion.a",
     }
     
     links { "stdc++" }
@@ -4060,20 +4008,21 @@ project "test_lambda_repl"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -4115,20 +4064,21 @@ project "test_lambda_proc"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -4150,7 +4100,7 @@ project "test_lambda_proc"
     }
     
     linkoptions {
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/usr/local/lib/libcriterion.a",
     }
     
     links { "stdc++" }
@@ -4174,20 +4124,21 @@ project "test_validator_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -4211,16 +4162,16 @@ project "test_validator_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -4231,9 +4182,6 @@ project "test_validator_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -4258,20 +4206,21 @@ project "test_ast_validator_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -4295,16 +4244,16 @@ project "test_ast_validator_catch2"
     }
     
     linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter.a",
-        "/opt/homebrew/lib/libmpdec.a",
-        "/opt/homebrew/lib/libutf8proc.a",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+        "/usr/local/lib/libmpdec.a",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
-        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "../../curl",
         "../../mac-deps/nghttp2/lib/libnghttp2.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/opt/libedit/lib/libedit.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "../../edit",
     }
     
     -- Add dynamic libraries
@@ -4315,9 +4264,6 @@ project "test_ast_validator_catch2"
     
     -- Add macOS frameworks
     linkoptions {
-        "-framework CoreFoundation",
-        "-framework CoreServices",
-        "-framework SystemConfiguration",
     }
     
     links { "stdc++" }
@@ -4342,20 +4288,21 @@ project "test_lambda_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -4396,20 +4343,21 @@ project "test_lambda_repl_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -4450,20 +4398,21 @@ project "test_lambda_proc_catch2"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -4504,20 +4453,21 @@ project "test_lambda_runner"
     
     includedirs {
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/include",
+        "/workspaces/jubily/lambda/tree-sitter/lib/include",
+        "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "mac-deps/nghttp2/include",
-        "/opt/homebrew/opt/libedit/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/include/editline",
+        "/usr/local/include",
         "/opt/homebrew/Cellar/catch2/3.10.0/include",
+        "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
