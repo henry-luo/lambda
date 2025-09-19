@@ -19,10 +19,8 @@
 #include <setjmp.h>  // for setjmp/longjmp
 
 // Include readline header for line editing functionality
-#ifdef _WIN32
-#include <readline/readline.h>
-#include <readline/history.h>
-#else
+// Note: For Windows, we use simple fallback instead of readline to avoid DLL dependencies
+#ifndef _WIN32
 #include <editline/readline.h>
 #include <histedit.h>
 #endif
@@ -61,7 +59,7 @@ static const char *prompt_func(EditLine *el) {
 }
 #endif
 
-// Initialize libedit (non-Windows) or setup readline (Windows)
+// Initialize libedit (non-Windows) or setup simple fallback (Windows)
 int repl_init() {
     // Only try EditLine for truly interactive terminals
     if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {
@@ -70,8 +68,8 @@ int repl_init() {
     }
     
 #ifdef _WIN32
-    // Windows console setup - simplified
-    printf("Debug: Using readline for Windows\n");
+    // Windows: use simple fallback instead of readline to avoid DLL dependencies
+    printf("Debug: Using simple fallback for Windows (no readline dependency)\n");
     return 0; // Success
 #else
     // Check for specific terminal types that might not work well with EditLine
@@ -187,12 +185,18 @@ const char* get_repl_prompt() {
 
 char *repl_readline(const char *prompt) {
 #ifdef _WIN32
-    // Windows: use readline library
-    char *line = readline(prompt);
-    if (line && strlen(line) > 0) {
-        add_history(line);
+    // Windows: use simple fallback instead of readline to avoid DLL dependencies
+    printf("%s", prompt);
+    fflush(stdout);
+    static char buffer[1024];
+    if (fgets(buffer, sizeof(buffer), stdin)) {
+        size_t len = strlen(buffer);
+        if (len > 0 && buffer[len-1] == '\n') {
+            buffer[len-1] = '\0';
+        }
+        return strdup(buffer);
     }
-    return line;
+    return NULL;
 #else
     // If EditLine failed before or is not initialized, use basic input
     if (!el || editline_failed) {
