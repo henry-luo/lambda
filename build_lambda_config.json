@@ -273,11 +273,12 @@
         },
         "windows": {
             "output": "lambda-windows.exe",
+            "compiler": "gcc",
             "libraries": [
                 {
                     "name": "curl",
-                    "include": "/clang64/include",
-                    "lib": "/clang64/lib/libcurl.a",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libcurl.dll.a",
                     "link": "static"
                 },
                 {
@@ -300,20 +301,20 @@
                 },
                 {
                     "name": "utf8proc",
-                    "include": "win-native-deps/include",
-                    "lib": "win-native-deps/lib/libutf8proc.a",
-                    "link": "static"
+                    "include": "/mingw64/include",
+                    "lib": "-lutf8proc",
+                    "link": "dynamic"
                 },
                 {
                     "name": "ssl",
-                    "include": "/clang64/include",
-                    "lib": "/clang64/lib/libssl.a",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libssl.a",
                     "link": "static"
                 },
                 {
                     "name": "crypto",
-                    "include": "/clang64/include",
-                    "lib": "/clang64/lib/libcrypto.a",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libcrypto.a",
                     "link": "static"
                 },
                 {
@@ -323,20 +324,20 @@
                 },
                 {
                     "name": "nghttp2",
-                    "include": "/clang64/include",
-                    "lib": "/clang64/lib/libnghttp2.a",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libnghttp2.a",
                     "link": "static"
                 },
                 {
                     "name": "readline",
-                    "include": "/clang64/include",
-                    "lib": "/clang64/lib/libreadline.a",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libreadline.a",
                     "link": "static"
                 },
                 {
                     "name": "ncurses",
-                    "include": "/clang64/include",
-                    "lib": "/clang64/lib/libncurses.a",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libncurses.a",
                     "link": "static"
                 },
                 {
@@ -346,8 +347,9 @@
                 },
                 {
                     "name": "mpdec",
-                    "lib": "",
-                    "link": "none"
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libmpdec.a",
+                    "link": "static"
                 },
                 {
                     "name": "hpdf",
@@ -363,21 +365,20 @@
             "dev_libraries": [
                 {
                     "name": "criterion",
-                    "include": "/clang64/include",
-                    "lib": "/clang64/lib/libcriterion.a",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libcriterion.a",
                     "link": "static"
                 },
                 {
                     "name": "catch2",
-                    "include": "/clang64/include",
-                    "lib": "/clang64/lib/libCatch2Main.a",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libCatch2Main.a",
                     "link": "static"
                 }
             ],
             "flags": [
                 "std=c++17",
                 "fms-extensions",
-                "static",
                 "DCROSS_COMPILE",
                 "D_WIN32",
                 "DWINVER=0x0601",

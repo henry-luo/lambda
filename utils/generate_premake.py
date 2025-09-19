@@ -304,12 +304,35 @@ class PremakeGenerator:
         # Add platform-specific compiler and flags
         platform_config = self.config.get('platform', '')
         if self.use_windows_config:
+            # Get Windows-specific platform configuration
+            platforms_config = self.config.get('platforms', {})
+            windows_config = platforms_config.get('windows', {})
+            
             self.premake_content.extend([
                 '    -- Native Windows build settings',
                 f'    toolset "{toolset}"',
-                '    defines { "WIN32", "_WIN32", "NATIVE_WINDOWS_BUILD" }',
+                '    defines { "WIN32", "_WIN32", "NATIVE_WINDOWS_BUILD", "CURL_STATICLIB", "UTF8PROC_STATIC" }',
                 '    ',
             ])
+            
+            # Add Windows-specific linker flags
+            linker_flags = windows_config.get('linker_flags', [])
+            if linker_flags:
+                self.premake_content.append('    linkoptions {')
+                for flag in linker_flags:
+                    if flag.startswith('l'):
+                        # Library flags start with 'l' (like lwinmm)
+                        self.premake_content.append(f'        "-{flag}",')
+                    elif flag.startswith('Wl,'):
+                        # Linker options start with 'Wl,'
+                        self.premake_content.append(f'        "-{flag}",')
+                    else:
+                        # Other flags like 'static', 'static-libgcc'
+                        self.premake_content.append(f'        "-{flag}",')
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
         elif platform_config == 'Linux_x64' or 'linux' in output.lower() or base_compiler in ['gcc', 'g++']:
             self.premake_content.extend([
                 '    -- Native Linux build settings',
@@ -658,10 +681,24 @@ class PremakeGenerator:
             # Add libdirs if we have dependencies
             self.premake_content.extend([
                 '    libdirs {',
-                '        "/opt/homebrew/lib",',
-                '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
-                '        "/usr/local/lib",',
-                '        "build/lib",',
+            ])
+            
+            # Add platform-specific library paths
+            if self.use_windows_config:
+                self.premake_content.extend([
+                    '        "/clang64/lib",',
+                    '        "win-native-deps/lib",',
+                    '        "build/lib",',
+                ])
+            else:
+                self.premake_content.extend([
+                    '        "/opt/homebrew/lib",',
+                    '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
+                    '        "/usr/local/lib",',
+                    '        "build/lib",',
+                ])
+            
+            self.premake_content.extend([
                 '    }',
                 '    '
             ])
@@ -809,9 +846,22 @@ class PremakeGenerator:
             if external_deps:
                 self.premake_content.extend([
                     '    libdirs {',
-                    '        "/opt/homebrew/lib",',
-                    '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
-                    '        "/usr/local/lib",',
+                ])
+                
+                # Add platform-specific library paths
+                if self.use_windows_config:
+                    self.premake_content.extend([
+                        '        "/clang64/lib",',
+                        '        "win-native-deps/lib",',
+                    ])
+                else:
+                    self.premake_content.extend([
+                        '        "/opt/homebrew/lib",',
+                        '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
+                        '        "/usr/local/lib",',
+                    ])
+                
+                self.premake_content.extend([
                     '    }',
                     '    ',
                     '    links {',
@@ -1136,6 +1186,12 @@ class PremakeGenerator:
                 '        "linux-deps/include",',
                 '        "linux-deps/include/ncurses",',
             ])
+        elif self.use_windows_config:
+            # Windows/MSYS2 paths
+            self.premake_content.extend([
+                '        "/clang64/include",',
+                '        "win-native-deps/include",',
+            ])
         else:
             # macOS paths (default)
             self.premake_content.extend([
@@ -1169,6 +1225,13 @@ class PremakeGenerator:
             # Linux cross-compilation paths
             self.premake_content.extend([
                 '        "linux-deps/lib",',
+                '        "build/lib",',
+            ])
+        elif self.use_windows_config:
+            # Windows/MSYS2 paths
+            self.premake_content.extend([
+                '        "/clang64/lib",',
+                '        "win-native-deps/lib",',
                 '        "build/lib",',
             ])
         else:
@@ -1336,7 +1399,14 @@ class PremakeGenerator:
             # Add static external libraries
             # If lambda-input-full is a dependency, we need to include curl/ssl/crypto/nghttp2 for proper linking
             # since static libraries don't propagate their dependencies in Premake
-            for lib_name in ['mpdec', 'utf8proc', 'mir', 'curl', 'nghttp2', 'ssl', 'crypto', 'libedit']:
+            base_libs = ['mpdec', 'utf8proc', 'mir', 'curl', 'nghttp2', 'ssl', 'crypto']
+            # Add platform-specific readline library
+            if self.use_windows_config:
+                base_libs.extend(['readline', 'ncurses'])
+            else:
+                base_libs.append('libedit')
+            
+            for lib_name in base_libs:
                 if lib_name in self.external_libraries:
                     # Skip if this library should be dynamic
                     if self.external_libraries[lib_name].get('link') == 'dynamic':
@@ -1579,14 +1649,26 @@ class PremakeGenerator:
                 self.premake_content.append(f'        "{lib_info["include"]}",')
         
         self.premake_content.extend([
-            '        "/usr/local/include",',
-            '        "/opt/homebrew/include",',
             '    }',
             '    ',
             '    libdirs {',
-            '        "/opt/homebrew/lib",',
-            '        "/usr/local/lib",',
-            '        "build/lib",',
+        ])
+        
+        # Add platform-specific library paths
+        if self.use_windows_config:
+            self.premake_content.extend([
+                '        "/clang64/lib",',
+                '        "win-native-deps/lib",',
+                '        "build/lib",',
+            ])
+        else:
+            self.premake_content.extend([
+                '        "/opt/homebrew/lib",',
+                '        "/usr/local/lib",',
+                '        "build/lib",',
+            ])
+        
+        self.premake_content.extend([
             '    }',
             '    '
         ])
@@ -1619,6 +1701,27 @@ class PremakeGenerator:
             self.premake_content.append('    linkoptions {')
             for lib_path in static_libs:
                 self.premake_content.append(f'        "{lib_path}",')
+            
+            # Add platform-specific additional libraries for static linking
+            # These are the same libraries that test projects include
+            base_libs = ['mpdec', 'utf8proc', 'mir', 'curl', 'nghttp2', 'ssl', 'crypto']
+            # Add platform-specific readline library
+            if self.use_windows_config:
+                base_libs.extend(['readline', 'ncurses'])
+            else:
+                base_libs.append('libedit')
+            
+            # Add these libraries if they're not already included and exist in external_libraries
+            for lib_name in base_libs:
+                if lib_name in self.external_libraries and lib_name not in [dep.replace('../../', '').replace('.a', '').replace('lib', '').replace('/clang64/lib/', '') for dep in static_libs]:
+                    lib_info = self.external_libraries[lib_name]
+                    if lib_info.get('link') != 'dynamic':
+                        lib_path = lib_info['lib']
+                        if not lib_path.startswith('/') and lib_path:
+                            lib_path = f"../../{lib_path}"
+                        if lib_path and lib_path != "../../":
+                            self.premake_content.append(f'        "{lib_path}",')
+            
             self.premake_content.extend([
                 '    }',
                 '    '
