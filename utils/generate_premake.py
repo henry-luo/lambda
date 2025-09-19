@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import glob
+import platform
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
@@ -241,16 +242,22 @@ class PremakeGenerator:
 
     def generate_workspace(self) -> None:
         """Generate the main workspace configuration"""
+        print("DEBUG: Generating workspace configuration...")
+        
         # Get workspace name from config or default
         workspace_name = self.config.get('workspace_name', 'Lambda')
         output = self.config.get('output', 'lambda.exe')
         startup_project = output.replace('.exe', '')
         
+        print(f"DEBUG: workspace_name={workspace_name}, output={output}, startup_project={startup_project}")
+        
         # Get compiler information
         base_compiler, toolset = self._get_compiler_info()
+        print(f"DEBUG: base_compiler={base_compiler}, toolset={toolset}")
         
         # Get platform and architecture information
         arch, platforms = self._get_platform_info()
+        print(f"DEBUG: arch={arch}, platforms={platforms}")
         
         platform_str = ', '.join([f'"{p}"' for p in platforms])
         
@@ -260,6 +267,7 @@ class PremakeGenerator:
             location = 'build_linux/test'
         else:
             location = 'build/premake'
+        print(f"DEBUG: platform_config={platform_config}, location={location}")
         
         self.premake_content.extend([
             f'workspace "{workspace_name}"',
@@ -281,13 +289,49 @@ class PremakeGenerator:
             '        defines { "DEBUG" }',
             '        symbols "On"',
             '        optimize "Off"',
+        ])
+        
+        # Add Windows-specific linker flags to debug configuration
+        if self.use_windows_config:
+            platforms_config = self.config.get('platforms', {})
+            windows_config = platforms_config.get('windows', {})
+            linker_flags = windows_config.get('linker_flags', [])
+            print(f"DEBUG: Adding Windows linker flags to Debug configuration: {linker_flags}")
+            
+            if linker_flags:
+                self.premake_content.append('        linkoptions {')
+                for flag in linker_flags:
+                    if flag.startswith('l'):
+                        # Library flags start with 'l' (like lwinmm)
+                        self.premake_content.append(f'            "-{flag}",')
+                        print(f"DEBUG: Added Windows library flag to Debug: -{flag}")
+                    elif flag.startswith('Wl,'):
+                        # Linker options start with 'Wl,'
+                        self.premake_content.append(f'            "-{flag}",')
+                        print(f"DEBUG: Added Windows linker option to Debug: -{flag}")
+                    else:
+                        # Other flags like 'static', 'static-libgcc'
+                        self.premake_content.append(f'            "-{flag}",')
+                        print(f"DEBUG: Added Windows other flag to Debug: -{flag}")
+                self.premake_content.extend([
+                    '        }',
+                ])
+                print("DEBUG: Added Windows linker flags to Debug configuration")
+        
+        self.premake_content.extend([
             '    ',
         ])
+        
+        print("DEBUG: Added Debug configuration filter")
         
         # Check if sanitizer should be disabled for linux platform
         platforms_config = self.config.get('platforms', {})
         linux_config = platforms_config.get('linux', {})
         disable_sanitizer = linux_config.get('disable_sanitizer', False)
+        
+        print(f"DEBUG: platforms_config keys: {list(platforms_config.keys())}")
+        print(f"DEBUG: linux_config: {linux_config}")
+        print(f"DEBUG: disable_sanitizer: {disable_sanitizer}")
         
         if not disable_sanitizer:
             self.premake_content.extend([
@@ -297,11 +341,13 @@ class PremakeGenerator:
                 '        linkoptions { "-fsanitize=address" }',
                 '    ',
             ])
+            print("DEBUG: Added AddressSanitizer for Debug (non-Linux)")
         else:
             self.premake_content.extend([
                 '    -- AddressSanitizer disabled for Linux platform',
                 '    ',
             ])
+            print("DEBUG: AddressSanitizer disabled")
         
         self.premake_content.extend([
             '    filter "configurations:Release"',
@@ -310,31 +356,8 @@ class PremakeGenerator:
             '    ',
         ])
         
-        # Add Windows-specific linker flags (if Windows platform)
-        if self.use_windows_config:
-            # Get Windows-specific platform configuration
-            platforms_config = self.config.get('platforms', {})
-            windows_config = platforms_config.get('windows', {})
-            
-            # Add Windows-specific linker flags
-            linker_flags = windows_config.get('linker_flags', [])
-            if linker_flags:
-                self.premake_content.append('    linkoptions {')
-                for flag in linker_flags:
-                    if flag.startswith('l'):
-                        # Library flags start with 'l' (like lwinmm)
-                        self.premake_content.append(f'        "-{flag}",')
-                    elif flag.startswith('Wl,'):
-                        # Linker options start with 'Wl,'
-                        self.premake_content.append(f'        "-{flag}",')
-                    else:
-                        # Other flags like 'static', 'static-libgcc'
-                        self.premake_content.append(f'        "-{flag}",')
-                self.premake_content.extend([
-                    '    }',
-                    '    '
-                ])
-        elif platform_config == 'Linux_x64' or 'linux' in output.lower() or base_compiler in ['gcc', 'g++']:
+        # Note: Windows linker flags are now added to Debug configuration above, not globally
+        if platform_config == 'Linux_x64' or 'linux' in output.lower() or base_compiler in ['gcc', 'g++']:
             self.premake_content.extend([
                 '    -- Native Linux build settings',
                 f'    toolset "{toolset}"',
@@ -1417,7 +1440,8 @@ class PremakeGenerator:
             base_libs = ['mpdec', 'utf8proc', 'mir', 'curl', 'nghttp2', 'ssl', 'crypto']
             # Add platform-specific readline library
             if self.use_windows_config:
-                base_libs.extend(['readline', 'ncurses'])
+                # Windows: skip readline/ncurses to avoid DLL dependencies
+                pass
             else:
                 base_libs.append('libedit')
             
@@ -1469,8 +1493,9 @@ class PremakeGenerator:
                         lib_flag = lib_flag[2:]  # Remove -l prefix
                     self.premake_content.append(f'        "{lib_flag}",')
             
-            # Add system libraries that libedit depends on
-            self.premake_content.append('        "ncurses",')
+            # Add system libraries that libedit depends on (Linux only)
+            if not self.use_windows_config:
+                self.premake_content.append('        "ncurses",')
             
             self.premake_content.extend([
                 '    }',
@@ -1615,12 +1640,8 @@ class PremakeGenerator:
         project_name = output.replace('.exe', '')
         
         # Use platform-specific target names
-        if 'linux' in output.lower():
-            target_name = 'lambda-linux'
-            target_extension = '.exe'
-        else:
-            target_name = 'lambda'
-            target_extension = '.exe'
+        target_name = 'lambda'
+        target_extension = '.exe'
         
         # Add files from source directories explicitly
         all_source_files = source_files[:]
@@ -1757,7 +1778,8 @@ class PremakeGenerator:
             base_libs = ['mpdec', 'utf8proc', 'mir', 'curl', 'nghttp2', 'ssl', 'crypto']
             # Add platform-specific readline library
             if self.use_windows_config:
-                base_libs.extend(['readline', 'ncurses'])
+                # Windows: skip readline/ncurses to avoid DLL dependencies
+                pass
             else:
                 base_libs.append('libedit')
             
@@ -1917,6 +1939,8 @@ class PremakeGenerator:
 
     def generate_premake_file(self, output_path: str = "premake5.lua") -> None:
         """Generate the complete premake5.lua file"""
+        print(f"DEBUG: Starting premake file generation, output_path={output_path}")
+        
         self.premake_content = []
         
         # Add header comment
@@ -1927,17 +1951,29 @@ class PremakeGenerator:
             '',
         ])
         
+        print("DEBUG: Added header comment")
+        
         # Generate all sections
+        print("DEBUG: Generating workspace...")
         self.generate_workspace()
+        print("DEBUG: Generating library projects...")
         self.generate_library_projects()
+        print("DEBUG: Generating complex libraries...")
         self.generate_complex_libraries()
+        print("DEBUG: Generating main program...")
         self.generate_main_program()
+        print("DEBUG: Generating test projects...")
         self.generate_test_projects()
+        
+        print(f"DEBUG: Total premake content lines: {len(self.premake_content)}")
         
         # Write to file
         try:
+            print(f"DEBUG: Attempting to write to {output_path}")
             with open(output_path, 'w') as f:
-                f.write('\n'.join(self.premake_content))
+                content_str = '\n'.join(self.premake_content)
+                f.write(content_str)
+                print(f"DEBUG: Successfully wrote {len(content_str)} characters to {output_path}")
             print(f"Generated {output_path} successfully")
         except IOError as e:
             print(f"Error writing {output_path}: {e}")
@@ -1962,14 +1998,20 @@ class PremakeGenerator:
 
 def main():
     """Main entry point"""
+    print(f"DEBUG: sys.argv = {sys.argv}")
+    
     config_file = "build_lambda_config.json"
     output_file = "premake5.lua"
     
     # Parse command line arguments
     if len(sys.argv) > 1:
         config_file = sys.argv[1]
+        print(f"DEBUG: config_file set to: {config_file}")
     if len(sys.argv) > 2:
         output_file = sys.argv[2]
+        print(f"DEBUG: output_file set to: {output_file}")
+    
+    print(f"DEBUG: Final config_file={config_file}, output_file={output_file}")
     
     # Generate Premake5 configuration
     generator = PremakeGenerator(config_file)

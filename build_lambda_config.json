@@ -110,24 +110,6 @@
             "include": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
             "lib": "-lz",
             "link": "dynamic"
-        },
-        {
-            "name": "nghttp2",
-            "include": "mac-deps/nghttp2/include",
-            "lib": "mac-deps/nghttp2/lib/libnghttp2.a",
-            "link": "static"
-        },
-        {
-            "name": "ncurses",
-            "include": "",
-            "lib": "-lncurses",
-            "link": "dynamic"
-        },
-        {
-            "name": "pthread",
-            "include": "",
-            "lib": "-lpthread",
-            "link": "dynamic"
         }
     ],
     "dev_libraries": [
@@ -196,7 +178,7 @@
                 "lib/log.c",
                 "lib/utf.c"
             ],
-            "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "curl", "nghttp2", "ssl", "crypto", "z", "CoreFoundation", "CoreServices", "SystemConfiguration", "criterion"],
+            "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "curl", "ssl", "crypto", "z", "criterion"],
             "include": "lib/mem-pool/include",
             "defines": ["SIMPLE_SCHEMA_PARSER"],
             "special_flags": "-lstdc++",
@@ -252,7 +234,8 @@
                 "O0"
             ],
             "linker_flags": [
-                "fsanitize=address"
+                "static-libgcc",
+                "static-libstdc++"
             ],
             "build_dir": "build_debug",
             "debug": true
@@ -263,9 +246,22 @@
             "exclude_source_files": [],
             "libraries": [
                 {
+                    "name": "readline",
+                    "link": "none"
+                },
+                {
+                    "name": "ncurses", 
+                    "link": "none"
+                },
+                {
+                    "name": "pthread",
+                    "link": "none"
+                },
+                {
                     "name": "curl",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libcurl.dll.a",
+                    "description": "libcurl HTTP client library (minimal static build)",
+                    "include": "win-native-deps/include",
+                    "lib": "win-native-deps/lib/libcurl.a",
                     "link": "static"
                 },
                 {
@@ -310,22 +306,12 @@
                     "link": "dynamic"
                 },
                 {
-                    "name": "nghttp2",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libnghttp2.a",
-                    "link": "static"
-                },
-                {
                     "name": "readline",
-                    "include": "/mingw64/include",
-                    "lib": "-lreadline",
-                    "link": "dynamic"
+                    "link": "none"
                 },
                 {
                     "name": "ncurses",
-                    "include": "/mingw64/include",
-                    "lib": "-lncurses",
-                    "link": "dynamic"
+                    "link": "none"
                 },
                 {
                     "name": "clock_compat",
@@ -391,6 +377,11 @@
                     "link": "dynamic"
                 },
                 {
+                    "name": "gdi32",
+                    "lib": "-lgdi32",
+                    "link": "dynamic"
+                },
+                {
                     "name": "shell32",
                     "lib": "-lshell32",
                     "link": "dynamic"
@@ -408,6 +399,31 @@
                 {
                     "name": "winmm",
                     "lib": "-lwinmm", 
+                    "link": "dynamic"
+                },
+                {
+                    "name": "crypt32",
+                    "lib": "-lcrypt32",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "bcrypt",
+                    "lib": "-lbcrypt",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "wldap32",
+                    "lib": "-lwldap32",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "iphlpapi",
+                    "lib": "-liphlpapi",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "secur32",
+                    "lib": "-lsecur32",
                     "link": "dynamic"
                 },
                 {
@@ -436,11 +452,6 @@
                 {
                     "name": "posix-compat",
                     "link": "none"
-                },
-                {
-                    "name": "readline_dep",
-                    "lib": "-lreadline",
-                    "link": "dynamic"
                 }
             ],
             "dev_libraries": [
@@ -475,12 +486,8 @@
             "linker_flags": [
                 "static-libgcc",
                 "static-libstdc++",
+                "Wl,-Bstatic",
                 "Wl,--subsystem,console",
-                "lwinmm",
-                "lkernel32",
-                "lpthread",
-                "D_POSIX_C_SOURCE=200809L",
-                "v",
                 "Wl,--verbose"
             ],
             "build_dir": "build_windows",
@@ -577,6 +584,18 @@
                     "include": "/usr/local/include",
                     "lib": "/usr/local/lib/liblexbor_static.a",
                     "link": "static"
+                },
+                {
+                    "name": "pthread",
+                    "include": "",
+                    "lib": "-lpthread",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "ncurses",
+                    "include": "",
+                    "lib": "-lncurses",
+                    "link": "dynamic"
                 },
                 {
                     "name": "stdc++fs",

@@ -138,6 +138,9 @@ install_msys2_package "git" "Git version control"
 install_msys2_package "${TOOLCHAIN_PREFIX}-gdb" "GDB debugger"
 install_msys2_package "jq" "JSON processor for build script configuration parsing"
 
+# HTTP/networking libraries - minimal setup for libcurl only
+# Note: nghttp2 removed - building minimal libcurl without HTTP/2 support
+
 # Additional utilities
 install_msys2_package "unzip" "Unzip utility"
 install_msys2_package "curl" "curl for downloading"
@@ -229,7 +232,7 @@ download_extract() {
         if command_exists curl; then
             curl -L "$url" -o "$archive"
         elif command_exists wget; then
-            wget "$url" -O "$archive"
+            wget --no-check-certificate "$url" -O "$archive"
         else
             echo "Error: Neither curl nor wget available for download"
             cd - > /dev/null
@@ -248,6 +251,230 @@ download_extract() {
     else
         echo "$name already exists, skipping download"
     fi
+}
+
+# Function to build minimal static libcurl for Windows (HTTP/HTTPS only)
+build_minimal_static_libcurl() {
+    echo "Building minimal static libcurl for Windows native (HTTP/HTTPS only)..."
+    
+    # Check if already built
+    if [ -f "$DEPS_DIR/lib/libcurl.a" ]; then
+        echo "Minimal static libcurl already built"
+        return 0
+    fi
+    
+    # Try multiple curl versions if the primary one fails
+    CURL_VERSIONS=("8.10.1" "8.9.1" "8.8.0")
+    CURL_SUCCESS=false
+    
+    for CURL_VERSION in "${CURL_VERSIONS[@]}"; do
+        CURL_DIR="curl-$CURL_VERSION"
+        
+        if [ -d "$DEPS_DIR/src/$CURL_DIR" ]; then
+            echo "Found existing curl directory: $CURL_DIR"
+            CURL_SUCCESS=true
+            break
+        fi
+        
+        echo "Attempting to download curl $CURL_VERSION..."
+        cd "$DEPS_DIR/src"
+        
+        CURL_URL="https://curl.se/download/$CURL_DIR.tar.gz"
+        CURL_ARCHIVE="$CURL_DIR.tar.gz"
+        
+        # Try downloading with curl first (more reliable in MSYS), then wget as fallback
+        DOWNLOAD_SUCCESS=false
+        
+        if command_exists curl; then
+            echo "Downloading with curl from: $CURL_URL"
+            if curl -L -f --connect-timeout 30 --max-time 300 "$CURL_URL" -o "$CURL_ARCHIVE"; then
+                DOWNLOAD_SUCCESS=true
+            else
+                echo "curl download failed for version $CURL_VERSION"
+            fi
+        fi
+        
+        if [ "$DOWNLOAD_SUCCESS" = "false" ] && command_exists wget; then
+            echo "Downloading with wget from: $CURL_URL (fallback)"
+            if wget --timeout=30 --tries=3 --no-check-certificate "$CURL_URL" -O "$CURL_ARCHIVE"; then
+                DOWNLOAD_SUCCESS=true
+            else
+                echo "wget download failed for version $CURL_VERSION"
+            fi
+        fi
+        
+        if [ "$DOWNLOAD_SUCCESS" = "false" ]; then
+            echo "⚠️  Failed to download curl $CURL_VERSION, trying next version..."
+            rm -f "$CURL_ARCHIVE"
+            cd - > /dev/null
+            continue
+        fi
+        
+        # Verify the downloaded file exists and has reasonable size
+        if [ ! -f "$CURL_ARCHIVE" ]; then
+            echo "⚠️  Downloaded file $CURL_ARCHIVE not found for version $CURL_VERSION"
+            cd - > /dev/null
+            continue
+        fi
+        
+        ARCHIVE_SIZE=$(stat -c%s "$CURL_ARCHIVE" 2>/dev/null || wc -c < "$CURL_ARCHIVE" 2>/dev/null || echo "0")
+        if [ "$ARCHIVE_SIZE" -lt 1000000 ]; then  # Less than 1MB is suspicious
+            echo "⚠️  Downloaded file $CURL_ARCHIVE is too small ($ARCHIVE_SIZE bytes) for version $CURL_VERSION"
+            echo "This might be an error page or incomplete download"
+            rm -f "$CURL_ARCHIVE"
+            cd - > /dev/null
+            continue
+        fi
+        
+        echo "✅ Downloaded curl $CURL_VERSION successfully ($ARCHIVE_SIZE bytes)"
+        echo "Extracting $CURL_ARCHIVE..."
+        
+        if tar -xzf "$CURL_ARCHIVE"; then
+            rm "$CURL_ARCHIVE"
+            echo "✅ Extraction successful for curl $CURL_VERSION"
+            CURL_SUCCESS=true
+            cd - > /dev/null
+            break
+        else
+            echo "❌ Error: Failed to extract $CURL_ARCHIVE for version $CURL_VERSION"
+            rm -f "$CURL_ARCHIVE"
+            cd - > /dev/null
+            continue
+        fi
+    done
+    
+    if [ "$CURL_SUCCESS" = "false" ]; then
+        echo "❌ Error: Failed to download any curl version"
+        echo "Tried versions: ${CURL_VERSIONS[*]}"
+        echo "Please check your internet connection and try again"
+        return 1
+    fi
+    
+    # Find the successfully downloaded curl directory
+    for CURL_VERSION in "${CURL_VERSIONS[@]}"; do
+        if [ -d "$DEPS_DIR/src/curl-$CURL_VERSION" ]; then
+            CURL_DIR="curl-$CURL_VERSION"
+            break
+        fi
+    done
+    
+    echo "Using curl directory: $CURL_DIR"
+    cd "$DEPS_DIR/src/$CURL_DIR"
+    
+    # Clean any previous builds
+    echo "Cleaning previous builds..."
+    make distclean 2>/dev/null || true
+    
+    # Set up environment for Windows compilation
+    if [[ "$MSYSTEM" == "CLANG64" ]]; then
+        export CC="clang"
+        export CXX="clang++"
+        export AR="llvm-ar"
+        export RANLIB="llvm-ranlib"
+        export STRIP="llvm-strip"
+    else
+        export CC="gcc"
+        export CXX="g++"
+        export AR="ar"
+        export RANLIB="ranlib"
+        export STRIP="strip"
+    fi
+    
+    export CFLAGS="-O2 -DNDEBUG -D_WIN32 -DWINDOWS"
+    export CXXFLAGS="-O2 -DNDEBUG -D_WIN32 -DWINDOWS"
+    export LDFLAGS=""
+    
+    # Configure with bare minimum features - absolutely no SSH, IDN, HTTP2, or advanced protocols
+    echo "Configuring libcurl with minimal options (HTTP/HTTPS only)..."
+    if ./configure \
+        --prefix="$SCRIPT_DIR/$DEPS_DIR" \
+        --enable-static \
+        --disable-shared \
+        --with-schannel \
+        --disable-http2 \
+        --without-nghttp2 \
+        --without-nghttp3 \
+        --without-ngtcp2 \
+        --without-libssh2 \
+        --without-libssh \
+        --without-libidn2 \
+        --without-libidn \
+        --without-libpsl \
+        --without-brotli \
+        --without-zstd \
+        --without-winidn \
+        --disable-ldap \
+        --disable-ldaps \
+        --disable-rtsp \
+        --disable-ftp \
+        --disable-ftps \
+        --disable-file \
+        --disable-dict \
+        --disable-telnet \
+        --disable-tftp \
+        --disable-pop3 \
+        --disable-imap \
+        --disable-smtp \
+        --disable-gopher \
+        --disable-smb \
+        --disable-mqtt \
+        --disable-manual \
+        --disable-libcurl-option \
+        --disable-sspi \
+        --disable-crypto-auth \
+        --disable-ntlm \
+        --disable-tls-srp \
+        --disable-unix-sockets \
+        --disable-cookies \
+        --disable-socketpair \
+        --disable-http-auth \
+        --disable-doh \
+        --disable-mime \
+        --disable-dateparse \
+        --disable-netrc \
+        --disable-progress-meter \
+        --disable-dnsshuffle \
+        --disable-alt-svc; then
+        
+        echo "Configuration complete. Building..."
+        if make -j4; then
+            echo "Installing to win-native-deps..."
+            if make install; then
+                echo "✅ Minimal static libcurl built successfully"
+                
+                # Verify the build doesn't contain problematic dependencies
+                echo "Verifying minimal build..."
+                
+                # Check for SSH objects
+                if ar -t "$SCRIPT_DIR/$DEPS_DIR/lib/libcurl.a" | grep -i ssh; then
+                    echo "WARNING: SSH objects found in libcurl.a"
+                else
+                    echo "✓ No SSH objects found"
+                fi
+                
+                # Check for IDN objects
+                if ar -t "$SCRIPT_DIR/$DEPS_DIR/lib/libcurl.a" | grep -i idn; then
+                    echo "WARNING: IDN objects found in libcurl.a"
+                else
+                    echo "✓ No IDN objects found"
+                fi
+                
+                # Check for HTTP2 objects
+                if ar -t "$SCRIPT_DIR/$DEPS_DIR/lib/libcurl.a" | grep -i http2; then
+                    echo "INFO: HTTP2 objects found (but should not cause linking issues)"
+                else
+                    echo "✓ No HTTP2 objects found"
+                fi
+                
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+    
+    echo "❌ Minimal libcurl build failed"
+    cd - > /dev/null
+    return 1
 }
 
 # Build MIR (JIT compiler)
@@ -420,6 +647,19 @@ fi
 # Build zlog (logging library) - REMOVED: No longer a dependency
 # zlog has been removed as a dependency from Lambda
 
+# Build libcurl with minimal static build for Windows
+echo "Setting up minimal static libcurl..."
+if [ -f "$DEPS_DIR/lib/libcurl.a" ]; then
+    echo "Minimal static libcurl already available"
+else
+    if ! build_minimal_static_libcurl; then
+        echo "Warning: minimal libcurl build failed"
+        exit 1
+    else
+        echo "Minimal static libcurl built successfully"
+    fi
+fi
+
 # Verify compiler setup
 echo ""
 echo "Verifying compiler setup..."
@@ -496,6 +736,8 @@ echo "  ✅ GMP (system package)"
 echo "  ✅ ICU (Unicode support)"
 echo "  ⏭️  Tree-sitter (managed directly under lambda/)"
 echo "  📦 MIR (building from source - see verification below)"
+echo "  📦 utf8proc (building from source - see verification below)"
+echo "  📦 libcurl minimal static (building from source - HTTP/HTTPS only, no HTTP/2)"
 echo ""
 
 # Final verification
@@ -509,6 +751,20 @@ if [ -f "$DEPS_DIR/lib/libmir.a" ]; then
     echo "✅ MIR library available"
 else
     echo "⚠️  MIR library missing"
+fi
+
+# Check utf8proc
+if [ -f "$DEPS_DIR/lib/libutf8proc.a" ]; then
+    echo "✅ utf8proc library available"
+else
+    echo "⚠️  utf8proc library missing"
+fi
+
+# Check libcurl
+if [ -f "$DEPS_DIR/lib/libcurl.a" ]; then
+    echo "✅ libcurl library available (minimal static build)"
+else
+    echo "⚠️  libcurl library missing"
 fi
 
 # Check compilers
@@ -526,3 +782,7 @@ fi
 
 echo ""
 echo "Setup completed! You can now build Lambda natively for Windows."
+echo ""
+echo "🔨 To build Lambda:"
+echo "  make build        # For native Windows build"
+echo "  make build-windows # For cross-compilation target"
