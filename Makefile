@@ -217,6 +217,34 @@ endef
 # Combined tree-sitter libraries target
 tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
 
+# Build tree-sitter without Unicode/ICU dependencies (minimal build)
+# Uses the amalgamated lib.c file approach recommended by ChatGPT
+build-tree-sitter:
+	@echo "Building minimal tree-sitter without Unicode/ICU dependencies..."
+	@echo "🔧 Using amalgamated build (lib.c) - no Unicode dependencies"
+	@cd lambda/tree-sitter && \
+	echo "🧹 Cleaning previous build..." && \
+	rm -f libtree-sitter-minimal.a tree_sitter.o && \
+	echo "🔧 Compiling amalgamated tree-sitter..." && \
+	env PATH="/mingw64/bin:$$PATH" $(CC) -c lib/src/lib.c \
+		-Ilib/include \
+		-O3 -Wall -Wextra -std=c11 -fPIC \
+		-D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE \
+		-o tree_sitter.o && \
+	echo "� Creating static library..." && \
+	env PATH="/mingw64/bin:$$PATH" $(AR) rcs libtree-sitter-minimal.a tree_sitter.o && \
+	echo "🧹 Cleaning object file..." && \
+	rm -f tree_sitter.o && \
+	echo "✅ Minimal tree-sitter library built: lambda/tree-sitter/libtree-sitter-minimal.a" && \
+	ls -la libtree-sitter-minimal.a
+
+# Clean minimal tree-sitter build
+clean-tree-sitter-minimal:
+	@echo "Cleaning minimal tree-sitter build..."
+	@cd lambda/tree-sitter && \
+	rm -f libtree-sitter-minimal.a tree_sitter.o && \
+	echo "✅ Minimal tree-sitter build cleaned."
+
 # Default target
 .DEFAULT_GOAL := build
 
@@ -224,11 +252,11 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
 .PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-input run help install uninstall \
         lambda radiant window cross-compile format lint check docs intellisense analyze-size \
         build-windows build-linux build-debug build-release clean-all distclean \
-        build-windows build-linux build-debug build-release clean-all distclean \
+        build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
         verify-windows verify-linux test-windows test-linux tree-sitter-libs \
         generate-premake clean-premake build-test build-test-linux build-catch2 test-catch2 \
         build-test-catch2-linux test-catch2-linux test-catch2-linux-docker test-catch2-linux-qemu \
-        build-mingw64
+        build-mingw64 build-tree-sitter clean-tree-sitter-minimal
 
 # Help target - shows available commands
 help:
@@ -272,6 +300,9 @@ help:
 	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
 	@echo "                     (automatic when grammar.js changes)"
 	@echo "  tree-sitter-libs - Build tree-sitter and tree-sitter-lambda libraries"
+	@echo "  build-tree-sitter - Build tree-sitter without Unicode/ICU dependencies (Windows)"
+	@echo "                      Creates libtree-sitter-minimal.a for Windows builds"
+	@echo "  clean-tree-sitter-minimal - Clean minimal tree-sitter build artifacts"
 	@echo ""
 	@echo "Development:"
 	@echo "  test          - Run comprehensive unit tests"
