@@ -127,6 +127,7 @@ install_msys2_package "base-devel" "Base development tools (make, autotools, etc
 install_msys2_package "$COMPILER_PACKAGE" "C/C++ compiler"
 install_msys2_package "${TOOLCHAIN_PREFIX}-cmake" "CMake build system"
 install_msys2_package "${TOOLCHAIN_PREFIX}-ninja" "Ninja build system"
+install_msys2_package "${TOOLCHAIN_PREFIX}-premake" "Premake5 build system generator (required for Lambda)"
 # Note: pkgconf is already installed as a dependency of cmake, no need for separate pkg-config
 
 # Essential libraries for Lambda
@@ -689,7 +690,7 @@ fi
 # Check other tools
 echo ""
 echo "Verifying build tools..."
-tools=("make" "cmake" "ninja" "git" "pkg-config")
+tools=("make" "cmake" "ninja" "git" "pkg-config" "premake5")
 for tool in "${tools[@]}"; do
     if command_exists "$tool"; then
         version=$($tool --version 2>/dev/null | head -1 || echo "version unknown")
@@ -730,7 +731,7 @@ echo "For debug build:"
 echo "  ./compile-win-native.sh --debug"
 echo ""
 echo "Dependencies installed:"
-echo "  ✅ Build tools (make, cmake, ninja)"
+echo "  ✅ Build tools (make, cmake, ninja, premake5)"
 echo "  ✅ Compiler toolchain ($COMPILER_NAME)"
 echo "  ✅ GMP (system package)"
 echo "  ✅ ICU (Unicode support)"
