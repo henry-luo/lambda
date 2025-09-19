@@ -41,7 +41,8 @@ class PremakeGenerator:
         
         # Parse regular libraries
         for lib in self.config.get('libraries', []):
-            if 'lib' in lib:  # Include both static and dynamic libraries
+            # Include libraries with lib field or those with link='none'
+            if 'lib' in lib or lib.get('link') == 'none':
                 libraries[lib['name']] = {
                     'include': lib.get('include', ''),
                     'lib': lib.get('lib', ''),
@@ -50,7 +51,8 @@ class PremakeGenerator:
         
         # Parse dev_libraries (development/test-only libraries like ginac, cln)
         for lib in self.config.get('dev_libraries', []):
-            if 'lib' in lib:  # Include both static and dynamic libraries
+            # Include libraries with lib field or those with link='none'
+            if 'lib' in lib or lib.get('link') == 'none':
                 libraries[lib['name']] = {
                     'include': lib.get('include', ''),
                     'lib': lib.get('lib', ''),
@@ -101,7 +103,8 @@ class PremakeGenerator:
             
             # Override with Windows-specific libraries
             for lib in windows_config.get('libraries', []):
-                if 'lib' in lib:
+                # Include libraries with lib field or those with link='none'
+                if 'lib' in lib or lib.get('link') == 'none':
                     libraries[lib['name']] = {
                         'include': lib.get('include', ''),
                         'lib': lib.get('lib', ''),
@@ -110,7 +113,8 @@ class PremakeGenerator:
             
             # Override with Windows-specific dev_libraries  
             for lib in windows_config.get('dev_libraries', []):
-                if 'lib' in lib:
+                # Include libraries with lib field or those with link='none'
+                if 'lib' in lib or lib.get('link') == 'none':
                     libraries[lib['name']] = {
                         'include': lib.get('include', ''),
                         'lib': lib.get('lib', ''),
@@ -712,6 +716,11 @@ class PremakeGenerator:
                 for dep in external_deps:
                     if dep in self.external_libraries:
                         lib_info = self.external_libraries[dep]
+                        
+                        # Skip libraries with link type "none"
+                        if lib_info.get('link') == 'none':
+                            continue
+                            
                         lib_path = lib_info['lib']
                         
                         if lib_info.get('link') == 'dynamic':
@@ -1175,6 +1184,10 @@ class PremakeGenerator:
         
         # Add external library include paths from parsed definitions
         for lib_name, lib_info in self.external_libraries.items():
+            # Skip libraries with link type "none"
+            if lib_info.get('link') == 'none':
+                continue
+                
             if lib_info['include']:
                 self.premake_content.append(f'        "{lib_info["include"]}",')
         
@@ -1347,6 +1360,11 @@ class PremakeGenerator:
             for lib_name in libraries:
                 if lib_name in self.external_libraries:
                     lib_info = self.external_libraries[lib_name]
+                    
+                    # Skip libraries with link type "none"
+                    if lib_info.get('link') == 'none':
+                        continue
+                        
                     if lib_info.get('link') == 'static':
                         lib_path = lib_info['lib']
                         if not lib_path.startswith('/'):
@@ -1601,6 +1619,16 @@ class PremakeGenerator:
         
         # Add files from source directories explicitly
         all_source_files = source_files[:]
+        
+        # Get platform-specific exclusions and additions
+        exclude_files = []
+        additional_files = []
+        platforms_config = self.config.get('platforms', {})
+        if self.use_windows_config:
+            windows_config = platforms_config.get('windows', {})
+            exclude_files = windows_config.get('exclude_source_files', [])
+            additional_files = windows_config.get('additional_source_files', [])
+        
         for source_dir in source_dirs:
             import glob
             c_pattern = f"{source_dir}/**/*.c"
@@ -1613,6 +1641,14 @@ class PremakeGenerator:
             # Find all C++ files  
             cpp_files = glob.glob(cpp_pattern, recursive=True)
             all_source_files.extend(cpp_files)
+        
+        # Remove excluded files
+        if exclude_files:
+            all_source_files = [f for f in all_source_files if f not in exclude_files]
+        
+        # Add additional platform-specific files
+        if additional_files:
+            all_source_files.extend(additional_files)
         
         self.premake_content.extend([
             f'project "{project_name}"',
@@ -1645,6 +1681,10 @@ class PremakeGenerator:
                         for lib in self.config.get('dev_libraries', [])}
         
         for lib_name, lib_info in self.external_libraries.items():
+            # Skip libraries with link type "none"
+            if lib_info.get('link') == 'none':
+                continue
+                
             if lib_info['include'] and lib_name not in dev_lib_names:
                 self.premake_content.append(f'        "{lib_info["include"]}",')
         
@@ -1681,6 +1721,11 @@ class PremakeGenerator:
         for dep in dependencies:
             if dep in self.external_libraries:
                 lib_info = self.external_libraries[dep]
+                
+                # Skip libraries with link type "none"
+                if lib_info.get('link') == 'none':
+                    continue
+                    
                 lib_path = lib_info['lib']
                 
                 if lib_info.get('link') == 'dynamic':
@@ -1715,6 +1760,11 @@ class PremakeGenerator:
             for lib_name in base_libs:
                 if lib_name in self.external_libraries and lib_name not in [dep.replace('../../', '').replace('.a', '').replace('lib', '').replace('/clang64/lib/', '') for dep in static_libs]:
                     lib_info = self.external_libraries[lib_name]
+                    
+                    # Skip libraries with link type "none"
+                    if lib_info.get('link') == 'none':
+                        continue
+                        
                     if lib_info.get('link') != 'dynamic':
                         lib_path = lib_info['lib']
                         if not lib_path.startswith('/') and lib_path:
@@ -1742,6 +1792,11 @@ class PremakeGenerator:
             for dep in dependencies:
                 if dep in self.external_libraries:
                     lib_info = self.external_libraries[dep]
+                    
+                    # Skip libraries with link type "none"
+                    if lib_info.get('link') == 'none':
+                        continue
+                        
                     if lib_info.get('link') == 'static':
                         lib_path = lib_info['lib']
                         if not lib_path.startswith('/'):
