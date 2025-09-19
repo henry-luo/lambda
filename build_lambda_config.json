@@ -271,25 +271,13 @@
                 {
                     "name": "tree-sitter",
                     "include": "lambda/tree-sitter/lib/include",
-                    "lib": "lambda/tree-sitter/libtree-sitter.a",
+                    "lib": "lambda/tree-sitter/libtree-sitter-minimal.a",
                     "link": "static"
                 },
                 {
                     "name": "tree-sitter-lambda",
                     "include": "lambda/tree-sitter-lambda/bindings/c",
                     "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-                    "link": "static"
-                },
-                {
-                    "name": "icuuc",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libicuuc.a",
-                    "link": "static"
-                },
-                {
-                    "name": "icudata",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libicudata.a",
                     "link": "static"
                 },
                 {
