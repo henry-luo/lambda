@@ -94,14 +94,6 @@
             "link": "static"
         },
         {
-            "name": "hpdf",
-            "description": "libharu PDF generation library",
-            "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib/libhpdf.a",
-            "link": "static",
-            "optional": true
-        },
-        {
             "name": "ssl",
             "include": "/opt/homebrew/include/openssl",
             "lib": "/opt/homebrew/lib/libssl.a",
@@ -123,12 +115,6 @@
             "name": "nghttp2",
             "include": "mac-deps/nghttp2/include",
             "lib": "mac-deps/nghttp2/lib/libnghttp2.a",
-            "link": "static"
-        },
-        {
-            "name": "libedit",
-            "include": "/opt/homebrew/opt/libedit/include",
-            "lib": "/opt/homebrew/opt/libedit/lib/libedit.a",
             "link": "static"
         },
         {
@@ -274,6 +260,7 @@
         "windows": {
             "output": "lambda-windows.exe",
             "compiler": "gcc",
+            "exclude_source_files": [],
             "libraries": [
                 {
                     "name": "curl",
@@ -291,6 +278,18 @@
                     "name": "tree-sitter-lambda",
                     "include": "lambda/tree-sitter-lambda/bindings/c",
                     "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+                    "link": "static"
+                },
+                {
+                    "name": "icuuc",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libicuuc.a",
+                    "link": "static"
+                },
+                {
+                    "name": "icudata",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libicudata.a",
                     "link": "static"
                 },
                 {
@@ -331,14 +330,14 @@
                 {
                     "name": "readline",
                     "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libreadline.a",
-                    "link": "static"
+                    "lib": "-lreadline",
+                    "link": "dynamic"
                 },
                 {
                     "name": "ncurses",
                     "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libncurses.a",
-                    "link": "static"
+                    "lib": "-lncurses",
+                    "link": "dynamic"
                 },
                 {
                     "name": "clock_compat",
@@ -353,13 +352,97 @@
                 },
                 {
                     "name": "hpdf",
-                    "lib": "",
                     "link": "none"
                 },
                 {
                     "name": "libedit",
-                    "lib": "",
                     "link": "none"
+                },
+                {
+                    "name": "mingw32",
+                    "lib": "-lmingw32",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "gcc",
+                    "lib": "-lgcc",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "gcc_s",
+                    "lib": "-lgcc_s",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "mingw-posix",
+                    "lib": "-lmingwex",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "msvcrt",
+                    "lib": "-lmsvcrt",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "kernel32",
+                    "lib": "-lkernel32",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "user32",
+                    "lib": "-luser32",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "advapi32",
+                    "lib": "-ladvapi32",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "ws2_32",
+                    "lib": "-lws2_32",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "ssp",
+                    "lib": "-lssp",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "winmm",
+                    "lib": "-lwinmm", 
+                    "link": "dynamic"
+                },
+                {
+                    "name": "posix",
+                    "lib": "-D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE",
+                    "link": "flags"
+                },
+
+                {
+                    "name": "setargv",
+                    "lib": "-lsetargv",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "mingwex",
+                    "lib": "-lmingwex",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "moldname",
+                    "lib": "-lmoldname",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "binmode",
+                    "lib": "-lbinmode",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "readline_dep",
+                    "lib": "-lreadline",
+                    "link": "dynamic"
                 }
             ],
             "dev_libraries": [
@@ -384,8 +467,10 @@
                 "DWINVER=0x0601",
                 "D_WIN32_WINNT=0x0601",
                 "D__USE_MINGW_ANSI_STDIO=1",
-                "D_POSIX_C_SOURCE=199309L",
-                "D_TIMESPEC_DEFINED"
+                "D_POSIX_C_SOURCE=200809L",
+                "D_GNU_SOURCE",
+                "D_TIMESPEC_DEFINED",
+                "v"
             ],
             "linker_flags": [
                 "static-libgcc",
@@ -393,7 +478,10 @@
                 "Wl,--subsystem,console",
                 "lwinmm",
                 "lkernel32",
-                "lpthread"
+                "lpthread",
+                "D_POSIX_C_SOURCE=200809L",
+                "v",
+                "Wl,--verbose"
             ],
             "build_dir": "build_windows",
             "cross_compile": true,

@@ -13,6 +13,18 @@
 #include "transpiler.hpp"  // For Runtime struct definition
 #include "ast.hpp"  // For print_root_item declaration
 
+#ifdef _WIN32
+// Windows compatibility shim for __intrinsic_setjmpex
+// In MinGW, we'll use regular setjmp instead of the Microsoft intrinsic
+#include <setjmp.h>
+extern "C" int __intrinsic_setjmpex(jmp_buf env, void* context) {
+    // In practice, __intrinsic_setjmpex is similar to setjmp but with SEH support
+    // For MinGW compatibility, we'll use standard setjmp
+    (void)context; // Unused in MinGW version
+    return setjmp(env);
+}
+#endif
+
 // Forward declare additional transpiler functions
 extern "C" {
     char* read_text_file(const char *filename);

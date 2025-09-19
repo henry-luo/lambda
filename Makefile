@@ -62,17 +62,45 @@ JOBS := $(NPROCS)
 LINK_JOBS := 1
 
 # Detect Python executable
-# On MSYS2/Windows, python3 may be in /clang64/bin/
-PYTHON := $(shell command -v python3 2>/dev/null || command -v /clang64/bin/python3 2>/dev/null || echo python3)
+# On MSYS2/Windows, prefer MINGW64 over CLANG64 for Universal CRT avoidance
+# Force explicit paths for MSYS environment compatibility
+ifeq ($(shell test -f /mingw64/bin/python3 && echo yes),yes)
+    PYTHON := /mingw64/bin/python3
+else ifeq ($(shell test -f /clang64/bin/python3 && echo yes),yes)
+    PYTHON := /clang64/bin/python3
+else
+    PYTHON := python3
+endif
 
 # Detect Premake5 executable
-# On MSYS2/Windows, premake5 may be in /clang64/bin/
-PREMAKE5 := $(shell command -v premake5 2>/dev/null || command -v /clang64/bin/premake5 2>/dev/null || echo premake5)
+# On MSYS2/Windows, prefer MINGW64 over CLANG64 for Universal CRT avoidance
+PREMAKE5 := $(shell command -v premake5 2>/dev/null || command -v /mingw64/bin/premake5 2>/dev/null || command -v /clang64/bin/premake5 2>/dev/null || echo premake5)
+
+# MINGW64 Environment Detection and Validation
+MSYSTEM_DETECTED := $(shell echo $$MSYSTEM)
+IS_MINGW64 := $(shell [ "$(MSYSTEM_DETECTED)" = "MINGW64" ] && echo "yes" || echo "no")
+IS_CLANG64 := $(shell [ "$(MSYSTEM_DETECTED)" = "CLANG64" ] && echo "yes" || echo "no")
+IS_MSYS2 := $(shell [ -n "$(MSYSTEM_DETECTED)" ] && echo "yes" || echo "no")
 
 # Detect C/C++ compilers
-# On MSYS2/Windows with clang64, use clang instead of gcc
-CC := $(shell command -v gcc 2>/dev/null || command -v /clang64/bin/clang 2>/dev/null || echo gcc)
-CXX := $(shell command -v g++ 2>/dev/null || command -v /clang64/bin/clang++ 2>/dev/null || echo g++)
+# On MSYS2/Windows, prefer MINGW64 GCC over CLANG64 to avoid Universal CRT
+# Force explicit paths for MSYS environment compatibility
+ifeq ($(shell test -f /mingw64/bin/gcc && echo yes),yes)
+    CC := /mingw64/bin/gcc
+    CXX := /mingw64/bin/g++
+    AR := /mingw64/bin/ar
+    RANLIB := /mingw64/bin/ranlib
+else ifeq ($(shell test -f /clang64/bin/clang && echo yes),yes)
+    CC := /clang64/bin/clang
+    CXX := /clang64/bin/clang++
+    AR := /clang64/bin/ar
+    RANLIB := /clang64/bin/ranlib
+else
+    CC := gcc
+    CXX := g++
+    AR := ar
+    RANLIB := ranlib
+endif
 
 # Tree-sitter grammar dependencies
 # This system automatically manages the dependency chain:
@@ -117,20 +145,76 @@ $(LAMBDA_EMBED_H_FILE): $(LAMBDA_H_FILE)
 	fi
 
 # Tree-sitter library targets
+# Use system-installed libtree-sitter on Windows/MSYS2, build from source otherwise
+ifeq ($(IS_MSYS2),yes)
+TREE_SITTER_LIB = /mingw64/lib/libtree-sitter.dll.a
+else
 TREE_SITTER_LIB = lambda/tree-sitter/libtree-sitter.a
+endif
 TREE_SITTER_LAMBDA_LIB = lambda/tree-sitter-lambda/libtree-sitter-lambda.a
 
-# Build tree-sitter library
+# Build or verify tree-sitter library
 $(TREE_SITTER_LIB):
-	@echo "Building tree-sitter library..."
-	$(MAKE) -C lambda/tree-sitter libtree-sitter.a
+ifeq ($(IS_MSYS2),yes)
+	@echo "Using system libtree-sitter library..."
+	@if [ ! -f "$(TREE_SITTER_LIB)" ]; then \
+		echo "❌ System libtree-sitter not found. Install with: pacman -S mingw-w64-x86_64-libtree-sitter"; \
+		exit 1; \
+	else \
+		echo "✅ Found system libtree-sitter: $(TREE_SITTER_LIB)"; \
+	fi
+else
+	@echo "Building tree-sitter library from source..."
+	@echo "🔧 Compiler: $(CC)"
+	@echo "🔧 CXX: $(CXX)"
+	@echo "🔧 Environment: MSYSTEM=$(MSYSTEM)"
+	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter libtree-sitter.a CC="$(CC)" CXX="$(CXX)" V=1
+endif
 
 # Build tree-sitter-lambda library (depends on parser generation)
 $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
 	@echo "Building tree-sitter-lambda library..."
-	$(MAKE) -C lambda/tree-sitter-lambda libtree-sitter-lambda.a
+	@echo "🔧 Compiler: $(CC)"
+	@echo "🔧 CXX: $(CXX)"
+	@echo "🔧 Environment: MSYSTEM=$(MSYSTEM)"
+	@echo "🔧 Working directory: lambda/tree-sitter-lambda"
+	@echo "🔧 Unsetting OS variable to bypass Windows check..."
+	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-lambda libtree-sitter-lambda.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
-# Combined target for all tree-sitter libraries
+# MINGW64 Environment Validation Functions
+define mingw64_env_check
+	@if [ "$(IS_MSYS2)" = "yes" ] && [ "$(IS_MINGW64)" != "yes" ]; then \
+		echo "⚠️  Warning: Not in MINGW64 environment!"; \
+		echo "Current MSYSTEM: $(MSYSTEM_DETECTED)"; \
+	fi
+endef
+
+define mingw64_toolchain_verify
+	@echo "🔍 Verifying toolchain..."
+	@if command -v $(CC) >/dev/null 2>&1; then \
+		echo "✅ Compiler: $(CC) ($(shell $(CC) --version 2>/dev/null | head -1 || echo 'version unknown'))"; \
+	else \
+		echo "❌ Compiler $(CC) not found"; \
+	fi
+	@if command -v $(CXX) >/dev/null 2>&1; then \
+		echo "✅ C++ Compiler: $(CXX) ($(shell $(CXX) --version 2>/dev/null | head -1 || echo 'version unknown'))"; \
+	else \
+		echo "❌ C++ Compiler $(CXX) not found"; \
+	fi
+endef
+
+define mingw64_dll_check
+	@if [ -f "lambda.exe" ]; then \
+		echo "📋 Checking DLL dependencies for Universal CRT..."; \
+		ldd lambda.exe 2>/dev/null | grep -E "not found|mingw64|msys64|ucrt|api-ms-win-crt" || echo "✅ No problematic dependencies found"; \
+	else \
+		echo "⚠️  lambda.exe not found, skipping DLL check"; \
+	fi
+endef
+
+# Combined tree-sitter libraries target
 tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
 
 # Default target
@@ -143,7 +227,8 @@ tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
         build-windows build-linux build-debug build-release clean-all distclean \
         verify-windows verify-linux test-windows test-linux tree-sitter-libs \
         generate-premake clean-premake build-test build-test-linux build-catch2 test-catch2 \
-        build-test-catch2-linux test-catch2-linux test-catch2-linux-docker test-catch2-linux-qemu
+        build-test-catch2-linux test-catch2-linux test-catch2-linux-docker test-catch2-linux-qemu \
+        build-mingw64
 
 # Help target - shows available commands
 help:
@@ -151,15 +236,21 @@ help:
 	@echo ""
 	@echo "Build Targets (Premake-based):"
 	@echo "  build         - Build lambda project using Premake build system (incremental, default)"
+	@echo "                  On Windows/MSYS2: Automatically configures MINGW64 toolchain with PATH fixes"
+	@echo "                  On other platforms: Prefers MINGW64 over CLANG64 to avoid Universal CRT"
 	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
 	@echo "  release       - Build optimized release version using Premake"
 	@echo "  rebuild       - Force complete rebuild using Premake"
 	@echo "  lambda        - Build lambda project specifically using Premake"
 	@echo "  all           - Build all projects"
 	@echo ""
+	@echo "MINGW64 Targets (Universal CRT Avoidance):"
+	@echo "  build-mingw64 - Enforce MINGW64 environment build (fails if not in MINGW64)"
+	@echo "                  Ensures traditional MSVCRT.dll usage instead of Universal CRT"
+	@echo ""
 	@echo "Cross-compilation:"
-	@echo "  cross-compile - Cross-compile for Windows"
-	@echo "  build-windows - Same as cross-compile"
+	@echo "  cross-compile - Cross-compile for Windows (now defaults to MINGW64)"
+	@echo "  build-windows - Same as cross-compile (now defaults to MINGW64)"
 	@echo "  build-linux   - Cross-compile for Linux (musl static)"
 	@echo "  build-test-linux - Cross-compile tests for Linux"
 	@echo ""
@@ -230,26 +321,87 @@ help:
 	@echo "  make debug                # Debug build with AddressSanitizer"
 	@echo "  make rebuild              # Force complete rebuild"
 
-# Main build target (incremental) - Now uses Premake
+# Environment debugging target
+env-debug:
+	@echo "🔍 Environment Detection Debug:"
+	@echo "MSYSTEM: '$(MSYSTEM)'"
+	@echo "MSYSTEM_DETECTED: '$(MSYSTEM_DETECTED)'"
+	@echo "IS_MSYS2: '$(IS_MSYS2)'"
+	@echo "IS_MINGW64: '$(IS_MINGW64)'"
+	@echo "IS_CLANG64: '$(IS_CLANG64)'"
+
+# Main build target (incremental) - Windows/MSYS2 optimized
 build: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+ifeq ($(IS_MSYS2),yes)
+	@echo "🔧 Windows/MSYS2 detected - using optimized build configuration..."
+	@echo "🔧 Setting up MINGW64 toolchain environment..."
 	@echo "Building $(PROJECT_NAME) using Premake build system..."
+	PATH="/mingw64/bin:$$PATH" $(PYTHON) utils/generate_premake.py
+	@echo "Generating makefiles..."
+	PATH="/mingw64/bin:$$PATH" $(PREMAKE5) gmake
+	@echo "Building lambda executable with $(JOBS) parallel jobs..."
+	PATH="/mingw64/bin:$$PATH" $(MAKE) -C build/premake -j$(JOBS) lambda CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	@echo "✅ Build completed successfully!"
+	@echo "📁 Output: build/premake/lambda$(EXE_SUFFIX)"
+else
+	@echo "Building $(PROJECT_NAME) using Premake build system..."
+	$(call mingw64_env_check)
+	$(call mingw64_toolchain_verify)
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py
 	@echo "Generating makefiles..."
 	$(PREMAKE5) gmake
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	# Use optimized parallel compilation with separate linking
-	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)" LINK_JOBS="$(LINK_JOBS)" 2>&1 | grep -v "warning:"
+	# Ensure explicit compiler variables are passed to Premake build
+	@echo "Using CC=$(CC) CXX=$(CXX)"
+	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)" 2>&1
 	@echo "Build completed. Executable: lambda.exe"
+	$(call mingw64_dll_check)
+endif
 
 print-vars:
 	@echo "Unicode support: Always enabled (utf8proc)"
 
 $(LAMBDA_EXE): build
 
-# Debug build - Now uses Premake
+# MINGW64-specific build target (enforced environment)
+build-mingw64: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+	@echo "🔄 Building with MINGW64 environment (avoids Universal CRT)..."
+	@if [ "$(IS_MSYS2)" = "yes" ] && [ "$(IS_MINGW64)" != "yes" ]; then \
+		echo "❌ Error: Must be in MINGW64 environment for this target"; \
+		echo "Current MSYSTEM: $(MSYSTEM_DETECTED)"; \
+		echo "💡 Switch to MINGW64:"; \
+		echo "   1. Close this terminal"; \
+		echo "   2. Open MSYS2 MINGW64 terminal"; \
+		echo "   3. Navigate to: cd /d/Projects/Lambda"; \
+		echo "   4. Run: make build-mingw64"; \
+		exit 1; \
+	fi
+	$(call mingw64_toolchain_verify)
+	@echo "Setting MINGW64 environment variables..."
+	@export CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib" PATH="/mingw64/bin:$$PATH"
+	@echo "Generating Premake configuration..."
+	$(PYTHON) utils/generate_premake.py
+	@echo "Generating makefiles..."
+	$(PREMAKE5) gmake
+	@echo "Building lambda executable with $(JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib" 2>&1 | grep -v "warning:"
+	@echo "✅ MINGW64 build completed. Executable: lambda.exe"
+	@echo "🧪 Testing executable..."
+	@./lambda.exe --help >/dev/null 2>&1 && echo "✅ Executable runs successfully" || echo "⚠️  Executable test failed"
+	$(call mingw64_dll_check)
+
+# Windows cross-compilation (legacy target, now redirects to build-mingw64)
+build-windows: build-mingw64
+	@echo "Note: build-windows now uses MINGW64 by default"
+
+cross-compile: build-mingw64
+	@echo "Note: cross-compile now uses MINGW64 by default"
+# Debug build - Now uses Premake with MINGW64 preference
 debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building debug version using Premake build system..."
+	$(call mingw64_env_check)
+	$(call mingw64_toolchain_verify)
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py
 	@echo "Generating makefiles..."
@@ -257,12 +409,15 @@ debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building lambda executable (debug) with $(JOBS) parallel jobs..."
 	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 	@echo "Debug build completed. Executable: lambda.exe"
+	$(call mingw64_dll_check)
 
 # Release build (optimized)
 release: build-release
 
 build-release: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building release version using Premake build system..."
+	$(call mingw64_env_check)
+	$(call mingw64_toolchain_verify)
 	@echo "Generating Premake configuration..."
 	$(PYTHON) utils/generate_premake.py
 	@echo "Generating makefiles..."
@@ -270,6 +425,7 @@ build-release: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building lambda executable (release) with $(JOBS) parallel jobs..."
 	$(MAKE) -C build/premake config=release_x64 lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 	@echo "Release build completed. Executable: lambda.exe"
+	$(call mingw64_dll_check)
 
 # Force rebuild (clean + build)
 rebuild: clean $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
