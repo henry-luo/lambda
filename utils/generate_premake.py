@@ -274,6 +274,9 @@ class PremakeGenerator:
             '    cdialect "C99"',
             '    warnings "Extra"',
             '    ',
+        ])
+        
+        self.premake_content.extend([
             '    filter "configurations:Debug"',
             '        defines { "DEBUG" }',
             '        symbols "On"',
@@ -307,19 +310,11 @@ class PremakeGenerator:
             '    ',
         ])
         
-        # Add platform-specific compiler and flags
-        platform_config = self.config.get('platform', '')
+        # Add Windows-specific linker flags (if Windows platform)
         if self.use_windows_config:
             # Get Windows-specific platform configuration
             platforms_config = self.config.get('platforms', {})
             windows_config = platforms_config.get('windows', {})
-            
-            self.premake_content.extend([
-                '    -- Native Windows build settings',
-                f'    toolset "{toolset}"',
-                '    defines { "WIN32", "_WIN32", "NATIVE_WINDOWS_BUILD", "CURL_STATICLIB", "UTF8PROC_STATIC" }',
-                '    ',
-            ])
             
             # Add Windows-specific linker flags
             linker_flags = windows_config.get('linker_flags', [])
@@ -1901,7 +1896,20 @@ class PremakeGenerator:
             '    filter {}',
             '    ',
             '    defines {',
-            '        "_GNU_SOURCE"',
+            '        "_GNU_SOURCE",',
+        ])
+        
+        # Add Windows-specific defines for the main lambda project
+        if self.use_windows_config:
+            self.premake_content.extend([
+                '        "WIN32",',
+                '        "_WIN32",',
+                '        "NATIVE_WINDOWS_BUILD",',
+                '        "CURL_STATICLIB",',
+                '        "UTF8PROC_STATIC",',
+            ])
+        
+        self.premake_content.extend([
             '    }',
             '    ',
             ''

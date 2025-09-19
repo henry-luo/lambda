@@ -363,10 +363,19 @@ if [ ! -f "$DEPS_DIR/lib/libutf8proc.a" ]; then
         # Build utf8proc for native Windows
         echo "Building utf8proc..."
         
-        # Use CLANG64 tools - only build static library to avoid linker issues
-        CC="/clang64/bin/clang.exe" \
-        AR="/clang64/bin/llvm-ar.exe" \
-        CFLAGS="-O2 -DNDEBUG -fPIC" \
+        # Use proper compiler based on MSYS2 environment
+        if [[ "$MSYSTEM" == "CLANG64" ]]; then
+            CC_BIN="clang"
+            AR_BIN="llvm-ar"
+        else
+            CC_BIN="gcc"
+            AR_BIN="ar"
+        fi
+        
+        # Build only static library with UTF8PROC_STATIC define
+        CC="$CC_BIN" \
+        AR="$AR_BIN" \
+        CFLAGS="-O2 -DNDEBUG -fPIC -DUTF8PROC_STATIC" \
         make libutf8proc.a || {
             echo "Error: Failed to build utf8proc static library"
             cd - > /dev/null
@@ -455,211 +464,13 @@ echo ""
 echo "Creating build configuration for native Windows..."
 
 # Determine library paths based on MSYS2 environment
-if [[ "$MSYSTEM" == "CLANG64" ]]; then
-    MSYS2_PREFIX="/clang64"
-    MSYS2_LIB_PREFIX="mingw-w64-clang-x86_64"
-elif [[ "$MSYSTEM" == "MINGW64" ]]; then
+if [[ "$MSYSTEM" == "MINGW64" ]]; then
     MSYS2_PREFIX="/mingw64"
     MSYS2_LIB_PREFIX="mingw-w64-x86_64"
 else
     MSYS2_PREFIX="/usr"
     MSYS2_LIB_PREFIX="unknown"
 fi
-
-cat > "build_lambda_win_native_config.json" << EOF
-{
-    "compiler": "${CC:-clang}",
-    "output": "lambda-native.exe",
-    "source_dirs": [],
-    "source_files": [
-        "lambda/input/input.cpp",
-        "lambda/input/input-json.cpp",
-        "lambda/input/input-ini.cpp",
-        "lambda/input/input-xml.cpp",
-        "lambda/input/input-yaml.cpp",
-        "lambda/input/input-toml.cpp",
-        "lambda/input/input-common.cpp",
-        "lambda/input/input-css.cpp",
-        "lambda/input/input-csv.cpp",
-        "lambda/input/input-eml.cpp",
-        "lambda/input/input-html.cpp",
-        "lambda/input/input-ics.cpp",
-        "lambda/input/input-latex.cpp",
-        "lambda/input/input-man.cpp",
-        "lambda/input/input-vcf.cpp",
-        "lambda/input/input-mark.cpp",
-        "lambda/input/input-org.cpp",
-        "lambda/input/input-math.cpp",
-        "lambda/input/input-rtf.cpp",
-        "lambda/input/input-pdf.cpp",
-        "lambda/input/input-markup.cpp",
-        "lambda/input/mime-detect.c",
-        "lambda/input/mime-types.c",
-        "lambda/tree-sitter-lambda/src/parser.c",
-        "lambda/parse.c",
-        "lib/strbuf.c",
-        "lib/strview.c",
-        "lib/arraylist.c",
-        "lib/file.c",
-        "lib/hashmap.c",
-        "lib/mem-pool/src/variable.c",
-        "lib/mem-pool/src/buffer.c",
-        "lib/mem-pool/src/utils.c",
-        "lib/url.c",
-        "lib/utf.c",
-        "lib/num_stack.c",
-        "lib/string.c",
-        "lib/datetime.c",
-        "lambda/runner.cpp",
-        "lambda/transpile.cpp",
-        "lambda/transpile-mir.cpp",
-        "lambda/build_ast.cpp",
-        "lambda/name_pool.cpp",
-        "lambda/mir.c",
-        "lambda/pack.cpp",
-        "lambda/print.cpp",
-        "lambda/format/format.cpp",
-        "lambda/format/format-css.cpp",
-        "lambda/format/format-latex.cpp",
-        "lambda/format/format-html.cpp",
-        "lambda/format/format-ini.cpp",
-        "lambda/format/format-json.cpp",
-        "lambda/format/format-math.cpp",
-        "lambda/format/format-md.cpp",
-        "lambda/format/format-org.cpp",
-        "lambda/format/format-rst.cpp",
-        "lambda/format/format-toml.cpp",
-        "lambda/format/format-xml.cpp",
-        "lambda/format/format-yaml.cpp",
-        "lambda/lambda-eval.cpp",
-        "lambda/utf_string.cpp",
-        "lambda/lambda-mem.cpp",
-        "lambda/validator/validate.cpp",
-        "lambda/validator/validator.cpp",
-        "lambda/validator/schema_parser.cpp",
-        "lambda/main.cpp"
-    ],
-    "libraries": [
-        {
-            "name": "tree-sitter",
-            "include": "lambda/tree-sitter/lib/include",
-            "lib": "lambda/tree-sitter/libtree-sitter.a",
-            "link": "static"
-        },
-        {
-            "name": "tree-sitter-lambda",
-            "include": "lambda/tree-sitter-lambda/bindings/c",
-            "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-            "link": "static"
-        },
-        {
-            "name": "mir",
-            "include": "$DEPS_DIR/include",
-            "lib": "$DEPS_DIR/lib/libmir.a",
-            "link": "static"
-        },
-        {
-            "name": "gmp",
-            "include": "$MSYS2_PREFIX/include",
-            "lib": "$MSYS2_PREFIX/lib",
-            "link": "dynamic"
-        }
-    ],
-    "warnings": [
-        "format",
-        "multichar"
-    ],
-    "flags": [
-        "std=c++17",
-        "fms-extensions",
-        "pedantic",
-        "fcolor-diagnostics",
-        "fno-omit-frame-pointer",
-        "g",
-        "O2",
-        "D_WIN32",
-        "DWINDOWS",
-        "D_GNU_SOURCE",
-        "DNATIVE_WINDOWS_BUILD"
-    ],
-    "linker_flags": [
-        "lgmp"
-    ],
-    "debug": false,
-    "build_dir": "build_win_native",
-    "cross_compile": false,
-    "platforms": {
-        "debug": {
-            "output": "lambda-native-debug.exe",
-            "flags": [
-                "std=c++17",
-                "fms-extensions",
-                "pedantic",
-                "fcolor-diagnostics",
-                "fsanitize=address",
-                "fno-omit-frame-pointer",
-                "g",
-                "O0",
-                "D_WIN32",
-                "DWINDOWS",
-                "D_GNU_SOURCE",
-                "DNATIVE_WINDOWS_BUILD",
-                "DDEBUG"
-            ],
-            "linker_flags": [
-                "fsanitize=address",
-                "lgmp"
-            ],
-            "build_dir": "build_win_native_debug",
-            "debug": true
-        }
-    }
-}
-EOF
-
-echo "✅ Created build_lambda_win_native_config.json"
-
-# Create convenience build script
-cat > "compile-win-native.sh" << 'EOF'
-#!/bin/bash
-
-# Convenience script for Windows native compilation
-# This script sets up the environment and calls the main compile script
-
-# Check MSYS2 environment
-if [[ "$MSYSTEM" != "MSYS" && "$MSYSTEM" != "MINGW64" && "$MSYSTEM" != "CLANG64" ]]; then
-    echo "Warning: This script should be run in MSYS2 environment"
-    echo "Current MSYSTEM: ${MSYSTEM:-not set}"
-fi
-
-# Set up compiler based on MSYS2 environment
-if [[ "$MSYSTEM" == "CLANG64" ]]; then
-    export CC="clang"
-    export CXX="clang++"
-    export AR="llvm-ar"
-    export RANLIB="llvm-ranlib"
-elif [[ "$MSYSTEM" == "MINGW64" ]]; then
-    export CC="gcc"
-    export CXX="g++"
-    export AR="ar"
-    export RANLIB="ranlib"
-fi
-
-# Set native Windows build environment
-export NATIVE_WINDOWS_BUILD=1
-
-echo "Windows Native Build Environment:"
-echo "  MSYSTEM: ${MSYSTEM:-not set}"
-echo "  CC: ${CC:-default}"
-echo "  CXX: ${CXX:-default}"
-echo ""
-
-# Call main compile script with native Windows config
-exec ./compile.sh build_lambda_win_native_config.json "$@"
-EOF
-
-chmod +x "compile-win-native.sh"
-echo "✅ Created compile-win-native.sh convenience script"
 
 echo ""
 echo "🎉 Windows native compilation setup completed!"
