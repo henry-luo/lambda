@@ -20,7 +20,8 @@ Thumbs.db
 *.exe
 *.out
 *.app
-*.bin
+*.bin|
+*.pyc
 
 # Build directories
 build/
@@ -33,7 +34,6 @@ cache/
 
 # Executables and other project-specific generated files
 flexbox
-transpile
 /core
 lambda-parser/test-lambda-parser
 lambda-parser/tree-sitter-lambda/src/grammar.json
@@ -91,6 +91,7 @@ logs/
 
 mac-deps/
 linux-deps/
+windows-deps/
 
 # Windows dependencies (built libraries and sources)
 windows-deps/lib/

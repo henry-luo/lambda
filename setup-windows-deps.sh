@@ -133,16 +133,9 @@ install_msys2_package "${TOOLCHAIN_PREFIX}-ninja" "Ninja build system"
 echo ""
 echo "Installing Lambda dependencies..."
 
-# GMP (GNU Multiple Precision Arithmetic Library)
-install_msys2_package "${TOOLCHAIN_PREFIX}-gmp" "GMP (GNU Multiple Precision Arithmetic Library)"
-
-# ICU (Unicode support - optional, for advanced Unicode handling)
-install_msys2_package "${TOOLCHAIN_PREFIX}-icu" "ICU (International Components for Unicode)"
-
 # Development tools
 install_msys2_package "git" "Git version control"
 install_msys2_package "${TOOLCHAIN_PREFIX}-gdb" "GDB debugger"
-install_msys2_package "vim" "Vim editor (includes xxd utility)"
 install_msys2_package "jq" "JSON processor for build script configuration parsing"
 
 # Additional utilities

@@ -329,8 +329,7 @@
                 },
                 {
                     "name": "clock_compat",
-                    "lib": "clock_compat_windows.o",
-                    "link": "static"
+                    "link": "none"
                 },
                 {
                     "name": "mpdec",
@@ -362,14 +361,14 @@
                     "link": "dynamic"
                 },
                 {
-                    "name": "mingw-posix",
-                    "lib": "-lmingwex",
-                    "link": "dynamic"
-                },
-                {
                     "name": "msvcrt",
                     "lib": "-lmsvcrt",
                     "link": "dynamic"
+                },
+                {
+                    "name": "mingw-posix",
+                    "lib": "/mingw64/lib/libmingwex.a",
+                    "link": "static"
                 },
                 {
                     "name": "kernel32",
@@ -392,6 +391,16 @@
                     "link": "dynamic"
                 },
                 {
+                    "name": "shell32",
+                    "lib": "-lshell32",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "ole32",
+                    "lib": "-lole32",
+                    "link": "dynamic"
+                },
+                {
                     "name": "ssp",
                     "lib": "-lssp",
                     "link": "dynamic"
@@ -403,19 +412,16 @@
                 },
                 {
                     "name": "posix",
-                    "lib": "-D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE",
-                    "link": "flags"
+                    "link": "none"
                 },
 
                 {
                     "name": "setargv",
-                    "lib": "-lsetargv",
-                    "link": "dynamic"
+                    "link": "none"
                 },
                 {
                     "name": "mingwex",
-                    "lib": "-lmingwex",
-                    "link": "dynamic"
+                    "link": "none"
                 },
                 {
                     "name": "moldname",
@@ -424,8 +430,12 @@
                 },
                 {
                     "name": "binmode",
-                    "lib": "-lbinmode",
-                    "link": "dynamic"
+                    "lib": "/mingw64/lib/binmode.o",
+                    "link": "static"
+                },
+                {
+                    "name": "posix-compat",
+                    "link": "none"
                 },
                 {
                     "name": "readline_dep",

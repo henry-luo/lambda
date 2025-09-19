@@ -31,6 +31,8 @@ class PremakeGenerator:
                                   current_platform.startswith('MINGW') or
                                   current_platform.startswith('MSYS') or
                                   current_platform.startswith('CYGWIN') or
+                                  'MSYS_NT' in current_platform or
+                                  'MINGW' in current_platform or
                                   self.config.get('platform') == 'Windows')
         
         self.external_libraries = self._parse_external_libraries()
@@ -690,7 +692,7 @@ class PremakeGenerator:
             # Add platform-specific library paths
             if self.use_windows_config:
                 self.premake_content.extend([
-                    '        "/clang64/lib",',
+                    '        "/mingw64/lib",',
                     '        "win-native-deps/lib",',
                     '        "build/lib",',
                 ])
@@ -860,7 +862,7 @@ class PremakeGenerator:
                 # Add platform-specific library paths
                 if self.use_windows_config:
                     self.premake_content.extend([
-                        '        "/clang64/lib",',
+                        '        "/mingw64/lib",',
                         '        "win-native-deps/lib",',
                     ])
                 else:
@@ -1202,7 +1204,7 @@ class PremakeGenerator:
         elif self.use_windows_config:
             # Windows/MSYS2 paths
             self.premake_content.extend([
-                '        "/clang64/include",',
+                '        "/mingw64/include",',
                 '        "win-native-deps/include",',
             ])
         else:
@@ -1243,7 +1245,7 @@ class PremakeGenerator:
         elif self.use_windows_config:
             # Windows/MSYS2 paths
             self.premake_content.extend([
-                '        "/clang64/lib",',
+                '        "/mingw64/lib",',
                 '        "win-native-deps/lib",',
                 '        "build/lib",',
             ])
@@ -1592,11 +1594,19 @@ class PremakeGenerator:
                 if lib_name not in ['criterion']:  # Exclude test-only libraries
                     dependencies.append(lib_name)
         
+        # Add platform-specific libraries for Windows
+        platforms_config = self.config.get('platforms', {})
+        if self.use_windows_config:
+            windows_config = platforms_config.get('windows', {})
+            for lib in windows_config.get('libraries', []):
+                lib_name = lib.get('name', '')
+                if lib_name and lib_name not in dependencies and lib_name not in ['criterion']:
+                    dependencies.append(lib_name)
+        
         # Add platform-specific libraries for macOS
         import platform
         current_platform = platform.system()
         if current_platform == 'Darwin':
-            platforms_config = self.config.get('platforms', {})
             macos_config = platforms_config.get('macos', {})
             for lib in macos_config.get('libraries', []):
                 lib_name = lib.get('name', '')
@@ -1697,7 +1707,7 @@ class PremakeGenerator:
         # Add platform-specific library paths
         if self.use_windows_config:
             self.premake_content.extend([
-                '        "/clang64/lib",',
+                '        "/mingw64/lib",',
                 '        "win-native-deps/lib",',
                 '        "build/lib",',
             ])
@@ -1758,7 +1768,7 @@ class PremakeGenerator:
             
             # Add these libraries if they're not already included and exist in external_libraries
             for lib_name in base_libs:
-                if lib_name in self.external_libraries and lib_name not in [dep.replace('../../', '').replace('.a', '').replace('lib', '').replace('/clang64/lib/', '') for dep in static_libs]:
+                if lib_name in self.external_libraries and lib_name not in [dep.replace('../../', '').replace('.a', '').replace('lib', '').replace('/mingw64/lib/', '') for dep in static_libs]:
                     lib_info = self.external_libraries[lib_name]
                     
                     # Skip libraries with link type "none"
@@ -1814,40 +1824,59 @@ class PremakeGenerator:
             ])
         
         # Add dynamic libraries and frameworks (macOS only)
-        if frameworks or dynamic_libs:
-            import platform
-            current_platform = platform.system()
+        # Always add dynamic libraries section for cross-platform compatibility
+        self.premake_content.extend([
+            '    -- Dynamic libraries',
+            '    filter "platforms:native"',
+            '        links {',
+        ])
+        
+        # Add all dynamic libraries
+        for lib in dynamic_libs:
+            self.premake_content.append(f'            "{lib}",')
             
-            self.premake_content.extend([
-                '    -- Dynamic libraries',
-                '    filter "platforms:native"',
-                '        links {',
-            ])
-            for lib in dynamic_libs:
+        # Add Windows system libraries if on Windows
+        if self.use_windows_config:
+            windows_dynamic_libs = []
+            for dep in dependencies:
+                if dep in self.external_libraries:
+                    lib_info = self.external_libraries[dep]
+                    if lib_info.get('link') == 'dynamic':
+                        lib_flag = lib_info['lib']
+                        if lib_flag.startswith('-l'):
+                            lib_flag = lib_flag[2:]  # Remove -l prefix
+                        if lib_flag not in dynamic_libs:
+                            windows_dynamic_libs.append(lib_flag)
+            
+            for lib in windows_dynamic_libs:
                 self.premake_content.append(f'            "{lib}",')
+                
+        self.premake_content.extend([
+            '        }',
+            '    '
+        ])
+            
+        import platform
+        current_platform = platform.system()
+            
+        # Only add frameworks on macOS
+        if frameworks and current_platform == 'Darwin':
+            self.premake_content.extend([
+                '        linkoptions {',
+            ])
+            for framework in frameworks:
+                self.premake_content.append(f'            "{framework}",')
             self.premake_content.extend([
                 '        }',
+                '    ',
+                '    filter {}',
                 '    '
             ])
-            
-            # Only add frameworks on macOS
-            if frameworks and current_platform == 'Darwin':
-                self.premake_content.extend([
-                    '        linkoptions {',
-                ])
-                for framework in frameworks:
-                    self.premake_content.append(f'            "{framework}",')
-                self.premake_content.extend([
-                    '        }',
-                    '    ',
-                    '    filter {}',
-                    '    '
-                ])
-            else:
-                self.premake_content.extend([
-                    '    filter {}',
-                    '    '
-                ])
+        else:
+            self.premake_content.extend([
+                '    filter {}',
+                '    '
+            ])
         
         # Add build options with separate handling for C and C++ files
         base_compiler, _ = self._get_compiler_info()
