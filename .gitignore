@@ -74,6 +74,7 @@ lambda/vsce/dist/
 *~
 .project
 .classpath
+.env
 # for intellisense
 compile_commands.json
 

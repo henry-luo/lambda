@@ -61,6 +61,15 @@ endif
 JOBS := $(NPROCS)
 LINK_JOBS := 1
 
+# Enable ccache for faster builds if available
+ifneq ($(shell which ccache 2>/dev/null),)
+    CC := ccache $(CC)
+    CXX := ccache $(CXX)
+    export CCACHE_DIR := $(shell pwd)/build/.ccache
+    export CCACHE_MAXSIZE := 500M
+    export CCACHE_COMPRESS := 1
+endif
+
 # Detect Python executable
 # On MSYS2/Windows, prefer MINGW64 over CLANG64 for Universal CRT avoidance
 # Force explicit paths for MSYS environment compatibility

@@ -288,9 +288,9 @@
                 },
                 {
                     "name": "utf8proc",
-                    "include": "/mingw64/include",
-                    "lib": "-lutf8proc",
-                    "link": "dynamic"
+                    "include": "win-native-deps/include",
+                    "lib": "win-native-deps/lib/libutf8proc.a",
+                    "link": "static"
                 },
                 {
                     "name": "ssl",
@@ -468,6 +468,8 @@
                 "D_POSIX_C_SOURCE=200809L",
                 "D_GNU_SOURCE",
                 "D_TIMESPEC_DEFINED",
+                "DUTF8PROC_STATIC",
+                "DCURL_STATICLIB",
                 "v"
             ],
             "linker_flags": [
