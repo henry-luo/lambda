@@ -8,7 +8,7 @@ ehthumbs.db
 Thumbs.db
 
 # Compiled binaries and objects
-*.lua
+premake5.lua
 *.o
 *.d
 *.a

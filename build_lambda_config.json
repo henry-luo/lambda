@@ -106,9 +106,36 @@
             "link": "static"
         },
         {
+            "name": "hpdf",
+            "description": "libharu PDF generation library",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libhpdf.a",
+            "link": "static"
+        },
+        {
+            "name": "nghttp2",
+            "description": "HTTP/2 library required by curl",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libnghttp2.a",
+            "link": "static"
+        },
+        {
+            "name": "libedit",
+            "description": "BSD libedit for readline functionality",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
+            "link": "static"
+        },
+        {
             "name": "z",
             "include": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
             "lib": "-lz",
+            "link": "dynamic"
+        },
+        {
+            "name": "ncurses",
+            "include": "",
+            "lib": "-lncurses",
             "link": "dynamic"
         }
     ],
@@ -117,12 +144,6 @@
             "name": "criterion",
             "include": "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
             "lib": "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
-            "link": "static"
-        },
-        {
-            "name": "catch2",
-            "include": "/opt/homebrew/Cellar/catch2/3.10.0/include",
-            "lib": "/opt/homebrew/Cellar/catch2/3.10.0/lib/libCatch2Main.a",
             "link": "static"
         }
     ],
@@ -147,7 +168,7 @@
                 "lambda/input/mime-detect.c",
                 "lambda/input/mime-types.c"
             ],
-            "libraries": ["criterion"],
+            "libraries": [],
             "special_flags": "",
             "link": "static"
         },
@@ -178,7 +199,7 @@
                 "lib/log.c",
                 "lib/utf.c"
             ],
-            "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "curl", "ssl", "crypto", "z", "criterion"],
+            "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "nghttp2", "curl", "ssl", "crypto", "z"],
             "include": "lib/mem-pool/include",
             "defines": ["SIMPLE_SCHEMA_PARSER"],
             "special_flags": "-lstdc++",
@@ -653,119 +674,62 @@
                         "source": "test_strbuf.c",
                         "name": "📝 String Buffer Tests",
                         "dependencies": ["lambda-lib"],
+                        "libraries": ["criterion"],
                         "binary": "test_strbuf.exe"
                     },
                     {
                         "source": "test_stringbuf.cpp",
                         "name": "🧵 StringBuf Tests",
                         "dependencies": ["lambda-lib"],
+                        "libraries": ["criterion"],
                         "binary": "test_stringbuf.exe"
                     },
                     {
                         "source": "test_strview.c",
                         "name": "👀 String View Tests",
                         "dependencies": ["lambda-lib"],
+                        "libraries": ["criterion"],
                         "binary": "test_strview.exe"
                     },
                     {
                         "source": "test_variable_pool.c",
                         "name": "🏊 Variable Pool Tests",
                         "dependencies": ["lambda-lib"],
+                        "libraries": ["criterion"],
                         "binary": "test_variable_pool.exe"
                     },
                     {
                         "source": "test_num_stack.c",
                         "name": "🔢 Number Stack Tests",
                         "dependencies": ["lambda-lib"],
+                        "libraries": ["criterion"],
                         "binary": "test_num_stack.exe"
                     },
                     {
                         "source": "test_datetime.c",
                         "name": "📅 DateTime Tests",
                         "dependencies": ["lambda-lib"],
+                        "libraries": ["criterion"],
                         "binary": "test_datetime.exe"
                     },
                     {
                         "source": "test_url.c",
                         "name": "🔗 URL Tests",
                         "dependencies": ["lambda-lib"],
+                        "libraries": ["criterion"],
                         "binary": "test_url.exe"
                     },
                     {
                         "source": "test_url_extra.c",
                         "name": "🌐 URL Extra Tests",
                         "dependencies": ["lambda-lib"],
+                        "libraries": ["criterion"],
                         "binary": "test_url_extra.exe"
                     }
                 ],
                 "type": "library",
                 "special_flags": "",
                 "cpp_flags": ""
-            },
-            {
-                "suite": "catch2",
-                "name": "🧪 Catch2 Tests",
-                "tests": [
-                    {
-                        "source": "test_strbuf_catch2.cpp",
-                        "name": "📝 String Buffer Tests (Catch2)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_strbuf_catch2.exe"
-                    },
-                    {
-                        "source": "test_stringbuf_catch2.cpp",
-                        "name": "🧵 StringBuf Tests (Catch2)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_stringbuf_catch2.exe"
-                    },
-                    {
-                        "source": "test_strview_catch2.cpp",
-                        "name": "👀 String View Tests (Catch2)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_strview_catch2.exe"
-                    },
-                    {
-                        "source": "test_variable_pool_catch2.cpp",
-                        "name": "🏊 Variable Pool Tests (Catch2)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_variable_pool_catch2.exe"
-                    },
-                    {
-                        "source": "test_num_stack_catch2.cpp",
-                        "name": "🔢 Number Stack Tests (Catch2)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_num_stack_catch2.exe"
-                    },
-                    {
-                        "source": "test_datetime_catch2.cpp",
-                        "name": "📅 DateTime Tests (Catch2)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_datetime_catch2.exe"
-                    },
-                    {
-                        "source": "test_url_catch2.cpp",
-                        "name": "🌐 URL Parser Tests (Catch2)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_url_catch2.exe"
-                    },
-                    {
-                        "source": "test_url_extra_catch2.cpp",
-                        "name": "🌐 URL Parser Extended Tests (Catch2)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_url_extra_catch2.exe"
-                    }
-                ],
-                "type": "catch2",
-                "special_flags": "",
-                "cpp_flags": "-std=c++17"
             },
             {
                 "suite": "input",
@@ -775,6 +739,7 @@
                         "source": "test_mime_detect.c",
                         "name": "📎 MIME Detection Tests",
                         "dependencies": ["lambda-input-full"],
+                        "libraries": ["criterion"],
                         "binary": "test_mime_detect.exe"
                     },
                     {
@@ -853,6 +818,7 @@
                         "source": "test_css_files_safe.c",
                         "name": "🎨 CSS Files Safe Tests (Criterion)",
                         "dependencies": ["lambda-input-full"],
+                        "libraries": ["criterion"],
                         "binary": "test_css_files_safe.exe"
                     },
                     {
@@ -863,122 +829,6 @@
                     }
                 ],
                 "type": "input",
-                "special_flags": "-fms-extensions -lstdc++",
-                "cpp_flags": "-std=c++17",
-                "parallel": true
-            },
-            {
-                "suite": "input_catch2",
-                "name": "📄 Input Processing Tests (Catch2)",
-                "tests": [
-                    {
-                        "source": "test_mime_detect_catch2.cpp",
-                        "name": "📎 MIME Detection Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_mime_detect_catch2.exe"
-                    },
-                    {
-                        "source": "test_css_tokenizer_catch2.cpp",
-                        "name": "🎨 CSS Tokenizer Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_css_tokenizer_catch2.exe"
-                    },
-                    {
-                        "source": "test_css_parser_catch2.cpp",
-                        "name": "🎨 CSS Parser Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_css_parser_catch2.exe"
-                    },
-                    {
-                        "source": "test_css_integration_catch2.cpp",
-                        "name": "🎨 CSS Integration Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_css_integration_catch2.exe"
-                    },
-                    {
-                        "source": "test_css_frameworks_catch2.cpp",
-                        "name": "🎨 CSS Framework Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_css_frameworks_catch2.exe"
-                    },
-                    {
-                        "source": "test_math_catch2.cpp",
-                        "name": "🔢 Math Roundtrip Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_math_catch2.exe"
-                    },
-                    {
-                        "source": "test_math_ascii_catch2.cpp",
-                        "name": "🔤 ASCII Math Roundtrip Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_math_ascii_catch2.exe"
-                    },
-                    {
-                        "source": "test_markup_roundtrip_catch2.cpp",
-                        "name": "📝 Markup Roundtrip Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_markup_roundtrip_catch2.exe"
-                    },
-                    {
-                        "source": "test_input_roundtrip_catch2.cpp",
-                        "name": "🔄 Input Roundtrip Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_input_roundtrip_catch2.exe",
-                        "additional_files": ["test/input_roundtrip_helpers.cpp"]
-                    },
-                    {
-                        "source": "test_dir_catch2.cpp",
-                        "name": "📁 Directory Listing Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_dir_catch2.exe"
-                    },
-                    {
-                        "source": "test_http_catch2.cpp",
-                        "name": "🌐 HTTP/HTTPS Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_http_catch2.exe"
-                    },
-                    {
-                        "source": "test_sysinfo_catch2.cpp",
-                        "name": "🖥️ System Information Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_sysinfo_catch2.exe"
-                    },
-                    {
-                        "source": "test_jsx_roundtrip_catch2.cpp",
-                        "name": "🔢 JSX Roundtrip Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_jsx_roundtrip_catch2.exe"
-                    },
-                    {
-                        "source": "test_mdx_roundtrip_catch2.cpp",
-                        "name": "📝 MDX Roundtrip Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_mdx_roundtrip_catch2.exe"
-                    },
-                    {
-                        "source": "test_css_files_safe_catch2.cpp",
-                        "name": "🎨 CSS Files Safe Tests (Catch2)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["Catch2Main", "Catch2"],
-                        "binary": "test_css_files_safe_catch2.exe"
-                    }
-                ],
-                "type": "catch2",
                 "special_flags": "-fms-extensions -lstdc++",
                 "cpp_flags": "-std=c++17",
                 "parallel": true

@@ -214,9 +214,9 @@ define mingw64_toolchain_verify
 	fi
 endef
 
+# Checking DLL dependencies to avoid Windows Universal CRT
 define mingw64_dll_check
 	@if [ -f "lambda.exe" ]; then \
-		echo "📋 Checking DLL dependencies for Universal CRT..."; \
 		ldd lambda.exe 2>/dev/null | grep -E "not found|mingw64|msys64|ucrt|api-ms-win-crt" || echo "✅ No problematic dependencies found"; \
 	else \
 		echo "⚠️  lambda.exe not found, skipping DLL check"; \
