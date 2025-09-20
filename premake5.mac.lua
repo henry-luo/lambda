@@ -878,6 +878,66 @@ project "test_url_extra"
     }
     
 
+project "test_cmdedit"
+    kind "ConsoleApp"
+    language "C"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_cmdedit.c",
+        "lib/cmdedit.c",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "criterion",
+        "nanomsg",
+        "git2",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-DCMDEDIT_TESTING",
+        "-Wno-implicit-function-declaration",
+        "-std=gnu99",
+    }
+    
+
 project "test_mime_detect"
     kind "ConsoleApp"
     language "C"
@@ -962,6 +1022,8 @@ project "test_mime_detect"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fms-extensions",
+        "-lstdc++",
         "-std=c99",
     }
     
@@ -1056,6 +1118,7 @@ project "test_math"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -1149,6 +1212,7 @@ project "test_math_ascii"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -1242,6 +1306,7 @@ project "test_markup_roundtrip"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -1335,6 +1400,7 @@ project "test_input_roundtrip"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -1428,6 +1494,7 @@ project "test_dir"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -1521,6 +1588,7 @@ project "test_http"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -1614,6 +1682,7 @@ project "test_sysinfo"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -1707,6 +1776,7 @@ project "test_jsx_roundtrip"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -1800,6 +1870,7 @@ project "test_mdx_roundtrip"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -1893,6 +1964,7 @@ project "test_css_tokenizer"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -1986,6 +2058,7 @@ project "test_css_parser"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -2079,6 +2152,7 @@ project "test_css_integration"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -2172,6 +2246,8 @@ project "test_css_files_safe"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fms-extensions",
+        "-lstdc++",
         "-std=c99",
     }
     
@@ -2266,6 +2342,7 @@ project "test_css_frameworks"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-fms-extensions",
     }
     
     filter {}
@@ -2681,5 +2758,7 @@ project "test_lambda_runner"
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
+        "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES",
+        "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0",
     }
     

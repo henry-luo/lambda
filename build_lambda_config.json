@@ -725,6 +725,15 @@
                         "dependencies": ["lambda-lib"],
                         "libraries": ["criterion"],
                         "binary": "test_url_extra.exe"
+                    },
+                    {
+                        "source": "test_cmdedit.c",
+                        "name": "⌨️ Command Line Editor Tests",
+                        "dependencies": [],
+                        "libraries": ["criterion"],
+                        "binary": "test_cmdedit.exe",
+                        "additional_sources": ["lib/cmdedit.c"],
+                        "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -std=gnu99"
                     }
                 ],
                 "type": "library",
