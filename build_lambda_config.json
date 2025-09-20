@@ -259,14 +259,6 @@
             "exclude_source_files": [],
             "libraries": [
                 {
-                    "name": "readline",
-                    "link": "none"
-                },
-                {
-                    "name": "ncurses", 
-                    "link": "none"
-                },
-                {
                     "name": "pthread",
                     "link": "none"
                 },
@@ -319,14 +311,6 @@
                     "link": "dynamic"
                 },
                 {
-                    "name": "readline",
-                    "link": "none"
-                },
-                {
-                    "name": "ncurses",
-                    "link": "none"
-                },
-                {
                     "name": "clock_compat",
                     "link": "none"
                 },
@@ -334,6 +318,13 @@
                     "name": "mpdec",
                     "include": "/mingw64/include",
                     "lib": "/mingw64/lib/libmpdec.a",
+                    "link": "static"
+                },
+                {
+                    "name": "nghttp2",
+                    "description": "HTTP/2 library required by curl",
+                    "include": "win-native-deps/include",
+                    "lib": "win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
                     "link": "static"
                 },
                 {
@@ -469,12 +460,6 @@
                     "include": "/mingw64/include",
                     "lib": "/mingw64/lib/libcriterion.a",
                     "link": "static"
-                },
-                {
-                    "name": "catch2",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libCatch2Main.a",
-                    "link": "static"
                 }
             ],
             "flags": [
@@ -496,8 +481,7 @@
                 "static-libgcc",
                 "static-libstdc++",
                 "Wl,-Bstatic",
-                "Wl,--subsystem,console",
-                "Wl,--verbose"
+                "Wl,--subsystem,console"
             ],
             "build_dir": "build_windows",
             "cross_compile": true,
@@ -577,12 +561,6 @@
                     "name": "pthread",
                     "include": "",
                     "lib": "-lpthread",
-                    "link": "dynamic"
-                },
-                {
-                    "name": "ncurses",
-                    "include": "",
-                    "lib": "-lncurses",
                     "link": "dynamic"
                 },
                 {

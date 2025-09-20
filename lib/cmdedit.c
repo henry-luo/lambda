@@ -17,6 +17,8 @@
 #define isatty _isatty
 #define STDIN_FILENO _fileno(stdin)
 #define STDOUT_FILENO _fileno(stdout)
+// Windows doesn't have ssize_t
+typedef intptr_t ssize_t;
 #else
 #include <unistd.h>
 #include <termios.h>
@@ -99,12 +101,14 @@ static struct history g_history = {0};
 static bool g_initialized = false;
 
 // Signal handling state
+#ifndef _WIN32
 static volatile sig_atomic_t g_signal_received = 0;
 static volatile sig_atomic_t g_winch_received = 0;
 static struct sigaction g_old_sigint;
 static struct sigaction g_old_sigterm;
 static struct sigaction g_old_sigwinch;
 static bool g_signals_installed = false;
+#endif
 
 // Readline compatibility variables
 char *rl_line_buffer = NULL;
@@ -129,6 +133,7 @@ static void kill_ring_cleanup(void);
 // SIGNAL HANDLING
 // ============================================================================
 
+#ifndef _WIN32
 static void signal_handler(int sig) {
     switch (sig) {
         case SIGINT:
@@ -231,6 +236,12 @@ static bool check_signals(void) {
     
     return false;  // No termination signal
 }
+#else
+// Windows stubs for signal handling
+static inline int install_signal_handlers(void) { return 0; }
+static inline int restore_signal_handlers(void) { return 0; }
+static inline bool check_signals(void) { return false; }
+#endif
 
 // ============================================================================
 // PHASE 1: TERMINAL I/O ABSTRACTION
@@ -1067,6 +1078,34 @@ static char *editor_readline(const char *prompt) {
         
         char *line = NULL;
         size_t len = 0;
+#ifdef _WIN32
+        // Windows doesn't have getline, so implement a simple version
+        size_t capacity = 128;
+        line = malloc(capacity);
+        if (!line) return NULL;
+        
+        char c;
+        while ((c = getchar()) != EOF && c != '\n') {
+            if (len >= capacity - 1) {
+                capacity *= 2;
+                char *new_line = realloc(line, capacity);
+                if (!new_line) {
+                    free(line);
+                    return NULL;
+                }
+                line = new_line;
+            }
+            line[len++] = c;
+        }
+        
+        if (c == EOF && len == 0) {
+            free(line);
+            return NULL;
+        }
+        
+        line[len] = '\0';
+        ssize_t nread = len;
+#else
         ssize_t nread = getline(&line, &len, stdin);
         
         if (nread == -1) {
@@ -1078,6 +1117,7 @@ static char *editor_readline(const char *prompt) {
         if (nread > 0 && line[nread-1] == '\n') {
             line[nread-1] = '\0';
         }
+#endif
         
         return line;
     }
