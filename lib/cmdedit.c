@@ -474,7 +474,7 @@ int terminal_read_key(struct terminal_state *term) {
                 case '5': return KEY_PAGE_UP;
                 case '6': return KEY_PAGE_DOWN;
                 case '3':
-                    // Delete key (ESC[3~)
+                    // Delete key (ESC[3~) - handles both regular delete and fn+delete on Mac/Linux
                     if (read(term->input_fd, &seq[2], 1) == 1 && seq[2] == '~') {
                         return KEY_DELETE;
                     }
@@ -1107,19 +1107,6 @@ static char *editor_readline(const char *prompt) {
         }
         
         int key = terminal_read_key(&g_terminal);
-        
-        // Temporary debug to identify key mappings
-        if (key == KEY_BACKSPACE || key == KEY_DELETE || key == 127 || key == 8 || key > 127) {
-            printf("\r\n[DEBUG: Raw key %d] ", key);
-            if (key == KEY_BACKSPACE) printf("-> BACKSPACE handler");
-            else if (key == KEY_DELETE) printf("-> DELETE handler");
-            else if (key == 127) printf("-> RAW 127 (DEL)");
-            else if (key == 8) printf("-> RAW 8 (BS)");
-            else printf("-> RAW %d", key);
-            printf("\r\n");
-            fflush(stdout);
-        }
-        
         if (key == KEY_ERROR || key == KEY_EOF) {
             done = -1; // Error or EOF
             break;
@@ -1134,19 +1121,13 @@ static char *editor_readline(const char *prompt) {
                 key = KEY_DELETE;
             }
         #else
-            // Mac/Linux: key 127 = backspace, delete key sends escape sequence
+            // Mac/Linux: key 127 = backspace, delete/fn+delete send ESC[3~ sequence (handled above)
             if (key == 127) {
                 key = KEY_BACKSPACE;
             } else if (key == 8) {
                 key = KEY_BACKSPACE; // Ctrl+H also acts as backspace
             }
         #endif
-        
-        // Show mapped key for debugging
-        if (key == KEY_BACKSPACE || key == KEY_DELETE) {
-            printf("[MAPPED to: %s] ", (key == KEY_BACKSPACE) ? "BACKSPACE" : "DELETE");
-            fflush(stdout);
-        }
         
         // Find handler for this key
         key_handler_t handler = find_key_handler(key);
