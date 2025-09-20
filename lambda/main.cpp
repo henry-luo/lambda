@@ -37,8 +37,8 @@ extern "C" AstValidationResult* exec_validation(int argc, char* argv[]);
 int exec_convert(int argc, char* argv[]);
 
 // REPL functions from main-repl.cpp
-extern int repl_init();
-extern void repl_cleanup();
+extern int lambda_repl_init();
+extern void lambda_repl_cleanup();
 void transpile_ast_root(Transpiler* tp, AstScript *script);
 
 // External function declarations
@@ -68,8 +68,8 @@ Item run_script_with_run_main(Runtime *runtime, char* script_path, bool transpil
 
 // Forward declare REPL functions from main-repl.cpp
 const char* get_repl_prompt();
-char *repl_readline(const char *prompt);
-int repl_add_history(const char *line);
+char *lambda_repl_readline(const char *prompt);
+int lambda_repl_add_history(const char *line);
 void print_help();
 
 // Linux-specific compatibility functions
@@ -107,8 +107,8 @@ void run_repl(Runtime *runtime, bool use_mir) {
     printf("Lambda Script REPL v1.0%s\n", use_mir ? " (MIR JIT)" : "");
     printf("Type .help for commands, .quit to exit\n");
     
-    // Initialize libedit
-    if (repl_init() != 0) {
+    // Initialize command line editor
+    if (lambda_repl_init() != 0) {
         printf("Warning: Failed to initialize readline, using basic input\n");
     }
     
@@ -119,15 +119,15 @@ void run_repl(Runtime *runtime, bool use_mir) {
     char *line;
     int exec_count = 0;
     
-    while ((line = repl_readline(prompt)) != NULL) {
+    while ((line = lambda_repl_readline(prompt)) != NULL) {
         // Skip empty lines
         if (strlen(line) == 0) {
             free(line);
             continue;
         }
         
-        // Add to libedit history
-        repl_add_history(line);
+        // Add to command history
+        lambda_repl_add_history(line);
         
         // Handle REPL commands
         if (strcmp(line, ".quit") == 0 || strcmp(line, ".q") == 0 || strcmp(line, ".exit") == 0) {
@@ -175,8 +175,8 @@ void run_repl(Runtime *runtime, bool use_mir) {
         free(line);
     }
     
-    // Cleanup libedit
-    repl_cleanup();
+    // Cleanup command line editor
+    lambda_repl_cleanup();
     
     strbuf_free(repl_history);
 }

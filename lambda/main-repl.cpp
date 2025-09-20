@@ -18,123 +18,20 @@
 #include <signal.h>  // for signal handling
 #include <setjmp.h>  // for setjmp/longjmp
 
-// Include readline header for line editing functionality
-// Note: For Windows, we use simple fallback instead of readline to avoid DLL dependencies
-#ifndef _WIN32
-#include <editline/readline.h>
-#include <histedit.h>
-#endif
+// Include our custom command line editor
+#include "../lib/cmdedit.h"
 
-// Forward declare readline functions to avoid header conflicts (only for non-Windows)
-#ifndef _WIN32
-extern "C" {
-    char *readline(const char *);
-    int add_history(const char *);
-}
-#endif
 
-// Global EditLine state (only for non-Windows systems using libedit)
-#ifndef _WIN32
-static EditLine *el = NULL;
-static History *hist = NULL;
-static volatile sig_atomic_t editline_failed = 0;
-static jmp_buf editline_jmp_buf;
 
-// Signal handler for EditLine crashes
-static void editline_crash_handler(int sig) {
-    (void)sig;
-    editline_failed = 1;
-    longjmp(editline_jmp_buf, 1);
-}
-#endif
-
-// Global prompt storage for EditLine
-static const char *current_prompt = "λ> ";
-
-#ifndef _WIN32
-// Prompt function for EditLine
-static const char *prompt_func(EditLine *el) {
-    (void)el; // Suppress unused parameter warning
-    return current_prompt;
-}
-#endif
-
-// Initialize libedit (non-Windows) or setup simple fallback (Windows)
-int repl_init() {
-    // Only try EditLine for truly interactive terminals
-    if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO)) {
-        printf("Debug: Non-interactive terminal detected, using basic input\n");
-        return 0;  // Success, but no EditLine
-    }
-    
-#ifdef _WIN32
-    // Windows: use simple fallback instead of readline to avoid DLL dependencies
-    printf("Debug: Using simple fallback for Windows (no readline dependency)\n");
-    return 0; // Success
-#else
-    // Check for specific terminal types that might not work well with EditLine
-    const char* term = getenv("TERM");
-    if (term && (strcmp(term, "dumb") == 0 || strstr(term, "emacs") != NULL)) {
-        printf("Debug: Unsupported terminal type, using basic input\n");
-        return 0;
-    }
-    
-    printf("Debug: Attempting to initialize libedit...\n");
-    
-    // Initialize history first
-    hist = history_init();
-    if (!hist) {
-        printf("Warning: Failed to initialize history, using basic input\n");
-        return 0; // Don't fail, just use basic input
-    }
-    
-    // Set history size
-    HistEvent ev;
-    if (history(hist, &ev, H_SETSIZE, 100) == -1) {
-        printf("Warning: Failed to set history size\n");
-        history_end(hist);
-        hist = NULL;
-        return 0; // Don't fail, just use basic input
-    }
-    
-    // Initialize EditLine
-    el = el_init("lambda", stdin, stdout, stderr);
-    if (!el) {
-        printf("Warning: Failed to initialize EditLine, using basic input\n");
-        if (hist) {
-            history_end(hist);
-            hist = NULL;
-        }
-        return 0; // Don't fail, just use basic input
-    }
-    
-    // Set the editor to emacs mode
-    if (el_set(el, EL_EDITOR, "emacs") == -1) {
-        printf("Warning: Failed to set emacs mode\n");
-    }
-    
-    // Set the history
-    if (el_set(el, EL_HIST, history, hist) == -1) {
-        printf("Warning: Failed to set history\n");
-    }
-    
-    printf("Debug: libedit initialized successfully\n");
-    return 0;
-#endif
+// Initialize command line editor
+int lambda_repl_init() {
+    // Use our custom cmdedit which handles all platforms
+    return repl_init();  // Our cmdedit's repl_init function
 }
 
-// Clean up libedit
-void repl_cleanup() {
-#ifndef _WIN32
-    if (el) {
-        el_end(el);
-        el = NULL;
-    }
-    if (hist) {
-        history_end(hist);
-        hist = NULL;
-    }
-#endif
+// Clean up command line editor
+void lambda_repl_cleanup() {
+    repl_cleanup();  // Our cmdedit's cleanup function
 }
 
 void print_help() {
@@ -183,140 +80,12 @@ const char* get_repl_prompt() {
 #endif
 }
 
-char *repl_readline(const char *prompt) {
-#ifdef _WIN32
-    // Windows: use simple fallback instead of readline to avoid DLL dependencies
-    printf("%s", prompt);
-    fflush(stdout);
-    static char buffer[1024];
-    if (fgets(buffer, sizeof(buffer), stdin)) {
-        size_t len = strlen(buffer);
-        if (len > 0 && buffer[len-1] == '\n') {
-            buffer[len-1] = '\0';
-        }
-        return strdup(buffer);
-    }
-    return NULL;
-#else
-    // If EditLine failed before or is not initialized, use basic input
-    if (!el || editline_failed) {
-        printf("%s", prompt);
-        fflush(stdout);
-        static char buffer[1024];
-        if (fgets(buffer, sizeof(buffer), stdin)) {
-            size_t len = strlen(buffer);
-            if (len > 0 && buffer[len-1] == '\n') {
-                buffer[len-1] = '\0';
-            }
-            return strdup(buffer);
-        }
-        return NULL;
-    }
-    
-    // Check if we're in an interactive terminal
-    if (!isatty(STDIN_FILENO)) {
-        // Not interactive, use simple fgets
-        printf("%s", prompt);
-        fflush(stdout);
-        static char buffer[1024];
-        if (fgets(buffer, sizeof(buffer), stdin)) {
-            size_t len = strlen(buffer);
-            if (len > 0 && buffer[len-1] == '\n') {
-                buffer[len-1] = '\0';
-            }
-            return strdup(buffer);
-        }
-        return NULL;
-    }
-    
-    // Set up signal handler for potential crashes
-    struct sigaction old_action;
-    struct sigaction new_action;
-    new_action.sa_handler = editline_crash_handler;
-    sigemptyset(&new_action.sa_mask);
-    new_action.sa_flags = 0;
-    sigaction(SIGSEGV, &new_action, &old_action);
-    
-    char *result = NULL;
-    
-    // Use setjmp to handle potential crashes in EditLine
-    if (setjmp(editline_jmp_buf) == 0) {
-        // Set the prompt
-        current_prompt = prompt;
-        el_set(el, EL_PROMPT, prompt_func);
-        
-        // Get input from EditLine with error checking
-        int count;
-        const char *line = el_gets(el, &count);
-        
-        if (line && count > 0) {
-            // Remove trailing newline and make a copy
-            result = strdup(line);
-            if (result) {
-                size_t len = strlen(result);
-                if (len > 0 && result[len-1] == '\n') {
-                    result[len-1] = '\0';
-                }
-            }
-        }
-    } else {
-        // EditLine crashed, mark it as failed
-        printf("\nWarning: EditLine crashed, switching to basic input mode\n");
-        editline_failed = 1;
-        
-        // Clean up EditLine resources
-        if (el) {
-            el_end(el);
-            el = NULL;
-        }
-        if (hist) {
-            history_end(hist);
-            hist = NULL;
-        }
-        
-        // Fall back to basic input
-        printf("%s", prompt);
-        fflush(stdout);
-        static char buffer[1024];
-        if (fgets(buffer, sizeof(buffer), stdin)) {
-            size_t len = strlen(buffer);
-            if (len > 0 && buffer[len-1] == '\n') {
-                buffer[len-1] = '\0';
-            }
-            result = strdup(buffer);
-        }
-    }
-    
-    // Restore original signal handler
-    sigaction(SIGSEGV, &old_action, NULL);
-    
-    return result;
-#endif
+char *lambda_repl_readline(const char *prompt) {
+    // Use our custom cmdedit which handles all platforms uniformly
+    return repl_readline(prompt);
 }
 
-int repl_add_history(const char *line) {
-#ifdef _WIN32
-    // Windows: readline automatically handles history in repl_readline
-    // This function is a no-op for Windows
-    (void)line; // Suppress unused parameter warning
-    return 0;
-#else
-    if (!hist) {
-        // If history is not initialized, just return success silently
-        return 0;
-    }
-    
-    // Don't add empty lines or commands starting with '.' to history
-    if (!line || strlen(line) == 0 || line[0] == '.') {
-        return 0;
-    }
-    
-    HistEvent ev;
-    if (history(hist, &ev, H_ENTER, line) == -1) {
-        printf("Warning: Failed to add line to history\n");
-        return -1;
-    }
-    
-    return 0;
-#endif
+int lambda_repl_add_history(const char *line) {
+    // Use our custom cmdedit history function
+    return repl_add_history(line);
 }

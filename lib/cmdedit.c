@@ -21,6 +21,8 @@
 #include <unistd.h>
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <sys/select.h>
+#include <sys/time.h>
 #include <errno.h>
 #endif
 
@@ -417,14 +419,30 @@ int terminal_read_key(struct terminal_state *term) {
     if (c == 27) { // ESC
         char seq[3];
         
-        // Try to read the next character
-        if (read(term->input_fd, &seq[0], 1) != 1) {
+        // Use select() to timeout on escape sequence reading
+        fd_set readfds;
+        struct timeval timeout;
+        
+        FD_ZERO(&readfds);
+        FD_SET(term->input_fd, &readfds);
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 100000; // 100ms timeout
+        
+        // Try to read the next character with timeout
+        if (select(term->input_fd + 1, &readfds, NULL, NULL, &timeout) <= 0 ||
+            read(term->input_fd, &seq[0], 1) != 1) {
             return KEY_ESC;
         }
         
         if (seq[0] == '[') {
-            // ANSI escape sequence
-            if (read(term->input_fd, &seq[1], 1) != 1) {
+            // ANSI escape sequence - read next character with timeout
+            FD_ZERO(&readfds);
+            FD_SET(term->input_fd, &readfds);
+            timeout.tv_sec = 0;
+            timeout.tv_usec = 100000; // 100ms timeout
+            
+            if (select(term->input_fd + 1, &readfds, NULL, NULL, &timeout) <= 0 ||
+                read(term->input_fd, &seq[1], 1) != 1) {
                 return KEY_ESC;
             }
             
@@ -455,6 +473,17 @@ int terminal_read_key(struct terminal_state *term) {
     
     return (unsigned char)c;
 #endif
+}
+
+// Debug function to understand key mapping
+static void debug_key_press(int key) {
+    printf("\r\n[KEY DEBUG: %d (0x%02x)] ", key, key);
+    if (key == KEY_BACKSPACE) printf("-> BACKSPACE");
+    else if (key == KEY_DELETE) printf("-> DELETE"); 
+    else if (key == 127) printf("-> ASCII 127 (DEL)");
+    else if (key == 8) printf("-> ASCII 8 (BS)");
+    printf("\r\n");
+    fflush(stdout);
 }
 
 // ============================================================================
@@ -651,7 +680,7 @@ int editor_init(struct line_editor *ed, const char *prompt) {
             free(ed->buffer);
             return -1;
         }
-        ed->prompt_len = utf8_display_width(prompt, strlen(prompt));
+        ed->prompt_len = cmdedit_utf8_display_width(prompt, strlen(prompt));
     } else {
         ed->prompt = strdup("");
         ed->prompt_len = 0;
@@ -734,15 +763,26 @@ int editor_insert_char(struct line_editor *ed, char c) {
 
 int editor_delete_char(struct line_editor *ed) {
     if (!ed || ed->cursor_pos >= ed->buffer_len) {
-        return -1; // Nothing to delete
+        return -1; // Nothing to delete - cursor is at end of line
     }
     
-    // Move characters after cursor to close the gap
-    memmove(ed->buffer + ed->cursor_pos,
-            ed->buffer + ed->cursor_pos + 1,
-            ed->buffer_len - ed->cursor_pos);
+    // Get the UTF-8 character at cursor position
+    utf8_char_t utf8_char;
+    if (!cmdedit_utf8_get_char_at_byte(ed->buffer, ed->buffer_len, ed->cursor_pos, &utf8_char)) {
+        return -1; // Invalid UTF-8 character
+    }
     
-    ed->buffer_len--;
+    size_t char_bytes = utf8_char.byte_length;
+    if (char_bytes == 0 || ed->cursor_pos + char_bytes > ed->buffer_len) {
+        return -1; // Invalid character or would go past end
+    }
+    
+    // Move characters after the deleted character to close the gap
+    memmove(ed->buffer + ed->cursor_pos,
+            ed->buffer + ed->cursor_pos + char_bytes,
+            ed->buffer_len - ed->cursor_pos - char_bytes);
+    
+    ed->buffer_len -= char_bytes;
     ed->buffer[ed->buffer_len] = '\0';
     
     return 0;
@@ -750,12 +790,28 @@ int editor_delete_char(struct line_editor *ed) {
 
 int editor_backspace_char(struct line_editor *ed) {
     if (!ed || ed->cursor_pos == 0) {
-        return -1; // Nothing to delete
+        return -1; // Nothing to delete - cursor is at beginning
     }
     
-    // Move cursor back and delete character
-    ed->cursor_pos--;
-    return editor_delete_char(ed);
+    // Move cursor back to the previous character
+    size_t prev_pos = cmdedit_utf8_move_cursor_left(ed->buffer, ed->buffer_len, ed->cursor_pos);
+    if (prev_pos == ed->cursor_pos) {
+        return -1; // Couldn't move back
+    }
+    
+    // Calculate bytes to delete
+    size_t char_bytes = ed->cursor_pos - prev_pos;
+    
+    // Move characters after cursor to close the gap
+    memmove(ed->buffer + prev_pos,
+            ed->buffer + ed->cursor_pos,
+            ed->buffer_len - ed->cursor_pos);
+    
+    ed->buffer_len -= char_bytes;
+    ed->cursor_pos = prev_pos;
+    ed->buffer[ed->buffer_len] = '\0';
+    
+    return 0;
 }
 
 int editor_move_cursor(struct line_editor *ed, int offset) {
@@ -766,12 +822,12 @@ int editor_move_cursor(struct line_editor *ed, int offset) {
     if (offset < 0) {
         // Move left by characters
         for (int i = 0; i < -offset && ed->cursor_pos > 0; i++) {
-            ed->cursor_pos = utf8_move_cursor_left(ed->buffer, ed->buffer_len, ed->cursor_pos);
+            ed->cursor_pos = cmdedit_utf8_move_cursor_left(ed->buffer, ed->buffer_len, ed->cursor_pos);
         }
     } else {
         // Move right by characters
         for (int i = 0; i < offset && ed->cursor_pos < ed->buffer_len; i++) {
-            ed->cursor_pos = utf8_move_cursor_right(ed->buffer, ed->buffer_len, ed->cursor_pos);
+            ed->cursor_pos = cmdedit_utf8_move_cursor_right(ed->buffer, ed->buffer_len, ed->cursor_pos);
         }
     }
     
@@ -800,8 +856,8 @@ void editor_refresh_display(struct line_editor *ed) {
     }
     
     // Calculate cursor display position using cached prompt width
-    int cursor_display_width = utf8_display_width(ed->buffer, ed->cursor_pos);
-    int total_display_width = utf8_display_width(ed->buffer, ed->buffer_len);
+    int cursor_display_width = cmdedit_utf8_display_width(ed->buffer, ed->cursor_pos);
+    int total_display_width = cmdedit_utf8_display_width(ed->buffer, ed->buffer_len);
     
     size_t total_pos = ed->prompt_len + cursor_display_width;
     size_t current_pos = ed->prompt_len + total_display_width;
@@ -1028,6 +1084,9 @@ static char *editor_readline(const char *prompt) {
         }
         
         int key = terminal_read_key(&g_terminal);
+        
+        // Debug: show what key was detected
+        debug_key_press(key);
         
         if (key == KEY_ERROR || key == KEY_EOF) {
             done = -1; // Error or EOF
@@ -1344,7 +1403,7 @@ static int handle_tab_completion(struct line_editor *ed, int key, int count) {
     }
     
     // Find the start of the word to complete
-    size_t word_start = utf8_find_word_start(ed->buffer, ed->buffer_len, ed->cursor_pos);
+    size_t word_start = cmdedit_utf8_find_word_start(ed->buffer, ed->buffer_len, ed->cursor_pos);
     
     // Extract the prefix to complete
     size_t prefix_len = ed->cursor_pos - word_start;
@@ -1470,11 +1529,11 @@ static bool is_word_char(char c) {
 }
 
 static size_t find_word_start(const char *buffer, size_t pos, size_t len) {
-    return utf8_find_word_start(buffer, len, pos);
+    return cmdedit_utf8_find_word_start(buffer, len, pos);
 }
 
 static size_t find_word_end(const char *buffer, size_t pos, size_t len) {
-    return utf8_find_word_end(buffer, len, pos);
+    return cmdedit_utf8_find_word_end(buffer, len, pos);
 }
 
 static size_t find_next_word_start(const char *buffer, size_t pos, size_t len) {
