@@ -142,6 +142,11 @@ static void signal_handler(int sig) {
             g_winch_received = 1;
             break;
 #endif
+#if !defined(_WIN32) && defined(SIGPIPE)
+        case SIGPIPE:
+            // Ignore SIGPIPE - handle broken pipes gracefully
+            break;
+#endif
         default:
             break;
     }
@@ -165,7 +170,16 @@ static int install_signal_handlers(void) {
         sigaction(SIGINT, &g_old_sigint, NULL);  // Restore SIGINT
         return -1;
     }
-    
+
+#if !defined(_WIN32) && defined(SIGPIPE)
+    // Install SIGPIPE handler (ignore broken pipes)
+    if (sigaction(SIGPIPE, &sa, NULL) != 0) {
+        sigaction(SIGINT, &g_old_sigint, NULL);
+        sigaction(SIGTERM, &g_old_sigterm, NULL);
+        return -1;
+    }
+#endif
+
 #if !defined(_WIN32) && defined(SIGWINCH)
     // Install SIGWINCH handler (window resize)
     if (sigaction(SIGWINCH, &sa, &g_old_sigwinch) != 0) {
@@ -1045,7 +1059,27 @@ static char *editor_readline(const char *prompt) {
     
     // Fall back to simple input for non-TTY
     if (!g_terminal.is_tty) {
-        return repl_readline(prompt);
+        // Simple fallback for non-interactive input (pipes, redirects)
+        if (prompt) {
+            printf("%s", prompt);
+            fflush(stdout);
+        }
+        
+        char *line = NULL;
+        size_t len = 0;
+        ssize_t nread = getline(&line, &len, stdin);
+        
+        if (nread == -1) {
+            if (line) free(line);
+            return NULL; // EOF or error
+        }
+        
+        // Remove trailing newline
+        if (nread > 0 && line[nread-1] == '\n') {
+            line[nread-1] = '\0';
+        }
+        
+        return line;
     }
     
     // Initialize editor
