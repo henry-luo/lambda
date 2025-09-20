@@ -10,6 +10,7 @@ import os
 import sys
 import glob
 import platform
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
@@ -39,90 +40,138 @@ class PremakeGenerator:
         self.external_libraries = self._parse_external_libraries()
 
     def _parse_external_libraries(self) -> Dict[str, Dict[str, str]]:
-        """Parse external library definitions from JSON config"""
+        """Parse external library definitions from JSON config
+        
+        Logic:
+        1. Libraries can be defined at global level
+        2. Platform-specific libraries override global settings
+        3. Platform can set link:'none' to exclude a globally-defined library
+        """
         libraries = {}
         
-        # Parse regular libraries
+        # Step 1: Parse global libraries first
         for lib in self.config.get('libraries', []):
-            # Include libraries with lib field or those with link='none'
-            if 'lib' in lib or lib.get('link') == 'none':
+            # Include all libraries that have a 'name' field
+            if 'name' in lib:
                 libraries[lib['name']] = {
                     'include': lib.get('include', ''),
                     'lib': lib.get('lib', ''),
                     'link': lib.get('link', 'static')
                 }
         
-        # Parse dev_libraries (development/test-only libraries like ginac, cln)
+        # Parse global dev_libraries (development/test-only libraries)
         for lib in self.config.get('dev_libraries', []):
-            # Include libraries with lib field or those with link='none'
-            if 'lib' in lib or lib.get('link') == 'none':
+            if 'name' in lib:
                 libraries[lib['name']] = {
                     'include': lib.get('include', ''),
                     'lib': lib.get('lib', ''),
                     'link': lib.get('link', 'static')
                 }
         
-        # Use class platform detection variables
+        # Step 2: Apply platform-specific overrides
         platforms_config = self.config.get('platforms', {})
         
         # Override with Linux-specific libraries if on Linux
         if self.use_linux_config:
             linux_config = platforms_config.get('linux', {})
             
-            # Override with Linux-specific libraries
+            # Process Linux-specific libraries
             for lib in linux_config.get('libraries', []):
-                if 'lib' in lib:
-                    libraries[lib['name']] = {
-                        'include': lib.get('include', ''),
-                        'lib': lib.get('lib', ''),
-                        'link': lib.get('link', 'static')
-                    }
+                if 'name' in lib:
+                    if lib.get('link') == 'none':
+                        # Remove library if it was globally defined
+                        if lib['name'] in libraries:
+                            del libraries[lib['name']]
+                    else:
+                        # Override or add library
+                        libraries[lib['name']] = {
+                            'include': lib.get('include', ''),
+                            'lib': lib.get('lib', ''),
+                            'link': lib.get('link', 'static')
+                        }
             
-            # Override with Linux-specific dev_libraries  
+            # Process Linux-specific dev_libraries  
             for lib in linux_config.get('dev_libraries', []):
-                if 'lib' in lib:
-                    libraries[lib['name']] = {
-                        'include': lib.get('include', ''),
-                        'lib': lib.get('lib', ''),
-                        'link': lib.get('link', 'static')
-                    }
+                if 'name' in lib:
+                    if lib.get('link') == 'none':
+                        # Remove library if it was globally defined
+                        if lib['name'] in libraries:
+                            del libraries[lib['name']]
+                    else:
+                        # Override or add library
+                        libraries[lib['name']] = {
+                            'include': lib.get('include', ''),
+                            'lib': lib.get('lib', ''),
+                            'link': lib.get('link', 'static')
+                        }
         
         # Override with macOS-specific libraries if on macOS
         if self.use_macos_config:
             macos_config = platforms_config.get('macos', {})
             
-            # Override with macOS-specific libraries
+            # Process macOS-specific libraries
             for lib in macos_config.get('libraries', []):
-                if 'lib' in lib:
-                    libraries[lib['name']] = {
-                        'include': lib.get('include', ''),
-                        'lib': lib.get('lib', ''),
-                        'link': lib.get('link', 'dynamic')
-                    }
+                if 'name' in lib:
+                    if lib.get('link') == 'none':
+                        # Remove library if it was globally defined
+                        if lib['name'] in libraries:
+                            del libraries[lib['name']]
+                    else:
+                        # Override or add library
+                        libraries[lib['name']] = {
+                            'include': lib.get('include', ''),
+                            'lib': lib.get('lib', ''),
+                            'link': lib.get('link', 'dynamic')  # Default to dynamic on macOS
+                        }
+            
+            # Process macOS-specific dev_libraries  
+            for lib in macos_config.get('dev_libraries', []):
+                if 'name' in lib:
+                    if lib.get('link') == 'none':
+                        # Remove library if it was globally defined
+                        if lib['name'] in libraries:
+                            del libraries[lib['name']]
+                    else:
+                        # Override or add library
+                        libraries[lib['name']] = {
+                            'include': lib.get('include', ''),
+                            'lib': lib.get('lib', ''),
+                            'link': lib.get('link', 'dynamic')  # Default to dynamic on macOS
+                        }
         
         # Override with Windows-specific libraries if on Windows
         if self.use_windows_config:
             windows_config = platforms_config.get('windows', {})
             
-            # Override with Windows-specific libraries
+            # Process Windows-specific libraries
             for lib in windows_config.get('libraries', []):
-                # Include libraries with lib field or those with link='none'
-                if 'lib' in lib or lib.get('link') == 'none':
-                    libraries[lib['name']] = {
-                        'include': lib.get('include', ''),
-                        'lib': lib.get('lib', ''),
-                        'link': lib.get('link', 'static')
-                    }
+                if 'name' in lib:
+                    if lib.get('link') == 'none':
+                        # Remove library if it was globally defined
+                        if lib['name'] in libraries:
+                            del libraries[lib['name']]
+                    else:
+                        # Override or add library
+                        libraries[lib['name']] = {
+                            'include': lib.get('include', ''),
+                            'lib': lib.get('lib', ''),
+                            'link': lib.get('link', 'static')
+                        }
             
-            # Override with Windows-specific dev_libraries  
+            # Process Windows-specific dev_libraries  
             for lib in windows_config.get('dev_libraries', []):
-                # Include libraries with lib field or those with link='none'
-                if 'lib' in lib or lib.get('link') == 'none':
-                    libraries[lib['name']] = {
-                        'include': lib.get('include', ''),
-                        'lib': lib.get('lib', ''),
-                        'link': lib.get('link', 'static')
-                    }
+                if 'name' in lib:
+                    if lib.get('link') == 'none':
+                        # Remove library if it was globally defined
+                        if lib['name'] in libraries:
+                            del libraries[lib['name']]
+                    else:
+                        # Override or add library
+                        libraries[lib['name']] = {
+                            'include': lib.get('include', ''),
+                            'lib': lib.get('lib', ''),
+                            'link': lib.get('link', 'static')
+                        }
         
         return libraries
 
@@ -596,7 +645,7 @@ class PremakeGenerator:
             # Create C++ project
             self._create_language_project(lib, cpp_files, source_patterns, dependencies, "C++", f"{lib_name}-cpp")
             # Create main project that links both
-            self._create_wrapper_project(lib_name, [f"{lib_name}-c", f"{lib_name}-cpp"])
+            self._create_wrapper_project(lib_name, [f"{lib_name}-c", f"{lib_name}-cpp"], lib)
         else:
             # Single language project
             language = "C++" if cpp_files or any('*.cpp' in pattern for pattern in source_patterns) else "C"
@@ -606,9 +655,13 @@ class PremakeGenerator:
                                source_patterns: List[str], dependencies: List[str], 
                                language: str, project_name: str) -> None:
         """Create a single-language project"""
+        # Determine library type based on link attribute
+        link_type = lib.get('link', 'static')
+        kind = "SharedLib" if link_type == 'dynamic' else "StaticLib"
+        
         self.premake_content.extend([
             f'project "{project_name}"',
-            '    kind "StaticLib"',
+            f'    kind "{kind}"',
             f'    language "{language}"',
             '    targetdir "build/lib"',
             '    objdir "build/obj/%{prj.name}"',
@@ -805,11 +858,15 @@ class PremakeGenerator:
         
         self.premake_content.append('')
     
-    def _create_wrapper_project(self, lib_name: str, sub_projects: List[str]) -> None:
+    def _create_wrapper_project(self, lib_name: str, sub_projects: List[str], lib: Dict[str, Any] = None) -> None:
         """Create a wrapper project that combines multiple sub-projects"""
+        # Determine library type based on link attribute
+        link_type = lib.get('link', 'static') if lib else 'static'
+        kind = "SharedLib" if link_type == 'dynamic' else "StaticLib"
+        
         self.premake_content.extend([
             f'project "{lib_name}"',
-            '    kind "StaticLib"',
+            f'    kind "{kind}"',
             '    language "C++"',
             '    targetdir "build/lib"',
             '    objdir "build/obj/%{prj.name}"',
@@ -835,9 +892,13 @@ class PremakeGenerator:
         dependencies = lib.get('libraries', [])
         sources = lib.get('sources', [])
         
+        # Determine library type based on link attribute
+        link_type = lib.get('link', 'static')
+        kind = "SharedLib" if link_type == 'dynamic' else "StaticLib"
+        
         self.premake_content.extend([
             f'project "{lib_name}"',
-            '    kind "StaticLib"',
+            f'    kind "{kind}"',
             '    language "C"',
             '    targetdir "build/lib"',
             '    objdir "build/obj/%{prj.name}"',
@@ -1435,9 +1496,10 @@ class PremakeGenerator:
             # (they need to come after libraries that depend on them)
             
             # Add static external libraries
-            # If lambda-input-full is a dependency, we need to include curl/ssl/crypto/nghttp2 for proper linking
+            # If lambda-input-full is a dependency, we need to include curl/ssl/crypto for proper linking
             # since static libraries don't propagate their dependencies in Premake
-            base_libs = ['mpdec', 'utf8proc', 'mir', 'curl', 'nghttp2', 'ssl', 'crypto']
+            # Note: Lambda's custom curl was built with external nghttp2 dependency
+            base_libs = ['mpdec', 'utf8proc', 'mir', 'nghttp2', 'curl', 'ssl', 'crypto']
             # Add platform-specific readline library
             if self.use_windows_config:
                 # Windows: skip readline/ncurses to avoid DLL dependencies
@@ -1454,7 +1516,12 @@ class PremakeGenerator:
                     # Convert to relative path from build directory
                     if not lib_path.startswith('/'):
                         lib_path = f"../../{lib_path}"
-                    self.premake_content.append(f'        "{lib_path}",')
+                    
+                    # Force load nghttp2 on macOS to ensure curl can find its symbols
+                    if lib_name == 'nghttp2' and not self.use_windows_config and not self.use_linux_config:
+                        self.premake_content.append(f'        "-Wl,-force_load,{lib_path}",')
+                    else:
+                        self.premake_content.append(f'        "{lib_path}",')
             
             # Add tree-sitter libraries directly within the group using normal linking
             # This should work for all tests without needing --whole-archive
@@ -1775,7 +1842,8 @@ class PremakeGenerator:
             
             # Add platform-specific additional libraries for static linking
             # These are the same libraries that test projects include
-            base_libs = ['mpdec', 'utf8proc', 'mir', 'curl', 'nghttp2', 'ssl', 'crypto']
+            # Note: Lambda's custom curl was built with external nghttp2 dependency
+            base_libs = ['mpdec', 'utf8proc', 'mir', 'nghttp2', 'curl', 'ssl', 'crypto', 'hpdf']
             # Add platform-specific readline library
             if self.use_windows_config:
                 # Windows: skip readline/ncurses to avoid DLL dependencies
@@ -1785,7 +1853,7 @@ class PremakeGenerator:
             
             # Add these libraries if they're not already included and exist in external_libraries
             for lib_name in base_libs:
-                if lib_name in self.external_libraries and lib_name not in [dep.replace('../../', '').replace('.a', '').replace('lib', '').replace('/mingw64/lib/', '') for dep in static_libs]:
+                if lib_name in self.external_libraries:
                     lib_info = self.external_libraries[lib_name]
                     
                     # Skip libraries with link type "none"
@@ -1797,7 +1865,11 @@ class PremakeGenerator:
                         if not lib_path.startswith('/') and lib_path:
                             lib_path = f"../../{lib_path}"
                         if lib_path and lib_path != "../../":
-                            self.premake_content.append(f'        "{lib_path}",')
+                            # Force load nghttp2 on macOS to ensure curl can find its symbols
+                            if lib_name == 'nghttp2' and not self.use_windows_config and not self.use_linux_config:
+                                self.premake_content.append(f'        "-Wl,-force_load,{lib_path}",')
+                            else:
+                                self.premake_content.append(f'        "{lib_path}",')
             
             self.premake_content.extend([
                 '    }',
@@ -1937,21 +2009,84 @@ class PremakeGenerator:
             ''
         ])
 
+    def _create_premake_symlink(self, platform_specific_file: str) -> None:
+        """Create symbolic link from premake5.lua to platform-specific file"""
+        import os
+        
+        # Only create symlink if this is a platform-specific file
+        if platform_specific_file == "premake5.lua":
+            print("DEBUG: Output file is already premake5.lua, no symlink needed")
+            return
+        
+        # Check if the platform-specific file contains known platform identifiers
+        platform_indicators = ['mac', 'lin', 'win']
+        if not any(indicator in platform_specific_file.lower() for indicator in platform_indicators):
+            print(f"DEBUG: {platform_specific_file} doesn't appear to be platform-specific, no symlink needed")
+            return
+            
+        symlink_path = "premake5.lua"
+        
+        try:
+            # Remove existing symlink or file if it exists
+            if os.path.exists(symlink_path) or os.path.islink(symlink_path):
+                print(f"DEBUG: Removing existing {symlink_path}")
+                os.remove(symlink_path)
+            
+            # Create symbolic link
+            # Use relative path to avoid absolute path dependencies
+            relative_target = os.path.basename(platform_specific_file)
+            
+            if os.name == 'nt':  # Windows
+                # Windows requires admin privileges for symlinks, use copy instead
+                import shutil
+                print(f"DEBUG: Windows detected, copying {relative_target} to {symlink_path}")
+                shutil.copy2(platform_specific_file, symlink_path)
+                print(f"✅ Created copy: {symlink_path} -> {relative_target}")
+            else:  # Unix-like (macOS, Linux)
+                print(f"DEBUG: Creating symbolic link: {symlink_path} -> {relative_target}")
+                os.symlink(relative_target, symlink_path)
+                print(f"✅ Created symbolic link: {symlink_path} -> {relative_target}")
+                
+        except OSError as e:
+            print(f"⚠️  Warning: Could not create {symlink_path}: {e}")
+            print(f"   You may need to manually create the link:")
+            if os.name == 'nt':
+                print(f"   copy {platform_specific_file} {symlink_path}")
+            else:
+                print(f"   ln -sf {platform_specific_file} {symlink_path}")
+
     def generate_premake_file(self, output_path: str = "premake5.lua") -> None:
         """Generate the complete premake5.lua file"""
         print(f"DEBUG: Starting premake file generation, output_path={output_path}")
         
+        # Determine platform from filename or current platform detection
+        platform_name = "unknown"
+        if "mac" in output_path.lower():
+            platform_name = "macOS"
+        elif "lin" in output_path.lower():
+            platform_name = "Linux"
+        elif "win" in output_path.lower():
+            platform_name = "Windows"
+        elif self.use_macos_config:
+            platform_name = "macOS"
+        elif self.use_linux_config:
+            platform_name = "Linux"
+        elif self.use_windows_config:
+            platform_name = "Windows"
+        
         self.premake_content = []
         
-        # Add header comment
+        # Add header comment with platform information
         self.premake_content.extend([
-            '-- Generated by utils/generate_premake.py',
+            f'-- Generated by utils/generate_premake.py for {platform_name}',
             '-- Lambda Build System Premake5 Configuration',
+            f'-- Platform: {platform_name}',
+            f'-- Generated on: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}',
             '-- DO NOT EDIT MANUALLY - Regenerate using: python3 utils/generate_premake.py',
             '',
         ])
         
-        print("DEBUG: Added header comment")
+        print(f"DEBUG: Added header comment for {platform_name}")
         
         # Generate all sections
         print("DEBUG: Generating workspace...")
@@ -1974,7 +2109,11 @@ class PremakeGenerator:
                 content_str = '\n'.join(self.premake_content)
                 f.write(content_str)
                 print(f"DEBUG: Successfully wrote {len(content_str)} characters to {output_path}")
-            print(f"Generated {output_path} successfully")
+            print(f"Generated {platform_name} premake file: {output_path}")
+            
+            # Create symbolic link to premake5.lua if this is a platform-specific file
+            self._create_premake_symlink(output_path)
+            
         except IOError as e:
             print(f"Error writing {output_path}: {e}")
             sys.exit(1)
@@ -2001,15 +2140,53 @@ def main():
     print(f"DEBUG: sys.argv = {sys.argv}")
     
     config_file = "build_lambda_config.json"
-    output_file = "premake5.lua"
+    output_file = None  # Will be determined based on platform
+    explicit_platform = None
     
     # Parse command line arguments
-    if len(sys.argv) > 1:
-        config_file = sys.argv[1]
-        print(f"DEBUG: config_file set to: {config_file}")
-    if len(sys.argv) > 2:
-        output_file = sys.argv[2]
-        print(f"DEBUG: output_file set to: {output_file}")
+    i = 1
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg in ['--platform', '-p'] and i + 1 < len(sys.argv):
+            explicit_platform = sys.argv[i + 1].lower()
+            i += 2
+        elif arg.endswith('.json'):
+            config_file = arg
+            i += 1
+        elif arg.endswith('.lua'):
+            output_file = arg
+            i += 1
+        else:
+            # Assume it's a config file if not a lua file
+            if i == 1:
+                config_file = arg
+            elif i == 2 and output_file is None:
+                output_file = arg
+            i += 1
+    
+    # Determine platform if not explicitly set via output filename
+    if output_file is None:
+        # Auto-detect platform and generate appropriate filename
+        current_platform = platform.system()
+        if explicit_platform:
+            if explicit_platform in ['mac', 'macos', 'darwin']:
+                output_file = "premake5.mac.lua"
+            elif explicit_platform in ['linux', 'lin']:
+                output_file = "premake5.lin.lua"
+            elif explicit_platform in ['windows', 'win']:
+                output_file = "premake5.win.lua"
+            else:
+                print(f"Error: Unknown platform '{explicit_platform}'. Use 'mac', 'linux', or 'windows'")
+                sys.exit(1)
+        elif current_platform == 'Darwin':
+            output_file = "premake5.mac.lua"
+        elif current_platform == 'Linux':
+            output_file = "premake5.lin.lua"
+        elif current_platform == 'Windows' or current_platform.startswith('MINGW') or current_platform.startswith('MSYS'):
+            output_file = "premake5.win.lua"
+        else:
+            print(f"Warning: Unknown platform '{current_platform}', defaulting to premake5.lua")
+            output_file = "premake5.lua"
     
     print(f"DEBUG: Final config_file={config_file}, output_file={output_file}")
     
@@ -2022,9 +2199,15 @@ def main():
     
     generator.generate_premake_file(output_file)
     print(f"Premake5 migration completed successfully!")
+    print(f"Generated platform-specific file: {output_file}")
     print(f"Next steps:")
-    print(f"  1. Run: premake5 gmake2")
+    print(f"  1. Run: premake5 gmake2 --file={output_file}")
     print(f"  2. Run: make -C build/premake config=debug_native")
+    print(f"")
+    print(f"To generate for other platforms, use:")
+    print(f"  python3 utils/generate_premake.py --platform mac")
+    print(f"  python3 utils/generate_premake.py --platform linux")
+    print(f"  python3 utils/generate_premake.py --platform windows")
 
 if __name__ == "__main__":
     main()
