@@ -730,10 +730,10 @@
                         "source": "test_cmdedit.c",
                         "name": "⌨️ Command Line Editor Tests",
                         "dependencies": [],
-                        "libraries": ["criterion"],
+                        "libraries": ["criterion", "utf8proc"],
                         "binary": "test_cmdedit.exe",
-                        "additional_sources": ["lib/cmdedit.c"],
-                        "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -std=gnu99"
+                        "additional_sources": ["lib/cmdedit.c", "lib/cmdedit_utf8.c"],
+                        "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -std=gnu99 -DUTF8PROC_STATIC"
                     }
                 ],
                 "type": "library",

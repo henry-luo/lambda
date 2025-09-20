@@ -114,6 +114,7 @@ struct line_editor {
     char *prompt;
     size_t prompt_len;
     struct terminal_state *term;
+    bool needs_refresh;     // Display needs updating
 };
 
 struct history_entry {

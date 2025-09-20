@@ -2,10 +2,12 @@
 #define _GNU_SOURCE
 #include <string.h>
 #include "cmdedit.h"
+#include "cmdedit_utf8.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <stdint.h>
 
 // Platform-specific includes
 #ifdef _WIN32
@@ -65,6 +67,7 @@ struct line_editor {
     char *prompt;           // Current prompt string
     size_t prompt_len;      // Display width of prompt
     struct terminal_state *term;
+    bool needs_refresh;     // Display needs updating
 };
 #endif // CMDEDIT_TESTING
 
@@ -93,6 +96,14 @@ static struct line_editor g_editor = {0};
 static struct history g_history = {0};
 static bool g_initialized = false;
 
+// Signal handling state
+static volatile sig_atomic_t g_signal_received = 0;
+static volatile sig_atomic_t g_winch_received = 0;
+static struct sigaction g_old_sigint;
+static struct sigaction g_old_sigterm;
+static struct sigaction g_old_sigwinch;
+static bool g_signals_installed = false;
+
 // Readline compatibility variables
 char *rl_line_buffer = NULL;
 int rl_point = 0;
@@ -111,6 +122,99 @@ int terminal_raw_mode(struct terminal_state *term, bool enable);
 static int terminal_raw_mode(struct terminal_state *term, bool enable);
 #endif
 static void kill_ring_cleanup(void);
+
+// ============================================================================
+// SIGNAL HANDLING
+// ============================================================================
+
+static void signal_handler(int sig) {
+    switch (sig) {
+        case SIGINT:
+            g_signal_received = SIGINT;
+            break;
+        case SIGTERM:
+            g_signal_received = SIGTERM;
+            break;
+#if !defined(_WIN32) && defined(SIGWINCH)
+        case SIGWINCH:
+            g_winch_received = 1;
+            break;
+#endif
+        default:
+            break;
+    }
+}
+
+static int install_signal_handlers(void) {
+    if (g_signals_installed) return 0;
+    
+    struct sigaction sa;
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;  // Restart interrupted system calls
+    
+    // Install SIGINT handler
+    if (sigaction(SIGINT, &sa, &g_old_sigint) != 0) {
+        return -1;
+    }
+    
+    // Install SIGTERM handler
+    if (sigaction(SIGTERM, &sa, &g_old_sigterm) != 0) {
+        sigaction(SIGINT, &g_old_sigint, NULL);  // Restore SIGINT
+        return -1;
+    }
+    
+#if !defined(_WIN32) && defined(SIGWINCH)
+    // Install SIGWINCH handler (window resize)
+    if (sigaction(SIGWINCH, &sa, &g_old_sigwinch) != 0) {
+        sigaction(SIGINT, &g_old_sigint, NULL);
+        sigaction(SIGTERM, &g_old_sigterm, NULL);
+        return -1;
+    }
+#endif
+    
+    g_signals_installed = true;
+    return 0;
+}
+
+static int restore_signal_handlers(void) {
+    if (!g_signals_installed) return 0;
+    
+    int result = 0;
+    
+    if (sigaction(SIGINT, &g_old_sigint, NULL) != 0) {
+        result = -1;
+    }
+    
+    if (sigaction(SIGTERM, &g_old_sigterm, NULL) != 0) {
+        result = -1;
+    }
+    
+#if !defined(_WIN32) && defined(SIGWINCH)
+    if (sigaction(SIGWINCH, &g_old_sigwinch, NULL) != 0) {
+        result = -1;
+    }
+#endif
+    
+    g_signals_installed = false;
+    return result;
+}
+
+static bool check_signals(void) {
+    // Check for window resize
+    if (g_winch_received) {
+        g_winch_received = 0;
+        // TODO: Handle window resize - refresh display
+        // For now, just return false to continue normal operation
+    }
+    
+    // Check for termination signals
+    if (g_signal_received) {
+        return true;  // Signal received, should exit
+    }
+    
+    return false;  // No termination signal
+}
 
 // ============================================================================
 // PHASE 1: TERMINAL I/O ABSTRACTION
@@ -366,6 +470,12 @@ int repl_init(void) {
         return -1;
     }
     
+    // Install signal handlers
+    if (install_signal_handlers() != 0) {
+        terminal_cleanup(&g_terminal);
+        return -1;
+    }
+    
     // Initialize history with default size
     g_history.max_size = 100;
     g_history.head = NULL;
@@ -400,6 +510,9 @@ void repl_cleanup(void) {
     
     // Cleanup kill ring
     kill_ring_cleanup();
+    
+    // Restore signal handlers
+    restore_signal_handlers();
     
     g_initialized = false;
 }
@@ -473,6 +586,7 @@ static int handle_ctrl_d(struct line_editor *ed, int key, int count);
 static int handle_ctrl_l(struct line_editor *ed, int key, int count);
 static int handle_history_prev(struct line_editor *ed, int key, int count);
 static int handle_history_next(struct line_editor *ed, int key, int count);
+static int handle_tab_completion(struct line_editor *ed, int key, int count);
 
 // Advanced editing function declarations
 #ifdef CMDEDIT_TESTING
@@ -501,6 +615,7 @@ static key_binding_t default_bindings[] = {
     {KEY_CTRL_L, handle_ctrl_l},
     {KEY_CTRL_P, handle_history_prev},  // Previous history
     {KEY_CTRL_N, handle_history_next},  // Next history
+    {KEY_TAB, handle_tab_completion},   // Tab completion
     {KEY_BACKSPACE, handle_backspace},
     {KEY_DELETE, handle_delete},
     {KEY_LEFT, handle_move_left},
@@ -536,7 +651,7 @@ int editor_init(struct line_editor *ed, const char *prompt) {
             free(ed->buffer);
             return -1;
         }
-        ed->prompt_len = strlen(prompt);
+        ed->prompt_len = utf8_display_width(prompt, strlen(prompt));
     } else {
         ed->prompt = strdup("");
         ed->prompt_len = 0;
@@ -568,9 +683,19 @@ static int editor_ensure_buffer_size(struct line_editor *ed, size_t needed) {
         return 0;
     }
     
+    // Use exponential growth for better performance with large inputs
     size_t new_size = ed->buffer_size;
+    if (new_size == 0) {
+        new_size = BUFFER_GROW_SIZE;
+    }
+    
     while (new_size < needed) {
-        new_size += BUFFER_GROW_SIZE;
+        if (new_size > SIZE_MAX / 2) {
+            // Avoid overflow, fall back to exact size
+            new_size = needed;
+            break;
+        }
+        new_size *= 2;
     }
     
     char *new_buffer = realloc(ed->buffer, new_size);
@@ -636,14 +761,20 @@ int editor_backspace_char(struct line_editor *ed) {
 int editor_move_cursor(struct line_editor *ed, int offset) {
     if (!ed) return -1;
     
-    int new_pos = (int)ed->cursor_pos + offset;
-    if (new_pos < 0) {
-        new_pos = 0;
-    } else if (new_pos > (int)ed->buffer_len) {
-        new_pos = (int)ed->buffer_len;
+    if (offset == 0) return 0;
+    
+    if (offset < 0) {
+        // Move left by characters
+        for (int i = 0; i < -offset && ed->cursor_pos > 0; i++) {
+            ed->cursor_pos = utf8_move_cursor_left(ed->buffer, ed->buffer_len, ed->cursor_pos);
+        }
+    } else {
+        // Move right by characters
+        for (int i = 0; i < offset && ed->cursor_pos < ed->buffer_len; i++) {
+            ed->cursor_pos = utf8_move_cursor_right(ed->buffer, ed->buffer_len, ed->cursor_pos);
+        }
     }
     
-    ed->cursor_pos = (size_t)new_pos;
     return 0;
 }
 
@@ -668,9 +799,12 @@ void editor_refresh_display(struct line_editor *ed) {
         terminal_write(ed->term, ed->buffer, ed->buffer_len);
     }
     
-    // Position cursor correctly
-    size_t total_pos = ed->prompt_len + ed->cursor_pos;
-    size_t current_pos = ed->prompt_len + ed->buffer_len;
+    // Calculate cursor display position using cached prompt width
+    int cursor_display_width = utf8_display_width(ed->buffer, ed->cursor_pos);
+    int total_display_width = utf8_display_width(ed->buffer, ed->buffer_len);
+    
+    size_t total_pos = ed->prompt_len + cursor_display_width;
+    size_t current_pos = ed->prompt_len + total_display_width;
     
     if (current_pos > total_pos) {
         // Move cursor left to correct position
@@ -887,6 +1021,12 @@ static char *editor_readline(const char *prompt) {
     char *result = NULL;
     
     while (!done) {
+        // Check for signals before reading input
+        if (check_signals()) {
+            done = -2; // Signal received
+            break;
+        }
+        
         int key = terminal_read_key(&g_terminal);
         
         if (key == KEY_ERROR || key == KEY_EOF) {
@@ -1194,6 +1334,88 @@ static int handle_history_next(struct line_editor *ed, int key, int count) {
     return 0;
 }
 
+static int handle_tab_completion(struct line_editor *ed, int key, int count) {
+    (void)key;
+    (void)count;
+    
+    if (!ed || !rl_attempted_completion_function) {
+        // No completion function available, insert a tab character
+        return editor_insert_char(ed, '\t');
+    }
+    
+    // Find the start of the word to complete
+    size_t word_start = utf8_find_word_start(ed->buffer, ed->buffer_len, ed->cursor_pos);
+    
+    // Extract the prefix to complete
+    size_t prefix_len = ed->cursor_pos - word_start;
+    char *prefix = NULL;
+    if (prefix_len > 0) {
+        prefix = malloc(prefix_len + 1);
+        if (!prefix) return -1;
+        memcpy(prefix, ed->buffer + word_start, prefix_len);
+        prefix[prefix_len] = '\0';
+    } else {
+        prefix = malloc(1);
+        if (!prefix) return -1;
+        prefix[0] = '\0';
+    }
+    
+    // Call the completion function
+    char **completions = (*rl_attempted_completion_function)(prefix, word_start, ed->cursor_pos);
+    
+    if (completions && completions[0]) {
+        // We have at least one completion
+        const char *completion = completions[0];
+        size_t completion_len = strlen(completion);
+        
+        // Check if we need to replace the prefix or just append
+        size_t common_prefix = 0;
+        while (common_prefix < prefix_len && 
+               common_prefix < completion_len && 
+               prefix[common_prefix] == completion[common_prefix]) {
+            common_prefix++;
+        }
+        
+        // Remove the old prefix beyond the common part
+        if (prefix_len > common_prefix) {
+            size_t remove_count = prefix_len - common_prefix;
+            memmove(ed->buffer + word_start + common_prefix,
+                   ed->buffer + ed->cursor_pos,
+                   ed->buffer_len - ed->cursor_pos);
+            ed->buffer_len -= remove_count;
+            ed->cursor_pos -= remove_count;
+        }
+        
+        // Insert the new completion part
+        const char *insert_text = completion + common_prefix;
+        size_t insert_len = completion_len - common_prefix;
+        
+        if (editor_ensure_buffer_size(ed, ed->buffer_len + insert_len + 1) == 0) {
+            // Make space for the new text
+            memmove(ed->buffer + ed->cursor_pos + insert_len,
+                   ed->buffer + ed->cursor_pos,
+                   ed->buffer_len - ed->cursor_pos);
+            
+            // Insert the completion text
+            memcpy(ed->buffer + ed->cursor_pos, insert_text, insert_len);
+            ed->buffer_len += insert_len;
+            ed->cursor_pos += insert_len;
+            ed->buffer[ed->buffer_len] = '\0';
+            
+            editor_refresh_display(ed);
+        }
+        
+        // Free the completions array
+        for (int i = 0; completions[i]; i++) {
+            free(completions[i]);
+        }
+        free(completions);
+    }
+    
+    free(prefix);
+    return 0;
+}
+
 // Enhanced repl_add_history implementation
 // (This replaces the basic implementation above)
 
@@ -1248,34 +1470,11 @@ static bool is_word_char(char c) {
 }
 
 static size_t find_word_start(const char *buffer, size_t pos, size_t len) {
-    (void)len; // Unused parameter
-    if (pos == 0) return 0;
-    
-    // Skip whitespace backwards
-    while (pos > 0 && !is_word_char(buffer[pos - 1])) {
-        pos--;
-    }
-    
-    // Skip word characters backwards
-    while (pos > 0 && is_word_char(buffer[pos - 1])) {
-        pos--;
-    }
-    
-    return pos;
+    return utf8_find_word_start(buffer, len, pos);
 }
 
 static size_t find_word_end(const char *buffer, size_t pos, size_t len) {
-    // Skip whitespace forwards
-    while (pos < len && !is_word_char(buffer[pos])) {
-        pos++;
-    }
-    
-    // Skip word characters forwards
-    while (pos < len && is_word_char(buffer[pos])) {
-        pos++;
-    }
-    
-    return pos;
+    return utf8_find_word_end(buffer, len, pos);
 }
 
 static size_t find_next_word_start(const char *buffer, size_t pos, size_t len) {
