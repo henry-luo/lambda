@@ -61,6 +61,17 @@ project "lambda-lib"
     
     includedirs {
         "lib/mem-pool/include",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+    }
+    
+    links {
+        "utf8proc",
     }
     
     buildoptions {

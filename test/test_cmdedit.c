@@ -1271,14 +1271,17 @@ Test(advanced_editing, kill_ring_multiple_entries) {
     
     // Test multiple kill operations to fill kill ring
     editor_insert_char(&ed, 'a');
+    ed.cursor_pos = 0; // Move cursor to beginning
     result = handle_kill_line(&ed, 11, 1); // Kill 'a'
     cr_assert_eq(result, 0, "First kill should succeed");
     
     editor_insert_char(&ed, 'b');
+    ed.cursor_pos = 0; // Move cursor to beginning
     result = handle_kill_line(&ed, 11, 1); // Kill 'b'
     cr_assert_eq(result, 0, "Second kill should succeed");
     
     editor_insert_char(&ed, 'c');
+    ed.cursor_pos = 0; // Move cursor to beginning
     result = handle_kill_line(&ed, 11, 1); // Kill 'c'
     cr_assert_eq(result, 0, "Third kill should succeed");
     

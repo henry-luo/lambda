@@ -926,6 +926,17 @@ class PremakeGenerator:
             '    ',
             '    includedirs {',
             '        "lib/mem-pool/include",',
+        ])
+        
+        # Add external library include paths for meta-library dependencies
+        external_deps = [dep for dep in dependencies if dep not in inline_libs]
+        for lib_name in external_deps:
+            if lib_name in self.external_libraries:
+                include_path = self.external_libraries[lib_name]['include']
+                if include_path:
+                    self.premake_content.append(f'        "{include_path}",')
+        
+        self.premake_content.extend([
             '    }',
             '    '
         ])
