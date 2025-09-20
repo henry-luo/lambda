@@ -17,6 +17,7 @@
 // Windows compatibility shim for __intrinsic_setjmpex
 // In MinGW, we'll use regular setjmp instead of the Microsoft intrinsic
 #include <setjmp.h>
+#include <windows.h>  // For console UTF-8 setup
 extern "C" int __intrinsic_setjmpex(jmp_buf env, void* context) {
     // In practice, __intrinsic_setjmpex is similar to setjmp but with SEH support
     // For MinGW compatibility, we'll use standard setjmp
@@ -466,6 +467,12 @@ int exec_convert(int argc, char* argv[]) {
 }
 
 int main(int argc, char *argv[]) {
+#ifdef _WIN32
+    // Set console to UTF-8 for proper Unicode display on Windows
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+#endif
+
     // Initialize logging system with config file if available
     if (access("log.conf", F_OK) == 0) {
         // log.conf exists, load it

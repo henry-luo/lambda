@@ -265,6 +265,10 @@ int terminal_init(struct terminal_state *term) {
     term->is_tty = _isatty(term->input_fd) && _isatty(term->output_fd);
     
     if (term->is_tty) {
+        // Set console to UTF-8 for proper Unicode display
+        SetConsoleOutputCP(CP_UTF8);
+        SetConsoleCP(CP_UTF8);
+        
         // Save original console modes
         if (!GetConsoleMode(term->h_stdin, &term->orig_input_mode) ||
             !GetConsoleMode(term->h_stdout, &term->orig_output_mode)) {

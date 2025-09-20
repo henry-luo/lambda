@@ -63,8 +63,9 @@ void print_help() {
 // Function to determine the best REPL prompt based on system capabilities
 const char* get_repl_prompt() {
 #ifdef _WIN32
-    // Simplified Windows prompt - avoid complex console API calls
-    return "> ";
+    // On Windows 10+ with UTF-8 support, use lambda symbol
+    // SetConsoleOutputCP(CP_UTF8) is called in terminal_init
+    return "λ> ";
 #else
     // On Unix-like systems, UTF-8 is usually supported
     // Check if LANG/LC_ALL suggests UTF-8 support
