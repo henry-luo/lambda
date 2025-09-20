@@ -311,7 +311,7 @@ static int terminal_raw_mode(struct terminal_state *term, bool enable) {
         // Enable raw input mode
         DWORD input_mode = term->orig_input_mode;
         input_mode &= ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT | ENABLE_PROCESSED_INPUT);
-        input_mode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
+        // Note: Don't enable ENABLE_VIRTUAL_TERMINAL_INPUT - we want native Windows key events
         
         DWORD output_mode = term->orig_output_mode;
         output_mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
