@@ -192,6 +192,7 @@ get_c_test_display_name() {
         "test_url") echo "🔗 URL Tests" ;;
         "test_validator") echo "🔍 Validator Tests" ;;
         "test_variable_pool") echo "🏊 Variable Pool Tests" ;;
+        "test_cmdedit") echo "⌨️ Command Line Editor Tests" ;;
         "lambda_test_runner") echo "🧪 Lambda Standard Tests" ;;
         *) echo "🧪 $exe_name" ;;
     esac

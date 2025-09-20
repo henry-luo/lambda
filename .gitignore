@@ -31,6 +31,7 @@ dist/
 .cache/
 cache/
 *.dSYM/
+__pycache__/
 
 # Executables and other project-specific generated files
 flexbox
@@ -93,15 +94,6 @@ logs/
 mac-deps/
 linux-deps/
 windows-deps/
-
-# Windows dependencies (built libraries and sources)
-windows-deps/lib/
-windows-deps/src/gmp-6.2.1/
-windows-deps/src/zlog/
-windows-deps/src/lexbor/
-windows-deps/include/lexbor/
-windows-deps/**/*.xz
-windows-deps/**/*.bz2
 win-native-deps/
 
 # ICU source and build artifacts

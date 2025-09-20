@@ -1173,6 +1173,10 @@ class PremakeGenerator:
                 defines = test.get('defines', [])
                 test_name_override = test.get('name', '')
                 
+                # Enhanced support for test-specific flags and additional sources
+                test_special_flags = test.get('special_flags', special_flags)  # Test-specific flags override suite flags
+                additional_sources = test.get('additional_sources', [])  # New field for extra source files
+                
                 if not source or not binary_name:
                     continue
                     
@@ -1194,7 +1198,7 @@ class PremakeGenerator:
                     print(f"Warning: Test file not found: {actual_path}")
                     continue
                 
-                self._generate_single_test(test_name, test_file_path, dependencies, special_flags, cpp_flags, libraries, defines, additional_files)
+                self._generate_single_test(test_name, test_file_path, dependencies, test_special_flags, cpp_flags, libraries, defines, additional_files, additional_sources)
         else:
             # Old format: parallel arrays (for backward compatibility)
             sources = suite.get('sources', [])
@@ -1224,7 +1228,7 @@ class PremakeGenerator:
                         print(f"Warning: Test file not found: {actual_path}")
     
     def _generate_single_test(self, test_name: str, test_file_path: str, dependencies: List[str], 
-                             special_flags: str, cpp_flags: str, libraries: List[str] = None, defines: List[str] = None, additional_files: List[str] = None) -> None:
+                             special_flags: str, cpp_flags: str, libraries: List[str] = None, defines: List[str] = None, additional_files: List[str] = None, additional_sources: List[str] = None) -> None:
         """Generate a single test project"""
         if libraries is None:
             libraries = []
@@ -1232,6 +1236,8 @@ class PremakeGenerator:
             defines = []
         if additional_files is None:
             additional_files = []
+        if additional_sources is None:
+            additional_sources = []
             
         source = test_file_path
         language = "C" if source.endswith('.c') else "C++"
@@ -1247,6 +1253,10 @@ class PremakeGenerator:
             '    files {',
             f'        "{test_file_path}",',
         ])
+        
+        # Add additional source files if specified (NEW FEATURE)
+        for additional_source in additional_sources:
+            self.premake_content.append(f'        "{additional_source}",')
         
         # Add additional files if specified
         for additional_file in additional_files:
@@ -1598,16 +1608,40 @@ class PremakeGenerator:
         if is_cpp_test:
             if cpp_flags:
                 build_opts.append(cpp_flags)
-            if special_flags and '-std=c++17' in special_flags:
-                build_opts.append('-std=c++17')
-            if special_flags and '-lstdc++' in special_flags:
-                self.premake_content.extend([
-                    '    links { "stdc++" }',
-                    '    '
-                ])
+            # Add special flags for C++ tests
+            if special_flags:
+                # Handle special_flags as either string or list
+                if isinstance(special_flags, str):
+                    flag_list = special_flags.split()
+                else:
+                    flag_list = special_flags
+                
+                for flag in flag_list:
+                    if flag == '-lstdc++':
+                        self.premake_content.extend([
+                            '    links { "stdc++" }',
+                            '    '
+                        ])
+                    else:
+                        build_opts.append(flag)
         else:
-            # For C files, use C99 standard
-            build_opts.append('-std=c99')
+            # For C files, check if special flags contain a std flag
+            has_std_flag = False
+            if special_flags:
+                # Handle special_flags as either string or list
+                if isinstance(special_flags, str):
+                    flag_list = special_flags.split()
+                else:
+                    flag_list = special_flags
+                
+                for flag in flag_list:
+                    if flag.startswith('-std='):
+                        has_std_flag = True
+                    build_opts.append(flag)
+            
+            # Only add default C99 standard if no std flag was specified
+            if not has_std_flag:
+                build_opts.append('-std=c99')
         
         self.premake_content.extend([
             '    buildoptions {',
