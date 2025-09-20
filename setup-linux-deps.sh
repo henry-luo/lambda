@@ -11,15 +11,12 @@ SYSTEM_PREFIX="/usr/local"
 # List of libraries and dev_libraries from build_lambda_config.json
 ALL_LIBS=(
     "libcurl4-openssl-dev"   # curl
-    "libedit-dev"            # libedit
     "libmpdec-dev"           # mpdecimal
     "libutf8proc-dev"        # utf8proc
     "libssl-dev"             # ssl
     "zlib1g-dev"             # z
     "libnghttp2-dev"         # nghttp2
-    "libncurses5-dev"        # ncurses (provides tinfo)
-    "libbsd-dev"             # bsd
-    "libmd-dev"              # md
+    "libncurses5-dev"        # ncurses
     "build-essential"        # includes pthread
 )
 
@@ -617,70 +614,6 @@ build_mpdecimal_for_linux() {
     return 1
 }
 
-# Function to build GMP for Linux
-build_gmp_for_linux() {
-    echo "Building GMP for Linux..."
-    
-    # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.so" ]; then
-        echo "GMP already installed in system location"
-        return 0
-    fi
-    
-    # Try apt package first for easier installation
-    echo "Attempting to install GMP via apt..."
-    if dpkg -l | grep -q libgmp-dev; then
-        echo "GMP development package already installed"
-        return 0
-    else
-        echo "Installing GMP via apt..."
-        if sudo apt update && sudo apt install -y libgmp-dev; then
-            echo "✅ GMP installed successfully via apt"
-            return 0
-        else
-            echo "apt installation failed, building from source..."
-        fi
-    fi
-    
-    # Build from source if apt is not available or failed
-    GMP_VERSION="6.3.0"
-    GMP_DIR="gmp-${GMP_VERSION}"
-    GMP_ARCHIVE="${GMP_DIR}.tar.xz"
-    GMP_URL="https://gmplib.org/download/gmp/${GMP_ARCHIVE}"
-    
-    download_extract "$GMP_DIR" "$GMP_URL" "$GMP_ARCHIVE"
-    
-    cd "build_temp/$GMP_DIR"
-    
-    echo "Configuring GMP..."
-    if ./configure \
-        --prefix="$SYSTEM_PREFIX" \
-        --enable-static \
-        --enable-shared \
-        --enable-cxx; then
-        
-        echo "Building GMP..."
-        if make -j$(nproc); then
-            echo "Installing GMP to system location (requires sudo)..."
-            sudo make install
-            
-            # Update library cache
-            sudo ldconfig
-            
-            # Verify the build
-            if [ -f "$SYSTEM_PREFIX/lib/libgmp.a" ]; then
-                echo "✅ GMP library installed successfully"
-                cd - > /dev/null
-                return 0
-            fi
-        fi
-    fi
-    
-    echo "❌ GMP build failed"
-    cd - > /dev/null
-    return 1
-}
-
 # Function to build lexbor for Linux
 build_lexbor_for_linux() {
     echo "Building lexbor for Linux..."
@@ -988,20 +921,6 @@ else
 fi
 
 
-# Build GMP for Linux (if used)
-if [ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.so" ]; then
-    echo "GMP already available"
-elif dpkg -l | grep -q libgmp-dev; then
-    echo "GMP already installed via apt"
-else
-    if ! build_gmp_for_linux; then
-        echo "Warning: GMP build failed"
-    else
-        echo "GMP built successfully"
-    fi
-fi
-
-
 # Build MIR for Linux
 if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && [ -f "$SYSTEM_PREFIX/include/c2mir.h" ]; then
     echo "MIR already available"
@@ -1156,16 +1075,11 @@ echo "- Tree-sitter: $([ -f "lambda/tree-sitter/libtree-sitter.a" ] && echo "✓
 echo "- Tree-sitter-lambda: $([ -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ] && echo "✓ Built" || echo "✗ Missing")"
 
 # Check system locations and apt packages
-echo "- GMP: $([ -f "$SYSTEM_PREFIX/lib/libgmp.a" ] || [ -f "$SYSTEM_PREFIX/lib/libgmp.so" ] || [ -f "/usr/lib/x86_64-linux-gnu/libgmp.so" ] || [ -f "/usr/lib/aarch64-linux-gnu/libgmp.so.10" ] && echo "✓ Available" || echo "✗ Missing")"
 echo "- lexbor: $([ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.so" ] && echo "✓ Available" || echo "✗ Missing")"
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- curl: $([ -f "/usr/lib/x86_64-linux-gnu/libcurl.so" ] || dpkg -l | grep -q libcurl && echo "✓ Available" || echo "✗ Missing")"
 echo "- mpdecimal: $([ -f "/usr/lib/x86_64-linux-gnu/libmpdec.so" ] || [ -f "/usr/lib/aarch64-linux-gnu/libmpdec.so" ] || [ -f "$SYSTEM_PREFIX/lib/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- libedit: $([ -f "/usr/lib/x86_64-linux-gnu/libedit.so" ] || dpkg -l | grep -q libedit-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- utf8proc: $([ -f "/usr/lib/x86_64-linux-gnu/libutf8proc.so" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] || dpkg -l | grep -q libutf8proc-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- tinfo: $([ -f "/usr/lib/x86_64-linux-gnu/libtinfo.so" ] || dpkg -l | grep -q libncurses && echo "✓ Available" || echo "✗ Missing")"
-echo "- bsd: $([ -f "/usr/lib/x86_64-linux-gnu/libbsd.so" ] || dpkg -l | grep -q libbsd-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- md: $([ -f "/usr/lib/x86_64-linux-gnu/libmd.so" ] || dpkg -l | grep -q libmd-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- criterion: $([ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ] || dpkg -l | grep -q libcriterion-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo "- premake5: $(command -v premake5 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"

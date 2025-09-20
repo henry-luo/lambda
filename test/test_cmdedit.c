@@ -203,19 +203,37 @@ Test(input_output, repl_readline_non_interactive, .init = cr_redirect_stdout, .f
 }
 
 Test(input_output, repl_readline_with_prompt, .init = cr_redirect_stdout, .fini = cr_redirect_stdout) {
-    repl_init();
-    
-    // Test that prompt is printed (we can't easily test actual readline in unit tests)
-    // This mainly tests that the function doesn't crash
-    char *result = repl_readline("λ> ");
-    
-    // In a real terminal, this would wait for input
-    // In test environment, it might return NULL or read from redirected input
-    if (result) {
-        free(result);
+    // Create a temporary file for input simulation
+    FILE *temp_input = tmpfile();
+    if (temp_input) {
+        fprintf(temp_input, "lambda prompt test\n");
+        rewind(temp_input);
+        
+        // Temporarily redirect stdin
+        FILE *old_stdin = stdin;
+        stdin = temp_input;
+        
+        repl_init();
+        
+        // Test that prompt is printed and function doesn't crash
+        char *result = repl_readline("λ> ");
+        
+        // Restore stdin
+        stdin = old_stdin;
+        fclose(temp_input);
+        
+        if (result) {
+            cr_assert_str_eq(result, "lambda prompt test", "Should read prompt input correctly");
+            free(result);
+        }
+        
+        repl_cleanup();
+    } else {
+        // If tmpfile fails, just test initialization/cleanup
+        repl_init();
+        repl_cleanup();
+        cr_assert(true, "Should handle tmpfile failure gracefully");
     }
-    
-    repl_cleanup();
 }
 
 // ============================================================================

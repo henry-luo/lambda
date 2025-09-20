@@ -589,6 +589,12 @@
                     "name": "stdc++fs",
                     "lib": "-lstdc++fs",
                     "link": "dynamic"
+                },
+                {
+                    "name": "nghttp2",
+                    "include": "/usr/include",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+                    "link": "static"
                 }
             ],
             "flags": [
