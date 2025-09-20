@@ -888,6 +888,7 @@ project "test_cmdedit"
     files {
         "test/test_cmdedit.c",
         "lib/cmdedit.c",
+        "lib/cmdedit_utf8.c",
     }
     
     includedirs {
@@ -923,10 +924,12 @@ project "test_cmdedit"
         "criterion",
         "nanomsg",
         "git2",
+        "utf8proc",
     }
     
     linkoptions {
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/opt/homebrew/lib/libutf8proc.a",
     }
     
     buildoptions {
@@ -935,6 +938,7 @@ project "test_cmdedit"
         "-DCMDEDIT_TESTING",
         "-Wno-implicit-function-declaration",
         "-std=gnu99",
+        "-DUTF8PROC_STATIC",
     }
     
 
