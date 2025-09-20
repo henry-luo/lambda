@@ -475,17 +475,6 @@ int terminal_read_key(struct terminal_state *term) {
 #endif
 }
 
-// Debug function to understand key mapping
-static void debug_key_press(int key) {
-    printf("\r\n[KEY DEBUG: %d (0x%02x)] ", key, key);
-    if (key == KEY_BACKSPACE) printf("-> BACKSPACE");
-    else if (key == KEY_DELETE) printf("-> DELETE"); 
-    else if (key == 127) printf("-> ASCII 127 (DEL)");
-    else if (key == 8) printf("-> ASCII 8 (BS)");
-    printf("\r\n");
-    fflush(stdout);
-}
-
 // ============================================================================
 // PHASE 1: BASIC API IMPLEMENTATION
 // ============================================================================
@@ -1085,12 +1074,44 @@ static char *editor_readline(const char *prompt) {
         
         int key = terminal_read_key(&g_terminal);
         
-        // Debug: show what key was detected
-        debug_key_press(key);
+        // Temporary debug to identify key mappings
+        if (key == KEY_BACKSPACE || key == KEY_DELETE || key == 127 || key == 8 || key > 127) {
+            printf("\r\n[DEBUG: Raw key %d] ", key);
+            if (key == KEY_BACKSPACE) printf("-> BACKSPACE handler");
+            else if (key == KEY_DELETE) printf("-> DELETE handler");
+            else if (key == 127) printf("-> RAW 127 (DEL)");
+            else if (key == 8) printf("-> RAW 8 (BS)");
+            else printf("-> RAW %d", key);
+            printf("\r\n");
+            fflush(stdout);
+        }
         
         if (key == KEY_ERROR || key == KEY_EOF) {
             done = -1; // Error or EOF
             break;
+        }
+        
+        // Platform-specific key mapping for delete/backspace
+        #ifdef _WIN32
+            // Windows: key 8 = backspace, key 127 = delete
+            if (key == 8) {
+                key = KEY_BACKSPACE;
+            } else if (key == 127) {
+                key = KEY_DELETE;
+            }
+        #else
+            // Mac/Linux: key 127 = backspace, delete key sends escape sequence
+            if (key == 127) {
+                key = KEY_BACKSPACE;
+            } else if (key == 8) {
+                key = KEY_BACKSPACE; // Ctrl+H also acts as backspace
+            }
+        #endif
+        
+        // Show mapped key for debugging
+        if (key == KEY_BACKSPACE || key == KEY_DELETE) {
+            printf("[MAPPED to: %s] ", (key == KEY_BACKSPACE) ? "BACKSPACE" : "DELETE");
+            fflush(stdout);
         }
         
         // Find handler for this key
@@ -1494,7 +1515,9 @@ int read_history(const char *filename) {
         repl_init();
     }
     
-    return history_load_from_file(&g_history, filename);
+    // For readline compatibility, return 0 even if file doesn't exist
+    int result = history_load_from_file(&g_history, filename);
+    return (result == -1 && filename) ? 0 : result; // Convert file-not-found to success
 }
 
 int write_history(const char *filename) {

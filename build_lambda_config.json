@@ -140,7 +140,7 @@
         {
             "name": "lambda-lib",
             "description": "Unified runtime with all basic libraries for tests",
-            "include": "lib/mem-pool/include",
+            "includes": ["lib/mem-pool/include", "/opt/homebrew/include"],
             "sources": [
                 "lib/mem-pool/src/variable.c",
                 "lib/mem-pool/src/buffer.c",
@@ -159,8 +159,9 @@
                 "lambda/input/mime-detect.c",
                 "lambda/input/mime-types.c"
             ],
-            "libraries": [],
-            "special_flags": "",
+            "libraries": ["utf8proc"],
+            "special_flags": "-DUTF8PROC_STATIC",
+            "cpp_flags": "-I/opt/homebrew/include",
             "link": "static"
         },
         {

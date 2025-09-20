@@ -174,6 +174,7 @@ void run_repl(Runtime *runtime, bool use_mir) {
         
         free(line);
     }
+    printf("\n");  // print one last '\n', otherwise, may see '%' at the end of the line
     
     // Cleanup command line editor
     lambda_repl_cleanup();
