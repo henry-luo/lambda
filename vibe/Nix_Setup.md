@@ -61,6 +61,7 @@ This provides a reproducible development environment using Nix flakes, replacing
 |---------|-------------|--------|
 | Node.js & npm | `nodejs` | ✅ Available |
 | CMake | `cmake` | ✅ Available |
+| Premake5 | `premake5` | ✅ Available |
 | Tree-sitter | `tree-sitter` | ✅ Available |
 | mpdecimal | `libmpdecimal` | ✅ Available |
 | utf8proc | `utf8proc` | ✅ Available |
@@ -71,6 +72,7 @@ This provides a reproducible development environment using Nix flakes, replacing
 | lexbor | `lexbor` | ✅ Available |
 | libharu | `libharu` | ✅ Available |
 | MIR | Custom build | ✅ Available |
+| Clang (macOS) | `clang` | ✅ Available |
 
 ## Commands Available
 
