@@ -263,8 +263,7 @@ clean-tree-sitter-minimal:
         build-windows build-linux build-debug build-release clean-all distclean \
         build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
         verify-windows verify-linux test-windows test-linux tree-sitter-libs \
-        generate-premake clean-premake build-test build-test-linux build-catch2 test-catch2 \
-        build-test-catch2-linux test-catch2-linux test-catch2-linux-docker test-catch2-linux-qemu \
+        generate-premake clean-premake build-test build-test-linux \
         build-mingw64 build-tree-sitter clean-tree-sitter-minimal
 
 # Help target - shows available commands
@@ -303,7 +302,6 @@ help:
 	@echo "  generate-premake - Generate premake5.lua from build_lambda_config.json"
 	@echo "  clean-premake - Clean Premake build artifacts and generated files"
 	@echo "  build-test    - Build all test projects using Premake"
-	@echo "  build-catch2  - Build Catch2 test projects using Premake"
 	@echo ""
 	@echo "Grammar & Parser:"
 	@echo "  generate-grammar - Generate parser and ts-enum.h from grammar.js"
@@ -321,11 +319,6 @@ help:
 	@echo "  test-mir      - Run MIR JIT tests only"
 	@echo "  test-lambda   - Run lambda runtime tests only"
 	@echo "  test-std      - Run Lambda Standard Tests (custom test runner)"
-	@echo "  test-catch2   - Run Catch2 test suite"
-	@echo "  build-test-catch2-linux - Cross-compile Catch2 tests for Linux"
-	@echo "  test-catch2-linux - Run Linux Catch2 tests (auto-detects QEMU/Docker)"
-	@echo "  test-catch2-linux-docker - Run Linux Catch2 tests using Docker"
-	@echo "  test-catch2-linux-qemu - Run Linux Catch2 tests using QEMU"
 	@echo "  test-verbose  - Run tests with verbose output"
 	@echo "  test-sequential - Run tests sequentially (not parallel)"
 	@echo "  test-coverage - Run tests with code coverage analysis"
@@ -602,7 +595,7 @@ distclean: clean-all clean-grammar clean-test
 test: build-test
 	@echo "Clearing HTTP cache for clean test runs..."
 	@rm -rf temp/cache
-	@echo "Running old test suite (excluding Catch2 tests)..."
+	@echo "Running test suite ..."
 	@if [ -f "test/test_run.sh" ]; then \
 		./test/test_run.sh --parallel; \
 	else \
