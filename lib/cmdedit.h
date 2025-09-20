@@ -36,10 +36,7 @@ extern rl_completion_func_t *rl_attempted_completion_function;
 // Key binding functions
 int rl_bind_key(int key, int (*function)(int, int));
 
-// Internal functions exposed for testing
-#ifdef CMDEDIT_TESTING
-
-// Key codes for testing
+// Key codes
 enum {
     KEY_ENTER = 13,
     KEY_BACKSPACE = 8,
@@ -88,6 +85,9 @@ enum {
     KEY_ERROR = -1,
     KEY_EOF = -2
 };
+
+// Internal functions exposed for testing
+#ifdef CMDEDIT_TESTING
 
 struct terminal_state {
     int input_fd;

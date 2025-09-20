@@ -4,7 +4,7 @@
 #include <ctype.h>
 
 // Get UTF-8 character count using utf8proc
-int utf8_char_count(const char* str, size_t byte_len) {
+int cmdedit_utf8_char_count(const char* str, size_t byte_len) {
     if (!str || byte_len == 0) return 0;
     
     int char_count = 0;
@@ -28,7 +28,7 @@ int utf8_char_count(const char* str, size_t byte_len) {
 }
 
 // Get display width using utf8proc
-int utf8_display_width(const char* str, size_t byte_len) {
+int cmdedit_utf8_display_width(const char* str, size_t byte_len) {
     if (!str || byte_len == 0) return 0;
     
     int total_width = 0;
@@ -55,7 +55,7 @@ int utf8_display_width(const char* str, size_t byte_len) {
 }
 
 // Convert byte offset to character offset
-int utf8_byte_to_char_offset(const char* str, size_t byte_len, size_t byte_offset) {
+int cmdedit_utf8_byte_to_char_offset(const char* str, size_t byte_len, size_t byte_offset) {
     if (!str || byte_offset > byte_len) return 0;
     
     int char_offset = 0;
@@ -79,7 +79,7 @@ int utf8_byte_to_char_offset(const char* str, size_t byte_len, size_t byte_offse
 }
 
 // Convert character offset to byte offset
-int utf8_char_to_byte_offset(const char* str, size_t byte_len, int char_offset) {
+int cmdedit_utf8_char_to_byte_offset(const char* str, size_t byte_len, int char_offset) {
     if (!str || char_offset <= 0) return 0;
     
     int current_char = 0;
@@ -103,7 +103,7 @@ int utf8_char_to_byte_offset(const char* str, size_t byte_len, int char_offset) 
 }
 
 // Get UTF-8 character at specific byte position
-bool utf8_get_char_at_byte(const char* str, size_t byte_len, size_t byte_offset, utf8_char_t* out_char) {
+bool cmdedit_utf8_get_char_at_byte(const char* str, size_t byte_len, size_t byte_offset, utf8_char_t* out_char) {
     if (!str || !out_char || byte_offset >= byte_len) return false;
     
     utf8proc_int32_t codepoint;
@@ -130,7 +130,7 @@ bool utf8_get_char_at_byte(const char* str, size_t byte_len, size_t byte_offset,
 }
 
 // Get display width of character at byte position
-int utf8_char_display_width_at(const char* str, size_t byte_len, size_t byte_offset) {
+int cmdedit_utf8_char_display_width_at(const char* str, size_t byte_len, size_t byte_offset) {
     if (!str || byte_offset >= byte_len) return 0;
     
     utf8proc_int32_t codepoint;
@@ -147,7 +147,7 @@ int utf8_char_display_width_at(const char* str, size_t byte_len, size_t byte_off
 }
 
 // Move cursor left by one character
-size_t utf8_move_cursor_left(const char* str, size_t byte_len, size_t current_byte_offset) {
+size_t cmdedit_utf8_move_cursor_left(const char* str, size_t byte_len, size_t current_byte_offset) {
     if (!str || current_byte_offset == 0) return 0;
     
     // Move back byte by byte until we find a valid UTF-8 character start
@@ -170,7 +170,7 @@ size_t utf8_move_cursor_left(const char* str, size_t byte_len, size_t current_by
 }
 
 // Move cursor right by one character
-size_t utf8_move_cursor_right(const char* str, size_t byte_len, size_t current_byte_offset) {
+size_t cmdedit_utf8_move_cursor_right(const char* str, size_t byte_len, size_t current_byte_offset) {
     if (!str || current_byte_offset >= byte_len) return byte_len;
     
     utf8proc_int32_t codepoint;
@@ -186,14 +186,14 @@ size_t utf8_move_cursor_right(const char* str, size_t byte_len, size_t current_b
 }
 
 // Find word start (moving left)
-size_t utf8_find_word_start(const char* str, size_t byte_len, size_t current_byte_offset) {
+size_t cmdedit_utf8_find_word_start(const char* str, size_t byte_len, size_t current_byte_offset) {
     if (!str || current_byte_offset == 0) return 0;
     
     size_t pos = current_byte_offset;
     bool found_non_space = false;
     
     while (pos > 0) {
-        pos = utf8_move_cursor_left(str, byte_len, pos);
+        pos = cmdedit_utf8_move_cursor_left(str, byte_len, pos);
         
         utf8proc_int32_t codepoint;
         utf8proc_ssize_t bytes_read = utf8proc_iterate((const utf8proc_uint8_t*)(str + pos), 
@@ -202,7 +202,7 @@ size_t utf8_find_word_start(const char* str, size_t byte_len, size_t current_byt
         if (bytes_read <= 0) {
             // Invalid UTF-8, treat as non-space
             if (found_non_space && isspace((unsigned char)str[pos])) {
-                return utf8_move_cursor_right(str, byte_len, pos);
+                return cmdedit_utf8_move_cursor_right(str, byte_len, pos);
             }
             found_non_space = true;
         } else {
@@ -212,7 +212,7 @@ size_t utf8_find_word_start(const char* str, size_t byte_len, size_t current_byt
                            category == UTF8PROC_CATEGORY_ZP);
             
             if (found_non_space && is_space) {
-                return utf8_move_cursor_right(str, byte_len, pos);
+                return cmdedit_utf8_move_cursor_right(str, byte_len, pos);
             }
             if (!is_space) {
                 found_non_space = true;
@@ -224,7 +224,7 @@ size_t utf8_find_word_start(const char* str, size_t byte_len, size_t current_byt
 }
 
 // Find word end (moving right)
-size_t utf8_find_word_end(const char* str, size_t byte_len, size_t current_byte_offset) {
+size_t cmdedit_utf8_find_word_end(const char* str, size_t byte_len, size_t current_byte_offset) {
     if (!str || current_byte_offset >= byte_len) return byte_len;
     
     size_t pos = current_byte_offset;

@@ -53,6 +53,8 @@ project "lambda-lib"
         "lib/url.c",
         "lib/url_parser.c",
         "lib/log.c",
+        "lib/cmdedit.c",
+        "lib/cmdedit_utf8.c",
         "lambda/input/mime-detect.c",
         "lambda/input/mime-types.c",
     }
@@ -234,6 +236,8 @@ project "lambda"
         "lib/file.c",
         "lib/hashmap.c",
         "lib/log.c",
+        "lib/cmdedit.c",
+        "lib/cmdedit_utf8.c",
         "lib/mem-pool/src/variable.c",
         "lib/mem-pool/src/buffer.c",
         "lib/mem-pool/src/utils.c",
@@ -347,7 +351,6 @@ project "lambda"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
     }
     
@@ -368,7 +371,6 @@ project "lambda"
         "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/lib/libhpdf.a",
         "/opt/homebrew/lib/libnghttp2.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
         "/opt/homebrew/lib/libmpdec.a",
         "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
@@ -377,14 +379,12 @@ project "lambda"
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/lib/libhpdf.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Dynamic libraries
     filter "platforms:native"
         links {
             "z",
-            "ncurses",
         }
     
         linkoptions {
@@ -436,7 +436,6 @@ project "test_strbuf"
         "/opt/homebrew/include",
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -496,7 +495,6 @@ project "test_stringbuf"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -551,7 +549,6 @@ project "test_strview"
         "/opt/homebrew/include",
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -611,7 +608,6 @@ project "test_variable_pool"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -667,7 +663,6 @@ project "test_num_stack"
         "/opt/homebrew/include",
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -727,7 +722,6 @@ project "test_datetime"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -783,7 +777,6 @@ project "test_url"
         "/opt/homebrew/include",
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -843,7 +836,6 @@ project "test_url_extra"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -901,7 +893,6 @@ project "test_cmdedit"
         "/opt/homebrew/include",
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -965,7 +956,6 @@ project "test_mime_detect"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -1002,13 +992,11 @@ project "test_mime_detect"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -1061,7 +1049,6 @@ project "test_math"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -1095,13 +1082,11 @@ project "test_math"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -1155,7 +1140,6 @@ project "test_math_ascii"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -1189,13 +1173,11 @@ project "test_math_ascii"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -1249,7 +1231,6 @@ project "test_markup_roundtrip"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -1283,13 +1264,11 @@ project "test_markup_roundtrip"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -1343,7 +1322,6 @@ project "test_input_roundtrip"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -1377,13 +1355,11 @@ project "test_input_roundtrip"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -1437,7 +1413,6 @@ project "test_dir"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -1471,13 +1446,11 @@ project "test_dir"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -1531,7 +1504,6 @@ project "test_http"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -1565,13 +1537,11 @@ project "test_http"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -1625,7 +1595,6 @@ project "test_sysinfo"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -1659,13 +1628,11 @@ project "test_sysinfo"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -1719,7 +1686,6 @@ project "test_jsx_roundtrip"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -1753,13 +1719,11 @@ project "test_jsx_roundtrip"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -1813,7 +1777,6 @@ project "test_mdx_roundtrip"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -1847,13 +1810,11 @@ project "test_mdx_roundtrip"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -1907,7 +1868,6 @@ project "test_css_tokenizer"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -1941,13 +1901,11 @@ project "test_css_tokenizer"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -2001,7 +1959,6 @@ project "test_css_parser"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -2035,13 +1992,11 @@ project "test_css_parser"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -2095,7 +2050,6 @@ project "test_css_integration"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -2129,13 +2083,11 @@ project "test_css_integration"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -2189,7 +2141,6 @@ project "test_css_files_safe"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -2226,13 +2177,11 @@ project "test_css_files_safe"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -2285,7 +2234,6 @@ project "test_css_frameworks"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -2319,13 +2267,11 @@ project "test_css_frameworks"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -2379,7 +2325,6 @@ project "test_validator"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -2413,13 +2358,11 @@ project "test_validator"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -2472,7 +2415,6 @@ project "test_ast_validator"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -2506,13 +2448,11 @@ project "test_ast_validator"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
-        "/opt/homebrew/Cellar/libedit/20250104-3.1/lib/libedit.a",
     }
     
     -- Add dynamic libraries
     links {
         "z",
-        "ncurses",
         "ncurses",
     }
     
@@ -2563,7 +2503,6 @@ project "test_lambda"
         "/opt/homebrew/include",
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -2623,7 +2562,6 @@ project "test_lambda_repl"
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
         "/usr/local/include",
@@ -2675,7 +2613,6 @@ project "test_lambda_proc"
         "/opt/homebrew/include",
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -2733,7 +2670,6 @@ project "test_lambda_runner"
         "/opt/homebrew/include",
         "/opt/homebrew/include/openssl",
         "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
