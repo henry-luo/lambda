@@ -123,13 +123,26 @@
           
           # Check essential tools
           echo "Essential tools:"
-          for tool in make gcc git cmake pkg-config node npm npx; do
+          for tool in make gcc git cmake pkg-config premake5 node npm npx; do
             if command -v "$tool" >/dev/null 2>&1; then
               echo "  ✅ $tool"
             else
               echo "  ❌ $tool (missing)"
             fi
           done
+          
+          # Check macOS-specific tools
+          if [[ "$OSTYPE" == "darwin"* ]]; then
+            echo ""
+            echo "macOS-specific tools:"
+            for tool in clang llvm-config; do
+              if command -v "$tool" >/dev/null 2>&1; then
+                echo "  ✅ $tool"
+              else
+                echo "  ❌ $tool (missing)"
+              fi
+            done
+          fi
           echo ""
           
           # Check libraries
@@ -191,6 +204,7 @@
             cmake
             pkg-config
             coreutils
+            premake5
             
             # Node.js ecosystem
             nodejs
@@ -229,6 +243,10 @@
             setup-lambda-deps
             clean-lambda-deps
             validate-setup
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            # macOS-specific tools
+            clang
+            llvm
           ];
 
           shellHook = ''
@@ -289,7 +307,7 @@
           version = "0.1.0";
           src = ./.;
           
-          nativeBuildInputs = with pkgs; [ gnumake gcc ];
+          nativeBuildInputs = with pkgs; [ gnumake gcc premake5 ];
           buildInputs = with pkgs; [
             libmpdecimal utf8proc criterion
             openssl_3 curl nghttp2 lexbor libharu mir

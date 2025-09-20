@@ -571,55 +571,6 @@ build_nghttp2_for_mac() {
     return 1
 }
 
-# Function to build SIGAR for Mac
-build_sigar_for_mac() {
-    echo "Building SIGAR for Mac..."
-    
-    # Check if already built
-    if [ -f "mac-deps/sigar/lib/libsigar.a" ]; then
-        echo "SIGAR already built"
-        return 0
-    fi
-    
-    # Create mac-deps directory if it doesn't exist
-    mkdir -p mac-deps
-    
-    # Download SIGAR if not exists
-    if [ ! -d "mac-deps/sigar" ]; then
-        echo "Downloading SIGAR..."
-        cd mac-deps
-        git clone https://github.com/hyperic/sigar.git || {
-            echo "Warning: Could not clone SIGAR repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    fi
-    
-    cd mac-deps/sigar
-    
-    # Configure and build SIGAR
-    echo "Configuring SIGAR..."
-    if ./autogen.sh && ./configure --prefix="$SCRIPT_DIR/mac-deps/sigar" \
-        --enable-static --disable-shared \
-        --disable-java --disable-perl --disable-csharp; then
-        
-        echo "Building SIGAR..."
-        if make -j$(sysctl -n hw.ncpu); then
-            echo "Installing SIGAR..."
-            if make install; then
-                echo "✅ SIGAR built successfully"
-                cd - > /dev/null
-                return 0
-            fi
-        fi
-    fi
-    
-    echo "❌ SIGAR build failed"
-    cd - > /dev/null
-    return 1
-}
-
 # Function to build libcurl with HTTP/2 support for Mac
 build_curl_with_http2_for_mac() {
     echo "Building libcurl with HTTP/2 support for Mac..."
@@ -703,10 +654,6 @@ else
     fi
 fi
 
-# Build SIGAR for Mac (DISABLED - not currently used in Lambda codebase)
-echo "Setting up SIGAR..."
-echo "SIGAR not needed - skipping (not used in current Lambda implementation)"
-
 # Build libcurl with HTTP/2 support for Mac
 echo "Setting up libcurl with HTTP/2 support..."
 if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
@@ -736,7 +683,6 @@ if command -v brew >/dev/null 2>&1; then
     echo "- utf8proc: $([ -f "$BREW_PREFIX/lib/libutf8proc.a" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- libedit: $([ -f "$BREW_PREFIX/lib/libedit.a" ] || [ -f "$BREW_PREFIX/lib/libedit.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- criterion: $([ -d "$BREW_PREFIX/Cellar/criterion" ] && echo "✓ Available" || echo "✗ Missing")"
-    echo "- catch2: $([ -d "$BREW_PREFIX/Cellar/catch2" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- coreutils: $([ -f "$BREW_PREFIX/bin/gtimeout" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- timeout: $([ -f "$BREW_PREFIX/bin/timeout" ] && command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 else
@@ -744,12 +690,10 @@ else
 fi
 
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- SIGAR: ⚪ Skipped (not used in current Lambda implementation)"
 echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- GiNaC: $(command -v brew >/dev/null 2>&1 && brew list ginac >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo ""
 echo "Next steps:"
-echo "1. Run: ./compile.sh"
+echo "1. Run: make"
 echo ""
 echo "To clean up intermediate files later, run: ./setup-mac-deps.sh clean"
