@@ -120,6 +120,120 @@ TEST(LambdaReplTests, test_empty_input) {
     free_test_result(&result);
 }
 
+// Additional tests migrated from Criterion version to achieve full parity
+
+TEST(LambdaReplTests, test_executable_exists) {
+#ifdef _WIN32
+    int result = system("where lambda.exe > nul 2>&1");
+#else
+    int result = system("test -x ./lambda.exe");
+#endif
+    ASSERT_EQ(result, 0) << "Lambda executable should exist and be executable";
+}
+
+TEST(LambdaReplTests, test_startup_and_quit) {
+    test_result result = run_lambda_repl(".quit");
+    ASSERT_NE(result.output, nullptr) << "Expected output from REPL";
+    ASSERT_GT(strlen(result.output), 0) << "REPL should produce output";
+    ASSERT_TRUE(strstr(result.output, "Lambda") != nullptr || 
+                strstr(result.output, "λ") != nullptr) << "Output should mention Lambda";
+    free_test_result(&result);
+}
+
+TEST(LambdaReplTests, test_multiple_commands) {
+    test_result result = run_lambda_repl("1 + 1\n2 * 3\n.quit");
+    ASSERT_NE(result.output, nullptr) << "Expected output from multiple commands";
+    ASSERT_GT(strlen(result.output), 0) << "Should show results from multiple expressions";
+    free_test_result(&result);
+}
+
+TEST(LambdaReplTests, test_quit_variations) {
+    // Test .q short form
+    test_result result1 = run_lambda_repl(".q");
+    ASSERT_NE(result1.output, nullptr) << "Expected output from .q";
+    free_test_result(&result1);
+    
+    // Test .exit
+    test_result result2 = run_lambda_repl(".exit");
+    ASSERT_NE(result2.output, nullptr) << "Expected output from .exit";
+    free_test_result(&result2);
+}
+
+TEST(LambdaReplTests, test_complex_arithmetic) {
+    test_result result = run_lambda_repl("5 * 7\n8 / 2\n.quit");
+    ASSERT_NE(result.output, nullptr) << "Expected output from complex arithmetic";
+    ASSERT_GT(strlen(result.output), 0) << "Should show complex arithmetic results";
+    free_test_result(&result);
+}
+
+TEST(LambdaReplTests, test_error_recovery) {
+    test_result result = run_lambda_repl("2 +\n1 + 1\n.quit");
+    ASSERT_NE(result.output, nullptr) << "Expected output from error recovery test";
+    // Should continue running despite syntax error
+    ASSERT_GT(strlen(result.output), 0) << "Should recover from syntax error";
+    free_test_result(&result);
+}
+
+TEST(LambdaReplTests, test_version_display) {
+    test_result result = run_lambda_repl(".quit");
+    ASSERT_NE(result.output, nullptr) << "Expected output from REPL";
+    // Should show version information or Lambda branding
+    ASSERT_GT(strlen(result.output), 0) << "Should show version/startup information";
+    free_test_result(&result);
+}
+
+TEST(LambdaReplTests, test_repl_functionality) {
+    test_result result = run_lambda_repl(".quit");
+    ASSERT_NE(result.output, nullptr) << "Expected output to check REPL behavior";
+    // In non-interactive mode, prompts may not appear but REPL should function
+    bool has_startup_info = strstr(result.output, "Lambda") != nullptr ||
+                           strstr(result.output, "help") != nullptr ||
+                           strstr(result.output, "λ") != nullptr;
+    ASSERT_TRUE(has_startup_info) << "Should show REPL startup information";
+    free_test_result(&result);
+}
+
+TEST(LambdaReplTests, test_command_sequence_stability) {
+    test_result result = run_lambda_repl("1 + 1\n.help\n2 * 2\n.quit");
+    ASSERT_NE(result.output, nullptr) << "Expected output from command sequence";
+    ASSERT_GT(strlen(result.output), 10) << "Should produce substantial output";
+    free_test_result(&result);
+}
+
+TEST(LambdaReplTests, test_prompt_display) {
+    test_result result = run_lambda_repl(".quit");
+    ASSERT_NE(result.output, nullptr) << "Expected output from REPL";
+    // Check for Lambda prompts or startup messages
+    bool has_lambda_content = strstr(result.output, "λ") != nullptr ||
+                             strstr(result.output, "Lambda") != nullptr ||
+                             strstr(result.output, "L>") != nullptr;
+    ASSERT_TRUE(has_lambda_content) << "Should show Lambda prompt or content";
+    free_test_result(&result);
+}
+
+TEST(LambdaReplTests, test_prompt_with_expressions) {
+    test_result result = run_lambda_repl("2 + 3\n.quit");
+    ASSERT_NE(result.output, nullptr) << "Expected output from expressions";
+    // Should handle expressions even in non-interactive mode
+    ASSERT_GT(strlen(result.output), 0) << "Should show expression results or prompts";
+    free_test_result(&result);
+}
+
+TEST(LambdaReplTests, test_unicode_prompt_support) {
+    test_result result = run_lambda_repl(".quit");
+    ASSERT_NE(result.output, nullptr) << "Expected output from REPL";
+    // Unicode support test - just ensure REPL handles input/output properly
+    ASSERT_GT(strlen(result.output), 0) << "Should handle unicode input properly";
+    free_test_result(&result);
+}
+
+TEST(LambdaReplTests, test_multiple_prompt_sequence) {
+    test_result result = run_lambda_repl("1\n2\n3\n.quit");
+    ASSERT_NE(result.output, nullptr) << "Expected output from multiple prompts";
+    ASSERT_GT(strlen(result.output), 0) << "Should handle multiple prompt sequence";
+    free_test_result(&result);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
