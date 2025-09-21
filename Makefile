@@ -373,9 +373,8 @@ ifeq ($(IS_MSYS2),yes)
 	@echo "Generating makefiles..."
 	PATH="/mingw64/bin:$$PATH" $(PREMAKE5) gmake
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	PATH="/mingw64/bin:$$PATH" $(MAKE) -C build/premake -j$(JOBS) lambda CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)"
+	PATH="/mingw64/bin:$$PATH" $(MAKE) -C build/premake -j$(JOBS) lambda CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
 	@echo "✅ Build completed successfully!"
-	@echo "📁 Output: build/premake/lambda$(EXE_SUFFIX)"
 else
 	@echo "Building $(PROJECT_NAME) using Premake build system..."
 	$(call mingw64_env_check)
@@ -394,6 +393,11 @@ endif
 
 print-vars:
 	@echo "Unicode support: Always enabled (utf8proc)"
+
+print-jobs:
+	@echo "CPU cores detected (NPROCS): $(NPROCS)"
+	@echo "Parallel jobs (JOBS): $(JOBS)"
+	@echo "Link jobs (LINK_JOBS): $(LINK_JOBS)"
 
 $(LAMBDA_EXE): build
 
@@ -418,7 +422,7 @@ build-mingw64: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Generating makefiles..."
 	$(PREMAKE5) gmake
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib" 2>&1 | grep -v "warning:"
+	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w" 2>&1 | grep -v "warning:"
 	@echo "✅ MINGW64 build completed. Executable: lambda.exe"
 	@echo "🧪 Testing executable..."
 	@./lambda.exe --help >/dev/null 2>&1 && echo "✅ Executable runs successfully" || echo "⚠️  Executable test failed"
