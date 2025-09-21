@@ -97,9 +97,9 @@ static void format_map_attributes(StringBuf* sb, TypeMap* map_type, void* map_da
                         format_xml_string(sb, str);
                     }
                 } else if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64) {
-                    long int_val = *(long*)data;
+                    int64_t int_val = *(int64_t*)data;
                     char num_buf[32];
-                    snprintf(num_buf, sizeof(num_buf), "%ld", int_val);
+                    snprintf(num_buf, sizeof(num_buf), "%" PRId64, int_val);
                     stringbuf_append_str(sb, num_buf);
                 } else if (field_type == LMD_TYPE_FLOAT) {
                     double float_val = *(double*)data;
@@ -149,7 +149,7 @@ static void format_attributes(StringBuf* sb, TypeMap* map_type, void* map_data) 
                         }
                     }
                 } else if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64) {
-                    long int_val = *(long*)data;
+                    int64_t int_val = *(int64_t*)data;
                     char num_buf[32];
                     snprintf(num_buf, sizeof(num_buf), "%ld", int_val);
                     stringbuf_append_str(sb, num_buf);

@@ -323,27 +323,27 @@ static Item parse_number(Input *input, const char **toml) {
     
     // Handle hex, octal, binary integers
     if (**toml == '0' && (*(*toml + 1) == 'x' || *(*toml + 1) == 'X')) {
-        long val = strtol(start, &end, 16);
-        long *lval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval);
+        int64_t val = strtol(start, &end, 16);
+        int64_t *lval;
+        MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&lval);
         if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *lval = val;
         *toml = end;
         return {.item = l2it(lval)};
     }
     if (**toml == '0' && (*(*toml + 1) == 'o' || *(*toml + 1) == 'O')) {
-        long val = strtol(start + 2, &end, 8);
-        long *lval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval);
+        int64_t val = strtol(start + 2, &end, 8);
+        int64_t *lval;
+        MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&lval);
         if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *lval = val;
         *toml = end;
         return {.item = l2it(lval)};
     }
     if (**toml == '0' && (*(*toml + 1) == 'b' || *(*toml + 1) == 'B')) {
-        long val = strtol(start + 2, &end, 2);
-        long *lval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval);
+        int64_t val = strtol(start + 2, &end, 2);
+        int64_t *lval;
+        MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&lval);
         if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *lval = val;
         *toml = end;
@@ -375,9 +375,9 @@ static Item parse_number(Input *input, const char **toml) {
         *toml = end;
         return {.item = d2it(dval)};
     } else {
-        long val = strtol(start, &end, 10);
-        long *lval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval);
+        int64_t val = strtol(start, &end, 10);
+        int64_t *lval;
+        MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&lval);
         if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
         *lval = val;
         *toml = end;

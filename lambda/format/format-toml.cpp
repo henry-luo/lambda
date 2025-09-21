@@ -290,7 +290,7 @@ String* format_toml(VariableMemPool* pool, Item root_item) {
         TypeMap* type_map = (TypeMap*)map->type;
         if (type_map->length > 0) {
             stringbuf_append_str(sb, "# Map with ");
-            stringbuf_append_format(sb, "%ld", (long)type_map->length);
+            stringbuf_append_format(sb, "%ld", (int64_t)type_map->length);
             stringbuf_append_str(sb, " fields\n\n");
             
             // format using centralized approach

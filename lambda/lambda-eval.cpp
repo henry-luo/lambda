@@ -80,7 +80,7 @@ String *fn_strcat(String *left, String *right) {
     return result;
 }
 
-String *str_repeat(String *str, long times) {
+String *str_repeat(String *str, int64_t times) {
     if (times <= 0) {
         // Return empty string
         String *result = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
@@ -159,10 +159,10 @@ Item fn_normalize(Item str_item, Item type_item) {
 Range* fn_to(Item item_a, Item item_b) {
     if ((item_a.type_id == LMD_TYPE_INT || item_a.type_id == LMD_TYPE_INT64 || item_a.type_id == LMD_TYPE_FLOAT) && 
         (item_b.type_id == LMD_TYPE_INT || item_b.type_id == LMD_TYPE_INT64 || item_b.type_id == LMD_TYPE_FLOAT)) {
-        long start = item_a.type_id == LMD_TYPE_INT ? item_a.int_val : 
-            item_a.type_id == LMD_TYPE_INT64 ? *(long*)item_a.pointer : (long)*(double*)item_a.pointer;
-        long end = item_b.type_id == LMD_TYPE_INT ? item_b.int_val : 
-            item_b.type_id == LMD_TYPE_INT64 ? *(long*)item_b.pointer : (long)*(double*)item_b.pointer;
+        int64_t start = item_a.type_id == LMD_TYPE_INT ? item_a.int_val : 
+            item_a.type_id == LMD_TYPE_INT64 ? *(int64_t*)item_a.pointer : (int64_t)*(double*)item_a.pointer;
+        int64_t end = item_b.type_id == LMD_TYPE_INT ? item_b.int_val : 
+            item_b.type_id == LMD_TYPE_INT64 ? *(int64_t*)item_b.pointer : (int64_t)*(double*)item_b.pointer;
         if (start > end) {
             // return empty range instead of NULL
             log_debug("Error: start of range is greater than end: %ld > %ld", start, end);
@@ -205,7 +205,7 @@ double it2d(Item itm) {
         return itm.int_val;
     }
     else if (itm.type_id == LMD_TYPE_INT64) {
-        return *(long*)itm.pointer;
+        return *(int64_t*)itm.pointer;
     }
     else if (itm.type_id == LMD_TYPE_FLOAT) {
         return *(double*)itm.pointer;
@@ -283,7 +283,7 @@ Bool fn_eq(Item a_item, Item b_item) {
         return (a_item.int_val == b_item.int_val) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_INT64) {
-        return (*(long*)a_item.pointer == *(long*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
+        return (*(int64_t*)a_item.pointer == *(int64_t*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT) {
         return (*(double*)a_item.pointer == *(double*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
@@ -341,7 +341,7 @@ Bool fn_lt(Item a_item, Item b_item) {
         return (a_item.int_val < b_item.int_val) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_INT64) {
-        return (*(long*)a_item.pointer < *(long*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
+        return (*(int64_t*)a_item.pointer < *(int64_t*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT) {
         return (*(double*)a_item.pointer < *(double*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
@@ -392,7 +392,7 @@ Bool fn_gt(Item a_item, Item b_item) {
         return (a_item.int_val > b_item.int_val) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_INT64) {
-        return (*(long*)a_item.pointer > *(long*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
+        return (*(int64_t*)a_item.pointer > *(int64_t*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
     }
     else if (a_item.type_id == LMD_TYPE_FLOAT) {
         return (*(double*)a_item.pointer > *(double*)b_item.pointer) ? BOOL_TRUE : BOOL_FALSE;
@@ -635,7 +635,7 @@ String* fn_string(Item itm) {
     }
     case LMD_TYPE_INT64: {
         char buf[32];
-        long long_val = *(long*)itm.pointer;
+        int64_t long_val = *(int64_t*)itm.pointer;
         snprintf(buf, sizeof(buf), "%ld", long_val);
         int len = strlen(buf);
         return heap_string(buf, len);
@@ -895,19 +895,19 @@ String* fn_format1(Item item) {
 // generic field access function for any type
 Item fn_index(Item item, Item index_item) {
     // Determine the type and delegate to appropriate getter
-    long index = -1;
+    int64_t index = -1;
     switch (index_item.type_id) {
     case LMD_TYPE_INT:
         index = index_item.int_val;
         break;
     case LMD_TYPE_INT64:
-        index = *(long*)index_item.pointer;
+        index = *(int64_t*)index_item.pointer;
         break;
     case LMD_TYPE_FLOAT: {
         double dval = *(double*)index_item.pointer;
         // check dval is an integer
-        if (dval == (long)dval) {
-            index = (long)dval;
+        if (dval == (int64_t)dval) {
+            index = (int64_t)dval;
         } else {
         log_debug("index must be an integer, got float %g", dval);
             return ItemNull;  // todo: push error

@@ -96,11 +96,11 @@ Item parse_scalar_value(Input *input, const char* str) {
     
     // Check for number
     char* end;
-    long int_val = strtol(copy, &end, 10);
+    int64_t int_val = strtol(copy, &end, 10);
     if (*end == '\0') {
         // Allocate long on pool
-        long *lval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval);
+        int64_t *lval;
+        MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&lval);
         if (err != MEM_POOL_ERR_OK) {
             free(copy);
             return {.item = ITEM_ERROR};

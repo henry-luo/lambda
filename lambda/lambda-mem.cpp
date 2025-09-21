@@ -62,15 +62,15 @@ Item push_d(double dval) {
     return {.item = d2it(dptr)};
 }
 
-Item push_l(long lval) {
-    log_debug("push_l: %ld", lval);
+Item push_l(int64_t lval) {
+    log_debug("push_l: %" PRId64, lval);
     // Safety check: if context is num_stack is NULL
     if (!context->num_stack) {
         log_error("push_l called with invalid context");
         return ItemError;
     }
     if (lval == INT_ERROR) return ItemError;
-    long *lptr = num_stack_push_long(context->num_stack, lval);
+    int64_t *lptr = num_stack_push_long(context->num_stack, lval);
     return {.item = l2it(lptr)};
 }
 
@@ -265,7 +265,7 @@ void free_container(Container* cont, bool clear_entry) {
             if (field) { free_map_item(field, elmt->data, clear_entry); }
             if (elmt->data) free(elmt->data);
             // free content
-            for (long j = 0; j < elmt->length; j++) {
+            for (int64_t j = 0; j < elmt->length; j++) {
                 free_item(elmt->items[j], clear_entry);
             }
             if (elmt->items) free(elmt->items);

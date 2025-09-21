@@ -184,10 +184,10 @@ static Item parse_typed_value(Input *input, String* value_str) {
                 }
             } else {
                 // Parse as integer
-                long lval = strtol(temp_str, &end, 10);
+                int64_t lval = strtol(temp_str, &end, 10);
                 if (end == temp_str + len) {
-                    long* lval_ptr;
-                    MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&lval_ptr);
+                    int64_t* lval_ptr;
+                    MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&lval_ptr);
                     if (err == MEM_POOL_ERR_OK) {
                         *lval_ptr = lval;
                         pool_variable_free(input->pool, temp_str);

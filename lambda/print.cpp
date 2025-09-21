@@ -1,7 +1,7 @@
 #include "lambda-data.hpp"
 #include "../lib/log.h"
 #include <math.h>
-
+#include <inttypes.h>  // for PRId64
 #include "ast.hpp"
 
 #define MAX_DEPTH 2000
@@ -250,7 +250,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 strbuf_append_format(strbuf, "%d", *(int*)data);
                 break;
             case LMD_TYPE_INT64:
-                strbuf_append_format(strbuf, "%ld", *(long*)data);
+                strbuf_append_format(strbuf, "%" PRId64, *(int64_t*)data);
                 break;
             case LMD_TYPE_FLOAT:
                 print_double(strbuf, *(double*)data);
@@ -334,7 +334,7 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
         strbuf_append_format(strbuf, "%d", titem->int_val);
         break;
     case LMD_TYPE_INT64:
-        strbuf_append_format(strbuf, "%ld", titem->long_val);
+        strbuf_append_format(strbuf, "%" PRId64, titem->long_val);
         break;
     case LMD_TYPE_FLOAT:
         print_double(strbuf, titem->double_val);
@@ -406,8 +406,9 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         break;
     }
     case LMD_TYPE_INT64: {
-        long long_val = *(long*)item.pointer;
-        strbuf_append_format(strbuf, "%ld", long_val);
+        int64_t long_val = *(int64_t*)item.pointer;
+        log_debug("print int64: %" PRId64, long_val);
+        strbuf_append_format(strbuf, "%" PRId64, long_val);
         break;
     }
     case LMD_TYPE_FLOAT: {
@@ -701,7 +702,7 @@ void print_const(Script *script, Type* type) {
     }
     case LMD_TYPE_INT64: {
         int64_t num = *(int64_t*)data;
-        log_debug("[const@%d, %s, %lld]", const_type->const_index, type_name, num);
+        log_debug("[const@%d, %s, %" PRId64 "]", const_type->const_index, type_name, num);
         break;
     }
     case LMD_TYPE_DTIME: {

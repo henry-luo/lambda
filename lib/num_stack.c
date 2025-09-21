@@ -101,10 +101,10 @@ static num_value_t* num_stack_push_value(num_stack_t *stack, num_value_t value) 
 }
 
 // push a long value onto the stack
-long* num_stack_push_long(num_stack_t *stack, long value) {
+int64_t* num_stack_push_long(num_stack_t *stack, int64_t value) {
     num_value_t val;
     val.as_long = value;
-    return (long*)num_stack_push_value(stack, val);
+    return (int64_t*)num_stack_push_value(stack, val);
 }
 
 // push a double value onto the stack

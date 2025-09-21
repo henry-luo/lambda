@@ -31,10 +31,10 @@ static void format_scalar_value(StringBuf* sb, Item item) {
         }
         case LMD_TYPE_INT64: {
             // 64-bit integer stored as pointer
-            long* lptr = (long*)item.pointer;
+            int64_t* lptr = (int64_t*)item.pointer;
             if (lptr) {
                 char num_buf[32];
-                snprintf(num_buf, sizeof(num_buf), "%ld", *lptr);
+                snprintf(num_buf, sizeof(num_buf), "%" PRId64, *lptr);
                 stringbuf_append_str(sb, num_buf);
             }
             break;

@@ -40,7 +40,7 @@ static int type_entry_compare(const void *a, const void *b, void *udata) {
 
 // ==================== Utility Functions ====================
 
-void occurrence_to_counts(char modifier, long* min_count, long* max_count) {
+void occurrence_to_counts(char modifier, int64_t* min_count, int64_t* max_count) {
     switch (modifier) {
         case '?':
             *min_count = 0;
@@ -61,14 +61,14 @@ void occurrence_to_counts(char modifier, long* min_count, long* max_count) {
     }
 }
 
-char counts_to_occurrence(long min_count, long max_count) {
+char counts_to_occurrence(int64_t min_count, int64_t max_count) {
     if (min_count == 0 && max_count == 1) return '?';
     if (min_count == 1 && max_count == -1) return '+';
     if (min_count == 0 && max_count == -1) return '*';
     return 0; // No modifier
 }
 
-bool validate_occurrence_counts(long min_count, long max_count) {
+bool validate_occurrence_counts(int64_t min_count, int64_t max_count) {
     if (min_count < 0) return false;
     if (max_count != -1 && max_count < min_count) return false;
     return true;
