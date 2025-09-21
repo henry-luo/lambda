@@ -426,64 +426,7 @@ project "lambda"
     }
     
 
-project "test_strbuf"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_strbuf.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
-    }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c99",
-    }
-    
-
-project "test_stringbuf"
+project "test_strbuf_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -491,7 +434,7 @@ project "test_stringbuf"
     targetextension ".exe"
     
     files {
-        "test/test_stringbuf.cpp",
+        "test/test_strbuf_gtest.cpp",
     }
     
     includedirs {
@@ -524,30 +467,34 @@ project "test_stringbuf"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-std=c++17",
     }
     
 
-project "test_strview"
+project "test_stringbuf_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_strview.c",
+        "test/test_stringbuf_gtest.cpp",
     }
     
     includedirs {
@@ -580,31 +527,34 @@ project "test_strview"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
-project "test_variable_pool"
+project "test_strview_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_variable_pool.c",
+        "test/test_strview_gtest.cpp",
     }
     
     includedirs {
@@ -637,31 +587,34 @@ project "test_variable_pool"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
-project "test_num_stack"
+project "test_variable_pool_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_num_stack.c",
+        "test/test_variable_pool_gtest.cpp",
     }
     
     includedirs {
@@ -694,31 +647,34 @@ project "test_num_stack"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
-project "test_datetime"
+project "test_num_stack_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_datetime.c",
+        "test/test_num_stack_gtest.cpp",
     }
     
     includedirs {
@@ -751,31 +707,34 @@ project "test_datetime"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
-project "test_url"
+project "test_datetime_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_url.c",
+        "test/test_datetime_gtest.cpp",
     }
     
     includedirs {
@@ -808,31 +767,34 @@ project "test_url"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
-project "test_url_extra"
+project "test_url_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_url_extra.c",
+        "test/test_url_gtest.cpp",
     }
     
     includedirs {
@@ -865,33 +827,34 @@ project "test_url_extra"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
-project "test_cmdedit"
+project "test_url_extra_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_cmdedit.c",
-        "lib/cmdedit.c",
-        "lib/cmdedit_utf8.c",
+        "test/test_url_extra_gtest.cpp",
     }
     
     includedirs {
@@ -923,23 +886,87 @@ project "test_cmdedit"
     }
     
     links {
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+    }
+    
+
+project "test_cmdedit_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_cmdedit_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
         "utf8proc",
+        "criterion",
+        "nanomsg",
+        "git2",
     }
     
     linkoptions {
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/opt/homebrew/lib/libutf8proc.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-std=c++17",
         "-DCMDEDIT_TESTING",
         "-Wno-implicit-function-declaration",
-        "-std=gnu99",
         "-DUTF8PROC_STATIC",
     }
     
