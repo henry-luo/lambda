@@ -219,3 +219,494 @@ TEST_F(VariablePoolTest, RapidOperations) {
         }
     }
 }
+
+TEST_F(VariablePoolTest, ReallocSmaller) {
+    void *ptr;
+    MemPoolError err = pool_variable_alloc(pool, 200, &ptr);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // Fill with test data
+    memset(ptr, 0xAA, 200);
+    
+    // Realloc to smaller size
+    void *new_ptr = pool_variable_realloc(pool, ptr, 200, 50);
+    ASSERT_NE(new_ptr, nullptr) << "Realloc to smaller size should succeed";
+    
+    // Check that the data is preserved for the smaller size
+    char *bytes = (char*)new_ptr;
+    for (int i = 0; i < 50; i++) {
+        EXPECT_EQ(bytes[i], (char)0xAA) << "Data should be preserved at index " << i;
+    }
+    
+    pool_variable_free(pool, new_ptr);
+}
+
+TEST_F(VariablePoolTest, FragmentationHandling) {
+    void *ptrs[10];
+    MemPoolError err;
+    
+    // Allocate multiple blocks
+    for (int i = 0; i < 10; i++) {
+        err = pool_variable_alloc(pool, 50 + i * 10, &ptrs[i]);
+        ASSERT_EQ(err, MEM_POOL_ERR_OK);
+        sprintf((char*)ptrs[i], "Block%d", i);
+    }
+    
+    // Free every other block to create fragmentation
+    for (int i = 1; i < 10; i += 2) {
+        err = pool_variable_free(pool, ptrs[i]);
+        EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    }
+    
+    // Now test realloc on remaining blocks
+    for (int i = 0; i < 10; i += 2) {
+        char expected[20];
+        sprintf(expected, "Block%d", i);
+        
+        ptrs[i] = pool_variable_realloc(pool, ptrs[i], 50 + i * 10, 200);
+        ASSERT_NE(ptrs[i], nullptr) << "Realloc with fragmentation should succeed for block " << i;
+        EXPECT_STREQ((char*)ptrs[i], expected) << "Data should be preserved during fragmented realloc for block " << i;
+    }
+    
+    // Cleanup remaining blocks
+    for (int i = 0; i < 10; i += 2) {
+        pool_variable_free(pool, ptrs[i]);
+    }
+}
+
+TEST_F(VariablePoolTest, StressTest) {
+    const int num_iterations = 100;
+    void *ptrs[10];
+    
+    for (int iter = 0; iter < num_iterations; iter++) {
+        // Allocate with varying sizes
+        for (int i = 0; i < 10; i++) {
+            size_t size = 10 + (iter + i) % 200;
+            MemPoolError err = pool_variable_alloc(pool, size, &ptrs[i]);
+            ASSERT_EQ(err, MEM_POOL_ERR_OK) << "Allocation should succeed in iteration " << iter;
+            
+            // Fill with pattern
+            memset(ptrs[i], 0x55 + (i % 3), size);
+        }
+        
+        // Realloc some randomly
+        for (int i = 0; i < 5; i++) {
+            size_t old_size = 10 + (iter + i) % 200;
+            size_t new_size = 20 + (iter + i + 50) % 300;
+            ptrs[i] = pool_variable_realloc(pool, ptrs[i], old_size, new_size);
+            ASSERT_NE(ptrs[i], nullptr) << "Realloc should succeed in stress test iteration " << iter;
+        }
+        
+        // Free all
+        for (int i = 0; i < 10; i++) {
+            MemPoolError err = pool_variable_free(pool, ptrs[i]);
+            EXPECT_EQ(err, MEM_POOL_ERR_OK) << "Free should succeed in iteration " << iter;
+        }
+    }
+}
+
+TEST_F(VariablePoolTest, BufferGrowth) {
+    void *ptrs[5];
+    MemPoolError err;
+    
+    // Allocate blocks that will fill initial buffer
+    for (int i = 0; i < 5; i++) {
+        err = pool_variable_alloc(pool, 200, &ptrs[i]);
+        ASSERT_EQ(err, MEM_POOL_ERR_OK) << "Initial allocation " << i << " should succeed";
+        sprintf((char*)ptrs[i], "Data%d", i);
+    }
+    
+    // This should trigger buffer growth
+    void *large_ptr;
+    err = pool_variable_alloc(pool, 500, &large_ptr);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK) << "Large allocation should succeed and trigger buffer growth";
+    
+    strcpy((char*)large_ptr, "LargeData");
+    
+    // Verify all data is still intact
+    for (int i = 0; i < 5; i++) {
+        char expected[20];
+        sprintf(expected, "Data%d", i);
+        EXPECT_STREQ((char*)ptrs[i], expected) << "Data should be preserved after buffer growth for block " << i;
+    }
+    EXPECT_STREQ((char*)large_ptr, "LargeData") << "Large block data should be correct";
+    
+    // Cleanup
+    for (int i = 0; i < 5; i++) {
+        pool_variable_free(pool, ptrs[i]);
+    }
+    pool_variable_free(pool, large_ptr);
+}
+
+TEST_F(VariablePoolTest, AlignedSizeof) {
+    void *ptr;
+    MemPoolError err = pool_variable_alloc(pool, 100, &ptr);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    
+    size_t size;
+    err = pool_variable_aligned_sizeof(pool, ptr, &size);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK) << "aligned_sizeof should succeed";
+    EXPECT_GE(size, 100) << "Aligned size should be at least the requested size";
+    
+    pool_variable_free(pool, ptr);
+}
+
+TEST_F(VariablePoolTest, BestFitAlgorithm) {
+    // Test with smaller tolerance for better fit checking
+    VariableMemPool *test_pool;
+    MemPoolError err = pool_variable_init(&test_pool, 1024, 5);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    
+    void *ptr1, *ptr2, *ptr3;
+    
+    // Allocate blocks of different sizes
+    err = pool_variable_alloc(test_pool, 100, &ptr1);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    
+    err = pool_variable_alloc(test_pool, 50, &ptr2);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    
+    err = pool_variable_alloc(test_pool, 200, &ptr3);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // Free middle block
+    err = pool_variable_free(test_pool, ptr2);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // Allocate a block that should fit in the freed space
+    void *ptr4;
+    err = pool_variable_alloc(test_pool, 45, &ptr4);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK) << "Best fit allocation should succeed";
+    
+    // Cleanup
+    pool_variable_free(test_pool, ptr1);
+    pool_variable_free(test_pool, ptr3);
+    pool_variable_free(test_pool, ptr4);
+    pool_variable_destroy(test_pool);
+}
+
+TEST_F(VariablePoolTest, BufferBoundaryOverflowPrevention) {
+    // Test for the specific buffer boundary bug that was causing heap buffer overflow
+    VariableMemPool *test_pool;
+    // Use a very small buffer size to force boundary conditions quickly
+    MemPoolError err = pool_variable_init(&test_pool, 64, 10);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    
+    void *ptrs[10];
+    
+    // Fill the buffer almost to capacity to trigger boundary conditions
+    // Each allocation uses header_size (16 bytes) + aligned block size
+    // With 64-byte buffer, we can fit about 3 small allocations before hitting boundary
+    
+    // Allocate blocks that will fill the buffer close to capacity
+    err = pool_variable_alloc(test_pool, 16, &ptrs[0]); // ~32 bytes with header
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    
+    err = pool_variable_alloc(test_pool, 16, &ptrs[1]); // ~32 bytes with header  
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // This allocation should trigger buffer boundary check
+    // Before the fix: buffer_has_space would incorrectly return true when curr_ptr == end
+    // After the fix: buffer_has_space correctly returns false, creating new buffer
+    err = pool_variable_alloc(test_pool, 16, &ptrs[2]); // Should create new buffer
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    ASSERT_NE(ptrs[2], nullptr) << "Allocation at buffer boundary should succeed with new buffer";
+    
+    // Test the exact scenario that caused the crash:
+    // Allocate something that would exactly fill remaining space
+    err = pool_variable_alloc(test_pool, 8, &ptrs[3]);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    ASSERT_NE(ptrs[3], nullptr) << "Small allocation should succeed";
+    
+    // Now try to allocate something larger than remaining space
+    // This should trigger new buffer creation, not overflow
+    err = pool_variable_alloc(test_pool, 32, &ptrs[4]);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    ASSERT_NE(ptrs[4], nullptr) << "Large allocation should trigger new buffer, not overflow";
+    
+    // Verify all pointers are usable (write test data)
+    for (int i = 0; i < 5; i++) {
+        if (ptrs[i]) {
+            *((char*)ptrs[i]) = 'A' + i;
+            EXPECT_EQ(*((char*)ptrs[i]), 'A' + i) << "Pointer " << i << " should be writable";
+        }
+    }
+    
+    // Cleanup
+    for (int i = 0; i < 5; i++) {
+        if (ptrs[i]) {
+            pool_variable_free(test_pool, ptrs[i]);
+        }
+    }
+    pool_variable_destroy(test_pool);
+}
+
+TEST_F(VariablePoolTest, FreeListCorruptionDetection) {
+    // Create a scenario similar to the format-md.c crash
+    void *ptr1, *ptr2, *ptr3, *ptr4;
+    MemPoolError err;
+    
+    // Allocate adjacent blocks
+    err = pool_variable_alloc(pool, 100, &ptr1);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    err = pool_variable_alloc(pool, 100, &ptr2);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    err = pool_variable_alloc(pool, 100, &ptr3);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    err = pool_variable_alloc(pool, 100, &ptr4);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // Free middle blocks to create fragmentation
+    err = pool_variable_free(pool, ptr2);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    err = pool_variable_free(pool, ptr3);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // This should trigger coalescing and potential corruption detection
+    // The safety checks should handle any "block not found" scenarios gracefully
+    void *new_ptr1 = pool_variable_realloc(pool, ptr1, 100, 400);
+    ASSERT_NE(new_ptr1, nullptr) << "Realloc should succeed even with fragmented free list";
+    
+    // Verify we can still use the pool normally after potential corruption
+    void *test_ptr;
+    err = pool_variable_alloc(pool, 50, &test_ptr);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK) << "Pool should remain functional after corruption handling";
+    
+    // Cleanup
+    pool_variable_free(pool, ptr4);
+    pool_variable_free(pool, new_ptr1);
+    pool_variable_free(pool, test_ptr);
+}
+
+TEST_F(VariablePoolTest, StrbufReallocPattern) {
+    // Simulate the exact pattern from format-md.c where StrBuf growth causes corruption
+    void *strbuf_ptr;
+    MemPoolError err = pool_variable_alloc(pool, 32, &strbuf_ptr); // Initial StrBuf capacity
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // Fill with test data (simulating string content)
+    strcpy((char*)strbuf_ptr, "Line Breaks and Paragraphs");
+    
+    // Simulate other allocations happening (element processing, etc.)
+    void *elem1, *elem2, *elem3;
+    err = pool_variable_alloc(pool, 64, &elem1);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    err = pool_variable_alloc(pool, 128, &elem2);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    err = pool_variable_alloc(pool, 96, &elem3);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // Free some to create fragmentation (simulating element cleanup)
+    err = pool_variable_free(pool, elem2);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // Now simulate StrBuf growth (this is where corruption occurred)
+    strbuf_ptr = pool_variable_realloc(pool, strbuf_ptr, 32, 256);
+    ASSERT_NE(strbuf_ptr, nullptr) << "StrBuf realloc should succeed";
+    EXPECT_STREQ((char*)strbuf_ptr, "Line Breaks and Paragraphs") << "Data should be preserved";
+    
+    // Continue with more operations that might trigger the issue
+    strbuf_ptr = pool_variable_realloc(pool, strbuf_ptr, 256, 512);
+    ASSERT_NE(strbuf_ptr, nullptr) << "Second StrBuf realloc should succeed";
+    EXPECT_STREQ((char*)strbuf_ptr, "Line Breaks and Paragraphs") << "Data should still be preserved";
+    
+    // Test that we can continue allocating normally
+    void *new_elem;
+    err = pool_variable_alloc(pool, 200, &new_elem);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK) << "New allocations should work after realloc sequence";
+    
+    // Cleanup
+    pool_variable_free(pool, elem1);
+    pool_variable_free(pool, elem3);
+    pool_variable_free(pool, strbuf_ptr);
+    pool_variable_free(pool, new_elem);
+}
+
+TEST_F(VariablePoolTest, InfiniteLoopPrevention) {
+    // Create a scenario that could potentially cause infinite loops in free list traversal
+    void *ptrs[10];
+    MemPoolError err;
+    
+    // Allocate many small blocks
+    for (int i = 0; i < 10; i++) {
+        err = pool_variable_alloc(pool, 50, &ptrs[i]);
+        EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    }
+    
+    // Free them all to create a long free list
+    for (int i = 0; i < 10; i++) {
+        err = pool_variable_free(pool, ptrs[i]);
+        EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    }
+    
+    // Now allocate and immediately realloc to stress the free list traversal
+    void *test_ptr;
+    err = pool_variable_alloc(pool, 40, &test_ptr);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // Multiple reallocs should not cause infinite loops even with long free lists
+    for (int i = 0; i < 5; i++) {
+        test_ptr = pool_variable_realloc(pool, test_ptr, 40 + i * 10, 40 + (i + 1) * 10);
+        ASSERT_NE(test_ptr, nullptr) << "Realloc " << i << " should complete without infinite loop";
+    }
+    
+    pool_variable_free(pool, test_ptr);
+}
+
+TEST_F(VariablePoolTest, CorruptedPointerHandling) {
+    // Test that the pool handles various types of invalid pointers gracefully
+    MemPoolError err;
+    
+    // Test freeing NULL
+    err = pool_variable_free(pool, NULL);
+    EXPECT_EQ(err, MEM_POOL_ERR_UNKNOWN_BLOCK) << "Freeing NULL should be handled gracefully";
+    
+    // Test freeing stack pointer
+    int stack_var = 42;
+    err = pool_variable_free(pool, &stack_var);
+    EXPECT_EQ(err, MEM_POOL_ERR_UNKNOWN_BLOCK) << "Freeing stack pointer should be rejected";
+    
+    // Test freeing a pointer that looks like the corrupted pointer from the crash
+    void *fake_ptr = (void*)0x6e6120646c6f6230ULL;
+    err = pool_variable_free(pool, fake_ptr);
+    EXPECT_EQ(err, MEM_POOL_ERR_UNKNOWN_BLOCK) << "Freeing corrupted pointer should be handled";
+    
+    // Test that pool remains functional after invalid operations
+    void *valid_ptr;
+    err = pool_variable_alloc(pool, 100, &valid_ptr);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK) << "Pool should remain functional after invalid operations";
+    
+    pool_variable_free(pool, valid_ptr);
+}
+
+TEST_F(VariablePoolTest, DoubleFreeProtection) {
+    void *ptr;
+    MemPoolError err = pool_variable_alloc(pool, 100, &ptr);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    strcpy((char*)ptr, "Test data");
+    
+    // First free should succeed
+    err = pool_variable_free(pool, ptr);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK) << "First free should succeed";
+    
+    // Second free should be detected and handled gracefully
+    // Note: The current implementation doesn't explicitly check for double-free,
+    // but our safety checks should prevent crashes
+    err = pool_variable_free(pool, ptr);
+    EXPECT_EQ(err, MEM_POOL_ERR_UNKNOWN_BLOCK) << "Double free should be handled gracefully";
+    
+    // Pool should remain functional
+    void *new_ptr;
+    err = pool_variable_alloc(pool, 150, &new_ptr);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK) << "Pool should remain functional after double-free attempt";
+    
+    pool_variable_free(pool, new_ptr);
+}
+
+TEST_F(VariablePoolTest, BlockNotFoundScenario) {
+    // Create a specific scenario that triggers "block not found in free list"
+    void *blocks[6];
+    MemPoolError err;
+    
+    // Allocate a sequence of blocks
+    for (int i = 0; i < 6; i++) {
+        err = pool_variable_alloc(pool, 80 + i * 10, &blocks[i]);
+        ASSERT_EQ(err, MEM_POOL_ERR_OK);
+        snprintf((char*)blocks[i], 20, "Block%d", i);
+    }
+    
+    // Free blocks in a pattern that creates complex coalescing scenarios
+    err = pool_variable_free(pool, blocks[1]); // Free second block
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    err = pool_variable_free(pool, blocks[3]); // Free fourth block
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    err = pool_variable_free(pool, blocks[5]); // Free sixth block
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // Now realloc the first block - this should trigger coalescing with freed block[1]
+    // and the safety checks should handle any missing blocks gracefully
+    blocks[0] = pool_variable_realloc(pool, blocks[0], 80, 300);
+    ASSERT_NE(blocks[0], nullptr) << "Realloc should succeed despite complex free list state";
+    EXPECT_STREQ((char*)blocks[0], "Block0") << "Data should be preserved during complex realloc";
+    
+    // Try to realloc another block that might trigger more coalescing
+    blocks[2] = pool_variable_realloc(pool, blocks[2], 100, 250);
+    ASSERT_NE(blocks[2], nullptr) << "Second complex realloc should also succeed";
+    EXPECT_STREQ((char*)blocks[2], "Block2") << "Data should be preserved in second realloc";
+    
+    // Verify pool is still functional
+    void *new_block;
+    err = pool_variable_alloc(pool, 150, &new_block);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK) << "Pool should remain functional after complex operations";
+    
+    // Cleanup
+    pool_variable_free(pool, blocks[0]);
+    pool_variable_free(pool, blocks[2]);
+    pool_variable_free(pool, blocks[4]);
+    pool_variable_free(pool, new_block);
+}
+
+TEST_F(VariablePoolTest, FormatMdStressSimulation) {
+    // Simulate the complex allocation pattern from format-md.c processing
+    MemPoolError err;
+    
+    // Simulate main StrBuf for output
+    void *output_buf;
+    err = pool_variable_alloc(pool, 32, &output_buf);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    strcpy((char*)output_buf, "# Heading\n");
+    
+    // Simulate various element allocations during markdown processing
+    void *elements[20];
+    for (int i = 0; i < 20; i++) {
+        err = pool_variable_alloc(pool, 60 + (i % 8) * 20, &elements[i]);
+        ASSERT_EQ(err, MEM_POOL_ERR_OK);
+        snprintf((char*)elements[i], 30, "Element%d", i);
+    }
+    
+    // Simulate StrBuf growth during processing (like appending text)
+    output_buf = pool_variable_realloc(pool, output_buf, 32, 128);
+    ASSERT_NE(output_buf, nullptr) << "First StrBuf growth should succeed";
+    strcat((char*)output_buf, "## Subheading\n");
+    
+    // Free some elements (simulating element processing completion)
+    for (int i = 5; i < 15; i += 2) {
+        err = pool_variable_free(pool, elements[i]);
+        EXPECT_EQ(err, MEM_POOL_ERR_OK);
+        elements[i] = NULL;
+    }
+    
+    // More StrBuf growth (like appending a long paragraph)
+    output_buf = pool_variable_realloc(pool, output_buf, 128, 512);
+    ASSERT_NE(output_buf, nullptr) << "Second StrBuf growth should succeed";
+    strcat((char*)output_buf, "This is a long paragraph that would cause buffer expansion...\n");
+    
+    // Allocate more elements (simulating continued processing)
+    void *more_elements[10];
+    for (int i = 0; i < 10; i++) {
+        err = pool_variable_alloc(pool, 40 + i * 5, &more_elements[i]);
+        ASSERT_EQ(err, MEM_POOL_ERR_OK);
+        snprintf((char*)more_elements[i], 20, "More%d", i);
+    }
+    
+    // Final StrBuf growth
+    output_buf = pool_variable_realloc(pool, output_buf, 512, 1024);
+    ASSERT_NE(output_buf, nullptr) << "Final StrBuf growth should succeed";
+    
+    // Verify the output buffer still contains our data
+    EXPECT_NE(strstr((char*)output_buf, "# Heading"), nullptr) << "Original content should be preserved";
+    EXPECT_NE(strstr((char*)output_buf, "## Subheading"), nullptr) << "Added content should be preserved";
+    
+    // Cleanup all remaining allocations
+    for (int i = 0; i < 20; i++) {
+        if (elements[i] != NULL) {
+            pool_variable_free(pool, elements[i]);
+        }
+    }
+    
+    for (int i = 0; i < 10; i++) {
+        pool_variable_free(pool, more_elements[i]);
+    }
+    
+    pool_variable_free(pool, output_buf);
+}
