@@ -90,15 +90,15 @@ bool create_dir(const char* dir_path) {
     free(path_copy);
     
     // Now create this directory
-#ifdef _WIN32
-    if (mkdir(dir_path) == -1) {
-#else
-    if (mkdir(dir_path, 0755) == -1) {
-#endif
-        fprintf(stderr, "Failed to create directory %s: %s\n", 
-                dir_path, strerror(errno));
+    int ret;
+    #ifdef _WIN32
+    ret = mkdir(dir_path);
+    #else
+    ret = mkdir(dir_path, 0755);
+    #endif
+    if (ret) {
+        fprintf(stderr, "Failed to create directory %s: %s\n", dir_path, strerror(errno));
         return false;
     }
-    
     return true;
 }
