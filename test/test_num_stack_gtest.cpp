@@ -178,3 +178,122 @@ TEST_F(NumStackTest, LargeStackOperations) {
     
     EXPECT_TRUE(num_stack_is_empty(stack)) << "stack should be empty after popping all values";
 }
+
+// Missing test 1: Create with zero capacity
+TEST_F(NumStackTest, CreateWithZeroCapacity) {
+    num_stack_t* zero_stack = num_stack_create(0);
+    EXPECT_NE(zero_stack, nullptr) << "stack should be created even with zero capacity";
+    
+    EXPECT_EQ(num_stack_length(zero_stack), 0UL) << "zero capacity stack should start empty";
+    EXPECT_TRUE(num_stack_is_empty(zero_stack)) << "zero capacity stack should be empty";
+    
+    // Should still be able to push values (will allocate as needed)
+    int64_t* val = num_stack_push_long(zero_stack, 42);
+    EXPECT_NE(val, nullptr) << "push should succeed on zero capacity stack";
+    EXPECT_EQ(*val, 42) << "pushed value should be correct";
+    
+    num_stack_destroy(zero_stack);
+}
+
+// Missing test 2: Push mixed values
+TEST_F(NumStackTest, PushMixedValues) {
+    // Push different types of values
+    int64_t* long_val = num_stack_push_long(stack, 123);
+    double* double_val = num_stack_push_double(stack, 45.67);
+    int64_t* long_val2 = num_stack_push_long(stack, -789);
+    
+    EXPECT_NE(long_val, nullptr) << "long push should succeed";
+    EXPECT_NE(double_val, nullptr) << "double push should succeed";
+    EXPECT_NE(long_val2, nullptr) << "second long push should succeed";
+    
+    EXPECT_EQ(*long_val, 123) << "first long value should be correct";
+    EXPECT_DOUBLE_EQ(*double_val, 45.67) << "double value should be correct";
+    EXPECT_EQ(*long_val2, -789) << "second long value should be correct";
+    
+    EXPECT_EQ(num_stack_length(stack), 3UL) << "stack should contain 3 values";
+    
+    // Verify values can be retrieved
+    num_value_t* val0 = num_stack_get(stack, 0);
+    num_value_t* val1 = num_stack_get(stack, 1);
+    num_value_t* val2 = num_stack_get(stack, 2);
+    
+    EXPECT_NE(val0, nullptr) << "first value should be retrievable";
+    EXPECT_NE(val1, nullptr) << "second value should be retrievable";
+    EXPECT_NE(val2, nullptr) << "third value should be retrievable";
+}
+
+// Missing test 3: Chunk allocation behavior
+TEST_F(NumStackTest, ChunkAllocation) {
+    // Test that stack grows properly when exceeding initial capacity
+    const size_t initial_capacity = 16; // Assuming this is the chunk size
+    
+    // Push values beyond initial capacity
+    for (size_t i = 0; i < initial_capacity + 5; i++) {
+        int64_t* val = num_stack_push_long(stack, (int64_t)i);
+        EXPECT_NE(val, nullptr) << "push should succeed for value " << i;
+        EXPECT_EQ(*val, (int64_t)i) << "value should be correct";
+    }
+    
+    EXPECT_EQ(num_stack_length(stack), initial_capacity + 5) << "stack should contain all pushed values";
+    
+    // Verify all values are still accessible after chunk allocation
+    for (size_t i = 0; i < initial_capacity + 5; i++) {
+        num_value_t* val = num_stack_get(stack, i);
+        EXPECT_NE(val, nullptr) << "value at index " << i << " should be accessible after chunk allocation";
+    }
+}
+
+// Missing test 4: Reset to index edge cases
+TEST_F(NumStackTest, ResetToIndexEdgeCases) {
+    // Push several values
+    for (int i = 0; i < 5; i++) {
+        int64_t* val = num_stack_push_long(stack, i);
+        EXPECT_NE(val, nullptr);
+    }
+    
+    EXPECT_EQ(num_stack_length(stack), 5UL) << "stack should have 5 values";
+    
+    // Reset to current length (should be no-op)
+    num_stack_reset_to_index(stack, 5);
+    EXPECT_EQ(num_stack_length(stack), 5UL) << "reset to current length should not change stack";
+    
+    // Reset to beyond current length (should be no-op or clamped)
+    num_stack_reset_to_index(stack, 10);
+    EXPECT_EQ(num_stack_length(stack), 5UL) << "reset beyond length should not extend stack";
+    
+    // Reset to middle
+    num_stack_reset_to_index(stack, 2);
+    EXPECT_EQ(num_stack_length(stack), 2UL) << "reset to index 2 should leave 2 elements";
+    
+    // Verify remaining values are still accessible
+    num_value_t* val0 = num_stack_get(stack, 0);
+    num_value_t* val1 = num_stack_get(stack, 1);
+    EXPECT_NE(val0, nullptr) << "first value should remain after reset";
+    EXPECT_NE(val1, nullptr) << "second value should remain after reset";
+    
+    // Reset to 0 (clear stack)
+    num_stack_reset_to_index(stack, 0);
+    EXPECT_EQ(num_stack_length(stack), 0UL) << "reset to 0 should clear stack";
+    EXPECT_TRUE(num_stack_is_empty(stack)) << "stack should be empty after reset to 0";
+}
+
+// Missing test 5: Null pointer handling
+TEST_F(NumStackTest, NullPointerHandling) {
+    // Test null stack parameter handling
+    EXPECT_EQ(num_stack_length(nullptr), 0UL) << "length of null stack should be 0";
+    EXPECT_TRUE(num_stack_is_empty(nullptr)) << "null stack should be considered empty";
+    
+    EXPECT_EQ(num_stack_push_long(nullptr, 123), nullptr) << "push to null stack should return null";
+    EXPECT_EQ(num_stack_push_double(nullptr, 45.67), nullptr) << "push double to null stack should return null";
+    
+    EXPECT_EQ(num_stack_get(nullptr, 0), nullptr) << "get from null stack should return null";
+    EXPECT_EQ(num_stack_peek(nullptr), nullptr) << "peek null stack should return null";
+    
+    EXPECT_FALSE(num_stack_pop(nullptr)) << "pop from null stack should return false";
+    
+    // Reset and destroy should handle null gracefully
+    num_stack_reset_to_index(nullptr, 0); // Should not crash
+    num_stack_destroy(nullptr); // Should not crash
+    
+    SUCCEED() << "null pointer handling completed without crashes";
+}

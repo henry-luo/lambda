@@ -150,3 +150,106 @@ TEST_F(UrlTest, UrlComponents) {
         url_destroy(url);
     }
 }
+
+// Missing test 1: URL creation
+TEST_F(UrlTest, UrlCreation) {
+    // Test URL creation and basic properties
+    Url* url = url_create();
+    EXPECT_NE(url, nullptr) << "url_create should not return NULL";
+    EXPECT_EQ(url->scheme, URL_SCHEME_UNKNOWN) << "Default scheme should be UNKNOWN";
+    EXPECT_NE(url->host, nullptr) << "Default host should be allocated";
+    EXPECT_NE(url->pathname, nullptr) << "Default pathname should be allocated";
+    url_destroy(url);
+}
+
+// Missing test 2: Relative URL fragment only
+TEST_F(UrlTest, RelativeUrlFragmentOnly) {
+    // Test fragment-only relative URLs
+    Url* base = url_parse("https://example.com/path/to/page?query=value");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
+    
+    Url* url = url_parse_with_base("#newfragment", base);
+    EXPECT_NE(url, nullptr) << "Fragment-only relative URL should resolve";
+    if (url) {
+        EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
+        if (url->host && url->host->chars) {
+            EXPECT_STREQ(url->host->chars, "example.com") << "Host should be preserved";
+        }
+        if (url->pathname && url->pathname->chars) {
+            EXPECT_STREQ(url->pathname->chars, "/path/to/page") << "Path should be preserved";
+        }
+        if (url->search && url->search->chars) {
+            EXPECT_STREQ(url->search->chars, "?query=value") << "Query should be preserved";
+        }
+        if (url->hash && url->hash->chars) {
+            EXPECT_STREQ(url->hash->chars, "#newfragment") << "Fragment should be updated";
+        }
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+// Missing test 3: Relative URL query only
+TEST_F(UrlTest, RelativeUrlQueryOnly) {
+    // Test query-only relative URLs
+    Url* base = url_parse("https://example.com/path/to/page#fragment");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
+    
+    Url* url = url_parse_with_base("?newquery=newvalue", base);
+    EXPECT_NE(url, nullptr) << "Query-only relative URL should resolve";
+    if (url) {
+        EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
+        if (url->host && url->host->chars) {
+            EXPECT_STREQ(url->host->chars, "example.com") << "Host should be preserved";
+        }
+        if (url->pathname && url->pathname->chars) {
+            EXPECT_STREQ(url->pathname->chars, "/path/to/page") << "Path should be preserved";
+        }
+        if (url->search && url->search->chars) {
+            EXPECT_STREQ(url->search->chars, "?newquery=newvalue") << "Query should be updated";
+        }
+        // Fragment should be removed in query-only resolution
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+// Missing test 4: Relative URL absolute path
+TEST_F(UrlTest, RelativeUrlAbsolutePath) {
+    // Test absolute path relative URLs
+    Url* base = url_parse("https://example.com/old/path?query=value#fragment");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
+    
+    Url* url = url_parse_with_base("/new/absolute/path", base);
+    EXPECT_NE(url, nullptr) << "Absolute path relative URL should resolve";
+    if (url) {
+        EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
+        if (url->host && url->host->chars) {
+            EXPECT_STREQ(url->host->chars, "example.com") << "Host should be preserved";
+        }
+        if (url->pathname && url->pathname->chars) {
+            EXPECT_STREQ(url->pathname->chars, "/new/absolute/path") << "Path should be updated";
+        }
+        // Query and fragment should be removed
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+// Missing test 5: Error handling
+TEST_F(UrlTest, ErrorHandling) {
+    // Test error handling with invalid URLs
+    Url* url = url_parse("invalid_url");
+    EXPECT_EQ(url, nullptr) << "Invalid URL should return NULL";
+    
+    // Test NULL input
+    url = url_parse(nullptr);
+    EXPECT_EQ(url, nullptr) << "NULL input should return NULL";
+    
+    // Test empty string
+    url = url_parse("");
+    EXPECT_EQ(url, nullptr) << "Empty string should return NULL";
+}
