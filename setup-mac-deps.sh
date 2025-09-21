@@ -338,6 +338,64 @@ build_mir_for_mac() {
     return 1
 }
 
+# Function to build Google Test for Mac
+build_gtest_for_mac() {
+    echo "Building Google Test for Mac..."
+    
+    # Check if already installed in system location
+    if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
+        echo "Google Test already installed in system location"
+        return 0
+    fi
+    
+    if [ ! -d "build_temp/googletest" ]; then
+        cd build_temp
+        echo "Cloning Google Test repository..."
+        git clone https://github.com/google/googletest.git || {
+            echo "Warning: Could not clone Google Test repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+    
+    cd "build_temp/googletest"
+    
+    # Create build directory
+    mkdir -p build-mac
+    cd build-mac
+    
+    echo "Configuring Google Test with CMake..."
+    if cmake \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DGTEST_FORCE_SHARED_CRT=OFF \
+        -DBUILD_GMOCK=ON \
+        -DINSTALL_GTEST=ON \
+        -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" \
+        ..; then
+        
+        echo "Building Google Test..."
+        if make -j$(sysctl -n hw.ncpu); then
+            echo "Installing Google Test to system location (requires sudo)..."
+            sudo make install
+            
+            # Verify the build
+            if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
+                echo "✅ Google Test built successfully"
+                cd - > /dev/null
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+    
+    echo "❌ Google Test build failed"
+    cd - > /dev/null
+    cd - > /dev/null
+    return 1
+}
+
 echo "Found native compiler: $(which gcc)"
 
 # Build tree-sitter library for Mac
@@ -403,6 +461,19 @@ else
     fi
 fi
 
+# Build Google Test for Mac
+echo "Setting up Google Test..."
+if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
+    echo "Google Test already available"
+else
+    if ! build_gtest_for_mac; then
+        echo "Warning: Google Test build failed"
+        exit 1
+    else
+        echo "Google Test built successfully"
+    fi
+fi
+
 # Install Homebrew dependencies that are required by build_lambda_config.json
 echo "Installing Homebrew dependencies..."
 
@@ -412,7 +483,6 @@ HOMEBREW_DEPS=(
     "utf8proc"   # For Unicode processing - referenced in build config  
     "libedit"    # For command line editing - cross-platform readline alternative
     "criterion"  # For testing framework - referenced in build config
-    "catch2"     # For modern C++ testing framework - referenced in build config
     "coreutils"  # For timeout command needed by test suite
     "openssl@3"  # For SSL/TLS support - required for libcurl
     "ginac"      # For mathematical expression equivalence testing
@@ -690,6 +760,7 @@ else
 fi
 
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- Google Test: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo ""

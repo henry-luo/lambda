@@ -1016,27 +1016,16 @@ class PremakeGenerator:
             suite_type = suite.get('type', '')
             
             # Determine test framework type for this suite
-            is_catch2_suite = False
             is_criterion_suite = False
             
-            if suite_type == 'catch2':
-                is_catch2_suite = True
-            elif suite_type == 'library':
+            if suite_type == 'library':
                 is_criterion_suite = True
             else:
-                # Check if any test in this suite uses Catch2 libraries
-                tests = suite.get('tests', [])
-                for test in tests:
-                    libraries = test.get('libraries', [])
-                    if any(lib in ['Catch2Main', 'Catch2'] for lib in libraries):
-                        is_catch2_suite = True
-                        break
-                # If not Catch2, assume it's Criterion/library tests
-                if not is_catch2_suite:
-                    is_criterion_suite = True
+                # Assume it's Criterion/library tests
+                is_criterion_suite = True
             
             # Skip problematic test suites that have linking issues in the old test system
-            # Note: Enable input_catch2 and validator-catch2 tests since dependencies are supported
+            # Note: All test suites now enabled with proper dependencies
             problematic_suites = []  # All test suites now enabled
             if suite_name in problematic_suites:
                 continue
@@ -1313,7 +1302,6 @@ class PremakeGenerator:
                 '        "/usr/local/include",',
                 '        "/opt/homebrew/include",',
                 '        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",',
-                '        "/opt/homebrew/Cellar/catch2/3.10.0/include",',
             ])
         
         self.premake_content.extend([
@@ -1354,7 +1342,6 @@ class PremakeGenerator:
             self.premake_content.extend([
                 '        "/opt/homebrew/lib",',
                 '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
-                '        "/opt/homebrew/Cellar/catch2/3.10.0/lib",',
                 '        "/usr/local/lib",',
                 '        "build/lib",',
             ])
@@ -1408,16 +1395,7 @@ class PremakeGenerator:
         # Add libraries specified in the test configuration
         if libraries:
             for lib in libraries:
-                if lib == 'catch2':
-                    # Add Catch2 libraries
-                    self.premake_content.append('        "Catch2",')
-                    self.premake_content.append('        "Catch2Main",')
-                    test_frameworks_added.append('catch2')
-                elif lib == 'Catch2Main' or lib == 'Catch2' or lib == 'Catch2Maind' or lib == 'Catch2d':
-                    # Handle individual Catch2 library references (including debug versions)
-                    self.premake_content.append(f'        "{lib}",')
-                    test_frameworks_added.append('catch2')
-                elif lib == 'criterion':
+                if lib == 'criterion':
                     self.premake_content.append('        "criterion",')
                     # Add Criterion dependencies (required on macOS with Homebrew)
                     self.premake_content.append('        "nanomsg",')

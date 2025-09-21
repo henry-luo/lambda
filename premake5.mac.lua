@@ -456,13 +456,11 @@ project "test_strbuf"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -515,13 +513,11 @@ project "test_stringbuf"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -573,13 +569,11 @@ project "test_strview"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -632,13 +626,11 @@ project "test_variable_pool"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -691,13 +683,11 @@ project "test_num_stack"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -750,13 +740,11 @@ project "test_datetime"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -809,13 +797,11 @@ project "test_url"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -868,13 +854,11 @@ project "test_url_extra"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -929,13 +913,11 @@ project "test_cmdedit"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -992,13 +974,11 @@ project "test_mime_detect"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -1087,13 +1067,11 @@ project "test_math"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -1180,13 +1158,11 @@ project "test_math_ascii"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -1273,13 +1249,11 @@ project "test_markup_roundtrip"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -1366,13 +1340,11 @@ project "test_input_roundtrip"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -1459,13 +1431,11 @@ project "test_dir"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -1552,13 +1522,11 @@ project "test_http"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -1645,13 +1613,11 @@ project "test_sysinfo"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -1738,13 +1704,11 @@ project "test_jsx_roundtrip"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -1831,13 +1795,11 @@ project "test_mdx_roundtrip"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -1924,13 +1886,11 @@ project "test_css_tokenizer"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2017,13 +1977,11 @@ project "test_css_parser"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2110,13 +2068,11 @@ project "test_css_integration"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2203,13 +2159,11 @@ project "test_css_files_safe"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2298,13 +2252,11 @@ project "test_css_frameworks"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2391,13 +2343,11 @@ project "test_validator"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2483,13 +2433,11 @@ project "test_ast_validator"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2575,13 +2523,11 @@ project "test_lambda"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2634,13 +2580,11 @@ project "test_lambda_repl"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2689,13 +2633,11 @@ project "test_lambda_proc"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2748,13 +2690,11 @@ project "test_lambda_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2810,13 +2750,11 @@ project "test_lambda_repl_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2872,13 +2810,11 @@ project "test_lambda_proc_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
@@ -2934,13 +2870,11 @@ project "test_lambda_runner"
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/Cellar/catch2/3.10.0/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
         "/usr/local/lib",
         "build/lib",
     }
