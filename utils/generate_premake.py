@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 
 class PremakeGenerator:
-    def __init__(self, config_path: str = "build_lambda_config.json"):
+    def __init__(self, config_path: str = "build_lambda_config.json", explicit_platform: str = None):
         with open(config_path, 'r', encoding='utf-8') as f:
             self.config = json.load(f)
         self.premake_content = []
@@ -23,19 +23,38 @@ class PremakeGenerator:
         # Add platform detection for use throughout the generator
         import platform
         current_platform = platform.system()
-        self.use_linux_config = (current_platform == 'Linux' or 
-                                 self.config.get('platform') == 'Linux_x64' or
-                                 self.config.get('platform') == 'Linux')
-        self.use_macos_config = (current_platform == 'Darwin' or 
-                                self.config.get('platform') == 'macOS' or
-                                self.config.get('platform') == 'Darwin')
-        self.use_windows_config = (current_platform == 'Windows' or 
-                                  current_platform.startswith('MINGW') or
-                                  current_platform.startswith('MSYS') or
-                                  current_platform.startswith('CYGWIN') or
-                                  'MSYS_NT' in current_platform or
-                                  'MINGW' in current_platform or
-                                  self.config.get('platform') == 'Windows')
+        
+        # If explicit platform is provided, use it to override platform detection
+        if explicit_platform:
+            if explicit_platform in ['mac', 'macos', 'darwin']:
+                self.use_linux_config = False
+                self.use_macos_config = True
+                self.use_windows_config = False
+            elif explicit_platform in ['linux', 'lin']:
+                self.use_linux_config = True
+                self.use_macos_config = False
+                self.use_windows_config = False
+            elif explicit_platform in ['windows', 'win']:
+                self.use_linux_config = False
+                self.use_macos_config = False
+                self.use_windows_config = True
+            else:
+                raise ValueError(f"Unknown platform '{explicit_platform}'. Use 'mac', 'linux', or 'windows'")
+        else:
+            # Use auto-detection
+            self.use_linux_config = (current_platform == 'Linux' or 
+                                     self.config.get('platform') == 'Linux_x64' or
+                                     self.config.get('platform') == 'Linux')
+            self.use_macos_config = (current_platform == 'Darwin' or 
+                                    self.config.get('platform') == 'macOS' or
+                                    self.config.get('platform') == 'Darwin')
+            self.use_windows_config = (current_platform == 'Windows' or 
+                                      current_platform.startswith('MINGW') or
+                                      current_platform.startswith('MSYS') or
+                                      current_platform.startswith('CYGWIN') or
+                                      'MSYS_NT' in current_platform or
+                                      'MINGW' in current_platform or
+                                      self.config.get('platform') == 'Windows')
         
         self.external_libraries = self._parse_external_libraries()
 
@@ -2213,7 +2232,7 @@ def main():
     print(f"DEBUG: Final config_file={config_file}, output_file={output_file}")
     
     # Generate Premake5 configuration
-    generator = PremakeGenerator(config_file)
+    generator = PremakeGenerator(config_file, explicit_platform)
     generator.parse_config()
     
     if not generator.validate_config():
