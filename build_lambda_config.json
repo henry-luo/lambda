@@ -136,12 +136,6 @@
             "link": "static"
         },
         {
-            "name": "catch2",
-            "include": "catch2",
-            "lib": "catch2/catch_amalgamated.cpp",
-            "link": "source"
-        },
-        {
             "name": "gtest",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libgtest.a",
@@ -478,12 +472,6 @@
                     "include": "/mingw64/include",
                     "lib": "/mingw64/lib/libcriterion.a",
                     "link": "static"
-                },
-                {
-                    "name": "catch2",
-                    "include": "catch2",
-                    "lib": "catch2/catch_amalgamated.cpp",
-                    "link": "source"
                 }
             ],
             "flags": [
@@ -868,27 +856,6 @@
                         "dependencies": [],
                         "binary": "test/test_lambda_proc.exe",
                         "libraries": ["criterion"]
-                    },
-                    {
-                        "source": "test/test_lambda_catch2.cpp",
-                        "name": "🐑 Lambda Runtime Tests (Catch2)",
-                        "dependencies": [],
-                        "binary": "test/test_lambda_catch2.exe",
-                        "libraries": ["catch2"]
-                    },
-                    {
-                        "source": "test/test_lambda_repl_catch2.cpp",
-                        "name": "🎮 Lambda REPL Interface Tests (Catch2)",
-                        "dependencies": [],
-                        "binary": "test/test_lambda_repl_catch2.exe",
-                        "libraries": ["catch2"]
-                    },
-                    {
-                        "source": "test/test_lambda_proc_catch2.cpp",
-                        "name": "🐑 Lambda Procedural Tests (Catch2)",
-                        "dependencies": [],
-                        "binary": "test/test_lambda_proc_catch2.exe",
-                        "libraries": ["catch2"]
                     },
                     {
                         "source": "test/test_lambda_gtest.cpp",
