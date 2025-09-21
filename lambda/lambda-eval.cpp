@@ -723,37 +723,22 @@ extern "C" {
 }
 
 Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
-    const char* cwd_str = "null";
-    if (ctx && ctx->cwd) {
-        Url* cwd_url = (Url*)ctx->cwd;
-        if (cwd_url->pathname && cwd_url->pathname->chars) {
-            cwd_str = cwd_url->pathname->chars;
-        }
-    }
-    
-    printf("input_data at:: %s, type: %s, flavor: %s, cwd: %s\n", 
-        url ? url->chars : "null",
-        type ? type->chars : "null", 
-        flavor ? flavor->chars : "null", 
-        cwd_str);
-    
+    log_debug("input_data at: %s, type: %s, flavor: %s", 
+        url ? url->chars : "null", type ? type->chars : "null", 
+        flavor ? flavor->chars : "null");
     // Pass NULL for cwd if ctx is NULL to avoid crash
     return input_from_url(url, type, flavor, ctx ? (Url*)ctx->cwd : NULL);
 }
 
 Item fn_input2(Item url, Item type) {
-    String* url_str;
+    String *url_str, *type_str = NULL, *flavor_str = NULL;
     if (url.type_id != LMD_TYPE_STRING && url.type_id != LMD_TYPE_SYMBOL) {
         log_debug("input url must be a string or symbol, got type %d", url.type_id);
         return ItemNull;  // todo: push error
     }
-    else {
-        url_str = (String*)url.pointer;
-    }
-    
-    String* type_str = NULL;
-    String* flavor_str = NULL;
-    
+    else { url_str = (String*)url.pointer; }
+    log_debug("input url: %s", url_str->chars);
+
     TypeId type_id = get_type_id(type);
     if (type_id == LMD_TYPE_NULL) {
         // No type specified
@@ -795,7 +780,7 @@ Item fn_input2(Item url, Item type) {
                 flavor_str = (String*)input_flavor.pointer;
             }
             else {
-        log_debug("input flavor must be a string or symbol, got type %d", flavor_value_type);
+                log_debug("input flavor must be a string or symbol, got type %d", flavor_value_type);
                 // todo: push error
                 flavor_str = NULL;  // input flavor ignored
             }
@@ -812,6 +797,7 @@ Item fn_input2(Item url, Item type) {
         return ItemNull;
     }
     
+    log_debug("input type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
     Input *input = input_data(context, url_str, type_str, flavor_str);
     // todo: input should be cached in context
     return (input && input->root.item) ? input->root : ItemNull;

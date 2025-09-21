@@ -9,6 +9,7 @@
 #include <ctype.h>
 #include <unistd.h>  // for getcwd and chdir
 #include "url.h"
+#include "log.h"
 
 // String allocation helper
 String* url_create_string(const char* value) {
@@ -626,11 +627,20 @@ Url* get_current_dir() {
     if (getcwd(cwd, sizeof(cwd)) == NULL) {
         return NULL;
     }
+    log_debug("Current working directory: %s", cwd);
     
     // Convert to file:// URL format
     char file_url[1200];
-    snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
-    
+    if (cwd[0] == '/') {  // Mac or Linux
+        snprintf(file_url, sizeof(file_url), "file://%s", cwd);
+    } else { // Windows
+        // convert \ to /
+        int slen = strlen(cwd);
+        for (size_t i = 0; i < slen; i++) {
+            if (cwd[i] == '\\') { cwd[i] = '/'; }
+        }
+        snprintf(file_url, sizeof(file_url), "file:///%s/", cwd);
+    }
     return url_parse(file_url);
 }
 

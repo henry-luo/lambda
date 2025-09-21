@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <algorithm>  // for std::max
+#include "../../lib/log.h"  // add logging support
+#include "../../file.h"
 
 void parse_json(Input* input, const char* json_string);
 void parse_csv(Input* input, const char* csv_string);
@@ -559,9 +561,9 @@ static char* read_file_from_url(Url* url) {
         fprintf(stderr, "Only file:// URLs are supported for file reading\n");
         return NULL;
     }
-    
     const char* pathname = url_get_pathname(url);
     if (!pathname) return NULL;
+    log_debug("Reading file from path: %s", pathname);
     
     FILE* file = fopen(pathname, "r");
     if (!file) {
@@ -594,8 +596,7 @@ static char* read_file_from_url(Url* url) {
 }
 
 Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
-    printf("input_data at:: %s, type: %s, cwd:  %s\n", url ? url->chars : "null", type ? type->chars : "null", 
-        cwd && cwd->pathname && cwd->pathname->chars ? cwd->pathname->chars : "null");
+    log_debug("input_data at: %s, type: %s, cwd: %p", url ? url->chars : "null", type ? type->chars : "null", cwd);
     
     Url* abs_url;
     if (cwd) {
@@ -603,21 +604,28 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
     } else {
         abs_url = url_parse(url->chars);
     }
-    
     if (!abs_url) { 
-        printf("Failed to parse URL\n");  
+        log_error("Failed to parse URL\n");  
         return NULL; 
     }
+    log_debug("Parsed URL: scheme=%d, host=%s, pathname=%s", abs_url->scheme, abs_url->host ? abs_url->host->chars : "null", 
+        abs_url->pathname ? abs_url->pathname->chars : "null");
     
     // Handle different URL schemes
     if (abs_url->scheme == URL_SCHEME_FILE) {
         // Check if URL points to a directory (only for file:// URLs)
         const char* pathname = url_get_pathname(abs_url);
+        // if Windows, need to strip the starting '/' for absolute paths like /C:/path/to/file
+        #ifdef _WIN32
+        if (pathname && pathname[0] == '/' && isalpha(pathname[1]) && pathname[2] == ':') {
+            pathname++; // Skip the leading '/'
+        }
+        #endif
         if (pathname) {
             struct stat st;
             if (stat(pathname, &st) == 0 && S_ISDIR(st.st_mode)) {
                 // URL points to a directory - use directory listing
-                printf("URL points to directory, using input_from_directory\n");
+                log_debug("URL points to directory, using input_from_directory\n");
                 Input* input = input_from_directory(pathname, false, 1); // non-recursive, single level only
                 url_destroy(abs_url);
                 return input;
@@ -625,9 +633,10 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         }
         
         // URL points to a file - read as normal
-        char* source = read_file_from_url(abs_url);
+        log_debug("reading file from path: %s", pathname ? pathname : "null");
+        char* source = read_text_file(pathname);
         if (!source) {
-            printf("Failed to read document at URL: %s\n", url ? url->chars : "null");
+            log_debug("Failed to read document at URL: %s", url ? url->chars : "null");
             url_destroy(abs_url);
             return NULL;
         }
@@ -639,7 +648,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
     }
     else if (abs_url->scheme == URL_SCHEME_HTTP || abs_url->scheme == URL_SCHEME_HTTPS) {
         // Handle HTTP/HTTPS URLs
-        printf("HTTP/HTTPS URL detected, using HTTP client\n");
+        log_debug("HTTP/HTTPS URL detected, using HTTP client\n");
         
         const char* type_str = type ? type->chars : NULL;
         const char* flavor_str = flavor ? flavor->chars : NULL;
