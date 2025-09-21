@@ -472,6 +472,18 @@
                     "include": "/mingw64/include",
                     "lib": "/mingw64/lib/libcriterion.a",
                     "link": "static"
+                },
+                {
+                    "name": "gtest",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libgtest.a",
+                    "link": "static"
+                },
+                {
+                    "name": "gtest_main",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libgtest_main.a",
+                    "link": "static"
                 }
             ],
             "flags": [
