@@ -428,9 +428,24 @@ Type* build_lit_float(Transpiler* tp, TSNode node) {
     // check if there's sign
     bool has_sign = false;
     if (num_str[0] == '-') { has_sign = true;  num_str++; } // skip the sign
-    // atof is able to skip leading spaces
-    item_type->double_val = atof(num_str);
-    if (has_sign) { item_type->double_val = -item_type->double_val; }
+    while (*num_str == ' ' || *num_str == '\t' || *num_str == '\n' || *num_str == '\r') { num_str++; } // skip leading spaces
+    // atof() is not able to handle 'inf', 'nan' on Windows using old MSVC runtime
+    log_debug("build lit float: %s", num_str);
+    // add special handling for "inf", "-inf", "nan"
+    if (strncasecmp(num_str, "inf", 3) == 0) {
+        item_type->double_val = INFINITY;   
+        log_debug("build lit float: inf");
+        if (has_sign) { item_type->double_val = -item_type->double_val; }
+    }
+    else if (strncasecmp(num_str, "nan", 3) == 0) {
+        item_type->double_val = NAN;   
+        log_debug("build lit float: nan");
+    }
+    else { // normal float parsing
+        item_type->double_val = atof(num_str);
+        log_debug("build lit float: %s, value: %f", num_str, item_type->double_val);
+        if (has_sign) { item_type->double_val = -item_type->double_val; }
+    }
     arraylist_append(tp->const_list, &item_type->double_val);
     item_type->const_index = tp->const_list->length - 1;
     item_type->is_const = 1;  item_type->is_literal = 1;
