@@ -451,7 +451,9 @@ project "test_strbuf"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -509,7 +511,9 @@ project "test_stringbuf"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -566,7 +570,9 @@ project "test_strview"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -624,7 +630,9 @@ project "test_variable_pool"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -682,7 +690,9 @@ project "test_num_stack"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -740,7 +750,9 @@ project "test_datetime"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -798,7 +810,9 @@ project "test_url"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -856,7 +870,9 @@ project "test_url_extra"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -916,7 +932,9 @@ project "test_cmdedit"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -978,7 +996,9 @@ project "test_mime_detect"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1072,7 +1092,9 @@ project "test_math"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1164,7 +1186,9 @@ project "test_math_ascii"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1256,7 +1280,9 @@ project "test_markup_roundtrip"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1348,7 +1374,9 @@ project "test_input_roundtrip"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1440,7 +1468,9 @@ project "test_dir"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1532,7 +1562,9 @@ project "test_http"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1624,7 +1656,9 @@ project "test_sysinfo"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1716,7 +1750,9 @@ project "test_jsx_roundtrip"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1808,7 +1844,9 @@ project "test_mdx_roundtrip"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1900,7 +1938,9 @@ project "test_css_tokenizer"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -1992,7 +2032,9 @@ project "test_css_parser"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2084,7 +2126,9 @@ project "test_css_integration"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2176,7 +2220,9 @@ project "test_css_files_safe"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2270,7 +2316,9 @@ project "test_css_frameworks"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2362,7 +2410,9 @@ project "test_validator"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2453,7 +2503,9 @@ project "test_ast_validator"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2544,7 +2596,9 @@ project "test_lambda"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2602,7 +2656,9 @@ project "test_lambda_repl"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2656,7 +2712,9 @@ project "test_lambda_proc"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2714,7 +2772,9 @@ project "test_lambda_catch2"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2732,10 +2792,6 @@ project "test_lambda_catch2"
     links {
         "Catch2",
         "Catch2Main",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/opt/catch2/lib/libCatch2Main.a",
     }
     
     links { "stdc++" }
@@ -2771,7 +2827,9 @@ project "test_lambda_repl_catch2"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2789,10 +2847,6 @@ project "test_lambda_repl_catch2"
     links {
         "Catch2",
         "Catch2Main",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/opt/catch2/lib/libCatch2Main.a",
     }
     
     links { "stdc++" }
@@ -2828,7 +2882,9 @@ project "test_lambda_proc_catch2"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
@@ -2848,8 +2904,193 @@ project "test_lambda_proc_catch2"
         "Catch2Main",
     }
     
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+    }
+    
+
+project "test_lambda_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_lambda_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+        "criterion",
+        "nanomsg",
+        "git2",
+    }
+    
     linkoptions {
-        "/opt/homebrew/opt/catch2/lib/libCatch2Main.a",
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+    }
+    
+
+project "test_lambda_repl_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_lambda_repl_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+        "criterion",
+        "nanomsg",
+        "git2",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+    }
+    
+
+project "test_lambda_proc_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_lambda_proc_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/Cellar/catch2/3.10.0/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/opt/homebrew/Cellar/catch2/3.10.0/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+        "criterion",
+        "nanomsg",
+        "git2",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
     }
     
     links { "stdc++" }
@@ -2885,7 +3126,9 @@ project "test_lambda_runner"
         "/opt/homebrew/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-        "/opt/homebrew/opt/catch2/include",
+        "catch2",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
