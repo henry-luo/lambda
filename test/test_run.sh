@@ -181,6 +181,9 @@ get_c_test_display_name() {
         "test_http") echo "🌐 HTTP/HTTPS Tests" ;;
         "test_input_roundtrip") echo "🔄 Input Roundtrip Tests" ;;
         "test_lambda") echo "🐑 Lambda Runtime Tests" ;;
+        "test_lambda_catch2") echo "🐑 Lambda Runtime Tests (Catch2)" ;;
+        "test_lambda_proc_catch2") echo "🐑 Lambda Procedural Tests (Catch2)" ;;
+        "test_lambda_repl_catch2") echo "🎮 Lambda REPL Interface Tests (Catch2)" ;;
         "test_markup_roundtrip") echo "📝 Markup Roundtrip Tests" ;;
         "test_math") echo "🔢 Math Roundtrip Tests" ;;
         "test_mime_detect") echo "📎 MIME Detection Tests" ;;
@@ -263,15 +266,29 @@ run_test_with_timeout() {
             "./test/csv_generator.exe" "$json_file" "$TEST_OUTPUT_DIR/${base_name}_results.csv" > /dev/null 2>&1 || echo "Warning: CSV generation failed" >&2
         fi
     else
-        # Standard Criterion-based tests
-        if [ "$RAW_OUTPUT" = true ]; then
-            # Raw mode: show output directly without JSON redirect
-            timeout "$TIMEOUT_DURATION" "./$test_exe" --json="$json_file"
-            local exit_code=$?
+        # Check if this is a Catch2 test by examining the executable name
+        if [[ "$base_name" =~ _catch2$ ]]; then
+            # Catch2-based tests
+            if [ "$RAW_OUTPUT" = true ]; then
+                # Raw mode: show output directly and redirect JSON to file
+                timeout "$TIMEOUT_DURATION" "./$test_exe" --reporter=json --out="$json_file"
+                local exit_code=$?
+            else
+                # Normal mode: capture console output and redirect JSON to file
+                timeout "$TIMEOUT_DURATION" "./$test_exe" --reporter=json --out="$json_file" >/dev/null 2>&1
+                local exit_code=$?
+            fi
         else
-            # Normal mode: capture output for processing
-            timeout "$TIMEOUT_DURATION" "./$test_exe" --json="$json_file" >/dev/null 2>&1
-            local exit_code=$?
+            # Standard Criterion-based tests
+            if [ "$RAW_OUTPUT" = true ]; then
+                # Raw mode: show output directly without JSON redirect
+                timeout "$TIMEOUT_DURATION" "./$test_exe" --json="$json_file"
+                local exit_code=$?
+            else
+                # Normal mode: capture output for processing
+                timeout "$TIMEOUT_DURATION" "./$test_exe" --json="$json_file" >/dev/null 2>&1
+                local exit_code=$?
+            fi
         fi
     fi
     
@@ -313,6 +330,10 @@ parse_json_results() {
         # Custom Lambda Test Runner JSON format
         local passed=$(jq -r '.summary.passed // 0' "$json_file" 2>/dev/null || echo "0")
         local failed=$(jq -r '.summary.failed // 0' "$json_file" 2>/dev/null || echo "0")
+    elif jq -e '.["test-run"]' "$json_file" >/dev/null 2>&1; then
+        # Catch2 JSON format
+        local passed=$(jq -r '.["test-run"].totals.["test-cases"].passed // 0' "$json_file" 2>/dev/null || echo "0")
+        local failed=$(jq -r '.["test-run"].totals.["test-cases"].failed // 0' "$json_file" 2>/dev/null || echo "0")
     else
         # Standard Criterion JSON format
         local passed=$(jq -r '.passed // 0' "$json_file" 2>/dev/null || echo "0")
@@ -442,6 +463,9 @@ extract_failed_test_names() {
     if [ "$base_name" = "lambda_test_runner" ]; then
         # Custom Lambda Test Runner JSON format
         jq -r '.tests[]? | select(.passed == false) | .name' "$json_file" 2>/dev/null || true
+    elif jq -e '.["test-run"]' "$json_file" >/dev/null 2>&1; then
+        # Catch2 JSON format
+        jq -r '.["test-run"]["test-cases"][]? | select(.result.status == "failed") | .["test-info"].name' "$json_file" 2>/dev/null || true
     else
         # Standard Criterion JSON format
         jq -r '.test_suites[]?.tests[]? | select(.status == "FAILED") | .name' "$json_file" 2>/dev/null || true
@@ -483,8 +507,20 @@ for source_file in "${valid_test_sources[@]}"; do
     fi
     exe_file="test/${base_name}.exe"
     
-    # Skip Catch2 tests (exclude any test with "catch2" in the name)
-    if [[ "$base_name" == *"catch2"* ]]; then
+    # For Lambda Runtime Tests, prefer Catch2 versions over Criterion
+    if [[ "$base_name" == "test_lambda" || "$base_name" == "test_lambda_repl" || "$base_name" == "test_lambda_proc" ]]; then
+        catch2_name="${base_name}_catch2"
+        catch2_exe="test/${catch2_name}.exe"
+        if [ -f "$catch2_exe" ]; then
+            # Use Catch2 version if available
+            test_executables+=("$catch2_exe")
+            continue
+        fi
+    fi
+    
+    # Skip other Catch2 tests (exclude any test with "catch2" in the name)
+    # except for the lambda runtime tests we specifically want
+    if [[ "$base_name" == *"catch2"* ]] && [[ "$base_name" != "test_lambda_catch2" ]] && [[ "$base_name" != "test_lambda_repl_catch2" ]] && [[ "$base_name" != "test_lambda_proc_catch2" ]]; then
         continue
     fi
     

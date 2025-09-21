@@ -134,6 +134,12 @@
             "include": "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
             "lib": "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
             "link": "static"
+        },
+        {
+            "name": "catch2",
+            "include": "/opt/homebrew/opt/catch2/include",
+            "lib": "/opt/homebrew/opt/catch2/lib/libCatch2Main.a",
+            "link": "static"
         }
     ],
     "targets": [
@@ -844,6 +850,27 @@
                         "dependencies": [],
                         "binary": "test/test_lambda_proc.exe",
                         "libraries": ["criterion"]
+                    },
+                    {
+                        "source": "test/test_lambda_catch2.cpp",
+                        "name": "🐑 Lambda Runtime Tests (Catch2)",
+                        "dependencies": [],
+                        "binary": "test/test_lambda_catch2.exe",
+                        "libraries": ["catch2"]
+                    },
+                    {
+                        "source": "test/test_lambda_repl_catch2.cpp",
+                        "name": "🎮 Lambda REPL Interface Tests (Catch2)",
+                        "dependencies": [],
+                        "binary": "test/test_lambda_repl_catch2.exe",
+                        "libraries": ["catch2"]
+                    },
+                    {
+                        "source": "test/test_lambda_proc_catch2.cpp",
+                        "name": "🐑 Lambda Procedural Tests (Catch2)",
+                        "dependencies": [],
+                        "binary": "test/test_lambda_proc_catch2.exe",
+                        "libraries": ["catch2"]
                     }
                 ],
                 "type": "lambda",
