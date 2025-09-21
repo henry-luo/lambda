@@ -140,6 +140,18 @@
             "include": "catch2",
             "lib": "catch2/catch_amalgamated.cpp",
             "link": "source"
+        },
+        {
+            "name": "gtest",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libgtest.a",
+            "link": "static"
+        },
+        {
+            "name": "gtest_main",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libgtest_main.a",
+            "link": "static"
         }
     ],
     "targets": [
@@ -883,21 +895,21 @@
                         "name": "🐑 Lambda Runtime Tests (GTest)",
                         "dependencies": [],
                         "binary": "test/test_lambda_gtest.exe",
-                        "libraries": ["gtest"]
+                        "libraries": ["gtest", "gtest_main"]
                     },
                     {
                         "source": "test/test_lambda_repl_gtest.cpp",
                         "name": "🎮 Lambda REPL Interface Tests (GTest)",
                         "dependencies": [],
                         "binary": "test/test_lambda_repl_gtest.exe",
-                        "libraries": ["gtest"]
+                        "libraries": ["gtest", "gtest_main"]
                     },
                     {
                         "source": "test/test_lambda_proc_gtest.cpp",
                         "name": "🐑 Lambda Procedural Tests (GTest)",
                         "dependencies": [],
                         "binary": "test/test_lambda_proc_gtest.exe",
-                        "libraries": ["gtest"]
+                        "libraries": ["gtest", "gtest_main"]
                     }
                 ],
                 "type": "lambda",

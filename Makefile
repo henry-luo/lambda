@@ -1275,10 +1275,7 @@ build-test:
 		echo "Building configurations..."; \
 		mkdir -p build/premake; \
 		$(MAKE) generate-premake; \
-		cd build/premake && premake5 gmake --file=../../premake5.lua; \
-		mv build/premake/Makefile build/premake/PremakeMakefile 2>/dev/null || true; \
-		echo "Building tests with $(JOBS) parallel jobs..."; \
-		$(MAKE) -C build/premake -f PremakeMakefile config=debug_native -j$(JOBS); \
+		cd build/premake && premake5 gmake --file=../../premake5.lua && $(MAKE) config=debug_native -j$(JOBS); \
 	fi
 
 
