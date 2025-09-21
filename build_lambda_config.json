@@ -137,9 +137,9 @@
         },
         {
             "name": "catch2",
-            "include": "/opt/homebrew/opt/catch2/include",
-            "lib": "/opt/homebrew/opt/catch2/lib/libCatch2Main.a",
-            "link": "static"
+            "include": "catch2",
+            "lib": "catch2/catch_amalgamated.cpp",
+            "link": "source"
         }
     ],
     "targets": [
@@ -466,6 +466,12 @@
                     "include": "/mingw64/include",
                     "lib": "/mingw64/lib/libcriterion.a",
                     "link": "static"
+                },
+                {
+                    "name": "catch2",
+                    "include": "catch2",
+                    "lib": "catch2/catch_amalgamated.cpp",
+                    "link": "source"
                 }
             ],
             "flags": [
@@ -871,6 +877,27 @@
                         "dependencies": [],
                         "binary": "test/test_lambda_proc_catch2.exe",
                         "libraries": ["catch2"]
+                    },
+                    {
+                        "source": "test/test_lambda_gtest.cpp",
+                        "name": "🐑 Lambda Runtime Tests (GTest)",
+                        "dependencies": [],
+                        "binary": "test/test_lambda_gtest.exe",
+                        "libraries": ["gtest"]
+                    },
+                    {
+                        "source": "test/test_lambda_repl_gtest.cpp",
+                        "name": "🎮 Lambda REPL Interface Tests (GTest)",
+                        "dependencies": [],
+                        "binary": "test/test_lambda_repl_gtest.exe",
+                        "libraries": ["gtest"]
+                    },
+                    {
+                        "source": "test/test_lambda_proc_gtest.cpp",
+                        "name": "🐑 Lambda Procedural Tests (GTest)",
+                        "dependencies": [],
+                        "binary": "test/test_lambda_proc_gtest.exe",
+                        "libraries": ["gtest"]
                     }
                 ],
                 "type": "lambda",

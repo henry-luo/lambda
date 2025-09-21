@@ -1243,14 +1243,43 @@ clean-premake:
 	@rm -f dummy.cpp
 	@echo "Premake5 artifacts cleaned."
 
-build-test: generate-premake
-	@echo "Building tests using Premake5..."
-	@echo "Building configurations..."
-	@mkdir -p build/premake
-	cd build/premake && premake5 gmake --file=../../premake5.lua
-	@mv build/premake/Makefile build/premake/PremakeMakefile 2>/dev/null || true
-	@echo "Building tests with $(JOBS) parallel jobs..."
-	@$(MAKE) -C build/premake -f PremakeMakefile config=debug_native -j$(JOBS)
+build-test:
+	@# Windows/MSYS2: Build gtest tests directly 
+	@if [ -n "$(MSYSTEM)" ] || [ "$(IS_MINGW64)" = "yes" ] || [ "$(OS)" = "MSYS_NT-10.0" ]; then \
+		echo "🪟 Windows/MSYS2 detected - Building Lambda GTest tests directly..."; \
+		echo "Setting up GTest environment..."; \
+		echo "Building Lambda GTest tests..."; \
+		CXX="g++"; \
+		CXXFLAGS="-std=c++17 -I/mingw64/include"; \
+		LDFLAGS="-L/mingw64/lib -lgtest -lgtest_main -lpthread"; \
+		TEST_FILES="test/test_lambda_gtest.cpp test/test_lambda_repl_gtest.cpp test/test_lambda_proc_gtest.cpp"; \
+		for test_file in $$TEST_FILES; do \
+			if [ -f "$$test_file" ]; then \
+				base_name=$$(basename "$$test_file" .cpp); \
+				output_name="test/$${base_name}.exe"; \
+				echo "Building $$output_name..."; \
+				$$CXX $$CXXFLAGS "$$test_file" $$LDFLAGS -o "$$output_name"; \
+				if [ $$? -eq 0 ]; then \
+					echo "✅ Successfully built $$output_name"; \
+				else \
+					echo "❌ Failed to build $$output_name"; \
+					exit 1; \
+				fi; \
+			else \
+				echo "⚠️  Test file $$test_file not found"; \
+			fi; \
+		done; \
+		echo "🎉 All gtest tests built successfully!"; \
+	else \
+		echo "Building tests using Premake5..."; \
+		echo "Building configurations..."; \
+		mkdir -p build/premake; \
+		$(MAKE) generate-premake; \
+		cd build/premake && premake5 gmake --file=../../premake5.lua; \
+		mv build/premake/Makefile build/premake/PremakeMakefile 2>/dev/null || true; \
+		echo "Building tests with $(JOBS) parallel jobs..."; \
+		$(MAKE) -C build/premake -f PremakeMakefile config=debug_native -j$(JOBS); \
+	fi
 
 
 # Include KLEE analysis targets
