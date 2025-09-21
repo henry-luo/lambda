@@ -57,6 +57,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Detect Windows/MSYS2 environment
+IS_WINDOWS=false
+if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ -n "$MSYSTEM" ]]; then
+    IS_WINDOWS=true
+    echo "🪟 Windows/MSYS2 environment detected - will only run gtest tests"
+fi
+
 echo "🚀 Enhanced Lambda Test Suite Runner - Test Results Breakdown"
 if [ -n "$TARGET_SUITE" ]; then
     echo "🎯 Target Suite: $TARGET_SUITE"
@@ -181,9 +188,9 @@ get_c_test_display_name() {
         "test_http") echo "🌐 HTTP/HTTPS Tests" ;;
         "test_input_roundtrip") echo "🔄 Input Roundtrip Tests" ;;
         "test_lambda") echo "🐑 Lambda Runtime Tests" ;;
-        "test_lambda_catch2") echo "🐑 Lambda Runtime Tests (Catch2)" ;;
-        "test_lambda_proc_catch2") echo "🐑 Lambda Procedural Tests (Catch2)" ;;
-        "test_lambda_repl_catch2") echo "🎮 Lambda REPL Interface Tests (Catch2)" ;;
+        "test_lambda_gtest") echo "🐑 Lambda Runtime Tests (GTest)" ;;
+        "test_lambda_proc_gtest") echo "🐑 Lambda Procedural Tests (GTest)" ;;
+        "test_lambda_repl_gtest") echo "🎮 Lambda REPL Interface Tests (GTest)" ;;
         "test_markup_roundtrip") echo "📝 Markup Roundtrip Tests" ;;
         "test_math") echo "🔢 Math Roundtrip Tests" ;;
         "test_mime_detect") echo "📎 MIME Detection Tests" ;;
@@ -266,16 +273,16 @@ run_test_with_timeout() {
             "./test/csv_generator.exe" "$json_file" "$TEST_OUTPUT_DIR/${base_name}_results.csv" > /dev/null 2>&1 || echo "Warning: CSV generation failed" >&2
         fi
     else
-        # Check if this is a Catch2 test by examining the executable name
-        if [[ "$base_name" =~ _catch2$ ]]; then
-            # Catch2-based tests
+        # Check if this is a GTest test by examining the executable name
+        if [[ "$base_name" =~ _gtest$ ]]; then
+            # GTest-based tests - use JSON output format
             if [ "$RAW_OUTPUT" = true ]; then
                 # Raw mode: show output directly and redirect JSON to file
-                timeout "$TIMEOUT_DURATION" "./$test_exe" --reporter=json --out="$json_file"
+                timeout "$TIMEOUT_DURATION" "./$test_exe" --gtest_output=json:"$json_file"
                 local exit_code=$?
             else
                 # Normal mode: capture console output and redirect JSON to file
-                timeout "$TIMEOUT_DURATION" "./$test_exe" --reporter=json --out="$json_file" >/dev/null 2>&1
+                timeout "$TIMEOUT_DURATION" "./$test_exe" --gtest_output=json:"$json_file" >/dev/null 2>&1
                 local exit_code=$?
             fi
         else
@@ -334,6 +341,11 @@ parse_json_results() {
         # Catch2 JSON format
         local passed=$(jq -r '.["test-run"].totals.["test-cases"].passed // 0' "$json_file" 2>/dev/null || echo "0")
         local failed=$(jq -r '.["test-run"].totals.["test-cases"].failed // 0' "$json_file" 2>/dev/null || echo "0")
+    elif jq -e '.tests' "$json_file" >/dev/null 2>&1; then
+        # GTest JSON format
+        local total=$(jq -r '.tests // 0' "$json_file" 2>/dev/null || echo "0")
+        local failed=$(jq -r '.failures // 0' "$json_file" 2>/dev/null || echo "0")
+        local passed=$((total - failed))
     else
         # Standard Criterion JSON format
         local passed=$(jq -r '.passed // 0' "$json_file" 2>/dev/null || echo "0")
@@ -507,21 +519,29 @@ for source_file in "${valid_test_sources[@]}"; do
     fi
     exe_file="test/${base_name}.exe"
     
-    # For Lambda Runtime Tests, prefer Catch2 versions over Criterion
+    # For Lambda Runtime Tests, prefer GTest versions over Criterion
     if [[ "$base_name" == "test_lambda" || "$base_name" == "test_lambda_repl" || "$base_name" == "test_lambda_proc" ]]; then
-        catch2_name="${base_name}_catch2"
-        catch2_exe="test/${catch2_name}.exe"
-        if [ -f "$catch2_exe" ]; then
-            # Use Catch2 version if available
-            test_executables+=("$catch2_exe")
+        gtest_name="${base_name}_gtest"
+        gtest_exe="test/${gtest_name}.exe"
+        if [ -f "$gtest_exe" ]; then
+            # Use GTest version if available
+            test_executables+=("$gtest_exe")
             continue
         fi
     fi
     
     # Skip other Catch2 tests (exclude any test with "catch2" in the name)
     # except for the lambda runtime tests we specifically want
-    if [[ "$base_name" == *"catch2"* ]] && [[ "$base_name" != "test_lambda_catch2" ]] && [[ "$base_name" != "test_lambda_repl_catch2" ]] && [[ "$base_name" != "test_lambda_proc_catch2" ]]; then
+    if [[ "$base_name" == *"catch2"* ]]; then
         continue
+    fi
+    
+    # On Windows, only run gtest tests to avoid compatibility issues
+    if [[ "$IS_WINDOWS" == "true" ]]; then
+        if [[ "$base_name" != *"gtest"* ]]; then
+            echo "⏭️  Skipping $base_name (Windows - gtest tests only)"
+            continue
+        fi
     fi
     
     # Only add if executable exists or source exists

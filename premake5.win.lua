@@ -466,6 +466,7 @@ project "test_strbuf"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -517,6 +518,7 @@ project "test_stringbuf"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -567,6 +569,7 @@ project "test_strview"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -618,6 +621,7 @@ project "test_variable_pool"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -669,6 +673,7 @@ project "test_num_stack"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -720,6 +725,7 @@ project "test_datetime"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -771,6 +777,7 @@ project "test_url"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -822,6 +829,7 @@ project "test_url_extra"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -875,6 +883,7 @@ project "test_cmdedit"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -930,6 +939,7 @@ project "test_mime_detect"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -1032,6 +1042,7 @@ project "test_math"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -1132,6 +1143,7 @@ project "test_math_ascii"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -1232,6 +1244,7 @@ project "test_markup_roundtrip"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -1332,6 +1345,7 @@ project "test_input_roundtrip"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -1432,6 +1446,7 @@ project "test_dir"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -1532,6 +1547,7 @@ project "test_http"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -1632,6 +1648,7 @@ project "test_sysinfo"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -1732,6 +1749,7 @@ project "test_jsx_roundtrip"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -1832,6 +1850,7 @@ project "test_mdx_roundtrip"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -1932,6 +1951,7 @@ project "test_css_tokenizer"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -2032,6 +2052,7 @@ project "test_css_parser"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -2132,6 +2153,7 @@ project "test_css_integration"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -2232,6 +2254,7 @@ project "test_css_files_safe"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -2334,6 +2357,7 @@ project "test_css_frameworks"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -2434,6 +2458,7 @@ project "test_validator"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -2533,6 +2558,7 @@ project "test_ast_validator"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -2632,6 +2658,7 @@ project "test_lambda"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -2683,6 +2710,7 @@ project "test_lambda_repl"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -2730,6 +2758,7 @@ project "test_lambda_proc"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
@@ -2748,6 +2777,294 @@ project "test_lambda_proc"
     
     linkoptions {
         "/mingw64/lib/libcriterion.a",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+    }
+    
+
+project "test_lambda_catch2"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_lambda_catch2.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "win-native-deps/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "catch2",
+        "/mingw64/include",
+        "win-native-deps/include",
+    }
+    
+    libdirs {
+        "/mingw64/lib",
+        "win-native-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "Catch2",
+        "Catch2Main",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+    }
+    
+
+project "test_lambda_repl_catch2"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_lambda_repl_catch2.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "win-native-deps/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "catch2",
+        "/mingw64/include",
+        "win-native-deps/include",
+    }
+    
+    libdirs {
+        "/mingw64/lib",
+        "win-native-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "Catch2",
+        "Catch2Main",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+    }
+    
+
+project "test_lambda_proc_catch2"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_lambda_proc_catch2.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "win-native-deps/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "catch2",
+        "/mingw64/include",
+        "win-native-deps/include",
+    }
+    
+    libdirs {
+        "/mingw64/lib",
+        "win-native-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "Catch2",
+        "Catch2Main",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+    }
+    
+
+project "test_lambda_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_lambda_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "win-native-deps/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "catch2",
+        "/mingw64/include",
+        "win-native-deps/include",
+    }
+    
+    libdirs {
+        "/mingw64/lib",
+        "win-native-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "criterion",
+        "nanomsg",
+        "git2",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+    }
+    
+
+project "test_lambda_repl_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_lambda_repl_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "win-native-deps/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "catch2",
+        "/mingw64/include",
+        "win-native-deps/include",
+    }
+    
+    libdirs {
+        "/mingw64/lib",
+        "win-native-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "criterion",
+        "nanomsg",
+        "git2",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+    }
+    
+
+project "test_lambda_proc_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_lambda_proc_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "win-native-deps/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "catch2",
+        "/mingw64/include",
+        "win-native-deps/include",
+    }
+    
+    libdirs {
+        "/mingw64/lib",
+        "win-native-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "criterion",
+        "nanomsg",
+        "git2",
     }
     
     links { "stdc++" }
@@ -2781,6 +3098,7 @@ project "test_lambda_runner"
         "/mingw64/include",
         "win-native-deps/include",
         "/mingw64/include",
+        "catch2",
         "/mingw64/include",
         "win-native-deps/include",
     }
