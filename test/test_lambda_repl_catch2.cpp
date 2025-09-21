@@ -112,10 +112,10 @@ bool output_contains_clean(const char* output, const char* expected) {
 struct test_result run_lambda_repl_interactive(const char* input) {
     struct test_result result = {0};
     
-    // Use script command with proper syntax for modern script version
+    // Use script command with proper macOS syntax and timeout to prevent hanging
     char command[2048];
     snprintf(command, sizeof(command), 
-             "echo \"%s\" | script -qec \"./lambda.exe\" /dev/null 2>&1", 
+             "echo \"%s\" | timeout 10 script -q /dev/null ./lambda.exe 2>&1", 
              input);
     
     FILE* proc = popen(command, "r");
