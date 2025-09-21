@@ -646,74 +646,72 @@
                 "name": "📚 Library Tests",
                 "tests": [
                     {
-                        "source": "test_strbuf.c",
-                        "name": "📝 String Buffer Tests",
+                        "source": "test_strbuf_gtest.cpp",
+                        "name": "📝 String Buffer Tests (GTest)",
                         "dependencies": ["lambda-lib"],
-                        "libraries": ["criterion"],
-                        "binary": "test_strbuf.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_strbuf_gtest.exe"
                     },
                     {
-                        "source": "test_stringbuf.cpp",
-                        "name": "🧵 StringBuf Tests",
+                        "source": "test_stringbuf_gtest.cpp",
+                        "name": "🧵 StringBuf Tests (GTest)",
                         "dependencies": ["lambda-lib"],
-                        "libraries": ["criterion"],
-                        "binary": "test_stringbuf.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_stringbuf_gtest.exe"
                     },
                     {
-                        "source": "test_strview.c",
-                        "name": "👀 String View Tests",
+                        "source": "test_strview_gtest.cpp",
+                        "name": "👀 String View Tests (GTest)",
                         "dependencies": ["lambda-lib"],
-                        "libraries": ["criterion"],
-                        "binary": "test_strview.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_strview_gtest.exe"
                     },
                     {
-                        "source": "test_variable_pool.c",
-                        "name": "🏊 Variable Pool Tests",
+                        "source": "test_variable_pool_gtest.cpp",
+                        "name": "🏊 Variable Pool Tests (GTest)",
                         "dependencies": ["lambda-lib"],
-                        "libraries": ["criterion"],
-                        "binary": "test_variable_pool.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_variable_pool_gtest.exe"
                     },
                     {
-                        "source": "test_num_stack.c",
-                        "name": "🔢 Number Stack Tests",
+                        "source": "test_num_stack_gtest.cpp",
+                        "name": "🔢 Number Stack Tests (GTest)",
                         "dependencies": ["lambda-lib"],
-                        "libraries": ["criterion"],
-                        "binary": "test_num_stack.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_num_stack_gtest.exe"
                     },
                     {
-                        "source": "test_datetime.c",
-                        "name": "📅 DateTime Tests",
+                        "source": "test_datetime_gtest.cpp",
+                        "name": "📅 DateTime Tests (GTest)",
                         "dependencies": ["lambda-lib"],
-                        "libraries": ["criterion"],
-                        "binary": "test_datetime.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_datetime_gtest.exe"
                     },
                     {
-                        "source": "test_url.c",
-                        "name": "🔗 URL Tests",
+                        "source": "test_url_gtest.cpp",
+                        "name": "🔗 URL Tests (GTest)",
                         "dependencies": ["lambda-lib"],
-                        "libraries": ["criterion"],
-                        "binary": "test_url.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_url_gtest.exe"
                     },
                     {
-                        "source": "test_url_extra.c",
-                        "name": "🌐 URL Extra Tests",
+                        "source": "test_url_extra_gtest.cpp",
+                        "name": "🌐 URL Extra Tests (GTest)",
                         "dependencies": ["lambda-lib"],
-                        "libraries": ["criterion"],
-                        "binary": "test_url_extra.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_url_extra_gtest.exe"
                     },
                     {
-                        "source": "test_cmdedit.c",
-                        "name": "⌨️ Command Line Editor Tests",
-                        "dependencies": [],
-                        "libraries": ["criterion", "utf8proc"],
-                        "binary": "test_cmdedit.exe",
-                        "additional_sources": ["lib/cmdedit.c", "lib/cmdedit_utf8.c"],
-                        "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -std=gnu99 -DUTF8PROC_STATIC"
+                        "source": "test_cmdedit_gtest.cpp",
+                        "name": "⌨️ Command Line Editor Tests (GTest)",
+                        "dependencies": ["lambda-lib"],
+                        "libraries": ["gtest", "gtest_main", "utf8proc"],
+                        "binary": "test_cmdedit_gtest.exe",
+                        "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -DUTF8PROC_STATIC"
                     }
                 ],
                 "type": "library",
-                "special_flags": "",
-                "cpp_flags": ""
+                "cpp_flags": "-std=c++17"
             },
             {
                 "suite": "input",
