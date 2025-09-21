@@ -86,7 +86,7 @@ typedef struct TypedItem {
         // inline value types
         bool bool_val;
         int int_val;
-        long long_val;
+        int64_t long_val;
         float float_val;
         double double_val;
         DateTime datetime_val;
@@ -147,7 +147,7 @@ typedef TypeString TypeSymbol;
 
 typedef struct TypeArray : Type {
     Type* nested;  // nested item type for the array
-    long length;  // no. of items in the array/map
+    int64_t length;  // no. of items in the array/map
     int type_index;  // index of the type in the type list
 } TypeArray;
 
@@ -156,13 +156,13 @@ typedef TypeArray TypeList;
 typedef struct ShapeEntry {
     StrView* name;
     Type* type;  // type of the field
-    long byte_offset;  // byte offset of the map field
+    int64_t byte_offset;  // byte offset of the map field
     struct ShapeEntry* next;
 } ShapeEntry;
 
 typedef struct TypeMap : Type {
-    long length;  // no. of items in the map
-    long byte_size;  // byte size of the struct that the map is transpiled to
+    int64_t length;  // no. of items in the map
+    int64_t byte_size;  // byte size of the struct that the map is transpiled to
     int type_index;  // index of the type in the type list
     ShapeEntry* shape;  // first shape entry of the map
     ShapeEntry* last;  // last shape entry of the map
@@ -170,7 +170,7 @@ typedef struct TypeMap : Type {
 
 typedef struct TypeElmt : TypeMap {
     StrView name;  // name of the element
-    long content_length;  // no. of content items, needed for element type
+    int64_t content_length;  // no. of content items, needed for element type
 } TypeElmt;
 
 typedef enum Operator {

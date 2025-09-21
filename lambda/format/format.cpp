@@ -9,7 +9,7 @@ Item create_item_from_field_data(void* field_data, TypeId type_id) {
         case LMD_TYPE_INT:
             return {.int_val = *(int*)field_data, ._type = LMD_TYPE_INT};
         case LMD_TYPE_INT64:
-            return {.item = l2it((long*)field_data)};
+            return {.item = l2it((int64_t*)field_data)};
         case LMD_TYPE_FLOAT:
             return {.item = d2it((double*)field_data)};
         case LMD_TYPE_STRING:
@@ -40,10 +40,10 @@ void format_number(StringBuf* sb, Item item) {
         snprintf(num_buf, sizeof(num_buf), "%d", val);
         stringbuf_append_str(sb, num_buf);
     } else if (type == LMD_TYPE_INT64) {
-        long* lptr = (long*)item.pointer;
+        int64_t* lptr = (int64_t*)item.pointer;
         if (lptr) {
             char num_buf[32];
-            snprintf(num_buf, sizeof(num_buf), "%ld", *lptr);
+            snprintf(num_buf, sizeof(num_buf), "%" PRId64, *lptr);
             stringbuf_append_str(sb, num_buf);
         } else {
             stringbuf_append_str(sb, "0");

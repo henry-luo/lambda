@@ -7,7 +7,7 @@
 
 // union to store either long or double values
 typedef union {
-    long as_long;
+    int64_t as_long;
     double as_double;
     DateTime as_datetime;
 } num_value_t;
@@ -29,7 +29,7 @@ num_stack_t* num_stack_create(size_t initial_capacity);
 void num_stack_destroy(num_stack_t *stack);
 
 // push operations
-long* num_stack_push_long(num_stack_t *stack, long value);
+int64_t* num_stack_push_long(num_stack_t *stack, int64_t value);
 double* num_stack_push_double(num_stack_t *stack, double value);
 DateTime* num_stack_push_datetime(num_stack_t *stack, DateTime value);
 

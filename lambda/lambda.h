@@ -1,6 +1,5 @@
 #pragma once
 // #include <math.h>  // MIR has problem parsing math.h
-// #include <stdint.h>
 
 // Include standard integer types from system
 #include <stdint.h>
@@ -172,16 +171,16 @@ long range_get(Range *range, int index);
         uint16_t ref_cnt;  // reference count
         //---------------------
         Item* items;  // pointer to items
-        long length;  // number of items
-        long extra;   // count of extra items stored at the end of the list
-        long capacity;  // allocated capacity
+        int64_t length;  // number of items
+        int64_t extra;   // count of extra items stored at the end of the list
+        int64_t capacity;  // allocated capacity
     };
 #else
     struct List : Container {
         Item* items;
-        long length;
-        long extra;  // count of extra items stored at the end of the list
-        long capacity;
+        int64_t length;
+        int64_t extra;  // count of extra items stored at the end of the list
+        int64_t capacity;
     };
 #endif
 
@@ -197,16 +196,16 @@ Item list_end(List *list);
         uint16_t ref_cnt;  // reference count
         //---------------------
         int* items;  // pointer to 32-bit integer items
-        long length;  // number of items
-        long extra;   // count of extra items stored at the end of the array
-        long capacity;  // allocated capacity
+        int64_t length;  // number of items
+        int64_t extra;   // count of extra items stored at the end of the array
+        int64_t capacity;  // allocated capacity
     };
 #else
     struct ArrayInt : Container {
         int* items;  // 32-bit integer items
-        long length;
-        long extra;  // count of extra items
-        long capacity;
+        int64_t length;
+        int64_t extra;  // count of extra items
+        int64_t capacity;
     };
 #endif
 
@@ -217,16 +216,16 @@ Item list_end(List *list);
         uint16_t ref_cnt;  // reference count
         //---------------------
         int64_t* items;  // pointer to 64-bit integer items
-        long length;  // number of items
-        long extra;   // count of extra items stored at the end of the array
-        long capacity;  // allocated capacity
+        int64_t length;  // number of items
+        int64_t extra;   // count of extra items stored at the end of the array
+        int64_t capacity;  // allocated capacity
     };
 #else
     struct ArrayInt64 : Container {
         int64_t* items;  // 64-bit integer items
-        long length;
-        long extra;  // count of extra items
-        long capacity;
+        int64_t length;
+        int64_t extra;  // count of extra items
+        int64_t capacity;
     };
 #endif
 
@@ -237,16 +236,16 @@ Item list_end(List *list);
         uint16_t ref_cnt;  // reference count
         //---------------------
         double* items;  // pointer to items
-        long length;  // number of items
-        long extra;   // count of extra items stored at the end of the array
-        long capacity;  // allocated capacity
+        int64_t length;  // number of items
+        int64_t extra;   // count of extra items stored at the end of the array
+        int64_t capacity;  // allocated capacity
     };
 #else
     struct ArrayFloat : Container {
         double* items;
-        long length;
-        long extra;  // count of extra items
-        long capacity;
+        int64_t length;
+        int64_t extra;  // count of extra items
+        int64_t capacity;
     };
 #endif
 
@@ -345,9 +344,9 @@ Bool is_truthy(Item item);
 Item v2it(List *list);
 
 Item push_d(double dval);
-Item push_l(long lval);
+Item push_l(int64_t lval);
 Item push_k(DateTime dtval);
-Item push_c(long cval);
+Item push_c(int64_t cval);
 
 #define const_d2it(index)    d2it((uint64_t)*(rt->consts + index))
 #define const_l2it(index)    l2it((uint64_t)*(rt->consts + index))

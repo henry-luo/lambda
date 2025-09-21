@@ -207,8 +207,8 @@ void array_set(Array* arr, int index, Item itm) {
         break;
     }
     case LMD_TYPE_INT64: {
-        long* ival = (long*)(arr->items + (arr->capacity - arr->extra - 1));
-        *ival = *(long*)itm.pointer;  arr->items[index] = {.item = l2it(ival)};
+        int64_t* ival = (int64_t*)(arr->items + (arr->capacity - arr->extra - 1));
+        *ival = *(int64_t*)itm.pointer;  arr->items[index] = {.item = l2it(ival)};
         arr->extra++;
         break;
     }
@@ -306,8 +306,8 @@ void list_push(List *list, Item item) {
         break;
     }
     case LMD_TYPE_INT64: {
-        long* ival = (long*)(list->items + (list->capacity - list->extra - 1));
-        *ival = *(long*)item.pointer;  list->items[list->length-1] = {.item = l2it(ival)};
+        int64_t* ival = (int64_t*)(list->items + (list->capacity - list->extra - 1));
+        *ival = *(int64_t*)item.pointer;  list->items[list->length-1] = {.item = l2it(ival)};
         list->extra++;
         log_debug("list_push: int64 value: %ld", *ival);
         break;
@@ -327,7 +327,7 @@ void list_push(List *list, Item item) {
 }
 
 TypedItem list_get_typed(List* list, int index) {
-        log_debug("list_get_type %p, index: %d", list, index);
+    log_debug("list_get_type %p, index: %d", list, index);
     if (!list) { return null_result; }
     if (index < 0 || index >= list->length) { 
         log_error("list_get_type: index out of bounds: %d", index);
@@ -348,7 +348,7 @@ TypedItem list_get_typed(List* list, int index) {
         result.int_val = *(int*)&item.item;
         return result;
     case LMD_TYPE_INT64: {
-        long lval = *(long*)item.pointer;
+        int64_t lval = *(int64_t*)item.pointer;
         result.long_val = lval;
         return result;
     }
@@ -432,7 +432,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 break;
             }
             case LMD_TYPE_INT64: {
-                *(long*)field_ptr = va_arg(args, long);
+                *(int64_t*)field_ptr = va_arg(args, int64_t);
                 break;
             }
             case LMD_TYPE_FLOAT: {
@@ -478,7 +478,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 case LMD_TYPE_INT:
                     titem.int_val = item.int_val;  break;
                 case LMD_TYPE_INT64:
-                    titem.long_val = *(long*)item.pointer;  break;
+                    titem.long_val = *(int64_t*)item.pointer;  break;
                 case LMD_TYPE_FLOAT:
                     titem.double_val = *(double*)item.pointer;  break;
                 case LMD_TYPE_DTIME:
@@ -557,7 +557,7 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
                 result.int_val = *(int*)field_ptr;
                 return result;
             case LMD_TYPE_INT64:
-                result.long_val = *(long*)field_ptr;
+                result.long_val = *(int64_t*)field_ptr;
                 return result;
             case LMD_TYPE_FLOAT:
                 result.double_val = *(double*)field_ptr;
@@ -613,12 +613,12 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
         field = field->next;
     }
     *is_found = false;
-        log_debug("map_get_typed: key %s not found", key);
+    log_debug("map_get_typed: key %s not found", key);
     return null_result;
 }
 
 TypedItem map_get_typed(Map* map, Item key) {
-        log_debug("map_get_typed %p", map);
+    log_debug("map_get_typed %p", map);
     if (!map || !key.item) { return null_result; }
     
     bool is_found;
@@ -629,7 +629,7 @@ TypedItem map_get_typed(Map* map, Item key) {
         log_error("map_get_typed: key must be string or symbol, got type %d", key.type_id);
         return null_result;  // only string or symbol keys are supported
     }
-        log_debug("map_get_typed key: %s", key_str);
+    log_debug("map_get_typed key: %s", key_str);
     return _map_get_typed((TypeMap*)map->type, map->data, key_str, &is_found);
 }
 

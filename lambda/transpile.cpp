@@ -1258,7 +1258,7 @@ void transpile_call_expr(Transpiler* tp, AstCallNode *call_node) {
                     transpile_expr(tp, arg);
                 }
                 else if (arg->type->type_id == LMD_TYPE_FLOAT) {
-                    strbuf_append_str(tp->code_buf, "((long)");
+                    strbuf_append_str(tp->code_buf, "((int64_t)");
                     transpile_expr(tp, arg);
                     strbuf_append_char(tp->code_buf, ')');
                 }

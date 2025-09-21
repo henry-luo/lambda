@@ -78,7 +78,7 @@ static void format_json_map_contents(StringBuf* sb, TypeMap* map_type, void* map
                 break;                    
             case LMD_TYPE_INT:
             case LMD_TYPE_INT64:
-                stringbuf_append_format(sb, "%ld", *(long*)data);
+                stringbuf_append_format(sb, "%" PRId64, *(int64_t*)data);
                 break;
             case LMD_TYPE_FLOAT:
                 stringbuf_append_format(sb, "%g", *(double*)data);

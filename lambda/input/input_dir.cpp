@@ -41,10 +41,10 @@ static Element* create_entry_element(Input* input, const char* name, const char*
     input_add_attribute_to_element(input, elmt, "name", name);
     
     // Create size as integer
-    long* size_ptr;
-    MemPoolError err = pool_variable_alloc(input->pool, sizeof(long), (void**)&size_ptr);
+    int64_t* size_ptr;
+    MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&size_ptr);
     if (err == MEM_POOL_ERR_OK) {
-        *size_ptr = (long)st->st_size;
+        *size_ptr = (int64_t)st->st_size;
         Item size_item = {.item = l2it(size_ptr)};
         input_add_attribute_item_to_element(input, elmt, "size", size_item);
     }

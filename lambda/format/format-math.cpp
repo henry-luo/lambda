@@ -1769,12 +1769,12 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
             #ifdef DEBUG_MATH_FORMAT
             log_debug("format_math_item: Processing INT64");
             #endif
-            long* val_ptr = (long*)item.pointer;
+            int64_t* val_ptr = (int64_t*)item.pointer;
             if (val_ptr) {
                 char num_buf[32];
-                snprintf(num_buf, sizeof(num_buf), "%ld", *val_ptr);
+                snprintf(num_buf, sizeof(num_buf), "%" PRId64, *val_ptr);
                 #ifdef DEBUG_MATH_FORMAT
-                log_debug("format_math_item: INT64 value=%ld, formatted='%s'", *val_ptr, num_buf);
+                log_debug("format_math_item: INT64 value=%" PRId64 ", formatted='%s'", *val_ptr, num_buf);
                 #endif
                 stringbuf_append_str(sb, num_buf);
             }

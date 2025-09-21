@@ -70,7 +70,7 @@ Item array_get(Array *array, int index) {
     Item item = array->items[index];
     switch (item.type_id) {
     case LMD_TYPE_INT64: {
-        long lval = *(long*)item.pointer;
+        int64_t lval = *(int64_t*)item.pointer;
         return push_l(lval); // need to push to num_stack, as long values are not ref counted
     }
     case LMD_TYPE_FLOAT: {
@@ -272,7 +272,7 @@ void array_float_set_item(ArrayFloat *arr, int index, Item value) {
             dval = *(double*)value.pointer;
             break;
         case LMD_TYPE_INT64:
-            dval = (double)(*(long*)value.pointer);
+            dval = (double)(*(int64_t*)value.pointer);
             break;
         case LMD_TYPE_INT:
             dval = (double)(value.int_val);
@@ -334,7 +334,7 @@ Item list_get(List *list, int index) {
     Item item = list->items[index];
     switch (item.type_id) {
     case LMD_TYPE_INT64: {
-        long lval = *(long*)item.pointer;
+        int64_t lval = *(int64_t*)item.pointer;
         return push_l(lval);
     }
     case LMD_TYPE_FLOAT: {
@@ -403,7 +403,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
             case LMD_TYPE_INT:
                 return {.item = i2it(*(int*)field_ptr)};
             case LMD_TYPE_INT64:
-                return push_l(*(long*)field_ptr);
+                return push_l(*(int64_t*)field_ptr);
             case LMD_TYPE_FLOAT:
                 return push_d(*(double*)field_ptr);
             case LMD_TYPE_DTIME: {
@@ -523,7 +523,7 @@ Item item_at(Item data, int index) {
     case LMD_TYPE_RANGE: {
         Range *range = data.range;
         if (index < range->start || index > range->end) { return ItemNull; }
-        long value = range->start + index;
+        int64_t value = range->start + index;
         return {.item = i2it(value)};
     }
     case LMD_TYPE_ELEMENT: {
