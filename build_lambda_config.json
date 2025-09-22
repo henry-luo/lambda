@@ -523,14 +523,14 @@
                 },
                 {
                     "name": "tree-sitter",
-                    "include": "/workspaces/jubily/lambda/tree-sitter/lib/include",
-                    "lib": "/workspaces/jubily/lambda/tree-sitter/libtree-sitter.a",
+                    "include": "/workspaces/Jubily/lambda/tree-sitter/lib/include",
+                    "lib": "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
                     "link": "static"
                 },
                 {
                     "name": "tree-sitter-lambda",
-                    "include": "/workspaces/jubily/lambda/tree-sitter-lambda/bindings/c",
-                    "lib": "/workspaces/jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+                    "include": "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+                    "lib": "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
                     "link": "static"
                 },
                 {
@@ -596,6 +596,20 @@
                     "name": "nghttp2",
                     "include": "/usr/include",
                     "lib": "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+                    "link": "static"
+                }
+            ],
+            "dev_libraries": [
+                {
+                    "name": "gtest",
+                    "include": "/usr/include",
+                    "lib": "/usr/local/lib/libgtest.a",
+                    "link": "static"
+                },
+                {
+                    "name": "gtest_main",
+                    "include": "/usr/include",
+                    "lib": "/usr/local/lib/libgtest_main.a",
                     "link": "static"
                 }
             ],

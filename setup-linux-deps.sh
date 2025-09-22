@@ -134,12 +134,10 @@ install_if_missing() {
     local description="${2:-$package}"
     # For certain packages, check if the command is available first
     case "$package" in
-        "cmake"|"git"|"curl"|"wget"|"python3"|"vim-common"|"clang"|"nodejs"|"npm")
+        "cmake"|"git"|"curl"|"wget"|"python3"|"xxd"|"clang"|"nodejs"|"npm")
             local command_name="$package"
             if [ "$package" = "python3-pip" ]; then
                 command_name="pip3"
-            elif [ "$package" = "vim-common" ]; then
-                command_name="xxd"
             elif [ "$package" = "nodejs" ]; then
                 command_name="node"
             fi
@@ -197,6 +195,7 @@ check_and_install_tool "make" "build-essential" || exit 1
 check_and_install_tool "gcc" "build-essential" || exit 1
 check_and_install_tool "g++" "build-essential" || exit 1
 check_and_install_tool "git" "git" || exit 1
+check_and_install_tool "xxd" "xxd" || exit 1
 
 # Check for Node.js and npm (needed for tree-sitter CLI via npx)
 echo "Setting up Node.js and npm for tree-sitter CLI..."
@@ -345,6 +344,69 @@ build_criterion_for_linux() {
     fi
     
     echo "❌ Criterion build failed"
+    cd - > /dev/null
+    return 1
+}
+
+# Function to build Google Test for Linux
+build_gtest_for_linux() {
+    echo "Building Google Test for Linux..."
+    
+    # Check if already installed in system location
+    if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
+        echo "Google Test already installed in system location"
+        return 0
+    fi
+    
+    # Create build_temp directory if it doesn't exist
+    mkdir -p "build_temp"
+    
+    # Build from source
+    if [ ! -d "build_temp/googletest" ]; then
+        cd build_temp
+        echo "Cloning Google Test repository..."
+        git clone https://github.com/google/googletest.git || {
+            echo "Warning: Could not clone Google Test repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+    
+    cd "build_temp/googletest"
+    
+    # Create build directory
+    mkdir -p build
+    cd build
+    
+    echo "Configuring Google Test with CMake..."
+    if cmake -DCMAKE_BUILD_TYPE=Release \
+             -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" \
+             -DBUILD_GMOCK=ON \
+             -DBUILD_GTEST=ON \
+             -DGTEST_CREATE_SHARED_LIBRARY=OFF \
+             ..; then
+        
+        echo "Building Google Test..."
+        if make -j$(nproc); then
+            echo "Installing Google Test to system location (requires sudo)..."
+            sudo make install
+            
+            # Update library cache
+            sudo ldconfig
+            
+            # Verify the build
+            if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
+                echo "✅ Google Test built successfully"
+                cd - > /dev/null
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+    
+    echo "❌ Google Test build failed"
+    cd - > /dev/null
     cd - > /dev/null
     return 1
 }
@@ -1065,6 +1127,68 @@ else
     fi
 fi
 
+# Install Google Test for Linux (prefer apt package over building from source)
+echo "Verifying Google Test installation..."
+if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] || dpkg -l | grep -q libgtest-dev; then
+    echo "✅ Google Test already available"
+else
+    echo "Installing Google Test via apt..."
+    if sudo apt install -y libgtest-dev libgmock-dev; then
+        echo "✅ Google Test installed successfully via apt"
+        
+        # On Ubuntu, the gtest package only installs source files, we need to build them
+        echo "Building Google Test libraries from apt-installed sources..."
+        if [ -d "/usr/src/gtest" ]; then
+            cd /usr/src/gtest
+            sudo cmake CMakeLists.txt
+            sudo make
+            
+            # Copy libraries to standard location
+            sudo cp lib/*.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || sudo cp *.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || {
+                echo "Trying alternative build approach..."
+                sudo mkdir -p build
+                cd build
+                sudo cmake ..
+                sudo make
+                sudo cp lib/*.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || sudo cp *.a "$SYSTEM_PREFIX/lib/"
+            }
+            
+            # Build gmock too if available
+            if [ -d "/usr/src/gmock" ]; then
+                cd /usr/src/gmock
+                sudo cmake CMakeLists.txt
+                sudo make
+                sudo cp lib/*.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || sudo cp *.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || {
+                    echo "Trying alternative gmock build approach..."
+                    sudo mkdir -p build
+                    cd build
+                    sudo cmake ..
+                    sudo make
+                    sudo cp lib/*.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || sudo cp *.a "$SYSTEM_PREFIX/lib/"
+                }
+            fi
+            
+            sudo ldconfig
+            cd "$SCRIPT_DIR"
+            echo "✅ Google Test libraries built from apt sources"
+        else
+            echo "❌ Google Test source not found at /usr/src/gtest, trying build from source..."
+            if ! build_gtest_for_linux; then
+                echo "Warning: Google Test build failed"
+            else
+                echo "Google Test built successfully"
+            fi
+        fi
+    else
+        echo "❌ Failed to install Google Test via apt, trying build from source..."
+        if ! build_gtest_for_linux; then
+            echo "Warning: Google Test build failed"
+        else
+            echo "Google Test built successfully"
+        fi
+    fi
+fi
+
 # Clean up intermediate files
 cleanup_intermediate_files
 
@@ -1081,6 +1205,7 @@ echo "- curl: $([ -f "/usr/lib/x86_64-linux-gnu/libcurl.so" ] || dpkg -l | grep 
 echo "- mpdecimal: $([ -f "/usr/lib/x86_64-linux-gnu/libmpdec.so" ] || [ -f "/usr/lib/aarch64-linux-gnu/libmpdec.so" ] || [ -f "$SYSTEM_PREFIX/lib/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- utf8proc: $([ -f "/usr/lib/x86_64-linux-gnu/libutf8proc.so" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] || dpkg -l | grep -q libutf8proc-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- criterion: $([ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ] || dpkg -l | grep -q libcriterion-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- gtest: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] || dpkg -l | grep -q libgtest-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo "- premake5: $(command -v premake5 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo ""
