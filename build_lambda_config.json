@@ -208,7 +208,7 @@
             "include": "lib/mem-pool/include",
             "defines": ["SIMPLE_SCHEMA_PARSER"],
             "special_flags": "-lstdc++",
-            "link": "static"
+            "link": "dynamic"
         }
     ],
     "warnings": [
@@ -260,8 +260,6 @@
                 "O0"
             ],
             "linker_flags": [
-                "static-libgcc",
-                "static-libstdc++"
             ],
             "build_dir": "build_debug",
             "debug": true
@@ -503,9 +501,6 @@
                 "v"
             ],
             "linker_flags": [
-                "static-libgcc",
-                "static-libstdc++",
-                "Wl,-Bstatic",
                 "Wl,--subsystem,console"
             ],
             "build_dir": "build_windows",

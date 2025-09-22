@@ -661,8 +661,10 @@ class PremakeGenerator:
         if c_files and cpp_files:
             # Create C project
             self._create_language_project(lib, c_files, [], dependencies, "C", f"{lib_name}-c")
-            # Create C++ project
-            self._create_language_project(lib, cpp_files, source_patterns, dependencies, "C++", f"{lib_name}-cpp")
+            # Create C++ project - include core C library files for proper linking
+            core_lib_files = [f for f in c_files if f.startswith('lib/')]
+            cpp_files_with_core = cpp_files + core_lib_files
+            self._create_language_project(lib, cpp_files_with_core, source_patterns, dependencies, "C++", f"{lib_name}-cpp")
             # Create main project that links both
             self._create_wrapper_project(lib_name, [f"{lib_name}-c", f"{lib_name}-cpp"], lib)
         else:
@@ -823,17 +825,10 @@ class PremakeGenerator:
                             else:
                                 dynamic_libs.append(lib_path)
                         else:
-                            # Static library - special handling for tree-sitter libraries
-                            # Tree-sitter libraries need to come after libraries that depend on them
-                            if dep in ['tree-sitter', 'tree-sitter-lambda']:
-                                # Add tree-sitter libraries to dynamic_libs so they go in links (LIBS)
-                                # instead of linkoptions (ALL_LDFLAGS) for proper linking order
-                                dynamic_libs.append(lib_path)
-                            else:
-                                # Regular static library
-                                if not lib_path.startswith('/') and not lib_path.startswith('-l'):
-                                    lib_path = f"../../{lib_path}"
-                                static_libs.append(lib_path)
+                            # Static library - handle all static libraries consistently
+                            if not lib_path.startswith('/') and not lib_path.startswith('-l'):
+                                lib_path = f"../../{lib_path}"
+                            static_libs.append(lib_path)
                 
                 # Add static libraries to linkoptions
                 if static_libs:
