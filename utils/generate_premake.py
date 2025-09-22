@@ -677,6 +677,11 @@ class PremakeGenerator:
         """Create a single-language project"""
         # Determine library type based on link attribute
         link_type = lib.get('link', 'static')
+        
+        # Force DLL for lambda-input-full on Windows to avoid static library dependency issues
+        # if self.use_windows_config and project_name.startswith('lambda-input-full'):
+        #     link_type = 'dynamic'
+            
         kind = "SharedLib" if link_type == 'dynamic' else "StaticLib"
         
         self.premake_content.extend([
@@ -783,6 +788,11 @@ class PremakeGenerator:
             # Pure language project: use global build options
             if language == "C++":
                 build_opts.append('-std=c++17')
+            
+            # Add Windows DLL export flags for lambda-input-full projects - moved to linkoptions
+            # if (self.use_windows_config and link_type == 'dynamic' and 
+            #     project_name.startswith('lambda-input-full')):
+            #     build_opts.extend(['-Wl,--export-all-symbols', '-Wl,--enable-auto-import'])
             
             self.premake_content.extend([
                 '    buildoptions {',
@@ -891,6 +901,12 @@ class PremakeGenerator:
                             '        "-lbcrypt",',
                             '        "-ladvapi32",',
                         ])
+                    # Add Windows DLL export flags for lambda-input-full projects
+                    if (link_type == 'dynamic' and project_name.startswith('lambda-input-full')):
+                        self.premake_content.extend([
+                            '        "-Wl,--export-all-symbols",',
+                            '        "-Wl,--enable-auto-import",',
+                        ])
                     self.premake_content.extend([
                         '    }',
                         '    '
@@ -899,12 +915,14 @@ class PremakeGenerator:
                 # Add frameworks, dynamic libraries, and internal libraries to links
                 if frameworks or dynamic_libs or internal_deps or special_flags_frameworks:
                     self.premake_content.append('    links {')
-                    # Add frameworks from external dependencies
-                    for framework in frameworks:
-                        self.premake_content.append(f'        "{framework}.framework",')
-                    # Add frameworks from special_flags
-                    for framework in special_flags_frameworks:
-                        self.premake_content.append(f'        "{framework}.framework",')
+                    # Add frameworks from external dependencies (macOS only)
+                    if not self.use_windows_config:
+                        for framework in frameworks:
+                            self.premake_content.append(f'        "{framework}.framework",')
+                    # Add frameworks from special_flags (macOS only)
+                    if not self.use_windows_config:
+                        for framework in special_flags_frameworks:
+                            self.premake_content.append(f'        "{framework}.framework",')
                     for lib in dynamic_libs:
                         self.premake_content.append(f'        "{lib}",')
                     for dep in internal_deps:
@@ -917,15 +935,38 @@ class PremakeGenerator:
                 # Add links for internal libraries and special_flags frameworks only
                 if internal_deps or special_flags_frameworks:
                     self.premake_content.append('    links {')
-                    # Add frameworks from special_flags
-                    for framework in special_flags_frameworks:
-                        self.premake_content.append(f'        "{framework}.framework",')
+                    # Add frameworks from special_flags (macOS only)
+                    if not self.use_windows_config:
+                        for framework in special_flags_frameworks:
+                            self.premake_content.append(f'        "{framework}.framework",')
                     for dep in internal_deps:
                         self.premake_content.append(f'        "{dep}",')
                     self.premake_content.extend([
                         '    }',
                         '    '
                     ])
+        
+        # Add Windows DLL export flags for lambda-input-full projects as separate linkoptions
+        if (self.use_windows_config and link_type == 'dynamic' and 
+            project_name.startswith('lambda-input-full')):
+            if project_name == 'lambda-input-full-cpp':
+                # Use .def file for C++ project for precise symbol export
+                self.premake_content.extend([
+                    '    linkoptions {',
+                    '        "-Wl,--output-def,lambda-input-full-cpp.def",',
+                    '        "../../lambda-input-full-cpp.def",',
+                    '    }',
+                    '    '
+                ])
+            else:
+                # Use export-all-symbols for C project
+                self.premake_content.extend([
+                    '    linkoptions {',
+                    '        "-Wl,--export-all-symbols",',
+                    '        "-Wl,--enable-auto-import",',
+                    '    }',
+                    '    '
+                ])
         
         # Add platform-specific defines
         platform_defines = []
@@ -964,6 +1005,11 @@ class PremakeGenerator:
         """Create a wrapper project that combines multiple sub-projects"""
         # Determine library type based on link attribute
         link_type = lib.get('link', 'static') if lib else 'static'
+        
+        # Force DLL for lambda-input-full on Windows to avoid static library dependency issues
+        # if self.use_windows_config and lib_name.startswith('lambda-input-full'):
+        #     link_type = 'dynamic'
+            
         kind = "SharedLib" if link_type == 'dynamic' else "StaticLib"
         
         self.premake_content.extend([
@@ -1083,6 +1129,11 @@ class PremakeGenerator:
         base_compiler, _ = self._get_compiler_info()
         build_opts = self._get_build_options(base_compiler)
         
+        # Add Windows DLL export flags for lambda-input-full projects - moved to linkoptions
+        # if (self.use_windows_config and link_type == 'dynamic' and 
+        #     lib_name.startswith('lambda-input-full')):
+        #     build_opts.extend(['-Wl,--export-all-symbols', '-Wl,--enable-auto-import'])
+        
         for opt in build_opts:
             self.premake_content.append(f'        "{opt}",')
         
@@ -1103,6 +1154,29 @@ class PremakeGenerator:
                 '    }',
                 '    '
             ])
+        
+        # Add Windows DLL export flags for lambda-input-full projects as separate linkoptions
+        if (self.use_windows_config and lib.get('link') == 'dynamic' and 
+            lib_name.startswith('lambda-input-full')):
+            if lib_name == 'lambda-input-full-cpp':
+                # Use .def file for C++ project for precise symbol export
+                self.premake_content.extend([
+                    '    linkoptions {',
+                    '        "-Wl,--output-def,lambda-input-full-cpp.def",',
+                    '        "../../lambda-input-full-cpp.def",',
+                    '    }',
+                    '    '
+                ])
+            else:
+                # Use export-all-symbols for C project
+                self.premake_content.extend([
+                    '    linkoptions {',
+                    '        "-Wl,--export-all-symbols",',
+                    '        "-Wl,--enable-auto-import",',
+                    '    }',
+                    '    '
+                ])
+        
         
         self.premake_content.append('')
     
@@ -1607,7 +1681,8 @@ class PremakeGenerator:
                 ])
         
         # Add external library paths for linking when lambda-runtime-full or lambda-input-full are used
-        if any(dep in ['lambda-runtime-full', 'lambda-input-full'] or dep.startswith('lambda-runtime-full-') or dep.startswith('lambda-input-full-') for dep in dependencies):
+        has_input_full_deps = any(dep in ['lambda-runtime-full', 'lambda-input-full'] or dep.startswith('lambda-runtime-full-') or dep.startswith('lambda-input-full-') for dep in dependencies)
+        if has_input_full_deps:
             self.premake_content.extend([
                 '    linkoptions {',
             ])
@@ -1616,51 +1691,46 @@ class PremakeGenerator:
             if self.use_linux_config:
                 self.premake_content.append('        "-Wl,--start-group",')
             
-            # NOTE: Tree-sitter libraries moved to links section for proper linking order
-            # (they need to come after libraries that depend on them)
-            
-            # Add static external libraries
-            # If lambda-input-full is a dependency, we need to include curl/ssl/crypto for proper linking
-            # since static libraries don't propagate their dependencies in Premake
-            # Note: Lambda's custom curl was built with external nghttp2 dependency
-            base_libs = ['mpdec', 'utf8proc', 'mir', 'nghttp2', 'curl', 'ssl', 'crypto']
-            # Add platform-specific readline library
+            # Add static external libraries with explicit paths like the main lambda program
             if self.use_windows_config:
-                # Windows: skip readline/ncurses to avoid DLL dependencies
-                pass
+                # Windows: use the same explicit paths as the main lambda program
+                windows_lib_paths = [
+                    "../../win-native-deps/lib/libcurl.a",
+                    "../../lambda/tree-sitter/libtree-sitter-minimal.a", 
+                    "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+                    "../../win-native-deps/lib/libmir.a",
+                    "/mingw64/lib/libmpdec.a",
+                    "../../win-native-deps/lib/libutf8proc.a",
+                    "/mingw64/lib/libssl.a",
+                    "/mingw64/lib/libcrypto.a",
+                    "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
+                ]
+                for lib_path in windows_lib_paths:
+                    self.premake_content.append(f'        "{lib_path}",')
             else:
+                # Non-Windows: use the original approach with external library definitions
+                # If lambda-input-full is a dependency, we need to include curl/ssl/crypto for proper linking
+                # since static libraries don't propagate their dependencies in Premake
+                # Note: Lambda's custom curl was built with external nghttp2 dependency
+                base_libs = ['mpdec', 'utf8proc', 'mir', 'nghttp2', 'curl', 'ssl', 'crypto']
+                # Add platform-specific readline library
                 base_libs.append('libedit')
-            
-            for lib_name in base_libs:
-                if lib_name in self.external_libraries:
-                    # Skip if this library should be dynamic
-                    if self.external_libraries[lib_name].get('link') == 'dynamic':
-                        continue
-                    lib_path = self.external_libraries[lib_name]['lib']
-                    # Convert to relative path from build directory
-                    if not lib_path.startswith('/'):
-                        lib_path = f"../../{lib_path}"
-                    
-                    # Force load nghttp2 on macOS to ensure curl can find its symbols
-                    if lib_name == 'nghttp2' and not self.use_windows_config and not self.use_linux_config:
-                        self.premake_content.append(f'        "-Wl,-force_load,{lib_path}",')
-                    else:
-                        self.premake_content.append(f'        "{lib_path}",')
-            
-            # Add tree-sitter libraries directly within the group using normal linking
-            # This should work for all tests without needing --whole-archive
-            # NOTE: Skip tree-sitter libraries here - they are handled in the links section
-            # tree_sitter_libs = ['tree-sitter', 'tree-sitter-lambda']
                 
-            # for lib_name in tree_sitter_libs:
-            #     if lib_name in self.external_libraries:
-            #         lib_path = self.external_libraries[lib_name]['lib']
-            #         # Convert to relative path from build directory
-            #         if not lib_path.startswith('/'):
-            #             lib_path = f"../../{lib_path}"
-            #         self.premake_content.append(f'        "{lib_path}",')
-            
-            # NOTE: Tree-sitter libraries will be added at the end via buildoptions for proper order
+                for lib_name in base_libs:
+                    if lib_name in self.external_libraries:
+                        # Skip if this library should be dynamic
+                        if self.external_libraries[lib_name].get('link') == 'dynamic':
+                            continue
+                        lib_path = self.external_libraries[lib_name]['lib']
+                        # Convert to relative path from build directory
+                        if not lib_path.startswith('/'):
+                            lib_path = f"../../{lib_path}"
+                        
+                        # Force load nghttp2 on macOS to ensure curl can find its symbols
+                        if lib_name == 'nghttp2' and not self.use_windows_config and not self.use_linux_config:
+                            self.premake_content.append(f'        "-Wl,-force_load,{lib_path}",')
+                        else:
+                            self.premake_content.append(f'        "{lib_path}",')
             
             # Add --end-group only on Linux for circular dependency resolution  
             if self.use_linux_config:

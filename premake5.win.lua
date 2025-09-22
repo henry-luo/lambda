@@ -144,11 +144,18 @@ project "lambda-input-full-c"
         "-lcrypt32",
         "-lbcrypt",
         "-ladvapi32",
+        "-Wl,--export-all-symbols",
+        "-Wl,--enable-auto-import",
     }
     
     links {
         "z",
         "lambda-lib",
+    }
+    
+    linkoptions {
+        "-Wl,--export-all-symbols",
+        "-Wl,--enable-auto-import",
     }
     
     defines {
@@ -217,11 +224,20 @@ project "lambda-input-full-cpp"
         "/mingw64/include",
     }
     
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17"
-    }
+    filter "files:**.c"
+        buildoptions {
+            "-pedantic",
+            "-fdiagnostics-color=auto",
+        }
+    
+    filter "files:**.cpp"
+        buildoptions {
+            "-pedantic",
+            "-fdiagnostics-color=auto",
+            "-std=c++17",
+        }
+    
+    filter {}
     
     libdirs {
         "/mingw64/lib",
@@ -244,11 +260,18 @@ project "lambda-input-full-cpp"
         "-lcrypt32",
         "-lbcrypt",
         "-ladvapi32",
+        "-Wl,--export-all-symbols",
+        "-Wl,--enable-auto-import",
     }
     
     links {
         "z",
         "lambda-lib",
+    }
+    
+    linkoptions {
+        "-Wl,--output-def,lambda-input-full-cpp.def",
+        "../../lambda-input-full-cpp.def",
     }
     
     defines {
@@ -521,7 +544,6 @@ project "test_strbuf_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -571,7 +593,6 @@ project "test_stringbuf_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "win-native-deps/include",
-        "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
@@ -627,7 +648,6 @@ project "test_strview_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -677,7 +697,6 @@ project "test_variable_pool_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "win-native-deps/include",
-        "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
@@ -733,7 +752,6 @@ project "test_num_stack_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -783,7 +801,6 @@ project "test_datetime_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "win-native-deps/include",
-        "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
@@ -839,7 +856,6 @@ project "test_url_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -892,7 +908,6 @@ project "test_url_extra_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -942,7 +957,6 @@ project "test_cmdedit_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "win-native-deps/include",
-        "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
@@ -1003,7 +1017,6 @@ project "test_mime_detect_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -1027,13 +1040,15 @@ project "test_mime_detect_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -1109,7 +1124,6 @@ project "test_math_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -1133,13 +1147,15 @@ project "test_math_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -1215,7 +1231,6 @@ project "test_math_ascii_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -1239,13 +1254,15 @@ project "test_math_ascii_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -1321,7 +1338,6 @@ project "test_markup_roundtrip_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -1345,13 +1361,15 @@ project "test_markup_roundtrip_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -1427,7 +1445,6 @@ project "test_input_roundtrip_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -1451,13 +1468,15 @@ project "test_input_roundtrip_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -1533,7 +1552,6 @@ project "test_dir_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -1557,13 +1575,15 @@ project "test_dir_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -1639,7 +1659,6 @@ project "test_http_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -1663,13 +1682,15 @@ project "test_http_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -1745,7 +1766,6 @@ project "test_sysinfo_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -1769,13 +1789,15 @@ project "test_sysinfo_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -1851,7 +1873,6 @@ project "test_jsx_roundtrip_new_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -1875,13 +1896,15 @@ project "test_jsx_roundtrip_new_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -1957,7 +1980,6 @@ project "test_mdx_roundtrip_new_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -1981,13 +2003,15 @@ project "test_mdx_roundtrip_new_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -2063,7 +2087,6 @@ project "test_css_tokenizer_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -2087,13 +2110,15 @@ project "test_css_tokenizer_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -2169,7 +2194,6 @@ project "test_css_parser_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -2193,13 +2217,15 @@ project "test_css_parser_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -2275,7 +2301,6 @@ project "test_css_integration_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -2299,13 +2324,15 @@ project "test_css_integration_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -2381,7 +2408,6 @@ project "test_css_files_safe_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -2405,13 +2431,15 @@ project "test_css_files_safe_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -2487,7 +2515,6 @@ project "test_css_frameworks_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -2511,13 +2538,15 @@ project "test_css_frameworks_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -2593,7 +2622,6 @@ project "test_mdx_roundtrip_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -2617,13 +2645,15 @@ project "test_mdx_roundtrip_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -2699,7 +2729,6 @@ project "test_jsx_roundtrip_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -2723,13 +2752,15 @@ project "test_jsx_roundtrip_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -2780,208 +2811,6 @@ project "test_jsx_roundtrip_gtest"
     }
     
 
-project "test_validator"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_validator.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "win-native-deps/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-    }
-    
-    libdirs {
-        "/mingw64/lib",
-        "win-native-deps/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
-    }
-    
-    linkoptions {
-        "/mingw64/lib/libmpdec.a",
-        "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
-        "/mingw64/lib/libssl.a",
-        "/mingw64/lib/libcrypto.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "mingw32",
-        "gcc",
-        "gcc_s",
-        "msvcrt",
-        "kernel32",
-        "user32",
-        "advapi32",
-        "ws2_32",
-        "gdi32",
-        "shell32",
-        "ole32",
-        "ssp",
-        "winmm",
-        "crypt32",
-        "bcrypt",
-        "wldap32",
-        "iphlpapi",
-        "secur32",
-        "moldname",
-    }
-    
-    -- Add tree-sitter libraries using linkoptions to append to LIBS section
-    linkoptions {
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-    }
-    
-    filter {}
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
-    }
-    
-
-project "test_ast_validator"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_ast_validator.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "win-native-deps/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-    }
-    
-    libdirs {
-        "/mingw64/lib",
-        "win-native-deps/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-cpp",
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
-    }
-    
-    linkoptions {
-        "/mingw64/lib/libmpdec.a",
-        "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
-        "/mingw64/lib/libssl.a",
-        "/mingw64/lib/libcrypto.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "mingw32",
-        "gcc",
-        "gcc_s",
-        "msvcrt",
-        "kernel32",
-        "user32",
-        "advapi32",
-        "ws2_32",
-        "gdi32",
-        "shell32",
-        "ole32",
-        "ssp",
-        "winmm",
-        "crypt32",
-        "bcrypt",
-        "wldap32",
-        "iphlpapi",
-        "secur32",
-        "moldname",
-    }
-    
-    -- Add tree-sitter libraries using linkoptions to append to LIBS section
-    linkoptions {
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-    }
-    
-    filter {}
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
-    }
-    
-
 project "test_validator_gtest"
     kind "ConsoleApp"
     language "C++"
@@ -3004,7 +2833,6 @@ project "test_validator_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "win-native-deps/include",
-        "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
@@ -3031,13 +2859,15 @@ project "test_validator_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -3112,7 +2942,6 @@ project "test_ast_validator_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -3136,13 +2965,15 @@ project "test_ast_validator_gtest"
     }
     
     linkoptions {
+        "../../win-native-deps/lib/libcurl.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../win-native-deps/lib/libmir.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
     }
     
     -- Add dynamic libraries
@@ -3217,7 +3048,6 @@ project "test_lambda_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -3267,7 +3097,6 @@ project "test_lambda_repl_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "win-native-deps/include",
-        "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
@@ -3323,7 +3152,6 @@ project "test_lambda_proc_gtest"
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
-        "/mingw64/include",
         "win-native-deps/include",
     }
     
@@ -3373,7 +3201,6 @@ project "test_lambda_runner"
         "/mingw64/include",
         "/mingw64/include",
         "win-native-deps/include",
-        "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
         "/mingw64/include",
