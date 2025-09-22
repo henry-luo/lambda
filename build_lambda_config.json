@@ -207,7 +207,7 @@
             "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "nghttp2", "curl", "ssl", "crypto", "z"],
             "include": "lib/mem-pool/include",
             "defines": ["SIMPLE_SCHEMA_PARSER"],
-            "special_flags": "-lstdc++",
+            "special_flags": "-lstdc++ -framework CoreFoundation -framework SystemConfiguration",
             "link": "dynamic"
         }
     ],
@@ -867,6 +867,20 @@
                         "name": "🔍 AST Validator Tests",
                         "dependencies": ["lambda-input-full"],
                         "binary": "test/test_ast_validator.exe"
+                    },
+                    {
+                        "source": "test/test_validator_gtest.cpp",
+                        "name": "🔍 Validator Tests (GTest)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test/test_validator_gtest.exe"
+                    },
+                    {
+                        "source": "test/test_ast_validator_gtest.cpp",
+                        "name": "🔍 AST Validator Tests (GTest)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test/test_ast_validator_gtest.exe"
                     }
                 ],
                 "type": "validator",

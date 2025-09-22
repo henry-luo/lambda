@@ -208,6 +208,9 @@ get_c_test_display_name() {
         "test_url_extra") echo "🌐 URL Extra Tests" ;;
         "test_url") echo "🔗 URL Tests" ;;
         "test_validator") echo "🔍 Validator Tests" ;;
+        "test_validator_gtest") echo "🔍 Validator Tests (GTest)" ;;
+        "test_ast_validator") echo "🔍 AST Validator Tests" ;;
+        "test_ast_validator_gtest") echo "🔍 AST Validator Tests (GTest)" ;;
         "test_variable_pool") echo "🏊 Variable Pool Tests" ;;
         "test_cmdedit") echo "⌨️ Command Line Editor Tests" ;;
         "lambda_test_runner") echo "🧪 Lambda Standard Tests" ;;
