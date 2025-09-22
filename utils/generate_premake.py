@@ -902,7 +902,7 @@ class PremakeGenerator:
                             '        "-ladvapi32",',
                         ])
                     # Add Windows DLL export flags for lambda-input-full projects
-                    if (link_type == 'dynamic' and project_name.startswith('lambda-input-full')):
+                    if (self.use_windows_config and link_type == 'dynamic' and project_name.startswith('lambda-input-full')):
                         self.premake_content.extend([
                             '        "-Wl,--export-all-symbols",',
                             '        "-Wl,--enable-auto-import",',

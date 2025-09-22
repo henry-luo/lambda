@@ -775,5 +775,6 @@ echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && ec
 echo ""
 echo "Next steps:"
 echo "1. Run: make"
+echo "2. Run: make test"
 echo ""
 echo "To clean up intermediate files later, run: ./setup-mac-deps.sh clean"

@@ -202,7 +202,7 @@
             "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "nghttp2", "curl", "ssl", "crypto", "z"],
             "include": "lib/mem-pool/include",
             "defines": ["SIMPLE_SCHEMA_PARSER"],
-            "special_flags": "-lstdc++ -framework CoreFoundation -framework SystemConfiguration",
+            "special_flags": "-lstdc++",
             "link": "dynamic"
         }
     ],
@@ -505,18 +505,6 @@
                     "include": "/usr/include",
                     "lib": "-lcurl",
                     "link": "dynamic"
-                },
-                {
-                    "name": "tree-sitter",
-                    "include": "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-                    "lib": "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
-                    "link": "static"
-                },
-                {
-                    "name": "tree-sitter-lambda",
-                    "include": "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
-                    "lib": "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-                    "link": "static"
                 },
                 {
                     "name": "mir",

@@ -1,0 +1,62 @@
+{
+  "tests": 4,
+  "failures": 0,
+  "disabled": 0,
+  "errors": 0,
+  "timestamp": "2025-09-22T15:52:17Z",
+  "time": "5.672s",
+  "name": "AllTests",
+  "testsuites": [
+    {
+      "name": "HttpInputTest",
+      "tests": 4,
+      "failures": 0,
+      "disabled": 0,
+      "errors": 0,
+      "timestamp": "2025-09-22T15:52:17Z",
+      "time": "5.672s",
+      "testsuite": [
+        {
+          "name": "test_http_download",
+          "file": "..\/..\/test\/test_http_gtest.cpp",
+          "line": 29,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2025-09-22T15:52:17Z",
+          "time": "2.582s",
+          "classname": "HttpInputTest"
+        },
+        {
+          "name": "test_http_cache",
+          "file": "..\/..\/test\/test_http_gtest.cpp",
+          "line": 52,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2025-09-22T15:52:19Z",
+          "time": "1.072s",
+          "classname": "HttpInputTest"
+        },
+        {
+          "name": "test_https_ssl",
+          "file": "..\/..\/test\/test_http_gtest.cpp",
+          "line": 76,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2025-09-22T15:52:21Z",
+          "time": "0.307s",
+          "classname": "HttpInputTest"
+        },
+        {
+          "name": "test_http_error_handling",
+          "file": "..\/..\/test\/test_http_gtest.cpp",
+          "line": 96,
+          "status": "RUN",
+          "result": "COMPLETED",
+          "timestamp": "2025-09-22T15:52:21Z",
+          "time": "1.708s",
+          "classname": "HttpInputTest"
+        }
+      ]
+    }
+  ]
+}
