@@ -138,11 +138,32 @@ project "lambda-input-full-c"
         "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "-lws2_32",
+        "-lwsock32",
+        "-lwinmm",
+        "-lcrypt32",
+        "-lbcrypt",
+        "-ladvapi32",
     }
     
     links {
         "z",
         "lambda-lib",
+    }
+    
+    defines {
+        "CROSS_COMPILE",
+        "_WIN32",
+        "WINVER=0x0601",
+        "_WIN32_WINNT=0x0601",
+        "__USE_MINGW_ANSI_STDIO=1",
+        "_POSIX_C_SOURCE=200809L",
+        "_GNU_SOURCE",
+        "_TIMESPEC_DEFINED",
+        "UTF8PROC_STATIC",
+        "CURL_STATICLIB",
+        "UTF8PROC_STATIC",
+        "CURL_STATICLIB",
     }
     
 
@@ -162,6 +183,15 @@ project "lambda-input-full-cpp"
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
         "test/test_stubs.cpp",
+        "lambda/parse.c",
+        "lambda/input/css_tokenizer.c",
+        "lambda/input/css_parser.c",
+        "lambda/input/css_properties.c",
+        "lib/arraylist.c",
+        "lib/hashmap.c",
+        "lib/file.c",
+        "lib/log.c",
+        "lib/utf.c",
     }
     
     files {
@@ -207,11 +237,32 @@ project "lambda-input-full-cpp"
         "../../win-native-deps/lib/libcurl.a",
         "/mingw64/lib/libssl.a",
         "/mingw64/lib/libcrypto.a",
+        "-lws2_32",
+        "-lwsock32",
+        "-lwinmm",
+        "-lcrypt32",
+        "-lbcrypt",
+        "-ladvapi32",
     }
     
     links {
         "z",
         "lambda-lib",
+    }
+    
+    defines {
+        "CROSS_COMPILE",
+        "_WIN32",
+        "WINVER=0x0601",
+        "_WIN32_WINNT=0x0601",
+        "__USE_MINGW_ANSI_STDIO=1",
+        "_POSIX_C_SOURCE=200809L",
+        "_GNU_SOURCE",
+        "_TIMESPEC_DEFINED",
+        "UTF8PROC_STATIC",
+        "CURL_STATICLIB",
+        "UTF8PROC_STATIC",
+        "CURL_STATICLIB",
     }
     
 

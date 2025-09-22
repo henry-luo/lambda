@@ -661,10 +661,9 @@ class PremakeGenerator:
         if c_files and cpp_files:
             # Create C project
             self._create_language_project(lib, c_files, [], dependencies, "C", f"{lib_name}-c")
-            # Create C++ project - include core C library files for proper linking
-            core_lib_files = [f for f in c_files if f.startswith('lib/')]
-            cpp_files_with_core = cpp_files + core_lib_files
-            self._create_language_project(lib, cpp_files_with_core, source_patterns, dependencies, "C++", f"{lib_name}-cpp")
+            # Create C++ project - include ALL C files for proper linking
+            cpp_files_with_c = cpp_files + c_files
+            self._create_language_project(lib, cpp_files_with_c, source_patterns, dependencies, "C++", f"{lib_name}-cpp")
             # Create main project that links both
             self._create_wrapper_project(lib_name, [f"{lib_name}-c", f"{lib_name}-cpp"], lib)
         else:
@@ -835,6 +834,17 @@ class PremakeGenerator:
                     self.premake_content.append('    linkoptions {')
                     for lib_path in static_libs:
                         self.premake_content.append(f'        "{lib_path}",')
+                    # Add Windows system libraries that static libraries depend on
+                    if self.use_windows_config:
+                        # Windows networking libraries for CURL
+                        self.premake_content.extend([
+                            '        "-lws2_32",',
+                            '        "-lwsock32",', 
+                            '        "-lwinmm",',
+                            '        "-lcrypt32",',
+                            '        "-lbcrypt",',
+                            '        "-ladvapi32",',
+                        ])
                     self.premake_content.extend([
                         '    }',
                         '    '
@@ -869,6 +879,37 @@ class PremakeGenerator:
                         '    }',
                         '    '
                     ])
+        
+        # Add platform-specific defines
+        platform_defines = []
+        if self.use_windows_config:
+            # Add Windows-specific defines for static linking
+            platforms_config = self.config.get('platforms', {})
+            windows_config = platforms_config.get('windows', {})
+            windows_flags = windows_config.get('flags', [])
+            
+            # Extract define flags from Windows flags
+            for flag in windows_flags:
+                if flag.startswith('D'):
+                    platform_defines.append(flag[1:])  # Remove 'D' prefix
+            
+            # Add critical static linking defines for Windows
+            platform_defines.extend(['UTF8PROC_STATIC', 'CURL_STATICLIB'])
+        
+        # Add target-specific defines
+        target_defines = lib.get('defines', []) if isinstance(lib, dict) else []
+        all_defines = platform_defines + target_defines
+        
+        if all_defines:
+            self.premake_content.extend([
+                '    defines {',
+            ])
+            for define in all_defines:
+                self.premake_content.append(f'        "{define}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
         
         self.premake_content.append('')
     
