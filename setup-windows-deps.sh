@@ -218,8 +218,64 @@ echo "If parallel directories are not found, dependencies will be downloaded."
 echo "Note: Tree-sitter libraries are managed directly under lambda/ directory."
 echo ""
 
-# Skip tree-sitter builds - they are managed directly under lambda/
-echo "⏭️  Skipping tree-sitter builds (managed directly under lambda/)"
+# Build tree-sitter libraries for Windows
+echo "Building tree-sitter libraries for Windows..."
+
+# Build tree-sitter library
+if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
+    echo "Building tree-sitter library for Windows..."
+    cd lambda/tree-sitter
+    
+    # Clean previous builds
+    make clean || true
+    
+    # Build static library for Windows
+    if [[ "$MSYSTEM" == "CLANG64" ]]; then
+        CC="clang" AR="llvm-ar" make libtree-sitter.a
+    else
+        CC="gcc" AR="ar" make libtree-sitter.a
+    fi
+    
+    if [ -f "libtree-sitter.a" ]; then
+        echo "✅ Tree-sitter library built successfully"
+    else
+        echo "❌ Tree-sitter library build failed"
+        cd - > /dev/null
+        exit 1
+    fi
+    
+    cd - > /dev/null
+else
+    echo "✅ Tree-sitter library already built for Windows"
+fi
+
+# Build tree-sitter-lambda
+if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
+    echo "Building tree-sitter-lambda for Windows..."
+    cd lambda/tree-sitter-lambda
+    
+    # Clean previous builds
+    make clean || true
+    
+    # Build static library for Windows (creates libtree-sitter-lambda.a)
+    if [[ "$MSYSTEM" == "CLANG64" ]]; then
+        CC="clang" AR="llvm-ar" make libtree-sitter-lambda.a
+    else
+        CC="gcc" AR="ar" make libtree-sitter-lambda.a
+    fi
+    
+    if [ -f "libtree-sitter-lambda.a" ]; then
+        echo "✅ Tree-sitter-lambda built successfully"
+    else
+        echo "❌ Tree-sitter-lambda build failed"
+        cd - > /dev/null
+        exit 1
+    fi
+    
+    cd - > /dev/null
+else
+    echo "✅ Tree-sitter-lambda already built for Windows"
+fi
 
 # Function to download and extract if not exists
 download_extract() {
@@ -382,8 +438,8 @@ build_minimal_static_libcurl() {
         export STRIP="strip"
     fi
     
-    export CFLAGS="-O2 -DNDEBUG -D_WIN32 -DWINDOWS"
-    export CXXFLAGS="-O2 -DNDEBUG -D_WIN32 -DWINDOWS"
+    export CFLAGS="-O2 -DNDEBUG -D_WIN32 -DWINDOWS -DCURL_STATICLIB"
+    export CXXFLAGS="-O2 -DNDEBUG -D_WIN32 -DWINDOWS -DCURL_STATICLIB"
     export LDFLAGS=""
     
     # Configure with bare minimum features - absolutely no SSH, IDN, HTTP2, or advanced protocols
@@ -604,7 +660,7 @@ if [ ! -f "$DEPS_DIR/lib/libutf8proc.a" ]; then
         # Build only static library with UTF8PROC_STATIC define
         CC="$CC_BIN" \
         AR="$AR_BIN" \
-        CFLAGS="-O2 -DNDEBUG -fPIC -DUTF8PROC_STATIC" \
+        CFLAGS="-O2 -DNDEBUG -fPIC -DUTF8PROC_STATIC -D_WIN32 -DWINDOWS" \
         make libutf8proc.a || {
             echo "Error: Failed to build utf8proc static library"
             cd - > /dev/null
@@ -736,7 +792,8 @@ echo "  ✅ Build tools (make, cmake, ninja, premake5)"
 echo "  ✅ Compiler toolchain ($COMPILER_NAME)"
 echo "  ✅ GMP (system package)"
 echo "  ✅ ICU (Unicode support)"
-echo "  ⏭️  Tree-sitter (managed directly under lambda/)"
+echo "  📦 Tree-sitter library (building from source - see verification below)"
+echo "  📦 Tree-sitter-lambda (building from source - see verification below)"
 echo "  📦 MIR (building from source - see verification below)"
 echo "  📦 utf8proc (building from source - see verification below)"
 echo "  📦 libcurl minimal static (building from source - HTTP/HTTPS only, no HTTP/2)"
@@ -745,8 +802,18 @@ echo ""
 # Final verification
 echo "Performing final verification..."
 
-# Skip tree-sitter verification (managed under lambda/)
-echo "⏭️  Tree-sitter libraries (managed directly under lambda/)"
+# Check tree-sitter libraries
+if [ -f "lambda/tree-sitter/libtree-sitter.a" ]; then
+    echo "✅ Tree-sitter library available"
+else
+    echo "⚠️  Tree-sitter library missing"
+fi
+
+if [ -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
+    echo "✅ Tree-sitter-lambda library available"
+else
+    echo "⚠️  Tree-sitter-lambda library missing"
+fi
 
 # Check MIR
 if [ -f "$DEPS_DIR/lib/libmir.a" ]; then
