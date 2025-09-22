@@ -54,6 +54,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <cstdint>
 
 extern "C" {
 #include "../lib/strbuf.h"
@@ -465,18 +466,18 @@ TEST_F(StrBufTest, TestAppendIntegerFunctions) {
     strbuf_append_int(sb, -123);
     EXPECT_STREQ(sb->str, "-123");
     
-    // Test append_long
+    // Test append_int64
     strbuf_reset(sb);
-    strbuf_append_long(sb, 1234567890L);
+    strbuf_append_int64(sb, 1234567890LL);
     EXPECT_STREQ(sb->str, "1234567890");
     
     strbuf_reset(sb);
-    strbuf_append_long(sb, -9876543210L);
+    strbuf_append_int64(sb, -9876543210LL);
     EXPECT_STREQ(sb->str, "-9876543210");
     
-    // Test append_ulong
+    // Test append_uint64
     strbuf_reset(sb);
-    strbuf_append_ulong(sb, 18446744073709551615UL); // Max unsigned long
+    strbuf_append_uint64(sb, 18446744073709551615ULL); // Max uint64_t
     EXPECT_NE(sb->str, nullptr);
     EXPECT_GT(sb->length, 0);
     

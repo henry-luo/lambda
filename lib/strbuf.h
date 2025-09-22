@@ -6,6 +6,8 @@
 #include <string.h>
 #include <stdarg.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include "strview.h"
 
 #ifdef __cplusplus
@@ -46,7 +48,11 @@ void strbuf_append_char(StrBuf *sb, char c);
 // append character c n times
 void strbuf_append_char_n(StrBuf *sb, char c, size_t n);
 void strbuf_append_int(StrBuf *buf, int value);
+void strbuf_append_int64(StrBuf *buf, int64_t value);
+void strbuf_append_uint64(StrBuf *buf, uint64_t value);
+// deprecated - use strbuf_append_int64 instead
 void strbuf_append_long(StrBuf *buf, long value);
+// deprecated - use strbuf_append_uint64 instead  
 void strbuf_append_ulong(StrBuf *buf, unsigned long value);
 void strbuf_append_all(StrBuf *sb, int num_args, ...);
 void strbuf_vappend(StrBuf *sb, int num_args, va_list args);

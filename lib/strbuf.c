@@ -1,5 +1,7 @@
 #include "strbuf.h"
 #include <string.h>
+#include <stdint.h>
+#include <inttypes.h>
 #include "log.h"
 
 #define INITIAL_CAPACITY 32
@@ -193,7 +195,7 @@ StrBuf* strbuf_dup(const StrBuf *sb) {
  *   num_of_digits(10)  = 2
  *   num_of_digits(123) = 3
  */
-static inline size_t num_of_digits(unsigned long v) {
+static inline size_t num_of_digits(uint64_t v) {
   if(v < P01) return 1;
   if(v < P02) return 2;
   if(v < P03) return 3;
@@ -213,7 +215,7 @@ static inline size_t num_of_digits(unsigned long v) {
   return 12 + num_of_digits(v / P12);
 }
 
-void strbuf_append_ulong(StrBuf *buf, unsigned long value) {
+void strbuf_append_uint64(StrBuf *buf, uint64_t value) {
     // Append two digits at a time
     static const char digits[201] =
         "0001020304050607080910111213141516171819"
@@ -227,13 +229,13 @@ void strbuf_append_ulong(StrBuf *buf, unsigned long value) {
 
     if (!strbuf_ensure_cap(buf, buf->length + num_digits + 1)) {
         // failed to allocate enough memory, early return
-        log_error("strbuf_append_ulong: Memory allocation failed: %d, %lu", buf->length + num_digits + 1, value);
+        log_error("strbuf_append_uint64: Memory allocation failed: %d, %" PRIu64, buf->length + num_digits + 1, value);
         return;
     }
     char *dst = buf->str + buf->length;
 
     while(value >= 100) {
-        size_t v = value % 100;
+        uint64_t v = value % 100;
         value /= 100;
         dst[pos] = digits[v * 2 + 1];
         dst[pos - 1] = digits[v * 2];
@@ -252,14 +254,31 @@ void strbuf_append_ulong(StrBuf *buf, unsigned long value) {
 }
 
 void strbuf_append_int(StrBuf *buf, int value) {
-    // strbuf_sprintf(buf, "%i", value);
-    strbuf_append_long(buf, value);
+    strbuf_append_int64(buf, value);
 }
 
+void strbuf_append_int64(StrBuf *buf, int64_t value) {
+    if (value < 0) { 
+        strbuf_append_char(buf, '-'); 
+        // Handle INT64_MIN correctly to avoid overflow
+        if (value == INT64_MIN) {
+            strbuf_append_uint64(buf, (uint64_t)INT64_MAX + 1);
+        } else {
+            strbuf_append_uint64(buf, (uint64_t)(-value));
+        }
+    } else {
+        strbuf_append_uint64(buf, (uint64_t)value);
+    }
+}
+
+// Deprecated - use strbuf_append_int64 instead
 void strbuf_append_long(StrBuf *buf, long value) {
-    // strbuf_sprintf(buf, "%li", value);
-    if (value < 0) { strbuf_append_char(buf, '-'); value = -value; }
-    strbuf_append_ulong(buf, value);
+    strbuf_append_int64(buf, (int64_t)value);
+}
+
+// Deprecated - use strbuf_append_uint64 instead
+void strbuf_append_ulong(StrBuf *buf, unsigned long value) {
+    strbuf_append_uint64(buf, (uint64_t)value);
 }
 
 bool strbuf_append_file(StrBuf *sb, FILE *file) {
