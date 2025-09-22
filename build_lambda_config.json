@@ -193,6 +193,7 @@
                 "lambda/validator.cpp",
                 "lambda/validator/ast_validate.cpp",
                 "lambda/validator/error_reporting.cpp",
+                "lambda/format/format.cpp",
                 "test/test_stubs.cpp",
                 "lambda/parse.c",
                 "lambda/input/css_tokenizer.c",

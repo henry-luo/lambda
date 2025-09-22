@@ -182,6 +182,7 @@ project "lambda-input-full-cpp"
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
+        "lambda/format/format.cpp",
         "test/test_stubs.cpp",
         "lambda/parse.c",
         "lambda/input/css_tokenizer.c",
@@ -534,9 +535,6 @@ project "test_strbuf_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -590,9 +588,6 @@ project "test_stringbuf_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -646,9 +641,6 @@ project "test_strview_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -702,9 +694,6 @@ project "test_variable_pool_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -758,9 +747,6 @@ project "test_num_stack_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -814,9 +800,6 @@ project "test_datetime_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -870,9 +853,6 @@ project "test_url_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -926,9 +906,6 @@ project "test_url_extra_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -983,9 +960,6 @@ project "test_cmdedit_gtest"
         "gtest",
         "gtest_main",
         "utf8proc",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1045,9 +1019,6 @@ project "test_mime_detect_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1154,9 +1125,6 @@ project "test_math_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1263,9 +1231,6 @@ project "test_math_ascii_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1372,9 +1337,6 @@ project "test_markup_roundtrip_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1481,9 +1443,6 @@ project "test_input_roundtrip_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1590,9 +1549,6 @@ project "test_dir_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1699,9 +1655,6 @@ project "test_http_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1808,9 +1761,6 @@ project "test_sysinfo_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1917,9 +1867,6 @@ project "test_jsx_roundtrip_new_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2026,9 +1973,6 @@ project "test_mdx_roundtrip_new_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2135,9 +2079,6 @@ project "test_css_tokenizer_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2244,9 +2185,6 @@ project "test_css_parser_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2353,9 +2291,6 @@ project "test_css_integration_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2462,9 +2397,6 @@ project "test_css_files_safe_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2571,9 +2503,6 @@ project "test_css_frameworks_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2680,9 +2609,6 @@ project "test_mdx_roundtrip_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2789,9 +2715,6 @@ project "test_jsx_roundtrip_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -3059,6 +2982,216 @@ project "test_ast_validator"
     }
     
 
+project "test_validator_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_validator_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "win-native-deps/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+    }
+    
+    libdirs {
+        "/mingw64/lib",
+        "win-native-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libmpdec.a",
+        "../../win-native-deps/lib/libutf8proc.a",
+        "../../win-native-deps/lib/libmir.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
+        "../../win-native-deps/lib/libcurl.a",
+        "/mingw64/lib/libssl.a",
+        "/mingw64/lib/libcrypto.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "z",
+        "mingw32",
+        "gcc",
+        "gcc_s",
+        "msvcrt",
+        "kernel32",
+        "user32",
+        "advapi32",
+        "ws2_32",
+        "gdi32",
+        "shell32",
+        "ole32",
+        "ssp",
+        "winmm",
+        "crypt32",
+        "bcrypt",
+        "wldap32",
+        "iphlpapi",
+        "secur32",
+        "moldname",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+    }
+    
+    filter {}
+    linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+    }
+    
+
+project "test_ast_validator_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_ast_validator_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "win-native-deps/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+    }
+    
+    libdirs {
+        "/mingw64/lib",
+        "win-native-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libmpdec.a",
+        "../../win-native-deps/lib/libutf8proc.a",
+        "../../win-native-deps/lib/libmir.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
+        "../../win-native-deps/lib/libcurl.a",
+        "/mingw64/lib/libssl.a",
+        "/mingw64/lib/libcrypto.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "z",
+        "mingw32",
+        "gcc",
+        "gcc_s",
+        "msvcrt",
+        "kernel32",
+        "user32",
+        "advapi32",
+        "ws2_32",
+        "gdi32",
+        "shell32",
+        "ole32",
+        "ssp",
+        "winmm",
+        "crypt32",
+        "bcrypt",
+        "wldap32",
+        "iphlpapi",
+        "secur32",
+        "moldname",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+    }
+    
+    filter {}
+    linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+    }
+    
+
 project "test_lambda_gtest"
     kind "ConsoleApp"
     language "C++"
@@ -3097,9 +3230,6 @@ project "test_lambda_gtest"
     links {
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -3153,9 +3283,6 @@ project "test_lambda_repl_gtest"
     links {
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -3209,9 +3336,6 @@ project "test_lambda_proc_gtest"
     links {
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
