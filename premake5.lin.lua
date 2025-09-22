@@ -66,7 +66,6 @@ project "lambda-lib"
     
     libdirs {
         "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
     }
     
@@ -79,9 +78,13 @@ project "lambda-lib"
         "-fdiagnostics-color=auto",
     }
     
+    defines {
+        "UTF8PROC_STATIC",
+    }
+    
 
 project "lambda-input-full-c"
-    kind "StaticLib"
+    kind "SharedLib"
     language "C"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
@@ -100,10 +103,10 @@ project "lambda-input-full-c"
     
     includedirs {
         "lib/mem-pool/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
         "/usr/local/include",
         "/usr/include",
         "/usr/include",
@@ -120,12 +123,13 @@ project "lambda-input-full-c"
     
     libdirs {
         "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
@@ -133,8 +137,6 @@ project "lambda-input-full-c"
     }
     
     links {
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
         "mpdec",
         "curl",
         "z",
@@ -143,7 +145,7 @@ project "lambda-input-full-c"
     
 
 project "lambda-input-full-cpp"
-    kind "StaticLib"
+    kind "SharedLib"
     language "C++"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
@@ -157,7 +159,17 @@ project "lambda-input-full-cpp"
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
+        "lambda/format/format.cpp",
         "test/test_stubs.cpp",
+        "lambda/parse.c",
+        "lambda/input/css_tokenizer.c",
+        "lambda/input/css_parser.c",
+        "lambda/input/css_properties.c",
+        "lib/arraylist.c",
+        "lib/hashmap.c",
+        "lib/file.c",
+        "lib/log.c",
+        "lib/utf.c",
     }
     
     files {
@@ -170,10 +182,10 @@ project "lambda-input-full-cpp"
     
     includedirs {
         "lib/mem-pool/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
         "/usr/local/include",
         "/usr/include",
         "/usr/include",
@@ -183,20 +195,30 @@ project "lambda-input-full-cpp"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
     }
     
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17"
-    }
+    filter "files:**.c"
+        buildoptions {
+            "-pedantic",
+            "-fdiagnostics-color=auto",
+        }
+    
+    filter "files:**.cpp"
+        buildoptions {
+            "-pedantic",
+            "-fdiagnostics-color=auto",
+            "-std=c++17",
+        }
+    
+    filter {}
     
     libdirs {
         "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
     
     linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
@@ -204,8 +226,6 @@ project "lambda-input-full-cpp"
     }
     
     links {
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
         "mpdec",
         "curl",
         "z",
@@ -214,7 +234,7 @@ project "lambda-input-full-cpp"
     
 
 project "lambda-input-full"
-    kind "StaticLib"
+    kind "SharedLib"
     language "C++"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
@@ -353,8 +373,8 @@ project "lambda"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -373,8 +393,8 @@ project "lambda"
     }
     
     linkoptions {
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/lib/aarch64-linux-gnu/libssl.a",
@@ -432,8 +452,8 @@ project "test_strbuf_gtest"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -444,11 +464,9 @@ project "test_strbuf_gtest"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -462,9 +480,6 @@ project "test_strbuf_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -493,8 +508,8 @@ project "test_stringbuf_gtest"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -505,11 +520,9 @@ project "test_stringbuf_gtest"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -523,9 +536,6 @@ project "test_stringbuf_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -554,8 +564,8 @@ project "test_strview_gtest"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -566,11 +576,9 @@ project "test_strview_gtest"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -584,9 +592,6 @@ project "test_strview_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -615,8 +620,8 @@ project "test_variable_pool_gtest"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -627,11 +632,9 @@ project "test_variable_pool_gtest"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -645,9 +648,6 @@ project "test_variable_pool_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -676,8 +676,8 @@ project "test_num_stack_gtest"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -688,11 +688,9 @@ project "test_num_stack_gtest"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -706,9 +704,6 @@ project "test_num_stack_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -737,8 +732,8 @@ project "test_datetime_gtest"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -749,11 +744,9 @@ project "test_datetime_gtest"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -767,9 +760,6 @@ project "test_datetime_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -798,8 +788,8 @@ project "test_url_gtest"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -810,11 +800,9 @@ project "test_url_gtest"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -828,9 +816,6 @@ project "test_url_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -859,8 +844,8 @@ project "test_url_extra_gtest"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -871,11 +856,9 @@ project "test_url_extra_gtest"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -889,9 +872,6 @@ project "test_url_extra_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -920,8 +900,8 @@ project "test_cmdedit_gtest"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -932,11 +912,9 @@ project "test_cmdedit_gtest"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -951,9 +929,6 @@ project "test_cmdedit_gtest"
         "gtest",
         "gtest_main",
         "utf8proc",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -972,102 +947,7 @@ project "test_cmdedit_gtest"
     }
     
 
-project "test_mime_detect"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_mime_detect.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
-    }
-    
-    linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "-Wl,--end-group",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "z",
-        "criterion",
-        "pthread",
-        "stdc++fs",
-        "ncurses",
-    }
-    
-    -- Add tree-sitter libraries using linkoptions to append to LIBS section
-    linkoptions {
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-    }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-fms-extensions",
-        "-lstdc++",
-        "-std=c99",
-    }
-    
-    filter {}
-    linkoptions {
-        "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
-    }
-    
-
-project "test_math"
+project "test_mime_detect_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1075,14 +955,14 @@ project "test_math"
     targetextension ".exe"
     
     files {
-        "test/test_math.cpp",
+        "test/test_mime_detect_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -1093,11 +973,9 @@ project "test_math"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -1111,9 +989,13 @@ project "test_math"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1132,7 +1014,6 @@ project "test_math"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -1158,13 +1039,13 @@ project "test_math"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_math_ascii"
+project "test_math_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1172,14 +1053,14 @@ project "test_math_ascii"
     targetextension ".exe"
     
     files {
-        "test/test_math_ascii.cpp",
+        "test/test_math_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -1190,11 +1071,9 @@ project "test_math_ascii"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -1208,9 +1087,13 @@ project "test_math_ascii"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1229,7 +1112,6 @@ project "test_math_ascii"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -1255,13 +1137,13 @@ project "test_math_ascii"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_markup_roundtrip"
+project "test_math_ascii_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1269,14 +1151,14 @@ project "test_markup_roundtrip"
     targetextension ".exe"
     
     files {
-        "test/test_markup_roundtrip.cpp",
+        "test/test_math_ascii_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -1287,11 +1169,9 @@ project "test_markup_roundtrip"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -1305,9 +1185,13 @@ project "test_markup_roundtrip"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1326,7 +1210,6 @@ project "test_markup_roundtrip"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -1352,13 +1235,13 @@ project "test_markup_roundtrip"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_input_roundtrip"
+project "test_markup_roundtrip_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1366,14 +1249,14 @@ project "test_input_roundtrip"
     targetextension ".exe"
     
     files {
-        "test/test_input_roundtrip.cpp",
+        "test/test_markup_roundtrip_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -1384,11 +1267,9 @@ project "test_input_roundtrip"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -1402,9 +1283,13 @@ project "test_input_roundtrip"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1423,7 +1308,6 @@ project "test_input_roundtrip"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -1449,13 +1333,13 @@ project "test_input_roundtrip"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_dir"
+project "test_input_roundtrip_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1463,14 +1347,14 @@ project "test_dir"
     targetextension ".exe"
     
     files {
-        "test/test_dir.cpp",
+        "test/test_input_roundtrip_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -1481,11 +1365,9 @@ project "test_dir"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -1499,9 +1381,13 @@ project "test_dir"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1520,7 +1406,6 @@ project "test_dir"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -1546,13 +1431,13 @@ project "test_dir"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_http"
+project "test_dir_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1560,14 +1445,14 @@ project "test_http"
     targetextension ".exe"
     
     files {
-        "test/test_http.cpp",
+        "test/test_dir_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -1578,11 +1463,9 @@ project "test_http"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -1596,9 +1479,13 @@ project "test_http"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1617,7 +1504,6 @@ project "test_http"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -1643,13 +1529,13 @@ project "test_http"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_sysinfo"
+project "test_http_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1657,14 +1543,14 @@ project "test_sysinfo"
     targetextension ".exe"
     
     files {
-        "test/test_sysinfo.cpp",
+        "test/test_http_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -1675,11 +1561,9 @@ project "test_sysinfo"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -1693,9 +1577,13 @@ project "test_sysinfo"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1714,7 +1602,6 @@ project "test_sysinfo"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -1740,13 +1627,13 @@ project "test_sysinfo"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_jsx_roundtrip"
+project "test_sysinfo_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1754,14 +1641,14 @@ project "test_jsx_roundtrip"
     targetextension ".exe"
     
     files {
-        "test/test_jsx_roundtrip.cpp",
+        "test/test_sysinfo_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -1772,11 +1659,9 @@ project "test_jsx_roundtrip"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -1790,9 +1675,13 @@ project "test_jsx_roundtrip"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1811,7 +1700,6 @@ project "test_jsx_roundtrip"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -1837,13 +1725,13 @@ project "test_jsx_roundtrip"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_mdx_roundtrip"
+project "test_jsx_roundtrip_new_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1851,14 +1739,14 @@ project "test_mdx_roundtrip"
     targetextension ".exe"
     
     files {
-        "test/test_mdx_roundtrip.cpp",
+        "test/test_jsx_roundtrip_new_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -1869,11 +1757,9 @@ project "test_mdx_roundtrip"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -1887,9 +1773,13 @@ project "test_mdx_roundtrip"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1908,7 +1798,6 @@ project "test_mdx_roundtrip"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -1934,13 +1823,13 @@ project "test_mdx_roundtrip"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_css_tokenizer"
+project "test_mdx_roundtrip_new_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1948,14 +1837,14 @@ project "test_css_tokenizer"
     targetextension ".exe"
     
     files {
-        "test/test_css_tokenizer.cpp",
+        "test/test_mdx_roundtrip_new_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -1966,11 +1855,9 @@ project "test_css_tokenizer"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -1984,9 +1871,13 @@ project "test_css_tokenizer"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -2005,7 +1896,6 @@ project "test_css_tokenizer"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -2031,13 +1921,13 @@ project "test_css_tokenizer"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_css_parser"
+project "test_css_tokenizer_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -2045,14 +1935,14 @@ project "test_css_parser"
     targetextension ".exe"
     
     files {
-        "test/test_css_parser.cpp",
+        "test/test_css_tokenizer_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -2063,11 +1953,9 @@ project "test_css_parser"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -2081,9 +1969,13 @@ project "test_css_parser"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -2102,7 +1994,6 @@ project "test_css_parser"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -2128,13 +2019,13 @@ project "test_css_parser"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_css_integration"
+project "test_css_parser_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -2142,14 +2033,14 @@ project "test_css_integration"
     targetextension ".exe"
     
     files {
-        "test/test_css_integration.cpp",
+        "test/test_css_parser_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -2160,11 +2051,9 @@ project "test_css_integration"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -2178,9 +2067,13 @@ project "test_css_integration"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -2199,7 +2092,6 @@ project "test_css_integration"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -2225,108 +2117,13 @@ project "test_css_integration"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_css_files_safe"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_css_files_safe.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/usr/include",
-        "/usr/include/openssl",
-        "/usr/include/openssl",
-        "/usr/local/include",
-        "/usr/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/include",
-        "/usr/local/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
-    }
-    
-    linkoptions {
-        "-Wl,--start-group",
-        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
-        "/usr/local/lib/libmir.a",
-        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
-        "/usr/lib/aarch64-linux-gnu/libssl.a",
-        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
-        "-Wl,--end-group",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "curl",
-        "mpdec",
-        "hpdf",
-        "z",
-        "criterion",
-        "pthread",
-        "stdc++fs",
-        "ncurses",
-    }
-    
-    -- Add tree-sitter libraries using linkoptions to append to LIBS section
-    linkoptions {
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-    }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-fms-extensions",
-        "-lstdc++",
-        "-std=c99",
-    }
-    
-    filter {}
-    linkoptions {
-        "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
-        "-Wl,--no-whole-archive",
-    }
-    
-
-project "test_css_frameworks"
+project "test_css_integration_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -2334,14 +2131,14 @@ project "test_css_frameworks"
     targetextension ".exe"
     
     files {
-        "test/test_css_frameworks.cpp",
+        "test/test_css_integration_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -2352,11 +2149,9 @@ project "test_css_frameworks"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -2370,9 +2165,13 @@ project "test_css_frameworks"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -2391,7 +2190,6 @@ project "test_css_frameworks"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -2417,13 +2215,13 @@ project "test_css_frameworks"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_validator"
+project "test_css_files_safe_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -2431,14 +2229,14 @@ project "test_validator"
     targetextension ".exe"
     
     files {
-        "test/test_validator.cpp",
+        "test/test_css_files_safe_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -2449,11 +2247,9 @@ project "test_validator"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -2467,9 +2263,13 @@ project "test_validator"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -2488,7 +2288,398 @@ project "test_validator"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+
+project "test_css_frameworks_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_css_frameworks_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "/usr/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/usr/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "z",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+
+project "test_mdx_roundtrip_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_mdx_roundtrip_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "/usr/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/usr/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "z",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+
+project "test_jsx_roundtrip_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_jsx_roundtrip_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "/usr/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/usr/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "z",
+        "pthread",
+        "stdc++fs",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,--whole-archive",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "-Wl,--no-whole-archive",
+    }
+    
+
+project "test_validator_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_validator_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "/usr/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/usr/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "-Wl,--start-group",
+        "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "/usr/lib/aarch64-linux-gnu/libssl.a",
+        "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+        "-Wl,--end-group",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "curl",
+        "mpdec",
+        "hpdf",
+        "z",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -2513,13 +2704,13 @@ project "test_validator"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
 
-project "test_ast_validator"
+project "test_ast_validator_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -2527,14 +2718,14 @@ project "test_ast_validator"
     targetextension ".exe"
     
     files {
-        "test/test_ast_validator.cpp",
+        "test/test_ast_validator_gtest.cpp",
     }
     
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -2545,11 +2736,9 @@ project "test_ast_validator"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -2563,9 +2752,13 @@ project "test_ast_validator"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -2584,7 +2777,6 @@ project "test_ast_validator"
         "mpdec",
         "hpdf",
         "z",
-        "criterion",
         "pthread",
         "stdc++fs",
         "ncurses",
@@ -2609,8 +2801,8 @@ project "test_ast_validator"
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "/workspaces/Jubily/lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
     
@@ -2629,8 +2821,8 @@ project "test_lambda_gtest"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -2641,11 +2833,9 @@ project "test_lambda_gtest"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -2658,9 +2848,6 @@ project "test_lambda_gtest"
     links {
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2690,8 +2877,8 @@ project "test_lambda_repl_gtest"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -2702,11 +2889,9 @@ project "test_lambda_repl_gtest"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -2719,9 +2904,6 @@ project "test_lambda_repl_gtest"
     links {
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2751,8 +2933,8 @@ project "test_lambda_proc_gtest"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -2763,11 +2945,9 @@ project "test_lambda_proc_gtest"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {
@@ -2780,9 +2960,6 @@ project "test_lambda_proc_gtest"
     links {
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2812,8 +2989,8 @@ project "test_lambda_runner"
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
-        "/workspaces/Jubily/lambda/tree-sitter/lib/include",
-        "/workspaces/Jubily/lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "/usr/local/include",
         "/usr/local/include",
         "/usr/include",
@@ -2824,11 +3001,9 @@ project "test_lambda_runner"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/include",
         "/usr/include",
-        "/usr/include",
         "/usr/local/include",
         "/usr/local/include",
         "/opt/homebrew/include",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
     }
     
     libdirs {

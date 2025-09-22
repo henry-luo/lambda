@@ -45,33 +45,6 @@ build_libharu_for_linux() {
     echo "libharu built and installed."
 }
 
-# Catch2 is not available via apt, build from source
-CATCH2_VERSION="3.10.0"
-CATCH2_REPO="https://github.com/catchorg/Catch2.git"
-build_catch2_for_linux() {
-    echo "Building Catch2 for Linux..."
-    mkdir -p build_temp
-    if [ ! -d "build_temp/Catch2" ]; then
-        cd build_temp
-        git clone --branch v$CATCH2_VERSION $CATCH2_REPO Catch2 || {
-            echo "Warning: Could not clone Catch2 repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    fi
-    cd build_temp/Catch2
-    mkdir -p build
-    cd build
-    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" .. && \
-    make -j$(nproc) && \
-    sudo make install && \
-    sudo ldconfig
-    cd - > /dev/null
-    cd - > /dev/null
-    echo "Catch2 built and installed."
-}
-
 # Check for cleanup option
 if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     echo "Cleaning up intermediate files..."
@@ -272,7 +245,7 @@ else
     echo "✅ pkg-config already available"
 fi
 
-# Check for meson (needed for building Criterion from source if needed)
+# Check for meson (needed for building dependencies from source)
 if ! command -v meson >/dev/null 2>&1; then
     echo "Installing meson..."
     install_if_missing "meson" "meson"
@@ -285,68 +258,6 @@ echo "Installing additional development dependencies..."
 sudo apt update
 
 
-
-# Function to build criterion for Linux
-build_criterion_for_linux() {
-    echo "Building Criterion for Linux..."
-    
-    # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ]; then
-        echo "Criterion already installed in system location"
-        return 0
-    fi
-    
-    # Check if meson is available for building
-    if ! command -v meson >/dev/null 2>&1; then
-        echo "❌ Meson not available, cannot build Criterion from source"
-        echo "Please install meson: sudo apt install meson"
-        return 1
-    fi
-    
-    # Create build_temp directory if it doesn't exist
-    mkdir -p "build_temp"
-    
-    # Build from source
-    if [ ! -d "build_temp/Criterion" ]; then
-        cd build_temp
-        echo "Cloning Criterion repository..."
-        git clone https://github.com/Snaipe/Criterion.git || {
-            echo "Warning: Could not clone Criterion repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    fi
-    
-    cd "build_temp/Criterion"
-    
-    # Create build directory
-    mkdir -p builddir
-    
-    echo "Configuring Criterion with Meson..."
-    if meson setup builddir --buildtype=release --prefix="$SYSTEM_PREFIX"; then
-        
-        echo "Building Criterion..."
-        if meson compile -C builddir; then
-            echo "Installing Criterion to system location (requires sudo)..."
-            sudo meson install -C builddir
-            
-            # Update library cache
-            sudo ldconfig
-            
-            # Verify the build
-            if [ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ]; then
-                echo "✅ Criterion built successfully"
-                cd - > /dev/null
-                return 0
-            fi
-        fi
-    fi
-    
-    echo "❌ Criterion build failed"
-    cd - > /dev/null
-    return 1
-}
 
 # Function to build Google Test for Linux
 build_gtest_for_linux() {
@@ -497,27 +408,6 @@ build_libharu_for_linux() {
     cd - > /dev/null
     echo "libharu built and installed."
 }
-
-# Build Catch2 if not available
-if ! pkg-config --exists catch2; then
-    build_catch2_for_linux
-fi
-
-# Install Criterion testing framework via apt, build from source as fallback
-echo "Installing Criterion testing framework..."
-if dpkg -l | grep -q libcriterion-dev; then
-    echo "✅ Criterion already installed via apt"
-else
-    echo "Installing Criterion via apt..."
-    if sudo apt install -y libcriterion-dev libcriterion3; then
-        echo "✅ Criterion installed successfully via apt"
-    else
-        echo "❌ Failed to install Criterion via apt, trying build from source..."
-        if ! build_criterion_for_linux; then
-            echo "Warning: criterion build failed"
-        fi
-    fi
-fi
 
 # Verify mpdecimal header installation
 echo "Verifying mpdecimal header installation..."
@@ -1109,24 +999,6 @@ else
 fi
 
 
-# Install criterion for Linux (prefer apt package over building from source)
-echo "Verifying Criterion installation..."
-if [ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ] || dpkg -l | grep -q libcriterion-dev; then
-    echo "✅ criterion already available"
-else
-    echo "Installing Criterion via apt..."
-    if sudo apt install -y libcriterion-dev libcriterion3; then
-        echo "✅ Criterion installed successfully via apt"
-    else
-        echo "❌ Failed to install Criterion via apt, trying build from source..."
-        if ! build_criterion_for_linux; then
-            echo "Warning: criterion build failed"
-        else
-            echo "criterion built successfully"
-        fi
-    fi
-fi
-
 # Install Google Test for Linux (prefer apt package over building from source)
 echo "Verifying Google Test installation..."
 if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] || dpkg -l | grep -q libgtest-dev; then
@@ -1204,12 +1076,12 @@ echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/incl
 echo "- curl: $([ -f "/usr/lib/x86_64-linux-gnu/libcurl.so" ] || dpkg -l | grep -q libcurl && echo "✓ Available" || echo "✗ Missing")"
 echo "- mpdecimal: $([ -f "/usr/lib/x86_64-linux-gnu/libmpdec.so" ] || [ -f "/usr/lib/aarch64-linux-gnu/libmpdec.so" ] || [ -f "$SYSTEM_PREFIX/lib/libmpdec.so" ] || dpkg -l | grep -q libmpdec-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- utf8proc: $([ -f "/usr/lib/x86_64-linux-gnu/libutf8proc.so" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ] || dpkg -l | grep -q libutf8proc-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- criterion: $([ -f "$SYSTEM_PREFIX/lib/libcriterion.a" ] || [ -f "$SYSTEM_PREFIX/lib/libcriterion.so" ] || dpkg -l | grep -q libcriterion-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- gtest: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] || dpkg -l | grep -q libgtest-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo "- premake5: $(command -v premake5 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo ""
 echo "Next steps:"
 echo "1. Run: make"
+echo "2. Run: make test"
 echo ""
 echo "To clean up intermediate files, run: ./setup-linux-deps.sh clean"
