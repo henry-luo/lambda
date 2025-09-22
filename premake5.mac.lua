@@ -85,7 +85,7 @@ project "lambda-lib"
     
 
 project "lambda-input-full-c"
-    kind "StaticLib"
+    kind "SharedLib"
     language "C"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
@@ -130,6 +130,8 @@ project "lambda-input-full-c"
     }
     
     linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "/opt/homebrew/lib/libmpdec.a",
         "/opt/homebrew/lib/libutf8proc.a",
         "/opt/homebrew/lib/libnghttp2.a",
@@ -139,15 +141,13 @@ project "lambda-input-full-c"
     }
     
     links {
-        "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "lambda/tree-sitter/libtree-sitter.a",
         "z",
         "lambda-lib",
     }
     
 
 project "lambda-input-full-cpp"
-    kind "StaticLib"
+    kind "SharedLib"
     language "C++"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
@@ -201,6 +201,8 @@ project "lambda-input-full-cpp"
     }
     
     linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
         "/opt/homebrew/lib/libmpdec.a",
         "/opt/homebrew/lib/libutf8proc.a",
         "/opt/homebrew/lib/libnghttp2.a",
@@ -210,15 +212,14 @@ project "lambda-input-full-cpp"
     }
     
     links {
-        "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "lambda/tree-sitter/libtree-sitter.a",
         "z",
+        "lambda-input-full-c",
         "lambda-lib",
     }
     
 
 project "lambda-input-full"
-    kind "StaticLib"
+    kind "SharedLib"
     language "C++"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
@@ -473,9 +474,6 @@ project "test_strbuf_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -533,9 +531,6 @@ project "test_stringbuf_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -593,9 +588,6 @@ project "test_strview_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -653,9 +645,6 @@ project "test_variable_pool_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -713,9 +702,6 @@ project "test_num_stack_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -773,9 +759,6 @@ project "test_datetime_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -833,9 +816,6 @@ project "test_url_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -893,9 +873,6 @@ project "test_url_extra_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -954,9 +931,6 @@ project "test_cmdedit_gtest"
         "gtest",
         "gtest_main",
         "utf8proc",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1020,9 +994,6 @@ project "test_mime_detect_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1118,9 +1089,6 @@ project "test_math_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1216,9 +1184,6 @@ project "test_math_ascii_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1314,9 +1279,6 @@ project "test_markup_roundtrip_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1412,9 +1374,6 @@ project "test_input_roundtrip_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1510,9 +1469,6 @@ project "test_dir_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1608,9 +1564,6 @@ project "test_http_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1706,9 +1659,6 @@ project "test_sysinfo_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1804,9 +1754,6 @@ project "test_jsx_roundtrip_new_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -1902,9 +1849,6 @@ project "test_mdx_roundtrip_new_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2000,9 +1944,6 @@ project "test_css_tokenizer_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2098,9 +2039,6 @@ project "test_css_parser_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2196,9 +2134,6 @@ project "test_css_integration_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2294,9 +2229,6 @@ project "test_css_files_safe_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2392,9 +2324,6 @@ project "test_css_frameworks_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2490,9 +2419,6 @@ project "test_mdx_roundtrip_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2588,9 +2514,6 @@ project "test_jsx_roundtrip_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2821,6 +2744,194 @@ project "test_ast_validator"
     }
     
 
+project "test_validator_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_validator_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "z",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
+    }
+    
+
+project "test_ast_validator_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_ast_validator_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "z",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
+    }
+    
+
 project "test_lambda_gtest"
     kind "ConsoleApp"
     language "C++"
@@ -2863,9 +2974,6 @@ project "test_lambda_gtest"
     links {
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2923,9 +3031,6 @@ project "test_lambda_repl_gtest"
     links {
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
@@ -2983,9 +3088,6 @@ project "test_lambda_proc_gtest"
     links {
         "gtest",
         "gtest_main",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
