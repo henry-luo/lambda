@@ -290,62 +290,62 @@ project "lambda"
         "typeset/output/pdf_renderer_enhanced.c",
         "lambda/main-repl.cpp",
         "lambda/main.cpp",
-        "lambda/input/mime-types.c",
-        "lambda/input/css_tokenizer.c",
-        "lambda/input/mime-detect.c",
         "lambda/input/css_parser.c",
         "lambda/input/css_properties.c",
+        "lambda/input/css_tokenizer.c",
+        "lambda/input/mime-detect.c",
+        "lambda/input/mime-types.c",
+        "lambda/input/input-adoc.cpp",
+        "lambda/input/input-common.cpp",
+        "lambda/input/input-css.cpp",
+        "lambda/input/input-csv.cpp",
+        "lambda/input/input-eml.cpp",
+        "lambda/input/input-html.cpp",
+        "lambda/input/input-ics.cpp",
+        "lambda/input/input-ini.cpp",
+        "lambda/input/input-json.cpp",
         "lambda/input/input-jsx.cpp",
         "lambda/input/input-latex.cpp",
-        "lambda/input/input_file_cache.cpp",
-        "lambda/input/input-vcf.cpp",
         "lambda/input/input-man.cpp",
-        "lambda/input/input.cpp",
-        "lambda/input/input-ics.cpp",
-        "lambda/input/input-json.cpp",
-        "lambda/input/input-css.cpp",
-        "lambda/input/input-pdf.cpp",
-        "lambda/input/input_cache_util.cpp",
-        "lambda/input/input_sysinfo.cpp",
-        "lambda/input/input-math-ascii.cpp",
-        "lambda/input/input-markup.cpp",
-        "lambda/input/input-csv.cpp",
-        "lambda/input/input_pool.cpp",
-        "lambda/input/input-adoc.cpp",
-        "lambda/input/input_http.cpp",
-        "lambda/input/input-org.cpp",
         "lambda/input/input-mark.cpp",
-        "lambda/input/input-toml.cpp",
-        "lambda/input/input-mdx.cpp",
-        "lambda/input/input_dir.cpp",
-        "lambda/input/input-yaml.cpp",
-        "lambda/input/input-html.cpp",
-        "lambda/input/input-eml.cpp",
-        "lambda/input/input-rtf.cpp",
+        "lambda/input/input-markup.cpp",
+        "lambda/input/input-math-ascii.cpp",
         "lambda/input/input-math.cpp",
+        "lambda/input/input-mdx.cpp",
+        "lambda/input/input-org.cpp",
+        "lambda/input/input-pdf.cpp",
         "lambda/input/input-prop.cpp",
-        "lambda/input/input-ini.cpp",
+        "lambda/input/input-rtf.cpp",
+        "lambda/input/input-toml.cpp",
+        "lambda/input/input-vcf.cpp",
         "lambda/input/input-xml.cpp",
-        "lambda/input/input-common.cpp",
-        "lambda/format/format-md.cpp",
-        "lambda/format/format-toml.cpp",
-        "lambda/format/format-jsx.cpp",
-        "lambda/format/format-text.cpp",
-        "lambda/format/format.cpp",
-        "lambda/format/format-prop.cpp",
-        "lambda/format/format-math.cpp",
-        "lambda/format/format-yaml.cpp",
+        "lambda/input/input-yaml.cpp",
+        "lambda/input/input.cpp",
+        "lambda/input/input_cache_util.cpp",
+        "lambda/input/input_dir.cpp",
+        "lambda/input/input_file_cache.cpp",
+        "lambda/input/input_http.cpp",
+        "lambda/input/input_pool.cpp",
+        "lambda/input/input_sysinfo.cpp",
         "lambda/format/format-css.cpp",
-        "lambda/format/format-math-ascii.cpp",
         "lambda/format/format-html.cpp",
-        "lambda/format/format-mdx.cpp",
-        "lambda/format/format-rst.cpp",
-        "lambda/format/format-org.cpp",
         "lambda/format/format-ini.cpp",
-        "lambda/format/format-xml.cpp",
-        "lambda/format/format-latex.cpp",
         "lambda/format/format-json.cpp",
+        "lambda/format/format-jsx.cpp",
+        "lambda/format/format-latex.cpp",
+        "lambda/format/format-math-ascii.cpp",
+        "lambda/format/format-math.cpp",
+        "lambda/format/format-md.cpp",
+        "lambda/format/format-mdx.cpp",
+        "lambda/format/format-org.cpp",
+        "lambda/format/format-prop.cpp",
+        "lambda/format/format-rst.cpp",
+        "lambda/format/format-text.cpp",
+        "lambda/format/format-toml.cpp",
         "lambda/format/format-wiki.cpp",
+        "lambda/format/format-xml.cpp",
+        "lambda/format/format-yaml.cpp",
+        "lambda/format/format.cpp",
     }
     
     includedirs {
@@ -443,60 +443,7 @@ project "lambda"
     }
     
 
-project "test_strbuf"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_strbuf.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "win-native-deps/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-    }
-    
-    libdirs {
-        "/mingw64/lib",
-        "win-native-deps/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
-    }
-    
-    linkoptions {
-        "/mingw64/lib/libcriterion.a",
-    }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c99",
-    }
-    
-
-project "test_stringbuf"
+project "test_strbuf_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -504,7 +451,7 @@ project "test_stringbuf"
     targetextension ".exe"
     
     files {
-        "test/test_stringbuf.cpp",
+        "test/test_strbuf_gtest.cpp",
     }
     
     includedirs {
@@ -533,30 +480,34 @@ project "test_stringbuf"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/mingw64/lib/libcriterion.a",
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-std=c++17",
     }
     
 
-project "test_strview"
+project "test_stringbuf_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_strview.c",
+        "test/test_stringbuf_gtest.cpp",
     }
     
     includedirs {
@@ -585,31 +536,34 @@ project "test_strview"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/mingw64/lib/libcriterion.a",
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
-project "test_variable_pool"
+project "test_strview_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_variable_pool.c",
+        "test/test_strview_gtest.cpp",
     }
     
     includedirs {
@@ -638,31 +592,34 @@ project "test_variable_pool"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/mingw64/lib/libcriterion.a",
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
-project "test_num_stack"
+project "test_variable_pool_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_num_stack.c",
+        "test/test_variable_pool_gtest.cpp",
     }
     
     includedirs {
@@ -691,31 +648,34 @@ project "test_num_stack"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/mingw64/lib/libcriterion.a",
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
-project "test_datetime"
+project "test_num_stack_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_datetime.c",
+        "test/test_num_stack_gtest.cpp",
     }
     
     includedirs {
@@ -744,31 +704,34 @@ project "test_datetime"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/mingw64/lib/libcriterion.a",
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
-project "test_url"
+project "test_datetime_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_url.c",
+        "test/test_datetime_gtest.cpp",
     }
     
     includedirs {
@@ -797,31 +760,34 @@ project "test_url"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/mingw64/lib/libcriterion.a",
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
-project "test_url_extra"
+project "test_url_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_url_extra.c",
+        "test/test_url_gtest.cpp",
     }
     
     includedirs {
@@ -850,33 +816,34 @@ project "test_url_extra"
     
     links {
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/mingw64/lib/libcriterion.a",
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
+        "-std=c++17",
     }
     
 
-project "test_cmdedit"
+project "test_url_extra_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_cmdedit.c",
-        "lib/cmdedit.c",
-        "lib/cmdedit_utf8.c",
+        "test/test_url_extra_gtest.cpp",
     }
     
     includedirs {
@@ -904,23 +871,83 @@ project "test_cmdedit"
     }
     
     links {
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+    }
+    
+
+project "test_cmdedit_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_cmdedit_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "win-native-deps/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+    }
+    
+    libdirs {
+        "/mingw64/lib",
+        "win-native-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
         "utf8proc",
+        "criterion",
+        "nanomsg",
+        "git2",
     }
     
     linkoptions {
-        "/mingw64/lib/libcriterion.a",
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
         "../../win-native-deps/lib/libutf8proc.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-std=c++17",
         "-DCMDEDIT_TESTING",
         "-Wno-implicit-function-declaration",
-        "-std=gnu99",
         "-DUTF8PROC_STATIC",
     }
     
@@ -2658,161 +2685,6 @@ project "test_ast_validator"
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter-minimal.a",
-    }
-    
-
-project "test_lambda"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_lambda.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "win-native-deps/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-    }
-    
-    libdirs {
-        "/mingw64/lib",
-        "win-native-deps/lib",
-        "build/lib",
-    }
-    
-    links {
-        "criterion",
-        "nanomsg",
-        "git2",
-    }
-    
-    linkoptions {
-        "/mingw64/lib/libcriterion.a",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-    }
-    
-
-project "test_lambda_repl"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_lambda_repl.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "win-native-deps/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-    }
-    
-    libdirs {
-        "/mingw64/lib",
-        "win-native-deps/lib",
-        "build/lib",
-    }
-    
-    links {
-        "criterion",
-        "nanomsg",
-        "git2",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-    }
-    
-
-project "test_lambda_proc"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_lambda_proc.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "win-native-deps/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-    }
-    
-    libdirs {
-        "/mingw64/lib",
-        "win-native-deps/lib",
-        "build/lib",
-    }
-    
-    links {
-        "criterion",
-        "nanomsg",
-        "git2",
-    }
-    
-    linkoptions {
-        "/mingw64/lib/libcriterion.a",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
     }
     
 
