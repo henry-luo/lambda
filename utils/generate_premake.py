@@ -1009,9 +1009,23 @@ class PremakeGenerator:
         
         self.premake_content.extend([
             '    }',
-            '    ',
-            ''
+            '    '
         ])
+        
+        # Add defines from target configuration
+        target_defines = lib.get('defines', [])
+        if target_defines:
+            self.premake_content.extend([
+                '    defines {',
+            ])
+            for define in target_defines:
+                self.premake_content.append(f'        "{define}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+        
+        self.premake_content.append('')
     
     def generate_test_projects(self) -> None:
         """Generate test executable projects from test suites or test_projects"""
