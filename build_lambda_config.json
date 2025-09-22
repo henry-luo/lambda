@@ -130,12 +130,6 @@
     ],
     "dev_libraries": [
         {
-            "name": "criterion",
-            "include": "/opt/homebrew/Cellar/criterion/2.4.2_2/include",
-            "lib": "/opt/homebrew/Cellar/criterion/2.4.2_2/lib/libcriterion.a",
-            "link": "static"
-        },
-        {
             "name": "gtest",
             "include": "/opt/homebrew/include",
             "lib": "/opt/homebrew/lib/libgtest.a",
@@ -467,12 +461,6 @@
             ],
             "dev_libraries": [
                 {
-                    "name": "criterion",
-                    "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libcriterion.a",
-                    "link": "static"
-                },
-                {
                     "name": "gtest",
                     "include": "/mingw64/include",
                     "lib": "/mingw64/lib/libgtest.a",
@@ -564,12 +552,6 @@
                     "include": "/usr/include/openssl",
                     "lib": "/usr/lib/aarch64-linux-gnu/libcrypto.a",
                     "link": "static"
-                },
-                {
-                    "name": "criterion",
-                    "include": "/usr/include",
-                    "lib": "-lcriterion",
-                    "link": "dynamic"
                 },
                 {
                     "name": "lexbor",
@@ -857,18 +839,6 @@
                 "name": "🔍 Validator Tests",
                 "tests": [
                     {
-                        "source": "test/test_validator.cpp",
-                        "name": "🔍 Validator Tests",
-                        "dependencies": ["lambda-input-full"],
-                        "binary": "test/test_validator.exe"
-                    },
-                    {
-                        "source": "test/test_ast_validator.cpp",
-                        "name": "🔍 AST Validator Tests",
-                        "dependencies": ["lambda-input-full"],
-                        "binary": "test/test_ast_validator.exe"
-                    },
-                    {
                         "source": "test/test_validator_gtest.cpp",
                         "name": "🔍 Validator Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
@@ -898,26 +868,6 @@
                 "suite": "lambda",
                 "name": "🐑 Lambda Runtime Tests",
                 "tests": [
-                    {
-                        "source": "test/test_lambda.cpp",
-                        "name": "🐑 Lambda Runtime Tests",
-                        "dependencies": [],
-                        "binary": "test/test_lambda.exe",
-                        "libraries": ["criterion"]
-                    },
-                    {
-                        "source": "test/test_lambda_repl.cpp",
-                        "name": "🎮 Lambda REPL Interface Tests",
-                        "dependencies": [],
-                        "binary": "test/test_lambda_repl.exe"
-                    },
-                    {
-                        "source": "test/test_lambda_proc.cpp",
-                        "name": "🐑 Lambda Procedural Tests",
-                        "dependencies": [],
-                        "binary": "test/test_lambda_proc.exe",
-                        "libraries": ["criterion"]
-                    },
                     {
                         "source": "test/test_lambda_gtest.cpp",
                         "name": "🐑 Lambda Runtime Tests (GTest)",

@@ -837,7 +837,6 @@ class PremakeGenerator:
             else:
                 self.premake_content.extend([
                     '        "/opt/homebrew/lib",',
-                    '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
                     '        "/usr/local/lib",',
                     '        "build/lib",',
                 ])
@@ -909,10 +908,7 @@ class PremakeGenerator:
                     for lib in dynamic_libs:
                         self.premake_content.append(f'        "{lib}",')
                     for dep in internal_deps:
-                        if dep == 'criterion':
-                            self.premake_content.append('        "criterion",')
-                        else:
-                            self.premake_content.append(f'        "{dep}",')
+                        self.premake_content.append(f'        "{dep}",')
                     self.premake_content.extend([
                         '    }',
                         '    '
@@ -925,10 +921,7 @@ class PremakeGenerator:
                     for framework in special_flags_frameworks:
                         self.premake_content.append(f'        "{framework}.framework",')
                     for dep in internal_deps:
-                        if dep == 'criterion':
-                            self.premake_content.append('        "criterion",')
-                        else:
-                            self.premake_content.append(f'        "{dep}",')
+                        self.premake_content.append(f'        "{dep}",')
                     self.premake_content.extend([
                         '    }',
                         '    '
@@ -1067,7 +1060,6 @@ class PremakeGenerator:
                 else:
                     self.premake_content.extend([
                         '        "/opt/homebrew/lib",',
-                        '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
                         '        "/usr/local/lib",',
                     ])
                 
@@ -1077,10 +1069,7 @@ class PremakeGenerator:
                     '    links {',
                 ])
                 for dep in external_deps:
-                    if dep == 'criterion':
-                        self.premake_content.append('        "criterion",')
-                    else:
-                        self.premake_content.append(f'        "{dep}",')
+                    self.premake_content.append(f'        "{dep}",')
                 self.premake_content.extend([
                     '    }',
                     '    '
@@ -1432,7 +1421,6 @@ class PremakeGenerator:
             self.premake_content.extend([
                 '        "/usr/local/include",',
                 '        "/opt/homebrew/include",',
-                '        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",',
             ])
         
         self.premake_content.extend([
