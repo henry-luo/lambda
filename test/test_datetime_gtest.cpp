@@ -430,6 +430,7 @@ TEST_F(DateTimeTest, PrecisionAwareFormatting) {
     strbuf_reset(strbuf);
     dt->precision = DATETIME_PRECISION_DATE_TIME;
     DATETIME_SET_TZ_OFFSET(dt, 0);
+    dt->format_hint = DATETIME_FORMAT_ISO8601_UTC;
     datetime_format_iso8601(strbuf, dt);
     EXPECT_NE(strbuf->str, nullptr) << "Full precision formatting should succeed";
     EXPECT_STREQ(strbuf->str, "2025-08-12T14:30:45.123Z") << "Full precision formatting should include everything";
