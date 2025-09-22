@@ -138,6 +138,7 @@ echo "Installing Lambda dependencies..."
 install_msys2_package "git" "Git version control"
 install_msys2_package "${TOOLCHAIN_PREFIX}-gdb" "GDB debugger"
 install_msys2_package "jq" "JSON processor for build script configuration parsing"
+install_msys2_package "vim" "Vim editor (provides xxd binary data tool)"
 
 # HTTP/networking libraries - minimal setup for libcurl only
 # Note: nghttp2 removed - building minimal libcurl without HTTP/2 support

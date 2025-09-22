@@ -115,6 +115,15 @@ if ! command -v cmake >/dev/null 2>&1; then
     fi
 fi
 
+# Check for xxd (needed for binary data conversion)
+if ! command -v xxd >/dev/null 2>&1; then
+    echo "Error: xxd is required but not found. This is unusual on macOS as xxd is typically included by default."
+    echo "You may need to install Xcode Command Line Tools: xcode-select --install"
+    exit 1
+else
+    echo "✅ xxd already available"
+fi
+
 # Create temporary build directory
 mkdir -p "build_temp"
 
