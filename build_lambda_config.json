@@ -173,8 +173,9 @@
             ],
             "libraries": ["utf8proc"],
             "special_flags": "-DUTF8PROC_STATIC",
-            "cpp_flags": "-I/opt/homebrew/include",
-            "link": "static"
+            "cpp_flags": "-I/opt/homebrew/include -DUTF8PROC_STATIC",
+            "link": "static",
+            "defines": ["UTF8PROC_STATIC"]
         },
         {
             "name": "lambda-input-full",

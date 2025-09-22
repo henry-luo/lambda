@@ -84,6 +84,10 @@ project "lambda-lib"
         "-fdiagnostics-color=auto",
     }
     
+    defines {
+        "UTF8PROC_STATIC",
+    }
+    
 
 project "lambda-input-full-c"
     kind "StaticLib"
