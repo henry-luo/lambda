@@ -31,12 +31,12 @@ static const ASCIIMathFormatDef* find_ascii_format_def(const char* element_name)
 // ASCII Math format definitions table
 static const ASCIIMathFormatDef ascii_format_defs[] = {
     // Basic arithmetic operators
-    {"add", " + ", true, false, true, 2},
-    {"sub", " - ", true, false, true, 2},
+    {"add", "+", true, false, true, 2},
+    {"sub", "-", true, false, true, 2},
     {"unary_minus", "-{1}", true, false, false, 1},
-    {"mul", " * ", true, false, true, 2},
+    {"mul", "*", true, false, true, 2},
     {"implicit_mul", "", true, false, true, 2},
-    {"div", " / ", true, false, true, 2},
+    {"div", "/", true, false, true, 2},
     
     // Powers and roots
     {"pow", "^", true, false, true, 2},
@@ -75,16 +75,16 @@ static const ASCIIMathFormatDef ascii_format_defs[] = {
     {"lg", "lg({1})", true, false, false, 1},
     
     // Relations
-    {"eq", " = ", true, false, true, 2},
-    {"neq", " != ", true, false, true, 2},
-    {"lt", " < ", true, false, true, 2},
-    {"le", " <= ", true, false, true, 2},
-    {"leq", " <= ", true, false, true, 2},
-    {"gt", " > ", true, false, true, 2},
-    {"ge", " >= ", true, false, true, 2},
-    {"geq", " >= ", true, false, true, 2},
-    {"approx", " ~~ ", true, false, true, 2},
-    {"equiv", " -= ", true, false, true, 2},
+    {"eq", "=", true, false, true, 2},
+    {"neq", "!=", true, false, true, 2},
+    {"lt", "<", true, false, true, 2},
+    {"le", "<=", true, false, true, 2},
+    {"leq", "<=", true, false, true, 2},
+    {"gt", ">", true, false, true, 2},
+    {"ge", ">=", true, false, true, 2},
+    {"geq", ">=", true, false, true, 2},
+    {"approx", "~~", true, false, true, 2},
+    {"equiv", "-=", true, false, true, 2},
     
     // Greek letters (as identifiers)
     {"alpha", "alpha", false, false, false, 0},
@@ -147,7 +147,7 @@ static const ASCIIMathFormatDef ascii_format_defs[] = {
     {"iff", " <=> ", true, false, true, 2},
     
     // Arrows
-    {"to", " -> ", true, false, true, 2},
+    {"to", "->", true, false, true, 2},
     {"rightarrow", " -> ", true, false, true, 2},
     {"leftarrow", " <- ", true, false, true, 2},
     {"leftrightarrow", " <-> ", true, false, true, 2},
@@ -369,8 +369,10 @@ static void format_ascii_math_element(StringBuf* sb, Element* elem, int depth) {
                 format_ascii_math_item(sb, elem->items[0], depth + 1);
                 if (left_needs_parens) stringbuf_append_str(sb, ")");
                 
-                // Add operator
+                // Add operator with spaces for better readability
+                stringbuf_append_str(sb, " ");
                 stringbuf_append_str(sb, def->ascii_format);
+                stringbuf_append_str(sb, " ");
                 
                 // Format right operand with parentheses if needed
                 if (right_needs_parens) stringbuf_append_str(sb, "(");

@@ -185,15 +185,22 @@ get_c_test_display_name() {
     case "$exe_name" in
         "test_datetime") echo "📅 DateTime Tests" ;;
         "test_dir") echo "📁 Directory Listing Tests" ;;
+        "test_dir_gtest") echo "📁 Directory Listing Tests (GTest)" ;;
         "test_http") echo "🌐 HTTP/HTTPS Tests" ;;
         "test_input_roundtrip") echo "🔄 Input Roundtrip Tests" ;;
+        "test_input_roundtrip_gtest") echo "🔄 Input Roundtrip Tests (GTest)" ;;
         "test_lambda") echo "🐑 Lambda Runtime Tests" ;;
         "test_lambda_gtest") echo "🐑 Lambda Runtime Tests (GTest)" ;;
         "test_lambda_proc_gtest") echo "🐑 Lambda Procedural Tests (GTest)" ;;
         "test_lambda_repl_gtest") echo "🎮 Lambda REPL Interface Tests (GTest)" ;;
         "test_markup_roundtrip") echo "📝 Markup Roundtrip Tests" ;;
+        "test_markup_roundtrip_gtest") echo "📝 Markup Roundtrip Tests (GTest)" ;;
         "test_math") echo "🔢 Math Roundtrip Tests" ;;
+        "test_math_gtest") echo "🔢 Math Roundtrip Tests (GTest)" ;;
+        "test_math_ascii_gtest") echo "🔤 ASCII Math Roundtrip Tests (GTest)" ;;
         "test_mime_detect") echo "📎 MIME Detection Tests" ;;
+        "test_mime_detect_gtest") echo "📎 MIME Detection Tests (GTest)" ;;
+        "test_css_files_safe_gtest") echo "🎨 CSS Files Safe Tests (GTest)" ;;
         "test_mir") echo "⚡ MIR JIT Tests" ;;
         "test_num_stack") echo "🔢 Number Stack Tests" ;;
         "test_strbuf") echo "📝 String Buffer Tests" ;;
@@ -213,6 +220,11 @@ ensure_test_compiled() {
     local test_exe="$1"
     local base_name="$(basename "$test_exe" .exe)"
     local source_file="test/${base_name}.c"
+    
+    # Check for .cpp file if .c doesn't exist
+    if [ ! -f "$source_file" ]; then
+        source_file="test/${base_name}.cpp"
+    fi
     
     # Check if source file exists
     if [ ! -f "$source_file" ]; then
@@ -530,6 +542,20 @@ for source_file in "${valid_test_sources[@]}"; do
         fi
     fi
     
+    # For Input Tests, prefer GTest versions over Criterion
+    if [[ "$base_name" == "test_mime_detect" || "$base_name" == "test_css_files_safe" || \
+          "$base_name" == "test_math" || "$base_name" == "test_math_ascii" || \
+          "$base_name" == "test_markup_roundtrip" || "$base_name" == "test_dir" || \
+          "$base_name" == "test_input_roundtrip" ]]; then
+        gtest_name="${base_name}_gtest"
+        gtest_exe="test/${gtest_name}.exe"
+        if [ -f "$gtest_exe" ]; then
+            # Use GTest version if available
+            test_executables+=("$gtest_exe")
+            continue
+        fi
+    fi
+    
     # Skip other Catch2 tests (exclude any test with "catch2" in the name)
     # except for the lambda runtime tests we specifically want
     if [[ "$base_name" == *"catch2"* ]]; then
@@ -739,6 +765,9 @@ else
         
         # Check if we have a source file for this test
         source_file="test/${base_name}.c"
+        if [ ! -f "$source_file" ]; then
+            source_file="test/${base_name}.cpp"
+        fi
         if [ -f "$source_file" ] || [ -x "$test_exe" ]; then
             c_test_display_name=$(get_c_test_display_name "$base_name")
             suite_category=$(get_test_suite_category "$base_name")
