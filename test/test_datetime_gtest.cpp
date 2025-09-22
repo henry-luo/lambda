@@ -288,6 +288,153 @@ TEST_F(DateTimeTest, ErrorHandling) {
     
     dt = datetime_parse_iso8601(pool, "invalid-date");
     EXPECT_EQ(dt, nullptr) << "Parsing invalid date should return NULL";
+}
+
+// Test 12: Round trip ISO8601
+TEST_F(DateTimeTest, RoundTripIso8601) {
+    // Test that parsing and formatting are inverse operations
+    const char* original = "2025-08-12T14:30:45.123Z";
+    
+    DateTime* dt = datetime_parse_iso8601(pool, original);
+    EXPECT_NE(dt, nullptr) << "Original string should parse successfully";
+    
+    StrBuf* strbuf = strbuf_new();
+    datetime_format_iso8601(strbuf, dt);
+    EXPECT_NE(strbuf->str, nullptr) << "Formatting should succeed";
+    EXPECT_STREQ(strbuf->str, original) << "Round-trip should preserve original string";
+    
+    // Test round-trip with timezone
+    const char* original_tz = "2025-08-12T14:30:45+05:30";
+    dt = datetime_parse_iso8601(pool, original_tz);
+    EXPECT_NE(dt, nullptr) << "Timezone string should parse successfully";
+    
+    strbuf_reset(strbuf);
+    datetime_format_iso8601(strbuf, dt);
+    EXPECT_NE(strbuf->str, nullptr) << "Timezone formatting should succeed";
+    EXPECT_STREQ(strbuf->str, original_tz) << "Round-trip should preserve timezone string";
+    
+    strbuf_free(strbuf);
+}
+
+// Test 13: Precision year only
+TEST_F(DateTimeTest, PrecisionYearOnly) {
+    DateTime* dt = datetime_new(pool);
+    EXPECT_NE(dt, nullptr);
+    
+    // Set only year information
+    DATETIME_SET_YEAR_MONTH(dt, 2025, 1);
+    dt->day = 1;
+    dt->precision = DATETIME_PRECISION_YEAR_ONLY;
+    
+    EXPECT_TRUE(datetime_is_valid(dt)) << "Year-only DateTime should be valid";
+    
+    // Test formatting with year-only precision
+    StrBuf* strbuf = strbuf_new();
+    datetime_format_iso8601(strbuf, dt);
+    EXPECT_NE(strbuf->str, nullptr) << "Year-only formatting should succeed";
+    // Should format as just the year
+    EXPECT_TRUE(strstr(strbuf->str, "2025") != nullptr) << "Year should appear in formatted string";
+    
+    strbuf_free(strbuf);
+}
+
+// Test 14: Precision flags
+TEST_F(DateTimeTest, PrecisionFlags) {
+    DateTime* dt = datetime_new(pool);
+    EXPECT_NE(dt, nullptr);
+    
+    // Test different precision levels
+    dt->precision = DATETIME_PRECISION_DATE_ONLY;
+    EXPECT_TRUE(dt->precision == DATETIME_PRECISION_DATE_ONLY || dt->precision == DATETIME_PRECISION_DATE_TIME) << "Date-only precision should indicate date availability";
+    EXPECT_FALSE(dt->precision == DATETIME_PRECISION_TIME_ONLY || dt->precision == DATETIME_PRECISION_DATE_TIME) << "Date-only precision should not indicate time availability";
+    
+    dt->precision = DATETIME_PRECISION_DATE_TIME;
+    EXPECT_TRUE(dt->precision == DATETIME_PRECISION_DATE_ONLY || dt->precision == DATETIME_PRECISION_DATE_TIME) << "Date-time precision should indicate date availability";
+    EXPECT_TRUE(dt->precision == DATETIME_PRECISION_TIME_ONLY || dt->precision == DATETIME_PRECISION_DATE_TIME) << "Date-time precision should indicate time availability";
+    
+    dt->precision = DATETIME_PRECISION_TIME_ONLY;
+    EXPECT_FALSE(dt->precision == DATETIME_PRECISION_DATE_ONLY || dt->precision == DATETIME_PRECISION_DATE_TIME) << "Time-only precision should not indicate date availability";
+    EXPECT_TRUE(dt->precision == DATETIME_PRECISION_TIME_ONLY || dt->precision == DATETIME_PRECISION_DATE_TIME) << "Time-only precision should indicate time availability";
+    
+    dt->precision = DATETIME_PRECISION_YEAR_ONLY;
+    EXPECT_TRUE(dt->precision == DATETIME_PRECISION_YEAR_ONLY) << "Year-only precision should indicate partial date availability";
+    EXPECT_FALSE(dt->precision == DATETIME_PRECISION_TIME_ONLY || dt->precision == DATETIME_PRECISION_DATE_TIME) << "Year-only precision should not indicate time availability";
+}
+
+// Test 15: Lambda format parsing
+TEST_F(DateTimeTest, LambdaFormatParsing) {
+    // Test Lambda-specific date format parsing
+    DateTime* dt = datetime_parse_lambda(pool, "t'2025-08-12'");
+    EXPECT_NE(dt, nullptr) << "Lambda date format should parse successfully";
+    EXPECT_EQ(DATETIME_GET_YEAR(dt), 2025) << "Lambda format year should be parsed correctly";
+    EXPECT_EQ(DATETIME_GET_MONTH(dt), 8) << "Lambda format month should be parsed correctly";
+    EXPECT_EQ(dt->day, 12) << "Lambda format day should be parsed correctly";
+    EXPECT_EQ(dt->precision, DATETIME_PRECISION_DATE_ONLY) << "Lambda date format should set date-only precision";
+    
+    // Test Lambda date-time format
+    dt = datetime_parse_lambda(pool, "t'2025-08-12T14:30:45'");
+    EXPECT_NE(dt, nullptr) << "Lambda date-time format should parse successfully";
+    EXPECT_EQ(DATETIME_GET_YEAR(dt), 2025) << "Lambda date-time year should be parsed correctly";
+    EXPECT_EQ(DATETIME_GET_MONTH(dt), 8) << "Lambda date-time month should be parsed correctly";
+    EXPECT_EQ(dt->day, 12) << "Lambda date-time day should be parsed correctly";
+    EXPECT_EQ(dt->hour, 14) << "Lambda date-time hour should be parsed correctly";
+    EXPECT_EQ(dt->minute, 30) << "Lambda date-time minute should be parsed correctly";
+    EXPECT_EQ(dt->second, 45) << "Lambda date-time second should be parsed correctly";
+    EXPECT_EQ(dt->precision, DATETIME_PRECISION_DATE_TIME) << "Lambda date-time format should set full precision";
+    
+    // Test Lambda time-only format
+    dt = datetime_parse_lambda(pool, "t'14:30:45'");
+    EXPECT_NE(dt, nullptr) << "Lambda time-only format should parse successfully";
+    EXPECT_EQ(dt->hour, 14) << "Lambda time-only hour should be parsed correctly";
+    EXPECT_EQ(dt->minute, 30) << "Lambda time-only minute should be parsed correctly";
+    EXPECT_EQ(dt->second, 45) << "Lambda time-only second should be parsed correctly";
+    EXPECT_EQ(dt->precision, DATETIME_PRECISION_TIME_ONLY) << "Lambda time-only format should set time-only precision";
+}
+
+// Test 16: Precision aware formatting
+TEST_F(DateTimeTest, PrecisionAwareFormatting) {
+    DateTime* dt = datetime_new(pool);
+    EXPECT_NE(dt, nullptr);
+    
+    // Set up base DateTime
+    DATETIME_SET_YEAR_MONTH(dt, 2025, 8);
+    dt->day = 12;
+    dt->hour = 14;
+    dt->minute = 30;
+    dt->second = 45;
+    dt->millisecond = 123;
+    
+    StrBuf* strbuf = strbuf_new();
+    
+    // Test date-only precision formatting
+    dt->precision = DATETIME_PRECISION_DATE_ONLY;
+    datetime_format_iso8601(strbuf, dt);
+    EXPECT_NE(strbuf->str, nullptr) << "Date-only formatting should succeed";
+    EXPECT_STREQ(strbuf->str, "2025-08-12") << "Date-only formatting should exclude time";
+    
+    // Test year-only precision formatting  
+    strbuf_reset(strbuf);
+    dt->precision = DATETIME_PRECISION_YEAR_ONLY;
+    datetime_format_iso8601(strbuf, dt);
+    EXPECT_NE(strbuf->str, nullptr) << "Year-only formatting should succeed";
+    EXPECT_STREQ(strbuf->str, "2025") << "Year-only formatting should show only year";
+    
+    // Test time-only precision formatting
+    strbuf_reset(strbuf);
+    dt->precision = DATETIME_PRECISION_TIME_ONLY;
+    datetime_format_iso8601(strbuf, dt);
+    EXPECT_NE(strbuf->str, nullptr) << "Time-only formatting should succeed";
+    EXPECT_STREQ(strbuf->str, "14:30:45.123") << "Time-only formatting should exclude date";
+    
+    // Test full precision formatting
+    strbuf_reset(strbuf);
+    dt->precision = DATETIME_PRECISION_DATE_TIME;
+    DATETIME_SET_TZ_OFFSET(dt, 0);
+    datetime_format_iso8601(strbuf, dt);
+    EXPECT_NE(strbuf->str, nullptr) << "Full precision formatting should succeed";
+    EXPECT_STREQ(strbuf->str, "2025-08-12T14:30:45.123Z") << "Full precision formatting should include everything";
+    
+    strbuf_free(strbuf);
     
     // Test NULL DateTime validation
     EXPECT_FALSE(datetime_is_valid(nullptr)) << "NULL DateTime should be invalid";

@@ -693,7 +693,7 @@ TEST_F(CmdEditTest, EditorWithTerminalState) {
         editor_insert_char(&editor, 'h');
         editor_insert_char(&editor, 'i');
         
-        EXPECT_GE(editor.line_length, 2UL) << "Editor should track inserted characters";
+        EXPECT_GE(editor.buffer_len, 2UL) << "Editor should track inserted characters";
         
         editor_cleanup(&editor);
         terminal_cleanup(&terminal);
@@ -717,7 +717,7 @@ TEST_F(CmdEditTest, EditorRefreshDisplaySafe) {
     // Test that refresh operations don't crash
     // In a real implementation, this would update the display
     // For now, just ensure the editor state is consistent
-    EXPECT_EQ(editor.line_length, 5UL) << "Line length should match inserted characters";
+    EXPECT_EQ(editor.buffer_len, 5UL) << "Line length should match inserted characters";
     
     editor_cleanup(&editor);
 }
@@ -730,7 +730,7 @@ TEST_F(CmdEditTest, BufferAllocationAndGrowth) {
     EXPECT_EQ(result, 0) << "Editor should initialize";
     
     // Initial capacity should be reasonable
-    size_t initial_capacity = editor.line_size;
+    size_t initial_capacity = editor.buffer_size;
     EXPECT_GT(initial_capacity, 0UL) << "Initial buffer should have some capacity";
     
     // Insert many characters to trigger growth
@@ -740,8 +740,8 @@ TEST_F(CmdEditTest, BufferAllocationAndGrowth) {
     }
     
     // Buffer should have grown
-    EXPECT_GE(editor.line_size, initial_capacity) << "Buffer should grow as needed";
-    EXPECT_EQ(editor.line_length, 200UL) << "Should track all inserted characters";
+    EXPECT_GE(editor.buffer_size, initial_capacity) << "Buffer should grow as needed";
+    EXPECT_EQ(editor.buffer_len, 200UL) << "Should track all inserted characters";
     
     editor_cleanup(&editor);
 }
@@ -762,8 +762,8 @@ TEST_F(CmdEditTest, PromptAllocation) {
         EXPECT_EQ(result, 0) << "Should handle prompt: " << prompts[i];
         
         // Verify prompt is accessible
-        if (editor.prompt_length > 0) {
-            EXPECT_EQ(editor.prompt_length, strlen(prompts[i])) 
+        if (editor.prompt_len > 0) {
+            EXPECT_EQ(editor.prompt_len, strlen(prompts[i])) 
                 << "Prompt length should match";
         }
         
@@ -815,7 +815,7 @@ TEST_F(CmdEditTest, KillLineOperations) {
     // Kill to end of line (Ctrl-K equivalent)
     // This would be implemented as editor_kill_line_forward() or similar
     // For now, just test that cursor position is valid
-    EXPECT_LT(cursor_before, editor.line_length) << "Cursor should be in valid position";
+    EXPECT_LT(cursor_before, editor.buffer_len) << "Cursor should be in valid position";
     
     editor_cleanup(&editor);
 }
@@ -833,12 +833,12 @@ TEST_F(CmdEditTest, KillWholeLineOperation) {
     editor_insert_char(&editor, 'l');
     editor_insert_char(&editor, 'o');
     
-    size_t initial_length = editor.line_length;
+    size_t initial_length = editor.buffer_len;
     EXPECT_EQ(initial_length, 5UL) << "Should have initial content";
     
     // Kill whole line would clear everything
     // For now, just verify we have content to kill
-    EXPECT_GT(editor.line_length, 0UL) << "Should have content before kill operation";
+    EXPECT_GT(editor.buffer_len, 0UL) << "Should have content before kill operation";
     
     editor_cleanup(&editor);
 }
@@ -853,7 +853,7 @@ TEST_F(CmdEditTest, TransposeCharacters) {
     editor_insert_char(&editor, 'a');
     editor_insert_char(&editor, 'b');
     
-    EXPECT_GE(editor.line_length, 2UL) << "Should have at least 2 characters";
+    EXPECT_GE(editor.buffer_len, 2UL) << "Should have at least 2 characters";
     
     // Move cursor to position where transpose is possible
     if (editor.cursor_pos > 0) {
@@ -876,11 +876,11 @@ TEST_F(CmdEditTest, TransposeAtEnd) {
     editor_insert_char(&editor, 'y');
     editor_insert_char(&editor, 'z');
     
-    EXPECT_EQ(editor.cursor_pos, editor.line_length) << "Cursor should be at end";
+    EXPECT_EQ(editor.cursor_pos, editor.buffer_len) << "Cursor should be at end";
     
     // Transpose at end should work with last two characters
-    if (editor.line_length >= 2) {
-        EXPECT_GE(editor.line_length, 2UL) << "Should have enough characters for transpose";
+    if (editor.buffer_len >= 2) {
+        EXPECT_GE(editor.buffer_len, 2UL) << "Should have enough characters for transpose";
     }
     
     editor_cleanup(&editor);
@@ -903,7 +903,7 @@ TEST_F(CmdEditTest, BackwardKillWord) {
     
     // Backward kill word would delete from cursor to start of current word
     // For now, just verify we have content that could be killed
-    EXPECT_GT(editor.line_length, 0UL) << "Should have content for word kill";
+    EXPECT_GT(editor.buffer_len, 0UL) << "Should have content for word kill";
     
     editor_cleanup(&editor);
 }
@@ -924,7 +924,7 @@ TEST_F(CmdEditTest, KillRingMultipleEntries) {
     
     for (size_t i = 0; i < sizeof(lines)/sizeof(lines[0]); i++) {
         // Clear editor
-        while (editor.line_length > 0 && editor.cursor_pos > 0) {
+        while (editor.buffer_len > 0 && editor.cursor_pos > 0) {
             editor_backspace_char(&editor);
         }
         
@@ -933,7 +933,7 @@ TEST_F(CmdEditTest, KillRingMultipleEntries) {
             editor_insert_char(&editor, lines[i][j]);
         }
         
-        EXPECT_EQ(editor.line_length, strlen(lines[i])) << "Should add line content";
+        EXPECT_EQ(editor.buffer_len, strlen(lines[i])) << "Should add line content";
     }
     
     editor_cleanup(&editor);
@@ -946,7 +946,7 @@ TEST_F(CmdEditTest, EmptyBufferOperations) {
     EXPECT_EQ(result, 0) << "Editor should initialize";
     
     // Test operations on empty buffer
-    EXPECT_EQ(editor.line_length, 0UL) << "Buffer should start empty";
+    EXPECT_EQ(editor.buffer_len, 0UL) << "Buffer should start empty";
     EXPECT_EQ(editor.cursor_pos, 0UL) << "Cursor should start at 0";
     
     // These operations should be safe on empty buffer
@@ -956,7 +956,7 @@ TEST_F(CmdEditTest, EmptyBufferOperations) {
     editor_move_cursor(&editor, 1);  // Should do nothing
     
     // Buffer should still be empty and valid
-    EXPECT_EQ(editor.line_length, 0UL) << "Buffer should remain empty";
+    EXPECT_EQ(editor.buffer_len, 0UL) << "Buffer should remain empty";
     EXPECT_EQ(editor.cursor_pos, 0UL) << "Cursor should remain at 0";
     
     editor_cleanup(&editor);

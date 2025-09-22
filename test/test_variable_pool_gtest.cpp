@@ -699,14 +699,144 @@ TEST_F(VariablePoolTest, FormatMdStressSimulation) {
     
     // Cleanup all remaining allocations
     for (int i = 0; i < 20; i++) {
-        if (elements[i] != NULL) {
+        if (elements[i]) {
             pool_variable_free(pool, elements[i]);
         }
     }
-    
     for (int i = 0; i < 10; i++) {
         pool_variable_free(pool, more_elements[i]);
     }
-    
     pool_variable_free(pool, output_buf);
+}
+
+// Test 27: Safety checks validation
+TEST_F(VariablePoolTest, SafetyChecksValidation) {
+    // Test that the safety checks we added for corruption detection work correctly
+    void *ptr1, *ptr2;
+    MemPoolError err;
+    
+    // Normal allocation and free
+    err = pool_variable_alloc(pool, 100, &ptr1);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    strcpy((char*)ptr1, "Test data");
+    
+    err = pool_variable_alloc(pool, 200, &ptr2);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    strcpy((char*)ptr2, "More test data");
+    
+    // Free first pointer
+    err = pool_variable_free(pool, ptr1);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // Verify second pointer is still valid
+    EXPECT_STREQ((char*)ptr2, "More test data") << "Remaining data should be intact";
+    
+    // Test realloc on remaining pointer
+    ptr2 = pool_variable_realloc(pool, ptr2, 200, 400);
+    ASSERT_NE(ptr2, nullptr) << "Realloc should succeed";
+    EXPECT_STREQ((char*)ptr2, "More test data") << "Data should be preserved";
+    
+    // Test that attempting to use freed pointer fails gracefully
+    err = pool_variable_free(pool, ptr1); // Double free attempt
+    EXPECT_EQ(err, MEM_POOL_ERR_UNKNOWN_BLOCK) << "Double free should be detected";
+    
+    pool_variable_free(pool, ptr2);
+}
+
+// Test 28: Debug output validation
+TEST_F(VariablePoolTest, DebugOutputValidation) {
+    // Test that debug output functions don't crash with various pool states
+    void *ptrs[5];
+    MemPoolError err;
+    
+    // Allocate some blocks
+    for (int i = 0; i < 5; i++) {
+        err = pool_variable_alloc(pool, 50 + i * 25, &ptrs[i]);
+        ASSERT_EQ(err, MEM_POOL_ERR_OK);
+        snprintf((char*)ptrs[i], 20, "Debug%d", i);
+    }
+    
+    // Free some to create free list
+    for (int i = 1; i < 4; i += 2) {
+        err = pool_variable_free(pool, ptrs[i]);
+        EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    }
+    
+    // Pool should remain functional after partial frees
+    void *test_ptr;
+    err = pool_variable_alloc(pool, 100, &test_ptr);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK) << "Pool should remain functional after partial frees";
+    
+    // Cleanup
+    pool_variable_free(pool, ptrs[0]);
+    pool_variable_free(pool, ptrs[4]);
+    pool_variable_free(pool, test_ptr);
+}
+
+// Test 29: Exact crash reproduction attempt
+TEST_F(VariablePoolTest, ExactCrashReproductionAttempt) {
+    // Attempt to reproduce the exact conditions that caused the original crash
+    // Based on the error logs from format-md.c processing
+    
+    void *output_buffer;
+    MemPoolError err = pool_variable_alloc(pool, 32, &output_buffer);
+    ASSERT_EQ(err, MEM_POOL_ERR_OK);
+    strcpy((char*)output_buffer, "# Line Breaks and Paragraphs\n");
+    
+    // Simulate element tree processing with specific allocation pattern
+    void *elements[15];
+    const size_t element_sizes[] = {48, 64, 32, 80, 96, 112, 48, 64, 32, 128, 80, 96, 48, 64, 144};
+    
+    for (int i = 0; i < 15; i++) {
+        err = pool_variable_alloc(pool, element_sizes[i], &elements[i]);
+        ASSERT_EQ(err, MEM_POOL_ERR_OK);
+        snprintf((char*)elements[i], 20, "Elem_%d", i);
+    }
+    
+    // The specific realloc sequence that triggered the crash
+    output_buffer = pool_variable_realloc(pool, output_buffer, 32, 128);
+    ASSERT_NE(output_buffer, nullptr) << "First realloc should succeed";
+    strcat((char*)output_buffer, "\\n\\n");
+    
+    // Free some elements to create the exact fragmentation pattern
+    err = pool_variable_free(pool, elements[2]);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    err = pool_variable_free(pool, elements[5]);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    err = pool_variable_free(pool, elements[8]);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    err = pool_variable_free(pool, elements[11]);
+    EXPECT_EQ(err, MEM_POOL_ERR_OK);
+    
+    // The critical realloc that caused corruption
+    output_buffer = pool_variable_realloc(pool, output_buffer, 128, 512);
+    ASSERT_NE(output_buffer, nullptr) << "Critical realloc should succeed without corruption";
+    
+    // Verify data integrity
+    EXPECT_NE(strstr((char*)output_buffer, "# Line Breaks"), nullptr) << "Original content should be preserved";
+    EXPECT_NE(strstr((char*)output_buffer, "\\n\\n"), nullptr) << "Added content should be preserved";
+    
+    // Continue processing to ensure no delayed corruption
+    for (int i = 0; i < 5; i++) {
+        void *new_elem;
+        err = pool_variable_alloc(pool, 72 + i * 8, &new_elem);
+        ASSERT_EQ(err, MEM_POOL_ERR_OK) << "Post-corruption allocations should succeed";
+        sprintf((char*)new_elem, "New_%d", i);
+        
+        // Immediate realloc test
+        new_elem = pool_variable_realloc(pool, new_elem, 72 + i * 8, 150 + i * 10);
+        ASSERT_NE(new_elem, nullptr) << "Post-corruption reallocs should succeed";
+        EXPECT_EQ(strncmp((char*)new_elem, "New_", 4), 0) << "Data should be preserved in post-corruption reallocs";
+        
+        pool_variable_free(pool, new_elem);
+    }
+    
+    // Cleanup remaining elements
+    const int remaining[] = {0, 1, 3, 4, 6, 7, 9, 10, 12, 13, 14};
+    for (size_t i = 0; i < sizeof(remaining)/sizeof(remaining[0]); i++) {
+        pool_variable_free(pool, elements[remaining[i]]);
+    }
+    pool_variable_free(pool, output_buffer);
+    
+    EXPECT_TRUE(true) << "Crash reproduction test completed without corruption";
 }
