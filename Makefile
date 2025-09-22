@@ -1187,10 +1187,6 @@ uninstall:
 # 	fi
 
 # Advanced targets for development workflow
-quick: 
-	@echo "Quick build (minimal checks)..."
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=$(JOBS)
-
 parallel:
 	@echo "Maximum parallel build..."
 	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=8 --force
@@ -1214,11 +1210,6 @@ info:
 	@echo ""
 	@echo "Available Configurations:"
 	@ls -1 *.json 2>/dev/null | grep -E "(config|build)" | sed 's/^/  /' || echo "  No configuration files found"
-
-# Dependency tracking (show what would be built)
-what-will-build:
-	@echo "Checking what files need compilation..."
-	$(COMPILE_SCRIPT) $(DEFAULT_CONFIG) --jobs=1 | head -20
 
 # Performance targets
 time-build:
@@ -1247,7 +1238,18 @@ clean-premake:
 	@rm -f dummy.cpp
 	@echo "Premake5 artifacts cleaned."
 
-build-test:
+build-lambda-input:
+	@echo "Building lambda-input DLLs..."
+	@echo "Generating Premake configuration..."
+	@mkdir -p build/premake
+	$(MAKE) generate-premake
+	@echo "Generating makefiles..."
+	cd build/premake && premake5 gmake --file=../../premake5.lua
+	@echo "Building lambda-input DLLs with $(JOBS) parallel jobs..."
+	cd build/premake && $(MAKE) config=debug_native lambda-input-full-cpp lambda-input-full-c -j$(JOBS)
+	@echo "✅ lambda-input DLLs built successfully!"
+
+build-test: build-lambda-input
 	@echo "Building tests using Premake5..."
 	@echo "Building configurations..."
 	@mkdir -p build/premake
