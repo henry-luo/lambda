@@ -141,6 +141,8 @@ project "lambda-input-full-c"
     }
     
     links {
+        "CoreFoundation.framework",
+        "SystemConfiguration.framework",
         "z",
         "lambda-lib",
     }
@@ -162,6 +164,15 @@ project "lambda-input-full-cpp"
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
         "test/test_stubs.cpp",
+        "lambda/parse.c",
+        "lambda/input/css_tokenizer.c",
+        "lambda/input/css_parser.c",
+        "lambda/input/css_properties.c",
+        "lib/arraylist.c",
+        "lib/hashmap.c",
+        "lib/file.c",
+        "lib/log.c",
+        "lib/utf.c",
     }
     
     files {
@@ -187,11 +198,20 @@ project "lambda-input-full-cpp"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
     }
     
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17"
-    }
+    filter "files:**.c"
+        buildoptions {
+            "-pedantic",
+            "-fdiagnostics-color=auto",
+        }
+    
+    filter "files:**.cpp"
+        buildoptions {
+            "-pedantic",
+            "-fdiagnostics-color=auto",
+            "-std=c++17",
+        }
+    
+    filter {}
     
     libdirs {
         "/opt/homebrew/lib",
@@ -212,8 +232,9 @@ project "lambda-input-full-cpp"
     }
     
     links {
+        "CoreFoundation.framework",
+        "SystemConfiguration.framework",
         "z",
-        "lambda-input-full-c",
         "lambda-lib",
     }
     
