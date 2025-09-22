@@ -749,19 +749,51 @@ class PremakeGenerator:
         base_compiler, _ = self._get_compiler_info()
         build_opts = self._get_build_options(base_compiler)
         
-        if language == "C++":
-            build_opts.append('-std=c++17')
+        # Check if this project has mixed C/C++ files
+        c_files_present = any(f.endswith('.c') for f in source_files)
+        cpp_files_present = any(f.endswith('.cpp') for f in source_files)
         
-        self.premake_content.extend([
-            '    buildoptions {',
-        ])
-        for i, opt in enumerate(build_opts):
-            comma = ',' if i < len(build_opts) - 1 else ''
-            self.premake_content.append(f'        "{opt}"{comma}')
-        self.premake_content.extend([
-            '    }',
-            '    '
-        ])
+        if c_files_present and cpp_files_present and language == "C++":
+            # Mixed project: use file-specific build options
+            c_build_opts = build_opts.copy()
+            cpp_build_opts = build_opts + ['-std=c++17']
+            
+            # C file build options
+            self.premake_content.extend([
+                '    filter "files:**.c"',
+                '        buildoptions {',
+            ])
+            for opt in c_build_opts:
+                self.premake_content.append(f'            "{opt}",')
+            self.premake_content.extend([
+                '        }',
+                '    ',
+                '    filter "files:**.cpp"',
+                '        buildoptions {',
+            ])
+            for opt in cpp_build_opts:
+                self.premake_content.append(f'            "{opt}",')
+            self.premake_content.extend([
+                '        }',
+                '    ',
+                '    filter {}',
+                '    '
+            ])
+        else:
+            # Pure language project: use global build options
+            if language == "C++":
+                build_opts.append('-std=c++17')
+            
+            self.premake_content.extend([
+                '    buildoptions {',
+            ])
+            for i, opt in enumerate(build_opts):
+                comma = ',' if i < len(build_opts) - 1 else ''
+                self.premake_content.append(f'        "{opt}"{comma}')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
         
         # Add library dependencies
         if dependencies:
@@ -774,6 +806,21 @@ class PremakeGenerator:
                     external_deps.append(dep)
                 else:
                     internal_deps.append(dep)
+            
+            # Process special_flags for frameworks
+            special_flags_frameworks = []
+            special_flags = lib.get('special_flags', '')
+            if special_flags:
+                # Parse special_flags to extract frameworks
+                flag_parts = special_flags.split()
+                i = 0
+                while i < len(flag_parts):
+                    if flag_parts[i] == '-framework' and i + 1 < len(flag_parts):
+                        framework_name = flag_parts[i + 1]
+                        special_flags_frameworks.append(framework_name)
+                        i += 2
+                    else:
+                        i += 1
             
             # Add libdirs if we have dependencies
             self.premake_content.extend([
@@ -790,7 +837,6 @@ class PremakeGenerator:
             else:
                 self.premake_content.extend([
                     '        "/opt/homebrew/lib",',
-                    '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
                     '        "/usr/local/lib",',
                     '        "build/lib",',
                 ])
@@ -851,30 +897,31 @@ class PremakeGenerator:
                     ])
                 
                 # Add frameworks, dynamic libraries, and internal libraries to links
-                if frameworks or dynamic_libs or internal_deps:
+                if frameworks or dynamic_libs or internal_deps or special_flags_frameworks:
                     self.premake_content.append('    links {')
+                    # Add frameworks from external dependencies
                     for framework in frameworks:
+                        self.premake_content.append(f'        "{framework}.framework",')
+                    # Add frameworks from special_flags
+                    for framework in special_flags_frameworks:
                         self.premake_content.append(f'        "{framework}.framework",')
                     for lib in dynamic_libs:
                         self.premake_content.append(f'        "{lib}",')
                     for dep in internal_deps:
-                        if dep == 'criterion':
-                            self.premake_content.append('        "criterion",')
-                        else:
-                            self.premake_content.append(f'        "{dep}",')
+                        self.premake_content.append(f'        "{dep}",')
                     self.premake_content.extend([
                         '    }',
                         '    '
                     ])
             else:
-                # Add links for internal libraries only
-                if internal_deps:
+                # Add links for internal libraries and special_flags frameworks only
+                if internal_deps or special_flags_frameworks:
                     self.premake_content.append('    links {')
+                    # Add frameworks from special_flags
+                    for framework in special_flags_frameworks:
+                        self.premake_content.append(f'        "{framework}.framework",')
                     for dep in internal_deps:
-                        if dep == 'criterion':
-                            self.premake_content.append('        "criterion",')
-                        else:
-                            self.premake_content.append(f'        "{dep}",')
+                        self.premake_content.append(f'        "{dep}",')
                     self.premake_content.extend([
                         '    }',
                         '    '
@@ -1013,7 +1060,6 @@ class PremakeGenerator:
                 else:
                     self.premake_content.extend([
                         '        "/opt/homebrew/lib",',
-                        '        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",',
                         '        "/usr/local/lib",',
                     ])
                 
@@ -1023,10 +1069,7 @@ class PremakeGenerator:
                     '    links {',
                 ])
                 for dep in external_deps:
-                    if dep == 'criterion':
-                        self.premake_content.append('        "criterion",')
-                    else:
-                        self.premake_content.append(f'        "{dep}",')
+                    self.premake_content.append(f'        "{dep}",')
                 self.premake_content.extend([
                     '    }',
                     '    '
@@ -1378,7 +1421,6 @@ class PremakeGenerator:
             self.premake_content.extend([
                 '        "/usr/local/include",',
                 '        "/opt/homebrew/include",',
-                '        "/opt/homebrew/Cellar/criterion/2.4.2_2/include",',
             ])
         
         self.premake_content.extend([
