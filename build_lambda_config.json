@@ -733,96 +733,123 @@
                 "name": "📄 Input Processing Tests",
                 "tests": [
                     {
-                        "source": "test_mime_detect.c",
-                        "name": "📎 MIME Detection Tests",
+                        "source": "test_mime_detect_gtest.cpp",
+                        "name": "📎 MIME Detection Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "libraries": ["criterion"],
-                        "binary": "test_mime_detect.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_mime_detect_gtest.exe"
                     },
                     {
-                        "source": "test_math.cpp",
-                        "name": "🔢 Math Roundtrip Tests",
+                        "source": "test_math_gtest.cpp",
+                        "name": "🔢 Math Roundtrip Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_math.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_math_gtest.exe"
                     },
                     {
-                        "source": "test_math_ascii.cpp",
-                        "name": "🔤 ASCII Math Roundtrip Tests",
+                        "source": "test_math_ascii_gtest.cpp",
+                        "name": "🔤 ASCII Math Roundtrip Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_math_ascii.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_math_ascii_gtest.exe"
                     },
                     {
-                        "source": "test_markup_roundtrip.cpp",
-                        "name": "📝 Markup Roundtrip Tests",
+                        "source": "test_markup_roundtrip_gtest.cpp",
+                        "name": "📝 Markup Roundtrip Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_markup_roundtrip.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_markup_roundtrip_gtest.exe"
                     },
                     {
-                        "source": "test/test_input_roundtrip.cpp",
-                        "name": "🔄 Input Roundtrip Tests",
+                        "source": "test_input_roundtrip_gtest.cpp",
+                        "name": "🔄 Input Roundtrip Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_input_roundtrip.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_input_roundtrip_gtest.exe"
                     },
                     {
-                        "source": "test/test_dir.cpp",
-                        "name": "📁 Directory Listing Tests",
+                        "source": "test_dir_gtest.cpp",
+                        "name": "📁 Directory Listing Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_dir.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_dir_gtest.exe"
                     },
                     {
-                        "source": "test/test_http.cpp",
-                        "name": "🌐 HTTP/HTTPS Tests",
+                        "source": "test/test_http_gtest.cpp",
+                        "name": "🌐 HTTP/HTTPS Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_http.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_http_gtest.exe"
                     },
                     {
-                        "source": "test/test_sysinfo.cpp",
-                        "name": "🖥️ System Information Tests",
+                        "source": "test/test_sysinfo_gtest.cpp",
+                        "name": "🖥️ System Information Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_sysinfo.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_sysinfo_gtest.exe"
                     },
                     {
-                        "source": "test/test_jsx_roundtrip.cpp",
-                        "name": "🔢 JSX Roundtrip Tests",
+                        "source": "test/test_jsx_roundtrip_new_gtest.cpp",
+                        "name": "🔢 JSX Roundtrip Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_jsx_roundtrip.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_jsx_roundtrip_new_gtest.exe"
                     },
                     {
-                        "source": "test/test_mdx_roundtrip.cpp",
-                        "name": "📝 MDX Roundtrip Tests",
+                        "source": "test/test_mdx_roundtrip_new_gtest.cpp",
+                        "name": "📝 MDX Roundtrip Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_mdx_roundtrip.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_mdx_roundtrip_new_gtest.exe"
                     },
                     {
-                        "source": "test/test_css_tokenizer.cpp",
-                        "name": "🎨 CSS Tokenizer Tests",
+                        "source": "test/test_css_tokenizer_gtest.cpp",
+                        "name": "🎨 CSS Tokenizer Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_css_tokenizer.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_css_tokenizer_gtest.exe"
                     },
                     {
-                        "source": "test/test_css_parser.cpp",
-                        "name": "🎨 CSS Parser Tests",
+                        "source": "test/test_css_parser_gtest.cpp",
+                        "name": "🎨 CSS Parser Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_css_parser.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_css_parser_gtest.exe"
                     },
                     {
-                        "source": "test/test_css_integration.cpp",
-                        "name": "🎨 CSS Integration Tests",
+                        "source": "test/test_css_integration_gtest.cpp",
+                        "name": "🎨 CSS Integration Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_css_integration.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_css_integration_gtest.exe"
                     },
                     {
-                        "source": "test_css_files_safe.c",
-                        "name": "🎨 CSS Files Safe Tests (Criterion)",
+                        "source": "test_css_files_safe_gtest.cpp",
+                        "name": "🎨 CSS Files Safe Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "libraries": ["criterion"],
-                        "binary": "test_css_files_safe.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_css_files_safe_gtest.exe"
                     },
                     {
-                        "source": "test/test_css_frameworks.cpp",
-                        "name": "🎨 CSS Framework Tests",
+                        "source": "test_css_frameworks_gtest.cpp",
+                        "name": "🎨 CSS Framework Tests (GTest)",
                         "dependencies": ["lambda-input-full"],
-                        "binary": "test_css_frameworks.exe"
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_css_frameworks_gtest.exe"
+                    },
+                    {
+                        "source": "test/test_mdx_roundtrip_gtest.cpp",
+                        "name": "📄 MDX Roundtrip Tests (GTest)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_mdx_roundtrip_gtest.exe"
+                    },
+                    {
+                        "source": "test/test_jsx_roundtrip_gtest.cpp",
+                        "name": "⚛️ JSX Roundtrip Tests (GTest)",
+                        "dependencies": ["lambda-input-full"],
+                        "libraries": ["gtest", "gtest_main"],
+                        "binary": "test_jsx_roundtrip_gtest.exe"
                     }
                 ],
                 "type": "input",

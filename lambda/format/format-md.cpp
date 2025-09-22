@@ -447,8 +447,9 @@ static void format_paragraph(StringBuf* sb, Element* elem) {
     format_element_children(sb, elem);
     
     // Add paragraph spacing for all paragraphs except math-only paragraphs (both display and inline)
+    // But don't add trailing newlines at the end of the document
     if (!only_math_elements) {
-        stringbuf_append_str(sb, "\n\n");
+        stringbuf_append_char(sb, '\n');
     }
 }
 
