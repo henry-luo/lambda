@@ -999,6 +999,25 @@ class PremakeGenerator:
                 '    '
             ])
         
+        # Add macOS frameworks for library projects
+        if self.use_macos_config:
+            self.premake_content.extend([
+                '    -- Add macOS frameworks',
+                '    linkoptions {'
+            ])
+            
+            # Add macOS frameworks using linkoptions
+            for lib_name in self.external_libraries:
+                if self.external_libraries[lib_name].get('link') == 'dynamic':
+                    lib_flag = self.external_libraries[lib_name]['lib']
+                    if lib_flag.startswith('-framework '):
+                        self.premake_content.append(f'        "{lib_flag}",')
+            
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+        
         self.premake_content.append('')
     
     def _create_wrapper_project(self, lib_name: str, sub_projects: List[str], lib: Dict[str, Any] = None) -> None:

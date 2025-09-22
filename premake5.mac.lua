@@ -139,10 +139,15 @@ project "lambda-input-full-c"
     }
     
     links {
-        "CoreFoundation.framework",
-        "SystemConfiguration.framework",
         "z",
         "lambda-lib",
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
     }
     
 
@@ -161,6 +166,7 @@ project "lambda-input-full-cpp"
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
+        "lambda/format/format.cpp",
         "test/test_stubs.cpp",
         "lambda/parse.c",
         "lambda/input/css_tokenizer.c",
@@ -229,10 +235,15 @@ project "lambda-input-full-cpp"
     }
     
     links {
-        "CoreFoundation.framework",
-        "SystemConfiguration.framework",
         "z",
         "lambda-lib",
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
     }
     
 
