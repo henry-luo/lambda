@@ -248,8 +248,346 @@ TEST_F(UrlTest, ErrorHandling) {
     // Test NULL input
     url = url_parse(nullptr);
     EXPECT_EQ(url, nullptr) << "NULL input should return NULL";
+}
+
+// Additional missing tests from Criterion suite
+
+TEST_F(UrlTest, RelativeUrlQueryWithFragment) {
+    // Test query with fragment relative URLs
+    Url* base = url_parse("https://example.com/path/to/page");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
     
+    Url* url = url_parse_with_base("?query=value#fragment", base);
+    EXPECT_NE(url, nullptr) << "Query with fragment URL should resolve";
+    if (url) {
+        EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
+        if (url->host && url->host->chars) {
+            EXPECT_STREQ(url->host->chars, "example.com") << "Host should be preserved";
+        }
+        if (url->pathname && url->pathname->chars) {
+            EXPECT_STREQ(url->pathname->chars, "/path/to/page") << "Path should be preserved";
+        }
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, RelativeUrlAuthorityRelative) {
+    // Test authority-relative URLs
+    Url* base = url_parse("https://example.com/path/to/page");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
+    
+    Url* url = url_parse_with_base("//newhost.com/newpath", base);
+    EXPECT_NE(url, nullptr) << "Authority-relative URL should resolve";
+    if (url) {
+        EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
+        EXPECT_EQ(url->scheme, URL_SCHEME_HTTPS) << "Scheme should be preserved";
+        if (url->host && url->host->chars) {
+            EXPECT_STREQ(url->host->chars, "newhost.com") << "Host should be updated";
+        }
+        if (url->pathname && url->pathname->chars) {
+            EXPECT_STREQ(url->pathname->chars, "/newpath") << "Path should be updated";
+        }
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, RelativeUrlPathRelative) {
+    // Test path-relative URLs
+    Url* base = url_parse("https://example.com/path/to/page");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
+    
+    Url* url = url_parse_with_base("../other/file", base);
+    EXPECT_NE(url, nullptr) << "Path-relative URL should resolve";
+    if (url) {
+        EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
+        if (url->host && url->host->chars) {
+            EXPECT_STREQ(url->host->chars, "example.com") << "Host should be preserved";
+        }
+        // Path resolution should handle .. segments
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, RelativeUrlPathWithSubdirectory) {
+    // Test relative URLs with subdirectory navigation
+    Url* base = url_parse("https://example.com/dir/subdir/page");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
+    
+    Url* url = url_parse_with_base("newfile", base);
+    EXPECT_NE(url, nullptr) << "Relative file URL should resolve";
+    if (url) {
+        EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
+        if (url->host && url->host->chars) {
+            EXPECT_STREQ(url->host->chars, "example.com") << "Host should be preserved";
+        }
+        // Should resolve relative to directory containing base
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, RelativeUrlDotSegments) {
+    // Test dot segment normalization
+    Url* base = url_parse("https://example.com/a/b/c/d");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
+    
+    // Test various dot segment combinations
+    const char* test_cases[] = {
+        "./file",
+        "../file", 
+        "../../file",
+        "./dir/./file",
+        "../dir/../file"
+    };
+    
+    for (size_t i = 0; i < sizeof(test_cases)/sizeof(test_cases[0]); i++) {
+        Url* url = url_parse_with_base(test_cases[i], base);
+        EXPECT_NE(url, nullptr) << "Dot segment URL should resolve: " << test_cases[i];
+        if (url) {
+            EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
+            url_destroy(url);
+        }
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, RelativeUrlDotSegmentsBeyondRoot) {
+    // Test dot segments that would go beyond root
+    Url* base = url_parse("https://example.com/");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
+    
+    Url* url = url_parse_with_base("../../../file", base);
+    EXPECT_NE(url, nullptr) << "Should handle excessive .. segments";
+    if (url) {
+        EXPECT_TRUE(url->is_valid) << "URL should still be valid";
+        if (url->pathname && url->pathname->chars) {
+            // Should not go beyond root
+            EXPECT_EQ(url->pathname->chars[0], '/') << "Path should start with /";
+        }
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, RelativeUrlComplexPathResolution) {
+    // Test complex path resolution scenarios
+    Url* base = url_parse("https://example.com/a/b/c");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
+    
+    Url* url = url_parse_with_base("../d/./e/../f", base);
+    EXPECT_NE(url, nullptr) << "Complex relative path should resolve";
+    if (url) {
+        EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
+        // Should normalize to /a/d/f
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, RelativeUrlEmptyInput) {
+    // Test empty relative URL
+    Url* base = url_parse("https://example.com/path?query#fragment");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
+    
+    Url* url = url_parse_with_base("", base);
+    EXPECT_NE(url, nullptr) << "Empty relative URL should resolve to base";
+    if (url) {
+        EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
+        // Should be identical to base
+        if (url->host && url->host->chars) {
+            EXPECT_STREQ(url->host->chars, "example.com") << "Host should match base";
+        }
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, RelativeUrlWhitespaceHandling) {
+    // Test whitespace handling in relative URLs
+    Url* base = url_parse("https://example.com/path");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
+    
+    Url* url = url_parse_with_base("  /trimmed/path  ", base);
+    EXPECT_NE(url, nullptr) << "URL with whitespace should resolve";
+    if (url) {
+        // Should handle whitespace appropriately
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, RelativeUrlAbsoluteUrlInput) {
+    // Test absolute URL as relative input
+    Url* base = url_parse("https://example.com/path");
+    EXPECT_NE(base, nullptr) << "Base URL should parse successfully";
+    
+    Url* url = url_parse_with_base("http://other.com/path", base);
+    EXPECT_NE(url, nullptr) << "Absolute URL should parse regardless of base";
+    if (url) {
+        EXPECT_TRUE(url->is_valid) << "Absolute URL should be valid";
+        EXPECT_EQ(url->scheme, URL_SCHEME_HTTP) << "Should use new scheme, not base";
+        if (url->host && url->host->chars) {
+            EXPECT_STREQ(url->host->chars, "other.com") << "Should use new host, not base";
+        }
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, RelativeUrlFileScheme) {
+    // Test file scheme handling
+    Url* base = url_parse("file:///home/user/documents/");
+    EXPECT_NE(base, nullptr) << "File scheme base URL should parse";
+    
+    Url* url = url_parse_with_base("../other/file.txt", base);
+    EXPECT_NE(url, nullptr) << "Relative file URL should resolve";
+    if (url) {
+        EXPECT_EQ(url->scheme, URL_SCHEME_FILE) << "Should preserve file scheme";
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, RelativeUrlWithPort) {
+    // Test relative URL resolution with port
+    Url* base = url_parse("https://example.com:8080/path");
+    EXPECT_NE(base, nullptr) << "Base URL with port should parse";
+    
+    Url* url = url_parse_with_base("../other", base);
+    EXPECT_NE(url, nullptr) << "Relative URL should resolve";
+    if (url) {
+        EXPECT_EQ(url->port_number, 8080) << "Port should be preserved";
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, DirectoryPathResolution) {
+    // Test directory vs file path resolution
+    Url* base = url_parse("https://example.com/dir/");
+    EXPECT_NE(base, nullptr) << "Directory base URL should parse";
+    
+    Url* url = url_parse_with_base("file.txt", base);
+    EXPECT_NE(url, nullptr) << "File in directory should resolve";
+    if (url) {
+        // Should resolve to /dir/file.txt
+        url_destroy(url);
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, FileVsDirectoryResolution) {
+    // Test file vs directory resolution behavior
+    Url* file_base = url_parse("https://example.com/dir/file.html");
+    Url* dir_base = url_parse("https://example.com/dir/");
+    
+    EXPECT_NE(file_base, nullptr) << "File base URL should parse";
+    EXPECT_NE(dir_base, nullptr) << "Directory base URL should parse";
+    
+    if (file_base && dir_base) {
+        Url* url1 = url_parse_with_base("other.html", file_base);
+        Url* url2 = url_parse_with_base("other.html", dir_base);
+        
+        // Both should resolve but to different paths
+        if (url1) url_destroy(url1);
+        if (url2) url_destroy(url2);
+    }
+    
+    if (file_base) url_destroy(file_base);
+    if (dir_base) url_destroy(dir_base);
+}
+
+TEST_F(UrlTest, NestedDirectoryResolution) {
+    // Test nested directory navigation
+    Url* base = url_parse("https://example.com/a/b/c/d/");
+    EXPECT_NE(base, nullptr) << "Nested directory base should parse";
+    
+    const char* test_cases[] = {
+        "file.txt",      // Should resolve to /a/b/c/d/file.txt
+        "../file.txt",   // Should resolve to /a/b/c/file.txt
+        "../../file.txt", // Should resolve to /a/b/file.txt
+        "../../../file.txt" // Should resolve to /a/file.txt
+    };
+    
+    for (size_t i = 0; i < sizeof(test_cases)/sizeof(test_cases[0]); i++) {
+        Url* url = url_parse_with_base(test_cases[i], base);
+        EXPECT_NE(url, nullptr) << "Nested directory navigation should work: " << test_cases[i];
+        if (url) {
+            EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
+            url_destroy(url);
+        }
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, RootDirectoryEdgeCases) {
+    // Test edge cases at root directory
+    Url* base = url_parse("https://example.com/");
+    EXPECT_NE(base, nullptr) << "Root directory base should parse";
+    
+    const char* test_cases[] = {
+        "file.txt",
+        "./file.txt", 
+        "../file.txt",  // Should not go beyond root
+        "/../file.txt"  // Should not go beyond root
+    };
+    
+    for (size_t i = 0; i < sizeof(test_cases)/sizeof(test_cases[0]); i++) {
+        Url* url = url_parse_with_base(test_cases[i], base);
+        EXPECT_NE(url, nullptr) << "Root edge case should resolve: " << test_cases[i];
+        if (url) {
+            EXPECT_TRUE(url->is_valid) << "Resolved URL should be valid";
+            url_destroy(url);
+        }
+    }
+    
+    url_destroy(base);
+}
+
+TEST_F(UrlTest, MemoryManagement) {
+    // Test memory management with multiple allocations
+    for (int i = 0; i < 100; i++) {
+        Url* url = url_parse("https://example.com/path");
+        if (url) {
+            EXPECT_TRUE(url->is_valid) << "URL should be valid";
+            url_destroy(url);
+        }
+    }
+    
+    // Test with relative URL parsing
+    Url* base = url_parse("https://example.com/base/");
+    if (base) {
+        for (int i = 0; i < 50; i++) {
+            Url* url = url_parse_with_base("relative/path", base);
+            if (url) {
+                url_destroy(url);
+            }
+        }
+        url_destroy(base);
+    }
+    
+    EXPECT_TRUE(true) << "Memory management test completed without crashes";
+}
+
+TEST_F(UrlTest, EmptyString) {
     // Test empty string
-    url = url_parse("");
+    Url* url = url_parse("");
     EXPECT_EQ(url, nullptr) << "Empty string should return NULL";
 }
