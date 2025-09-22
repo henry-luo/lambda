@@ -20,9 +20,6 @@ workspace "Lambda"
         symbols "On"
         optimize "Off"
         linkoptions {
-            "-static-libgcc",
-            "-static-libstdc++",
-            "-Wl,-Bstatic",
             "-Wl,--subsystem,console",
         }
     
@@ -90,7 +87,7 @@ project "lambda-lib"
     
 
 project "lambda-input-full-c"
-    kind "StaticLib"
+    kind "SharedLib"
     language "C"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
@@ -133,6 +130,8 @@ project "lambda-input-full-c"
     }
     
     linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
@@ -142,15 +141,13 @@ project "lambda-input-full-c"
     }
     
     links {
-        "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "lambda/tree-sitter/libtree-sitter-minimal.a",
         "z",
         "lambda-lib",
     }
     
 
 project "lambda-input-full-cpp"
-    kind "StaticLib"
+    kind "SharedLib"
     language "C++"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
@@ -202,6 +199,8 @@ project "lambda-input-full-cpp"
     }
     
     linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
         "/mingw64/lib/libmpdec.a",
         "../../win-native-deps/lib/libutf8proc.a",
         "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
@@ -211,15 +210,13 @@ project "lambda-input-full-cpp"
     }
     
     links {
-        "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "lambda/tree-sitter/libtree-sitter-minimal.a",
         "z",
         "lambda-lib",
     }
     
 
 project "lambda-input-full"
-    kind "StaticLib"
+    kind "SharedLib"
     language "C++"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
@@ -956,111 +953,7 @@ project "test_cmdedit_gtest"
     }
     
 
-project "test_mime_detect"
-    kind "ConsoleApp"
-    language "C"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_mime_detect.c",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "win-native-deps/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "/mingw64/include",
-        "win-native-deps/include",
-    }
-    
-    libdirs {
-        "/mingw64/lib",
-        "win-native-deps/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-input-full-c",
-        "lambda-lib",
-        "criterion",
-        "nanomsg",
-        "git2",
-    }
-    
-    linkoptions {
-        "/mingw64/lib/libcriterion.a",
-    }
-    
-    linkoptions {
-        "/mingw64/lib/libmpdec.a",
-        "../../win-native-deps/lib/libutf8proc.a",
-        "../../win-native-deps/lib/libmir.a",
-        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
-        "../../win-native-deps/lib/libcurl.a",
-        "/mingw64/lib/libssl.a",
-        "/mingw64/lib/libcrypto.a",
-    }
-    
-    -- Add dynamic libraries
-    links {
-        "z",
-        "mingw32",
-        "gcc",
-        "gcc_s",
-        "msvcrt",
-        "kernel32",
-        "user32",
-        "advapi32",
-        "ws2_32",
-        "gdi32",
-        "shell32",
-        "ole32",
-        "ssp",
-        "winmm",
-        "crypt32",
-        "bcrypt",
-        "wldap32",
-        "iphlpapi",
-        "secur32",
-        "moldname",
-    }
-    
-    -- Add tree-sitter libraries using linkoptions to append to LIBS section
-    linkoptions {
-    }
-    
-    -- Add macOS frameworks
-    linkoptions {
-    }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-fms-extensions",
-        "-lstdc++",
-        "-std=c99",
-    }
-    
-    filter {}
-    linkoptions {
-        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
-        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
-    }
-    
-
-project "test_math"
+project "test_mime_detect_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1068,7 +961,7 @@ project "test_math"
     targetextension ".exe"
     
     files {
-        "test/test_math.cpp",
+        "test/test_mime_detect_gtest.cpp",
     }
     
     includedirs {
@@ -1099,9 +992,16 @@ project "test_math"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1162,7 +1062,7 @@ project "test_math"
     }
     
 
-project "test_math_ascii"
+project "test_math_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1170,7 +1070,7 @@ project "test_math_ascii"
     targetextension ".exe"
     
     files {
-        "test/test_math_ascii.cpp",
+        "test/test_math_gtest.cpp",
     }
     
     includedirs {
@@ -1201,9 +1101,16 @@ project "test_math_ascii"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1264,7 +1171,7 @@ project "test_math_ascii"
     }
     
 
-project "test_markup_roundtrip"
+project "test_math_ascii_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1272,7 +1179,7 @@ project "test_markup_roundtrip"
     targetextension ".exe"
     
     files {
-        "test/test_markup_roundtrip.cpp",
+        "test/test_math_ascii_gtest.cpp",
     }
     
     includedirs {
@@ -1303,9 +1210,16 @@ project "test_markup_roundtrip"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1366,7 +1280,7 @@ project "test_markup_roundtrip"
     }
     
 
-project "test_input_roundtrip"
+project "test_markup_roundtrip_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1374,7 +1288,7 @@ project "test_input_roundtrip"
     targetextension ".exe"
     
     files {
-        "test/test_input_roundtrip.cpp",
+        "test/test_markup_roundtrip_gtest.cpp",
     }
     
     includedirs {
@@ -1405,9 +1319,16 @@ project "test_input_roundtrip"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1468,7 +1389,7 @@ project "test_input_roundtrip"
     }
     
 
-project "test_dir"
+project "test_input_roundtrip_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1476,7 +1397,7 @@ project "test_dir"
     targetextension ".exe"
     
     files {
-        "test/test_dir.cpp",
+        "test/test_input_roundtrip_gtest.cpp",
     }
     
     includedirs {
@@ -1507,9 +1428,16 @@ project "test_dir"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1570,7 +1498,7 @@ project "test_dir"
     }
     
 
-project "test_http"
+project "test_dir_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1578,7 +1506,7 @@ project "test_http"
     targetextension ".exe"
     
     files {
-        "test/test_http.cpp",
+        "test/test_dir_gtest.cpp",
     }
     
     includedirs {
@@ -1609,9 +1537,16 @@ project "test_http"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1672,7 +1607,7 @@ project "test_http"
     }
     
 
-project "test_sysinfo"
+project "test_http_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1680,7 +1615,7 @@ project "test_sysinfo"
     targetextension ".exe"
     
     files {
-        "test/test_sysinfo.cpp",
+        "test/test_http_gtest.cpp",
     }
     
     includedirs {
@@ -1711,9 +1646,16 @@ project "test_sysinfo"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1774,7 +1716,7 @@ project "test_sysinfo"
     }
     
 
-project "test_jsx_roundtrip"
+project "test_sysinfo_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1782,7 +1724,7 @@ project "test_jsx_roundtrip"
     targetextension ".exe"
     
     files {
-        "test/test_jsx_roundtrip.cpp",
+        "test/test_sysinfo_gtest.cpp",
     }
     
     includedirs {
@@ -1813,9 +1755,16 @@ project "test_jsx_roundtrip"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1876,7 +1825,7 @@ project "test_jsx_roundtrip"
     }
     
 
-project "test_mdx_roundtrip"
+project "test_jsx_roundtrip_new_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1884,7 +1833,7 @@ project "test_mdx_roundtrip"
     targetextension ".exe"
     
     files {
-        "test/test_mdx_roundtrip.cpp",
+        "test/test_jsx_roundtrip_new_gtest.cpp",
     }
     
     includedirs {
@@ -1915,9 +1864,16 @@ project "test_mdx_roundtrip"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -1978,7 +1934,7 @@ project "test_mdx_roundtrip"
     }
     
 
-project "test_css_tokenizer"
+project "test_mdx_roundtrip_new_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -1986,7 +1942,7 @@ project "test_css_tokenizer"
     targetextension ".exe"
     
     files {
-        "test/test_css_tokenizer.cpp",
+        "test/test_mdx_roundtrip_new_gtest.cpp",
     }
     
     includedirs {
@@ -2017,9 +1973,16 @@ project "test_css_tokenizer"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -2080,7 +2043,7 @@ project "test_css_tokenizer"
     }
     
 
-project "test_css_parser"
+project "test_css_tokenizer_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -2088,7 +2051,7 @@ project "test_css_parser"
     targetextension ".exe"
     
     files {
-        "test/test_css_parser.cpp",
+        "test/test_css_tokenizer_gtest.cpp",
     }
     
     includedirs {
@@ -2119,9 +2082,16 @@ project "test_css_parser"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -2182,7 +2152,7 @@ project "test_css_parser"
     }
     
 
-project "test_css_integration"
+project "test_css_parser_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -2190,7 +2160,7 @@ project "test_css_integration"
     targetextension ".exe"
     
     files {
-        "test/test_css_integration.cpp",
+        "test/test_css_parser_gtest.cpp",
     }
     
     includedirs {
@@ -2221,9 +2191,16 @@ project "test_css_integration"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -2284,15 +2261,15 @@ project "test_css_integration"
     }
     
 
-project "test_css_files_safe"
+project "test_css_integration_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_css_files_safe.c",
+        "test/test_css_integration_gtest.cpp",
     }
     
     includedirs {
@@ -2320,15 +2297,19 @@ project "test_css_files_safe"
     }
     
     links {
+        "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
     }
     
     linkoptions {
-        "/mingw64/lib/libcriterion.a",
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
@@ -2373,12 +2354,13 @@ project "test_css_files_safe"
     linkoptions {
     }
     
+    links { "stdc++" }
+    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-std=c++17",
         "-fms-extensions",
-        "-lstdc++",
-        "-std=c99",
     }
     
     filter {}
@@ -2388,7 +2370,7 @@ project "test_css_files_safe"
     }
     
 
-project "test_css_frameworks"
+project "test_css_files_safe_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -2396,7 +2378,7 @@ project "test_css_frameworks"
     targetextension ".exe"
     
     files {
-        "test/test_css_frameworks.cpp",
+        "test/test_css_files_safe_gtest.cpp",
     }
     
     includedirs {
@@ -2427,9 +2409,343 @@ project "test_css_frameworks"
         "lambda-input-full-cpp",
         "lambda-input-full-c",
         "lambda-lib",
+        "gtest",
+        "gtest_main",
         "criterion",
         "nanomsg",
         "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libmpdec.a",
+        "../../win-native-deps/lib/libutf8proc.a",
+        "../../win-native-deps/lib/libmir.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
+        "../../win-native-deps/lib/libcurl.a",
+        "/mingw64/lib/libssl.a",
+        "/mingw64/lib/libcrypto.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "z",
+        "mingw32",
+        "gcc",
+        "gcc_s",
+        "msvcrt",
+        "kernel32",
+        "user32",
+        "advapi32",
+        "ws2_32",
+        "gdi32",
+        "shell32",
+        "ole32",
+        "ssp",
+        "winmm",
+        "crypt32",
+        "bcrypt",
+        "wldap32",
+        "iphlpapi",
+        "secur32",
+        "moldname",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+    }
+    
+
+project "test_css_frameworks_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_css_frameworks_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "win-native-deps/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+    }
+    
+    libdirs {
+        "/mingw64/lib",
+        "win-native-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+        "criterion",
+        "nanomsg",
+        "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libmpdec.a",
+        "../../win-native-deps/lib/libutf8proc.a",
+        "../../win-native-deps/lib/libmir.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
+        "../../win-native-deps/lib/libcurl.a",
+        "/mingw64/lib/libssl.a",
+        "/mingw64/lib/libcrypto.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "z",
+        "mingw32",
+        "gcc",
+        "gcc_s",
+        "msvcrt",
+        "kernel32",
+        "user32",
+        "advapi32",
+        "ws2_32",
+        "gdi32",
+        "shell32",
+        "ole32",
+        "ssp",
+        "winmm",
+        "crypt32",
+        "bcrypt",
+        "wldap32",
+        "iphlpapi",
+        "secur32",
+        "moldname",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+    }
+    
+
+project "test_mdx_roundtrip_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_mdx_roundtrip_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "win-native-deps/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+    }
+    
+    libdirs {
+        "/mingw64/lib",
+        "win-native-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+        "criterion",
+        "nanomsg",
+        "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libmpdec.a",
+        "../../win-native-deps/lib/libutf8proc.a",
+        "../../win-native-deps/lib/libmir.a",
+        "../../win-native-deps/src/nghttp2-1.62.1/lib/.libs/libnghttp2.a",
+        "../../win-native-deps/lib/libcurl.a",
+        "/mingw64/lib/libssl.a",
+        "/mingw64/lib/libcrypto.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "z",
+        "mingw32",
+        "gcc",
+        "gcc_s",
+        "msvcrt",
+        "kernel32",
+        "user32",
+        "advapi32",
+        "ws2_32",
+        "gdi32",
+        "shell32",
+        "ole32",
+        "ssp",
+        "winmm",
+        "crypt32",
+        "bcrypt",
+        "wldap32",
+        "iphlpapi",
+        "secur32",
+        "moldname",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-fms-extensions",
+    }
+    
+    filter {}
+    linkoptions {
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "../../lambda/tree-sitter/libtree-sitter-minimal.a",
+    }
+    
+
+project "test_jsx_roundtrip_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_jsx_roundtrip_gtest.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "win-native-deps/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "/mingw64/include",
+        "win-native-deps/include",
+    }
+    
+    libdirs {
+        "/mingw64/lib",
+        "win-native-deps/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+        "criterion",
+        "nanomsg",
+        "git2",
+    }
+    
+    linkoptions {
+        "/mingw64/lib/libgtest.a",
+        "/mingw64/lib/libgtest_main.a",
     }
     
     linkoptions {
