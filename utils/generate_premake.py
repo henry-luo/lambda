@@ -1242,6 +1242,14 @@ class PremakeGenerator:
                 defines = test.get('defines', [])
                 test_name_override = test.get('name', '')
                 
+                # Check for gtest flag and add gtest libraries
+                if test.get('gtest', False):
+                    # Add gtest and gtest_main to libraries if not already present
+                    if 'gtest' not in libraries:
+                        libraries.append('gtest')
+                    if 'gtest_main' not in libraries:
+                        libraries.append('gtest_main')
+                
                 # Enhanced support for test-specific flags and additional sources
                 test_special_flags = test.get('special_flags', special_flags)  # Test-specific flags override suite flags
                 additional_sources = test.get('additional_sources', [])  # New field for extra source files
@@ -1470,6 +1478,12 @@ class PremakeGenerator:
                     self.premake_content.append('        "nanomsg",')
                     self.premake_content.append('        "git2",')
                     test_frameworks_added.append('criterion')
+                elif lib == 'gtest':
+                    self.premake_content.append('        "gtest",')
+                    test_frameworks_added.append('gtest')
+                elif lib == 'gtest_main':
+                    self.premake_content.append('        "gtest_main",')
+                    test_frameworks_added.append('gtest')
                 else:
                     # Handle other libraries
                     if lib == 'c++fs':
@@ -1490,7 +1504,7 @@ class PremakeGenerator:
                     test_frameworks_added.append('catch2')
             
         # Only add criterion to test executables if no other test framework is specified
-        if 'criterion' not in test_frameworks_added and 'catch2' not in test_frameworks_added:
+        if 'criterion' not in test_frameworks_added and 'catch2' not in test_frameworks_added and 'gtest' not in test_frameworks_added:
             self.premake_content.append('        "criterion",')
             # Add Criterion dependencies (required on macOS with Homebrew)
             self.premake_content.append('        "nanomsg",')
