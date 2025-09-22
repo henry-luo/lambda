@@ -11,15 +11,28 @@
 #include <future>
 #include <filesystem>
 #include <signal.h>
+#ifndef _WIN32
 #include <sys/wait.h>
 #include <unistd.h>
-#include <cstdlib>
 #include <dirent.h>
 #include <sys/stat.h>
+#else
+#include <windows.h>
+#include <direct.h>
+#include <io.h>
+#include <process.h>
+#include <sys/stat.h>
+#define getcwd _getcwd
+#define chdir _chdir
+#define WEXITSTATUS(status) (status)
+#endif
+#include <cstdlib>
 
 // Simple directory listing functions
 std::vector<std::string> listFilesInDir(const std::string& path) {
     std::vector<std::string> files;
+    
+#ifndef _WIN32
     DIR *dir;
     struct dirent *ent;
     struct stat st;
@@ -42,6 +55,33 @@ std::vector<std::string> listFilesInDir(const std::string& path) {
         }
         closedir(dir);
     }
+#else
+    // Windows implementation using FindFirstFile/FindNextFile
+    WIN32_FIND_DATAA findFileData;
+    HANDLE hFind;
+    
+    std::string searchPath = path + "\\*";
+    hFind = FindFirstFileA(searchPath.c_str(), &findFileData);
+    
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            std::string filename = findFileData.cFileName;
+            if (filename == "." || filename == "..") continue;
+            
+            std::string fullpath = path + "\\" + filename;
+            
+            if (findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                // Recursively add files from subdirectories
+                auto subfiles = listFilesInDir(fullpath);
+                files.insert(files.end(), subfiles.begin(), subfiles.end());
+            } else {
+                files.push_back(fullpath);
+            }
+        } while (FindNextFileA(hFind, &findFileData) != 0);
+        FindClose(hFind);
+    }
+#endif
+    
     return files;
 }
 
