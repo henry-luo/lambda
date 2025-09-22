@@ -428,10 +428,6 @@ else
     build_mpdecimal_for_linux
 fi
 
-# Try to install criterion via apt, build from source if not available
-echo "Installing criterion testing framework..."
-# Note: libcriterion-dev package installation is handled by build function below
-
 # Create temporary build directory
 mkdir -p "build_temp"
 
