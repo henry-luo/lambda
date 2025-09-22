@@ -511,6 +511,21 @@ error:
 }
 
 DateTime* datetime_parse_lambda(VariableMemPool* pool, const char* lambda_str) {
+    if (!lambda_str || !pool) return NULL;
+    
+    /* Handle Lambda format with t'...' wrapper */
+    if (strncmp(lambda_str, "t'", 2) == 0) {
+        const char* content = lambda_str + 2;
+        size_t len = strlen(content);
+        if (len > 0 && content[len-1] == '\'') {
+            char* temp = (char*)pool_calloc(pool, len);
+            strncpy(temp, content, len-1);
+            temp[len-1] = '\0';
+            return datetime_parse(pool, temp, DATETIME_PARSE_LAMBDA, NULL);
+        }
+    }
+    
+    /* If no wrapper, parse directly */
     return datetime_parse(pool, lambda_str, DATETIME_PARSE_LAMBDA, NULL);
 }
 
