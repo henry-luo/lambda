@@ -67,7 +67,9 @@ lambda/vsce/lambda-highlighter-*.vsix
 lambda/vsce/dist/
 
 # IDE and editor files
-.vscode/
+.vscode/*
+!.vscode/settings.base.json
+!.vscode/c_cpp_properties.json
 .idea/
 *.iml
 *.swp
