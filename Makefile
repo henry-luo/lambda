@@ -223,6 +223,63 @@ define mingw64_dll_check
 	fi
 endef
 
+# Function to run make with error collection and summary
+define run_make_with_error_summary
+	@echo "🔨 Starting build process..."
+	@BUILD_LOG=$$(mktemp) && \
+	if $(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)" 2>&1 | tee "$$BUILD_LOG"; then \
+		echo "✅ Build completed successfully."; \
+	else \
+		echo "❌ Build failed."; \
+	fi; \
+	echo ""; \
+	echo "📋 Build Summary:"; \
+	echo "================"; \
+	ERROR_COUNT=$$(grep -c -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" 2>/dev/null || echo "0"); \
+	WARNING_COUNT=$$(grep -c -E "(warning:|Warning:|WARNING:)" "$$BUILD_LOG" 2>/dev/null || echo "0"); \
+	echo "Errors: $$ERROR_COUNT"; \
+	echo "Warnings: $$WARNING_COUNT"; \
+	echo ""; \
+	if [ "$$ERROR_COUNT" -gt 0 ]; then \
+		echo "🔴 ERRORS FOUND:"; \
+		echo "================"; \
+		grep -n -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" | while IFS=: read -r line_num content; do \
+			file_info=$$(echo "$$content" | grep -oE "\.\./[^\s:]+\.[ch]p?p?:[0-9]+:[0-9]+:" | head -1); \
+			if [ -z "$$file_info" ]; then \
+				file_info=$$(echo "$$content" | grep -oE "\.\./[^\s:]+\.[ch]p?p?:[0-9]+:" | head -1); \
+			fi; \
+			if [ -z "$$file_info" ]; then \
+				file_info=$$(echo "$$content" | grep -oE "[^/\s]*\.[ch]p?p?:[0-9]+:[0-9]+:" | head -1); \
+			fi; \
+			if [ -z "$$file_info" ]; then \
+				file_info=$$(echo "$$content" | grep -oE "[^/\s]*\.[ch]p?p?:[0-9]+:" | head -1); \
+			fi; \
+			if [ -n "$$file_info" ]; then \
+				rel_path=$$(echo "$$file_info" | cut -d: -f1); \
+				line_no=$$(echo "$$file_info" | cut -d: -f2); \
+				col_no=$$(echo "$$file_info" | cut -d: -f3); \
+				if [[ "$$rel_path" == ../* ]]; then \
+					abs_path="$$(cd build/premake && realpath "$$rel_path" 2>/dev/null || echo "$$(pwd)/$$rel_path")"; \
+				else \
+					abs_path="$$(pwd)/build/premake/$$rel_path"; \
+				fi; \
+				if [ -n "$$col_no" ] && [ "$$col_no" != "" ]; then \
+					location="$$line_no:$$col_no"; \
+				else \
+					location="$$line_no"; \
+				fi; \
+				clean_content=$$(echo "$$content" | sed "s|[^[:space:]]*\.[ch]p*:[0-9]*:[0-9]*:||" | sed "s|[^[:space:]]*\.[ch]p*:[0-9]*:||"); \
+				echo "   file://$$abs_path:$$location -$$clean_content"; \
+			else \
+				echo "   $$content"; \
+			fi; \
+		done; \
+		echo ""; \
+		echo "💡 Click on the file:// links above to jump to errors in VS Code"; \
+	fi; \
+	rm -f "$$BUILD_LOG"
+endef
+
 # Combined tree-sitter libraries target
 tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
 
@@ -323,7 +380,7 @@ help:
 	@echo "  test-sequential - Run tests sequentially (not parallel)"
 	@echo "  test-coverage - Run tests with code coverage analysis"
 	@echo "  test-memory   - Run memory leak detection tests"
-	@echo "  test-benchmark- Run performance benchmark tests"  
+	@echo "  test-benchmark- Run performance benchmark tests"
 	@echo "  test-fuzz     - Run fuzzing tests for robustness"
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
@@ -386,9 +443,7 @@ else
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	# Ensure explicit compiler variables are passed to Premake build
 	@echo "Using CC=$(CC) CXX=$(CXX)"
-	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)" 2>&1
-	@echo "Build completed. Executable: lambda.exe"
-	$(call mingw64_dll_check)
+	$(call run_make_with_error_summary)
 endif
 
 print-vars:
@@ -783,7 +838,7 @@ test-typeset-c: build
 	rm -f test_end_to_end_direct
 
 # Minimal typesetting test without Lambda dependencies
-test-typeset-minimal: 
+test-typeset-minimal:
 	@echo "Building minimal typesetting test..."
 	gcc -I. -Iinclude -o test_minimal test/lambda/typeset/test_minimal.c \
 		typeset/view/view_tree.c typeset/output/renderer.c typeset/output/svg_renderer.c \
@@ -795,7 +850,7 @@ test-typeset-minimal:
 	rm -f test_minimal
 
 # Simple proof-of-concept test
-test-typeset-simple: 
+test-typeset-simple:
 	@echo "Building simple typesetting proof of concept..."
 	gcc -I. -Iinclude -o test_simple test/lambda/typeset/test_simple.c \
 		lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
@@ -806,7 +861,7 @@ test-typeset-simple:
 	rm -f test_simple
 
 # Complete workflow demonstration
-test-typeset-workflow: 
+test-typeset-workflow:
 	@echo "Building Lambda typesetting workflow demonstration..."
 	gcc -I. -Iinclude -o test_workflow test/lambda/typeset/test_workflow.c \
 		lib/strbuf.c lib/mem-pool/src/variable.c lib/mem-pool/src/buffer.c lib/mem-pool/src/utils.c \
