@@ -28,7 +28,7 @@ enum EnumTypeId {
     LMD_TYPE_STRING,
     LMD_TYPE_BINARY,
 
-    // container types, LMD_TYPE_CONTAINER 
+    // container types, LMD_TYPE_CONTAINER
     LMD_TYPE_LIST,
     LMD_TYPE_RANGE,
     LMD_TYPE_ARRAY_INT,
@@ -101,8 +101,8 @@ typedef union Item {
             };
             struct {
                 uint64_t pointer : 56;  // tagged pointer for long, double, string, symbol, dtime, binary
-                uint64_t type_id : 8;        
-            };           
+                uint64_t type_id : 8;
+            };
         };
     };
     uint64_t item;
@@ -148,16 +148,16 @@ struct Container {
         TypeId type_id;
         uint8_t flags;
         uint16_t ref_cnt;  // reference count
-        //---------------------    
-        long start;  // inclusive start
-        long end;    // inclusive end
-        long length;
+        //---------------------
+        int64_t start;  // inclusive start
+        int64_t end;    // inclusive end
+        int64_t length;
     };
 #else
     struct Range : Container {
-        long start;  // inclusive start
-        long end;    // inclusive end
-        long length;
+        int64_t start;  // inclusive start
+        int64_t end;    // inclusive end
+        int64_t length;
     };
 #endif
 
@@ -303,9 +303,10 @@ typedef struct num_stack_t num_stack_t;
 typedef struct Url Url;
 typedef struct _ArrayList ArrayList;
 typedef struct VariableMemPool VariableMemPool;
+typedef struct AstValidator AstValidator;
 
 typedef struct Context {
-    Heap* heap;   
+    Heap* heap;
     VariableMemPool* ast_pool;
     void** consts;
     ArrayList* type_list;
@@ -314,6 +315,7 @@ typedef struct Context {
     Url* cwd;  // current working directory
     Item result; // final exec result
     mpd_context_t* decimal_ctx; // libmpdec context for decimal operations
+    AstValidator* validator; // AST validator
     bool run_main; // whether to run main procedure on start
 } Context;
 

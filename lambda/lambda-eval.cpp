@@ -5,7 +5,7 @@
 #include <stdarg.h>
 #include <time.h>
 #include <errno.h>  // for errno checking
-#ifdef _WIN32
+#if _WIN32
 #include <windows.h>
 #include <process.h>
 // Windows doesn't have these macros, provide simple equivalents
@@ -14,11 +14,13 @@
 #else
 #include <sys/wait.h>  // for WIFEXITED, WEXITSTATUS
 #endif
+#include "validator.hpp"
 
 extern __thread Context* context;
 
 // External typeset function
 extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* output_file);
+ValidationResult* ast_validator_validate_type(AstValidator* validator, TypedItem item, Type* type);
 
 #define stack_alloc(size) alloca(size);
 
@@ -41,11 +43,11 @@ Bool is_truthy(Item item) {
     }
 }
 
-Item op_and(Bool a, Bool b) { 
+Item op_and(Bool a, Bool b) {
     return {.item = (a >= BOOL_ERROR || b >= BOOL_ERROR) ? ITEM_ERROR : (a && b) ? ITEM_TRUE : ITEM_FALSE};
 }
 
-Item op_or(Bool a, Bool b) { 
+Item op_or(Bool a, Bool b) {
     return {.item = (a >= BOOL_ERROR || b >= BOOL_ERROR) ? ITEM_ERROR : (a || b) ? ITEM_TRUE : ITEM_FALSE};
 }
 
@@ -89,18 +91,18 @@ String *str_repeat(String *str, int64_t times) {
         result->chars[0] = '\0';
         return result;
     }
-    
+
     size_t str_len = str->len;
     size_t total_len = str_len * times;
     String *result = (String *)heap_alloc(sizeof(String) + total_len + 1, LMD_TYPE_STRING);
     result->ref_cnt = 0;
     result->len = total_len;
-    
+
     for (long i = 0; i < times; i++) {
         memcpy(result->chars + (i * str_len), str->chars, str_len);
     }
     result->chars[total_len] = '\0';
-    
+
     return result;
 }
 
@@ -111,15 +113,15 @@ Item fn_normalize(Item str_item, Item type_item) {
         log_debug("normalize: first argument must be a string, got type: %d", str_item.type_id);
         return ItemError;
     }
-    
+
     String* str = (String*)str_item.pointer;
     if (!str || str->len == 0) {
         return str_item;  // Return empty string as-is
     }
-    
+
     // Default to NFC if no type specified or invalid type
     int options = UTF8PROC_STABLE | UTF8PROC_COMPOSE;
-    
+
     if (type_item.type_id == LMD_TYPE_STRING) {
         String* type_str = (String*)type_item.pointer;
         if (type_str && type_str->len > 0) {
@@ -133,35 +135,35 @@ Item fn_normalize(Item str_item, Item type_item) {
             // Default case (nfc) already set above
         }
     }
-    
+
     // Use utf8proc for Unicode normalization
     utf8proc_uint8_t* normalized = NULL;
     utf8proc_ssize_t normalized_len = utf8proc_map(
         (const utf8proc_uint8_t*)str->chars, str->len, &normalized, (utf8proc_option_t)options);
-    
+
     if (normalized_len < 0) {
         log_debug("normalize: utf8proc_map failed with error: %zd", normalized_len);
         return ItemError;
     }
-    
+
     // Create new string with normalized content
     String* result = (String*)heap_alloc(sizeof(String) + normalized_len + 1, LMD_TYPE_STRING);
     result->ref_cnt = 0;
     result->len = normalized_len;
     memcpy(result->chars, normalized, normalized_len);
     result->chars[normalized_len] = '\0';
-    
+
     // Free the utf8proc allocated buffer
     free(normalized);
     return (Item){.item = s2it(result)};
 }
 
 Range* fn_to(Item item_a, Item item_b) {
-    if ((item_a.type_id == LMD_TYPE_INT || item_a.type_id == LMD_TYPE_INT64 || item_a.type_id == LMD_TYPE_FLOAT) && 
+    if ((item_a.type_id == LMD_TYPE_INT || item_a.type_id == LMD_TYPE_INT64 || item_a.type_id == LMD_TYPE_FLOAT) &&
         (item_b.type_id == LMD_TYPE_INT || item_b.type_id == LMD_TYPE_INT64 || item_b.type_id == LMD_TYPE_FLOAT)) {
-        int64_t start = item_a.type_id == LMD_TYPE_INT ? item_a.int_val : 
+        int64_t start = item_a.type_id == LMD_TYPE_INT ? item_a.int_val :
             item_a.type_id == LMD_TYPE_INT64 ? *(int64_t*)item_a.pointer : (int64_t)*(double*)item_a.pointer;
-        int64_t end = item_b.type_id == LMD_TYPE_INT ? item_b.int_val : 
+        int64_t end = item_b.type_id == LMD_TYPE_INT ? item_b.int_val :
             item_b.type_id == LMD_TYPE_INT64 ? *(int64_t*)item_b.pointer : (int64_t)*(double*)item_b.pointer;
         if (start > end) {
             // return empty range instead of NULL
@@ -213,7 +215,7 @@ double it2d(Item itm) {
     else if (itm.type_id == LMD_TYPE_DECIMAL) {
         Decimal* dec = (Decimal*)itm.pointer;
         char* endptr;
-        char* dec_str = mpd_to_sci(dec->dec_val, 0); 
+        char* dec_str = mpd_to_sci(dec->dec_val, 0);
         double val = strtod(dec_str, &endptr);
         if (!dec_str || endptr == dec_str) {
             log_error("it2d: failed to convert decimal to double");
@@ -235,9 +237,10 @@ Function* to_fn(fn_ptr ptr) {
 }
 
 Bool fn_is(Item a, Item b) {
-    log_debug("is expr");
+    log_debug("fn_is");
     TypeId b_type_id = get_type_id(b);
     if (b_type_id != LMD_TYPE_TYPE) {
+        log_error("2nd argument must be a type, got type: %d", b_type_id);
         return BOOL_ERROR;
     }
     TypeType *type_b = (TypeType *)b.type;
@@ -248,11 +251,23 @@ Bool fn_is(Item a, Item b) {
         return a_type_id == LMD_TYPE_ERROR ? BOOL_FALSE : BOOL_TRUE;
     case LMD_TYPE_INT:  case LMD_TYPE_INT64:  case LMD_TYPE_FLOAT:  case LMD_TYPE_DECIMAL:  case LMD_TYPE_NUMBER:
         return LMD_TYPE_INT <= a_type_id && a_type_id <= type_b->type->type_id;
-    case LMD_TYPE_ARRAY:
-        return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT || 
-            a_type_id == LMD_TYPE_ARRAY_INT64 || a_type_id == LMD_TYPE_ARRAY_FLOAT;
-    // case LMD_TYPE_RANGE: case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_FLOAT:
-        // KIV: promotion among other array types? probably not at the moment
+    case LMD_TYPE_ARRAY: case LMD_TYPE_LIST: case LMD_TYPE_MAP: case LMD_TYPE_ELEMENT:
+        if (type_b == &LIT_TYPE_ARRAY) {  // fast path
+            log_debug("fast path array type check");
+            return a_type_id == LMD_TYPE_RANGE || a_type_id == LMD_TYPE_ARRAY || a_type_id == LMD_TYPE_ARRAY_INT ||
+                a_type_id == LMD_TYPE_ARRAY_INT64 || a_type_id == LMD_TYPE_ARRAY_FLOAT;
+        } else {  // full type validation
+            log_debug("full type validation for type: %d", type_b->type->type_id);
+            TypedItem titem = to_typed(a);
+            ValidationResult* result = ast_validator_validate_type(context->validator, titem, type_b->type);
+            if (result->error_count > 0) {
+                print_validation_result(result);
+                log_debug("type validation failed with %d errors", result->error_count);
+            } else {
+                log_debug("type validation succeeded");
+            }
+            return result->valid ? BOOL_TRUE : BOOL_FALSE;
+        }
     default:
         return a_type_id == type_b->type->type_id;
     }
@@ -263,7 +278,7 @@ Bool fn_eq(Item a_item, Item b_item) {
     log_debug("equal_comp expr");
     if (a_item.type_id != b_item.type_id) {
         // number promotion - only for int/float types
-        if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
+        if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER &&
             LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val == b_val) ? BOOL_TRUE : BOOL_FALSE;
@@ -272,10 +287,10 @@ Bool fn_eq(Item a_item, Item b_item) {
         // Note: null can only be compared to null, any other comparison is a type error
         return BOOL_ERROR;
     }
-    
+
     if (a_item.type_id == LMD_TYPE_NULL) {
         return BOOL_TRUE; // null == null
-    }    
+    }
     else if (a_item.type_id == LMD_TYPE_BOOL) {
         return (a_item.bool_val == b_item.bool_val) ? BOOL_TRUE : BOOL_FALSE;
     }
@@ -300,7 +315,7 @@ Bool fn_eq(Item a_item, Item b_item) {
         // todo: do a normalized field comparison
         return (*(uint64_t*)dt_a == *(uint64_t*)dt_b) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL || 
+    else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL ||
         a_item.type_id == LMD_TYPE_BINARY) {
         String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
         bool result = (str_a->len == str_b->len && strncmp(str_a->chars, str_b->chars, str_a->len) == 0);
@@ -321,7 +336,7 @@ Bool fn_lt(Item a_item, Item b_item) {
     log_debug("less_comp expr");
     if (a_item.type_id != b_item.type_id) {
         // number promotion - only for int/float types
-        if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
+        if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER &&
             LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
             return (a_val < b_val) ? BOOL_TRUE : BOOL_FALSE;
@@ -330,10 +345,10 @@ Bool fn_lt(Item a_item, Item b_item) {
         // Note: null can only be compared to null, any other comparison is a type error
         return BOOL_ERROR;
     }
-    
+
     if (a_item.type_id == LMD_TYPE_NULL) {
         return BOOL_ERROR;  // null does not support <, >, <=, >=
-    }    
+    }
     else if (a_item.type_id == LMD_TYPE_BOOL) {
         return BOOL_ERROR;  // bool does not support <, >, <=, >=
     }
@@ -356,7 +371,7 @@ Bool fn_lt(Item a_item, Item b_item) {
         // todo: do a proper normalized field comparison
         return (*(uint64_t*)dt_a < *(uint64_t*)dt_b) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL || 
+    else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL ||
         a_item.type_id == LMD_TYPE_BINARY) {
         String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
         bool result = strcmp(str_a->chars, str_b->chars) < 0;
@@ -371,7 +386,7 @@ Bool fn_gt(Item a_item, Item b_item) {
     log_debug("greater_comp expr");
     if (a_item.type_id != b_item.type_id) {
         // number promotion - only for int/float types
-        if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER && 
+        if (LMD_TYPE_INT <= a_item.type_id && a_item.type_id <= LMD_TYPE_NUMBER &&
             LMD_TYPE_INT <= b_item.type_id && b_item.type_id <= LMD_TYPE_NUMBER) {
             double a_val = it2d(a_item), b_val = it2d(b_item);
             log_debug("fn_gt: a_val %f, b_val %f", a_val, b_val);
@@ -381,10 +396,10 @@ Bool fn_gt(Item a_item, Item b_item) {
         // Note: null can only be compared to null, any other comparison is a type error
         return BOOL_ERROR;
     }
-    
+
     if (a_item.type_id == LMD_TYPE_NULL) {
         return BOOL_ERROR;  // null does not support <, >, <=, >=
-    }    
+    }
     else if (a_item.type_id == LMD_TYPE_BOOL) {
         return BOOL_ERROR;  // bool does not support <, >, <=, >=
     }
@@ -407,7 +422,7 @@ Bool fn_gt(Item a_item, Item b_item) {
         // todo: do a proper normalized field comparison
         return (*(uint64_t*)dt_a > *(uint64_t*)dt_b) ? BOOL_TRUE : BOOL_FALSE;
     }
-    else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL || 
+    else if (a_item.type_id == LMD_TYPE_STRING || a_item.type_id == LMD_TYPE_SYMBOL ||
         a_item.type_id == LMD_TYPE_BINARY) {
         String *str_a = (String*)a_item.pointer;  String *str_b = (String*)b_item.pointer;
         bool result = strcmp(str_a->chars, str_b->chars) > 0;
@@ -542,38 +557,38 @@ String* fn_string(Item itm) {
         DateTime *dt = (DateTime*)itm.pointer;
         if (dt) {
             // Debug: Print the datetime precision and basic info
-            log_debug("fn_string debug: DateTime precision=%d, hour=%d, minute=%d, second=%d, ms=%d", 
+            log_debug("fn_string debug: DateTime precision=%d, hour=%d, minute=%d, second=%d, ms=%d",
                    dt->precision, dt->hour, dt->minute, dt->second, dt->millisecond);
-            
+
             // Format datetime in Lambda format based on precision
             char buf[64];
             int len = 0;
-            
+
             switch (dt->precision) {
                 case DATETIME_PRECISION_YEAR_ONLY:
                     len = snprintf(buf, sizeof(buf), "t'%04d'", DATETIME_GET_YEAR(dt));
                     break;
-                    
+
                 case DATETIME_PRECISION_DATE_ONLY:
-                    len = snprintf(buf, sizeof(buf), "t'%04d-%02d-%02d'", 
+                    len = snprintf(buf, sizeof(buf), "t'%04d-%02d-%02d'",
                         DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day);
                     break;
-                    
+
                 case DATETIME_PRECISION_TIME_ONLY: {
                     // Debug: Print the datetime values we're formatting
-                    log_debug("fn_string debug: formatting time-only: %02d:%02d:%02d.%03d, tz_offset=%d", 
-                           dt->hour, dt->minute, dt->second, dt->millisecond, 
+                    log_debug("fn_string debug: formatting time-only: %02d:%02d:%02d.%03d, tz_offset=%d",
+                           dt->hour, dt->minute, dt->second, dt->millisecond,
                            DATETIME_HAS_TIMEZONE(dt) ? DATETIME_GET_TZ_OFFSET(dt) : -999);
-                    
+
                     // Format time-only without 'T' prefix
-                    len = snprintf(buf, sizeof(buf), "t'%02d:%02d:%02d", 
+                    len = snprintf(buf, sizeof(buf), "t'%02d:%02d:%02d",
                         dt->hour, dt->minute, dt->second);
-                    
+
                     // Add milliseconds if non-zero
                     if (dt->millisecond > 0) {
                         len += snprintf(buf + len, sizeof(buf) - len, ".%03d", dt->millisecond);
                     }
-                    
+
                     // Add timezone - use 'z' for UTC (+00:00)
                     if (DATETIME_HAS_TIMEZONE(dt)) {
                         int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
@@ -582,27 +597,27 @@ String* fn_string(Item itm) {
                         } else {
                             int hours = abs(tz_offset) / 60;
                             int minutes = abs(tz_offset) % 60;
-                            len += snprintf(buf + len, sizeof(buf) - len, "%+03d:%02d", 
+                            len += snprintf(buf + len, sizeof(buf) - len, "%+03d:%02d",
                                 tz_offset >= 0 ? hours : -hours, minutes);
                         }
                     }
-                    
+
                     len += snprintf(buf + len, sizeof(buf) - len, "'");
                     break;
                 }
-                    
+
                 case DATETIME_PRECISION_DATE_TIME:
                 default: {
                     // Format full datetime with 'T' separator
-                    len = snprintf(buf, sizeof(buf), "t'%04d-%02d-%02dT%02d:%02d:%02d", 
+                    len = snprintf(buf, sizeof(buf), "t'%04d-%02d-%02dT%02d:%02d:%02d",
                         DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
                         dt->hour, dt->minute, dt->second);
-                    
+
                     // Add milliseconds if non-zero
                     if (dt->millisecond > 0) {
                         len += snprintf(buf + len, sizeof(buf) - len, ".%03d", dt->millisecond);
                     }
-                    
+
                     // Add timezone - use 'z' for UTC (+00:00)
                     if (DATETIME_HAS_TIMEZONE(dt)) {
                         int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
@@ -611,11 +626,11 @@ String* fn_string(Item itm) {
                         } else {
                             int hours = abs(tz_offset) / 60;
                             int minutes = abs(tz_offset) % 60;
-                            len += snprintf(buf + len, sizeof(buf) - len, "%+03d:%02d", 
+                            len += snprintf(buf + len, sizeof(buf) - len, "%+03d:%02d",
                                 tz_offset >= 0 ? hours : -hours, minutes);
                         }
                     }
-                    
+
                     len += snprintf(buf + len, sizeof(buf) - len, "'");
                     break;
                 }
@@ -647,7 +662,7 @@ String* fn_string(Item itm) {
         int len = strlen(buf);
         return heap_string(buf, len);
     }
-    case LMD_TYPE_DECIMAL:  case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:  
+    case LMD_TYPE_DECIMAL:  case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
         StrBuf* sb = strbuf_new();
@@ -666,7 +681,7 @@ String* fn_string(Item itm) {
 }
 
 Type* base_type(TypeId type_id) {
-    return (type_id <= 0 || type_id > LMD_TYPE_ERROR) ? 
+    return (type_id <= 0 || type_id > LMD_TYPE_ERROR) ?
         &LIT_TYPE_ERROR : ((TypeInfo*)context->type_info)[type_id].lit_type;
 }
 
@@ -674,14 +689,14 @@ Type* const_type(int type_index) {
     ArrayList* type_list = (ArrayList*)context->type_list;
     if (type_index < 0 || type_index >= type_list->length) {
         return &LIT_TYPE_ERROR;
-    }    
+    }
     Type* type = (Type*)(type_list->data[type_index]);
         log_debug("const_type %d, %d, %p", type_index, type->type_id, type);
     return type;
 }
 
 Type* fn_type(Item item) {
-    TypeType *type = (TypeType *)calloc(1, sizeof(TypeType) + sizeof(Type)); 
+    TypeType *type = (TypeType *)calloc(1, sizeof(TypeType) + sizeof(Type));
     Type *item_type = (Type *)((uint8_t *)type + sizeof(TypeType));
     type->type = item_type;  type->type_id = LMD_TYPE_TYPE;
     if (item.type_id) {
@@ -723,8 +738,8 @@ extern "C" {
 }
 
 Input* input_data(Context* ctx, String* url, String* type, String* flavor) {
-    log_debug("input_data at: %s, type: %s, flavor: %s", 
-        url ? url->chars : "null", type ? type->chars : "null", 
+    log_debug("input_data at: %s, type: %s, flavor: %s",
+        url ? url->chars : "null", type ? type->chars : "null",
         flavor ? flavor->chars : "null");
     // Pass NULL for cwd if ctx is NULL to avoid crash
     return input_from_url(url, type, flavor, ctx ? (Url*)ctx->cwd : NULL);
@@ -752,7 +767,7 @@ Item fn_input2(Item url, Item type) {
         log_debug("input type is a map");
         // New behavior: type is a map with options
         Map* options_map = type.map;
-        
+
         // Extract 'type' from map
         bool is_found;
         Item input_type = _map_get((TypeMap*)options_map->type, options_map->data, "type", &is_found);
@@ -790,13 +805,13 @@ Item fn_input2(Item url, Item type) {
         log_debug("input type must be a string, symbol, or map, got type %d", type_id);
         return ItemNull;  // todo: push error
     }
-    
+
     // Check if context is properly initialized
     if (!context) {
         log_debug("Error: context is NULL in fn_input");
         return ItemNull;
     }
-    
+
     log_debug("input type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
     Input *input = input_data(context, url_str, type_str, flavor_str);
     // todo: input should be cached in context
@@ -825,7 +840,7 @@ String* fn_format2(Item item, Item type) {
         log_debug("format type is a map");
         // New behavior: type is a map with options
         Map* options_map = (Map*)type.pointer;
-        
+
         // Extract 'type' from map
         bool is_found;
         Item format_type = _map_get((TypeMap*)options_map->type, options_map->data, "type", &is_found);
@@ -863,7 +878,7 @@ String* fn_format2(Item item, Item type) {
         log_debug("format type must be a string, symbol, or map, got type %d", type_id);
         return NULL;  // todo: push error
     }
-    
+
     log_debug("format item type: %s, flavor: %s", type_str ? type_str->chars : "null", flavor_str ? flavor_str->chars : "null");
     String* result = format_data(item, type_str, flavor_str, context->heap->pool);
     if (result) {
@@ -939,7 +954,7 @@ Item fn_member(Item item, Item key) {
     }
 }
 
-// length of an item's content, relates to indexed access, i.e. item[index] 
+// length of an item's content, relates to indexed access, i.e. item[index]
 int64_t fn_len(Item item) {
     TypeId type_id = get_type_id(item);
     log_debug("fn_len item: %d", type_id);
@@ -994,30 +1009,30 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         log_debug("fn_substring: first argument must be a string");
         return ItemError;
     }
-    
+
     if (get_type_id(start_item) != LMD_TYPE_INT && get_type_id(start_item) != LMD_TYPE_INT64) {
         log_debug("fn_substring: start index must be an integer");
         return ItemError;
     }
-    
+
     if (get_type_id(end_item) != LMD_TYPE_INT && get_type_id(end_item) != LMD_TYPE_INT64) {
         log_debug("fn_substring: end index must be an integer");
         return ItemError;
     }
-    
+
     String* str = (String*)str_item.pointer;
     if (!str || str->len == 0) {
         return str_item; // return empty string
     }
-    
+
     int64_t start = it2l(start_item);
     int64_t end = it2l(end_item);
-    
+
     // handle negative indices (count from end)
     int64_t char_len = utf8_char_count(str->chars);
     if (start < 0) start = char_len + start;
     if (end < 0) end = char_len + end;
-    
+
     // clamp to valid range
     if (start < 0) start = 0;
     if (end > char_len) end = char_len;
@@ -1028,11 +1043,11 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         empty->chars[0] = '\0';
         return {.item = s2it(empty)};
     }
-    
+
     // convert char indices to byte indices
     long byte_start = utf8_char_to_byte_offset(str->chars, start);
     long byte_end = utf8_char_to_byte_offset(str->chars, end);
-    
+
     if (byte_start >= str->len || byte_end < 0) {
         // return empty string
         String* empty = (String *)heap_alloc(sizeof(String) + 1, LMD_TYPE_STRING);
@@ -1040,13 +1055,13 @@ Item fn_substring(Item str_item, Item start_item, Item end_item) {
         empty->chars[0] = '\0';
         return {.item = s2it(empty)};
     }
-    
+
     long result_len = byte_end - byte_start;
     String* result = (String *)heap_alloc(sizeof(String) + result_len + 1, LMD_TYPE_STRING);
     result->len = result_len;
     memcpy(result->chars, str->chars + byte_start, result_len);
     result->chars[result_len] = '\0';
-    
+
     return {.item = s2it(result)};
 }
 
@@ -1056,34 +1071,34 @@ Item fn_contains(Item str_item, Item substr_item) {
         log_debug("fn_contains: first argument must be a string");
         return ItemError;
     }
-    
+
     if (get_type_id(substr_item) != LMD_TYPE_STRING) {
         log_debug("fn_contains: second argument must be a string");
         return ItemError;
     }
-    
+
     String* str = (String*)str_item.pointer;
     String* substr = (String*)substr_item.pointer;
-    
+
     if (!str || !substr) {
         return {.item = b2it(false)};
     }
-    
+
     if (substr->len == 0) {
         return {.item = b2it(true)}; // empty string is contained in any string
     }
-    
+
     if (str->len == 0 || substr->len > str->len) {
         return {.item = b2it(false)};
     }
-    
+
     // simple byte-based search for now - could be optimized with KMP or Boyer-Moore
     for (int i = 0; i <= str->len - substr->len; i++) {
         if (memcmp(str->chars + i, substr->chars, substr->len) == 0) {
             return {.item = b2it(true)};
         }
     }
-    
+
     return {.item = b2it(false)};
 }
 
@@ -1098,7 +1113,7 @@ DateTime fn_datetime() {
         memset(&static_dt, 0, sizeof(DateTime));
         static_dt_initialized = true;
     }
-    
+
     // Get current time
     time_t now = time(NULL);
     struct tm* tm_utc = gmtime(&now);
@@ -1111,42 +1126,40 @@ DateTime fn_datetime() {
         static_dt.second = tm_utc->tm_sec;
         static_dt.millisecond = 0;
     }
-    
+
     // Set as UTC timezone
     DATETIME_SET_TZ_OFFSET(&static_dt, 0);
     static_dt.precision = DATETIME_PRECISION_DATE_TIME;
     static_dt.format_hint = DATETIME_FORMAT_ISO8601_UTC;
-    
+
     return static_dt;
 }
 
 // LaTeX Typeset Function
 Item fn_typeset_latex(Item input_file, Item output_file, Item options) {
     log_info("fn_typeset_latex called!");
-    
+
     // Validate input parameters
     if (input_file.type_id != LMD_TYPE_STRING || output_file.type_id != LMD_TYPE_STRING) {
         log_error("typeset_latex: input_file and output_file must be strings");
         return {.item = ITEM_FALSE};
     }
-    
+
     String* input_str = (String*)input_file.pointer;
     String* output_str = (String*)output_file.pointer;
-    
+
     if (!input_str || !output_str || !input_str->chars || !output_str->chars) {
         log_error("typeset_latex: invalid string parameters");
         return {.item = ITEM_FALSE};
     }
-    
+
     log_info("typeset_latex: Input: %s, Output: %s", input_str->chars, output_str->chars);
-    
+
     // For now, we'll call our standalone function
     // TODO: Extract LaTeX AST from input file and use proper pipeline
     bool result = fn_typeset_latex_standalone(input_str->chars, output_str->chars);
-    
+
     log_info("typeset_latex: Result: %s", result ? "SUCCESS" : "FAILED");
-    
+
     return {.item = result ? ITEM_TRUE : ITEM_FALSE};
 }
-
-

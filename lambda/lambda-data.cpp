@@ -134,7 +134,7 @@ struct Initializer {
         init_type_info();
     }
 };
-static Initializer initializer; 
+static Initializer initializer;
 
 Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
     Type* t;
@@ -160,7 +160,7 @@ void expand_list(List *list) {
     list->items = (Item*)realloc(list->items, list->capacity * sizeof(Item));
     // copy extra items to the end of the list
     if (list->extra) {
-        memcpy(list->items + (list->capacity - list->extra), 
+        memcpy(list->items + (list->capacity - list->extra),
             list->items + (list->capacity/2 - list->extra), list->extra * sizeof(Item));
         // scan the list, if the item is long/double,
         // and is stored in the list extra slots, need to update the pointer
@@ -173,7 +173,7 @@ void expand_list(List *list) {
                 if (old_items <= old_pointer && old_pointer < old_items + list->capacity/2) {
                     int offset = old_items + list->capacity/2 - old_pointer;
                     void* new_pointer = list->items + list->capacity - offset;
-                    list->items[i] = {.item = itm.type_id == LMD_TYPE_FLOAT ? d2it(new_pointer) : 
+                    list->items[i] = {.item = itm.type_id == LMD_TYPE_FLOAT ? d2it(new_pointer) :
                         itm.type_id == LMD_TYPE_INT64 ? l2it(new_pointer) : k2it(new_pointer)};
                 }
                 // if the pointer is not in the old buffer, it should not be updated
@@ -196,7 +196,7 @@ Array* array_pooled(VariableMemPool *pool) {
 void array_set(Array* arr, int index, Item itm) {
     arr->items[index] = itm;
     TypeId type_id = get_type_id(itm);
-    log_debug("array set item: type: %d, index: %d, length: %ld, extra: %ld", 
+    log_debug("array set item: type: %d, index: %d, length: %ld, extra: %ld",
         type_id, index, arr->length, arr->extra);
     switch (type_id) {
     case LMD_TYPE_FLOAT: {
@@ -250,7 +250,7 @@ void array_push(Array* arr, Item item) {
             array_push(arr, nest_item);
         }
         return;
-    }    
+    }
     if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
     array_set(arr, arr->length, item);
     arr->length++;
@@ -274,7 +274,7 @@ void list_push(List *list, Item item) {
         Container *container = item.container;
         container->ref_cnt++;
     }
-    
+
     // store the value in the list (and we may need two slots for long/double)
     log_debug("list pushing item: type: %d, length: %ld", type_id, list->length);
     if (list->length + list->extra + 2 > list->capacity) { expand_list(list); }
@@ -326,18 +326,10 @@ void list_push(List *list, Item item) {
     log_item({.list = list}, "list_after_push");
 }
 
-TypedItem list_get_typed(List* list, int index) {
-    log_debug("list_get_type %p, index: %d", list, index);
-    if (!list) { return null_result; }
-    if (index < 0 || index >= list->length) { 
-        log_error("list_get_type: index out of bounds: %d", index);
-        return null_result; 
-    }
-    
-    Item item = list->items[index];
+TypedItem to_typed(Item item) {
     TypeId type_id = get_type_id(item);
     TypedItem result = {.type_id = type_id};
-    
+
     switch (type_id) {
     case LMD_TYPE_NULL:
         return null_result;
@@ -375,16 +367,16 @@ TypedItem list_get_typed(List* list, int index) {
         result.string = (String*)item.pointer;
         return result;
     case LMD_TYPE_RANGE:
-        result.range = (Range*)item.pointer;
+        result.range = item.range;
         return result;
     case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64: case LMD_TYPE_ARRAY_FLOAT:
-        result.array = (Array*)item.pointer;
+        result.array = item.array;
         return result;
     case LMD_TYPE_LIST:
-        result.list = (List*)item.pointer;
+        result.list = item.list;
         return result;
     case LMD_TYPE_MAP:
-        result.map = (Map*)item.pointer;
+        result.map = item.map;
         return result;
     case LMD_TYPE_ELEMENT:
         result.element = item.element;
@@ -398,12 +390,22 @@ TypedItem list_get_typed(List* list, int index) {
     }
 }
 
+TypedItem list_get_typed(List* list, int index) {
+    log_debug("list_get_typed %p, index: %d", list, index);
+    if (!list) { return null_result; }
+    if (index < 0 || index >= list->length) {
+        log_error("list_get_typed: index out of bounds: %d", index);
+        return null_result;
+    }
+    return to_typed(list->items[index]);
+}
+
 void set_fields(TypeMap *map_type, void* map_data, va_list args) {
     long count = map_type->length;
     log_debug("map length: %ld", count);
     ShapeEntry *field = map_type->shape;
     for (long i = 0; i < count; i++) {
-        // printf("set field of type: %d, offset: %ld, name:%.*s\n", field->type->type_id, field->byte_offset, 
+        // printf("set field of type: %d, offset: %ld, name:%.*s\n", field->type->type_id, field->byte_offset,
         //     field->name ? (int)field->name->length:4, field->name ? field->name->str : "null");
         void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
         if (!field->name) { // nested map
@@ -471,7 +473,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
                 log_debug("set field of ANY type to: %d", type_id);
                 TypedItem titem = {.type_id =type_id, .pointer = item.raw_pointer};
                 switch (type_id) {
-                case LMD_TYPE_NULL: ; 
+                case LMD_TYPE_NULL: ;
                     break; // no extra work needed
                 case LMD_TYPE_BOOL:
                     titem.bool_val = item.bool_val;  break;
@@ -538,14 +540,14 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
             continue;
         }
         log_debug("map_get_typed compare field: %.*s", (int)field->name->length, field->name->str);
-        if (strncmp(field->name->str, key, field->name->length) == 0 && 
+        if (strncmp(field->name->str, key, field->name->length) == 0 &&
             strlen(key) == field->name->length) {
             *is_found = true;
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map_data + field->byte_offset;
-            log_debug("map_get_typed found field: %.*s, type: %d, ptr: %p", 
+            log_debug("map_get_typed found field: %.*s, type: %d, ptr: %p",
                 (int)field->name->length, field->name->str, type_id, field_ptr);
-            
+
             TypedItem result = {.type_id = type_id};
             switch (type_id) {
             case LMD_TYPE_NULL:
@@ -582,7 +584,7 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
             case LMD_TYPE_BINARY:
                 result.string = *(String**)field_ptr;
                 return result;
-                
+
             case LMD_TYPE_RANGE:
                 result.range = *(Range**)field_ptr;
                 return result;
@@ -620,7 +622,7 @@ TypedItem _map_get_typed(TypeMap* map_type, void* map_data, char *key, bool *is_
 TypedItem map_get_typed(Map* map, Item key) {
     log_debug("map_get_typed %p", map);
     if (!map || !key.item) { return null_result; }
-    
+
     bool is_found;
     char *key_str = NULL;
     if (key.type_id == LMD_TYPE_STRING || key.type_id == LMD_TYPE_SYMBOL) {

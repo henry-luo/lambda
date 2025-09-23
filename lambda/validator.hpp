@@ -9,7 +9,6 @@
 
 #include "../lib/mem-pool/include/mem_pool.h"
 #include "../lib/hashmap.h"
-#include "lambda-data.hpp"
 #include "transpiler.hpp"
 
 // Forward declarations
@@ -286,3 +285,5 @@ bool is_item_compatible_with_type(TypedItem item, Type* type);
  * Get string representation of Type*
  */
 const char* type_to_string(Type* type);
+
+void print_validation_result(ValidationResult* result);
