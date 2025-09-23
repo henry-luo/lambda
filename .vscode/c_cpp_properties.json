@@ -1,0 +1,173 @@
+{
+    "configurations": [
+        {
+            "name": "Mac",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/lib/mem-pool/include",
+                "${workspaceFolder}/lambda/tree-sitter/lib/include",
+                "${workspaceFolder}/lambda/tree-sitter-lambda/bindings/c",
+                "${workspaceFolder}/mac-deps/curl-8.10.1/include",
+                "${workspaceFolder}/include",
+                "/usr/local/include",
+                "/opt/homebrew/include",
+                "/opt/homebrew/include/openssl",
+                "/Library/Developer/CommandLineTools/usr/lib/clang/17/include",
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1",
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+                "/Library/Developer/CommandLineTools/usr/include"
+            ],
+            "defines": [
+                "UTF8PROC_STATIC",
+                "SIMPLE_SCHEMA_PARSER",
+                "__APPLE__",
+                "__MACH__",
+                "_GNU_SOURCE",
+                "__STDC_LIMIT_MACROS",
+                "__STDC_CONSTANT_MACROS",
+                "_WIN32=0"
+            ],
+            "macFrameworkPath": [
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
+            ],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "macos-clang-x64",
+            "compilerArgs": [
+                "-fms-extensions",
+                "-fcolor-diagnostics",
+                "-fno-omit-frame-pointer"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}",
+                    "${workspaceFolder}/lambda",
+                    "${workspaceFolder}/lib",
+                    "${workspaceFolder}/typeset",
+                    "${workspaceFolder}/test",
+                    "${workspaceFolder}/include",
+                    "/usr/local/include",
+                    "/opt/homebrew/include"
+                ],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
+            }
+        },
+        {
+            "name": "Debug",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/lib/mem-pool/include",
+                "${workspaceFolder}/lambda/tree-sitter/lib/include",
+                "${workspaceFolder}/lambda/tree-sitter-lambda/bindings/c",
+                "${workspaceFolder}/mac-deps/curl-8.10.1/include",
+                "${workspaceFolder}/include",
+                "/usr/local/include",
+                "/opt/homebrew/include",
+                "/opt/homebrew/include/openssl",
+                "/Library/Developer/CommandLineTools/usr/lib/clang/17/include",
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1",
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+                "/Library/Developer/CommandLineTools/usr/include"
+            ],
+            "defines": [
+                "UTF8PROC_STATIC",
+                "SIMPLE_SCHEMA_PARSER",
+                "__APPLE__",
+                "__MACH__",
+                "_GNU_SOURCE",
+                "__STDC_LIMIT_MACROS",
+                "__STDC_CONSTANT_MACROS",
+                "_DEBUG"
+            ],
+            "macFrameworkPath": [
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
+            ],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "macos-clang-x64",
+            "compilerArgs": [
+                "-fms-extensions",
+                "-fsanitize=address",
+                "-fcolor-diagnostics",
+                "-fno-omit-frame-pointer",
+                "-g3",
+                "-gline-tables-only",
+                "-O0"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}",
+                    "${workspaceFolder}/lambda",
+                    "${workspaceFolder}/lib",
+                    "${workspaceFolder}/typeset",
+                    "${workspaceFolder}/test",
+                    "${workspaceFolder}/include",
+                    "/usr/local/include",
+                    "/opt/homebrew/include"
+                ],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
+            }
+        },
+        {
+            "name": "Release",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "${workspaceFolder}/lib/mem-pool/include",
+                "${workspaceFolder}/lambda/tree-sitter/lib/include",
+                "${workspaceFolder}/lambda/tree-sitter-lambda/bindings/c",
+                "${workspaceFolder}/mac-deps/curl-8.10.1/include",
+                "${workspaceFolder}/include",
+                "/usr/local/include",
+                "/opt/homebrew/include",
+                "/opt/homebrew/include/openssl",
+                "/Library/Developer/CommandLineTools/usr/lib/clang/17/include",
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1",
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+                "/Library/Developer/CommandLineTools/usr/include"
+            ],
+            "defines": [
+                "UTF8PROC_STATIC",
+                "SIMPLE_SCHEMA_PARSER",
+                "__APPLE__",
+                "__MACH__",
+                "_GNU_SOURCE",
+                "__STDC_LIMIT_MACROS",
+                "__STDC_CONSTANT_MACROS",
+                "NDEBUG"
+            ],
+            "macFrameworkPath": [
+                "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
+            ],
+            "compilerPath": "/usr/bin/clang",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "macos-clang-x64",
+            "compilerArgs": [
+                "-fms-extensions",
+                "-fcolor-diagnostics",
+                "-fno-omit-frame-pointer",
+                "-O3",
+                "-flto"
+            ],
+            "browse": {
+                "path": [
+                    "${workspaceFolder}",
+                    "${workspaceFolder}/lambda",
+                    "${workspaceFolder}/lib",
+                    "${workspaceFolder}/typeset",
+                    "${workspaceFolder}/test",
+                    "${workspaceFolder}/include",
+                    "/usr/local/include",
+                    "/opt/homebrew/include"
+                ],
+                "limitSymbolsToIncludedHeaders": true,
+                "databaseFilename": "${workspaceFolder}/.vscode/browse.vc.db"
+            }
+        }
+    ],
+    "version": 4
+}
