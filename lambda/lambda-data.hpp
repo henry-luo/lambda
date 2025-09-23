@@ -10,7 +10,7 @@ extern "C" {
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
-#include <stdint.h>
+#include <cstdint>  // C++
 #include <inttypes.h>  // for cross-platform integer formatting
 #include <math.h>
 #include <mpdecimal.h>

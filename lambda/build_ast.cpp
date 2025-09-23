@@ -1467,6 +1467,8 @@ AstNode* build_occurrence_type(Transpiler* tp, TSNode occurrence_node) {
     return (AstNode*)ast_node;
 }
 
+// todo: build reference type
+
 AstNode* build_map(Transpiler* tp, TSNode map_node) {
     AstMapNode* ast_node = (AstMapNode*)alloc_ast_node(tp, AST_NODE_MAP, map_node, sizeof(AstMapNode));
     ast_node->type = alloc_type(tp->ast_pool, LMD_TYPE_MAP, sizeof(TypeMap));
