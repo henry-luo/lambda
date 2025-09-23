@@ -155,7 +155,7 @@ AstNode* build_field_expr(Transpiler* tp, TSNode array_node, AstNodeType node_ty
         AstIdentNode* id_node = (AstIdentNode*)alloc_ast_node(tp, AST_NODE_IDENT, field_node, sizeof(AstIdentNode));
         StrView var_name = ts_node_source(tp, field_node);
         id_node->name = name_pool_create_strview(tp->name_pool, var_name);
-        log_debug("member expr field name: %.*s", (int)id_node->name->len, id_node->name->chars);
+        log_debug("member expr field name: '%.*s'", (int)id_node->name->len, id_node->name->chars);
         ast_node->field = (AstNode*)id_node;
     }
     else {
@@ -375,6 +375,7 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     // todo: exclude zero-length string
     String* str;
+    log_debug("build lit string with symbol: %d", symbol);
     TypeString* str_type = (TypeString*)alloc_type(tp->ast_pool,
         symbol == SYM_STRING ? LMD_TYPE_STRING :
         symbol == SYM_BINARY ? LMD_TYPE_BINARY :
@@ -383,8 +384,9 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
 
     int cnt = ts_node_named_child_count(node);
     log_debug("string child count:: %d", cnt);
-    if (cnt == 1) {
-        TSNode child = ts_node_named_child(node, 0);
+    if (cnt <= 1) {
+        // for SYM_IDENT, child cnt == 0
+        TSNode child = cnt ? ts_node_named_child(node, 0) : node;
         int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
         int len = end - start;
         // copy the string
