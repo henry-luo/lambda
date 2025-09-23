@@ -88,7 +88,7 @@ typedef struct TypedItem {
         bool bool_val;
         int int_val;
         int64_t long_val;
-        float float_val;
+        // float float_val;
         double double_val;
         DateTime datetime_val;
 
@@ -313,6 +313,8 @@ static inline TypeId get_type_id(Item value) {
     }
     return LMD_TYPE_NULL; // fallback for null items
 }
+
+TypedItem to_typed(Item item);
 
 extern Type TYPE_NULL;
 extern Type TYPE_BOOL;

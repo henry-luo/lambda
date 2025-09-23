@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../lib/log.h"
+
 #undef LAMBDA_STATIC
 #include "lambda-data.hpp"
 

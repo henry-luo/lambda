@@ -5,7 +5,7 @@
 #include <time.h>
 #include <stdlib.h>
 
-#ifdef _WIN32
+#if _WIN32
 #include <windows.h>
 
 // Windows-specific timing implementation
@@ -20,7 +20,7 @@ static void get_time(win_timer* timer) {
 static void print_elapsed_time(const char* label, win_timer start, win_timer end) {
     LARGE_INTEGER frequency;
     QueryPerformanceFrequency(&frequency);
-    
+
     double elapsed_ms = ((double)(end.counter.QuadPart - start.counter.QuadPart) * 1000.0) / frequency.QuadPart;
     log_debug("%s took %.3f ms", label, elapsed_ms);
 }
@@ -66,27 +66,27 @@ void find_errors(TSNode node) {
     const char *node_type = ts_node_type(node);
     TSPoint start_point = ts_node_start_point(node);
     TSPoint end_point = ts_node_end_point(node);
-    
+
     // Check for direct syntax error nodes
     if (ts_node_is_error(node)) {
-        log_error("Syntax error at Ln %u, Col %u - %u, Col %u: %s", 
+        log_error("Syntax error at Ln %u, Col %u - %u, Col %u: %s",
                start_point.row + 1, start_point.column + 1,
                end_point.row + 1, end_point.column + 1, node_type);
     }
-    
+
     // Check for missing nodes (inserted by parser for error recovery)
     if (ts_node_is_missing(node)) {
-        log_error("Missing node at Ln %u, Col %u: expected %s", 
+        log_error("Missing node at Ln %u, Col %u: expected %s",
                start_point.row + 1, start_point.column + 1, node_type);
     }
-    
+
     // Check for ERROR node type specifically (some parsers use this)
     if (strcmp(node_type, "ERROR") == 0) {
-        log_error("ERROR node at Ln %u, Col %u - %u, Col %u", 
+        log_error("ERROR node at Ln %u, Col %u - %u, Col %u",
                start_point.row + 1, start_point.column + 1,
                end_point.row + 1, end_point.column + 1);
     }
-    
+
     uint32_t child_count = ts_node_child_count(node);
     for (uint32_t i = 0; i < child_count; ++i) {
         find_errors(ts_node_child(node, i));
@@ -107,7 +107,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             MIR_item_t imp = find_import(tp->jit_context, buf);
             log_debug("imported item: %p", imp);
             if (!imp) {
-                log_error("Error: Failed to find import item for module %.*s", 
+                log_error("Error: Failed to find import item for module %.*s",
                     (int)(import->module.length), import->module.str);
                 goto RETURN;
             }
@@ -115,7 +115,7 @@ void init_module_import(Transpiler *tp, AstScript *script) {
             // loop through the public functions in the module
             AstNode *node = import->script->ast_root;
             assert(node->node_type == AST_SCRIPT);
-            node = ((AstScript*)node)->child; 
+            node = ((AstScript*)node)->child;
             while (node) {
                 log_debug("checking node: %d", node->node_type);
                 if (node->node_type == AST_NODE_CONTENT) {
@@ -170,11 +170,11 @@ extern unsigned int lambda_lambda_h_len;
 void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     if (!script || !script->source) {
         log_error("Error: Source code is NULL");
-        return; 
+        return;
     }
     log_notice("Start transpiling %s...", script_path);
     win_timer start, end;
-    
+
     // create a parser
     get_time(&start);
     // parse the source
@@ -189,7 +189,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
 
     // print the syntax tree as an s-expr
     print_ts_root(tp->source, tp->syntax_tree);
-    
+
     // check if the syntax tree is valid
     TSNode root_node = ts_tree_root_node(tp->syntax_tree);
     if (ts_node_has_error(root_node)) {
@@ -199,7 +199,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
         log_debug("Root node is_missing: %d", ts_node_is_missing(root_node));
         log_debug("Root node has_error: %d", ts_node_has_error(root_node));
         log_debug("Source pointer: %p", script->source);
-        
+
         // find and print syntax errors
         find_errors(root_node);
         return;
@@ -212,14 +212,14 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     pool_variable_init(&tp->ast_pool, grow_size, tolerance_percent);
     tp->type_list = arraylist_new(16);
     tp->const_list = arraylist_new(16);
-    
+
     // Initialize name pool
     tp->name_pool = name_pool_create(tp->ast_pool, nullptr);
     if (!tp->name_pool) {
         log_error("Error: Failed to create name pool");
         return;
     }
-    
+
     if (strcmp(ts_node_type(root_node), "document") != 0) {
         log_error("Error: The tree has no valid root node.");
         return;
@@ -289,7 +289,7 @@ Script* load_script(Runtime *runtime, const char* script_path, const char* sourc
     log_debug("script source length: %d", (int)strlen(new_script->source));
     arraylist_append(runtime->scripts, new_script);
     new_script->index = runtime->scripts->length - 1;
-    
+
     // Initialize decimal context
     new_script->decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
     mpd_maxcontext(new_script->decimal_ctx);
@@ -307,6 +307,7 @@ void runner_init(Runtime *runtime, Runner* runner) {
 }
 
 #include "../lib/url.h"
+#include "validator.hpp"
 
 void runner_setup_context(Runner* runner) {
     log_debug("runner setup exec context");
@@ -317,11 +318,12 @@ void runner_setup_context(Runner* runner) {
     runner->context.num_stack = num_stack_create(16);
     runner->context.result = ItemNull;  // exec result
     runner->context.cwd = get_current_dir();  // proper URL object for current directory
-    
-    // Initialize decimal context
+    // initialize decimal context
     runner->context.decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
     mpd_defaultcontext(runner->context.decimal_ctx);
-    
+    // init AST validator
+    runner->context.validator = ast_validator_create(runner->context.ast_pool);
+
     context = &runner->context;
     heap_init();
     frame_start();
@@ -340,11 +342,15 @@ void runner_cleanup(Runner* runner) {
         heap_destroy();
         if (runner->context.num_stack) num_stack_destroy((num_stack_t*)runner->context.num_stack);
     }
-    
-    // Free decimal context
+    // free decimal context
     if (runner->context.decimal_ctx) {
         free(runner->context.decimal_ctx);
         runner->context.decimal_ctx = NULL;
+    }
+    // free AST validator
+    if (runner->context.validator) {
+        ast_validator_destroy(runner->context.validator);
+        runner->context.validator = NULL;
     }
 }
 
@@ -358,8 +364,8 @@ Item run_script(Runtime *runtime, const char* source, char* script_path, bool tr
     }
     // execute the function
     Item result;
-    if (!runner.script || !runner.script->main_func) { 
-        log_error("Error: Failed to compile the function."); 
+    if (!runner.script || !runner.script->main_func) {
+        log_error("Error: Failed to compile the function.");
         result = ItemNull;
     } else {
         log_notice("Executing JIT compiled code...");
@@ -388,17 +394,17 @@ Item run_script_with_run_main(Runtime *runtime, char* script_path, bool transpil
     }
     // execute the function
     Item result;
-    if (!runner.script || !runner.script->main_func) { 
-        log_error("Error: Failed to compile the function."); 
+    if (!runner.script || !runner.script->main_func) {
+        log_error("Error: Failed to compile the function.");
         result = ItemNull;
     } else {
         log_notice("Executing JIT compiled code...");
         runner_setup_context(&runner);
-        
+
         // Set the run_main flag in the execution context
         runner.context.run_main = run_main;
         log_debug("Set context run_main = %s", run_main ? "true" : "false");
-        
+
         log_debug("exec main func");
         result = context->result = runner.script->main_func(context);
         log_debug("after main func");

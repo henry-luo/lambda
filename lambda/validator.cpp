@@ -137,7 +137,6 @@ AstValidator* ast_validator_create(VariableMemPool* pool) {
     AstValidator* validator = (AstValidator*)pool_calloc(pool, sizeof(AstValidator));
     if (!validator) return nullptr;
 
-    // Initialize memory pool
     validator->pool = pool;
 
     validator->transpiler = transpiler_create(pool);
