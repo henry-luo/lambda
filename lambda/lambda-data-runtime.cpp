@@ -84,7 +84,7 @@ Item array_get(Array *array, int index) {
     default:
         log_debug("array_get returning: type: %d, item: %p", item.type_id, item.raw_pointer);
         return item;
-    }    
+    }
 }
 
 ArrayInt* array_int() {
@@ -111,7 +111,7 @@ ArrayInt* array_int_fill(ArrayInt *arr, int count, ...) {
         arr->length = count;  arr->capacity = count;
         for (int i = 0; i < count; i++) {
             arr->items[i] = va_arg(args, int32_t);
-        }       
+        }
         va_end(args);
     }
     log_debug("array_int_filled");
@@ -148,14 +148,14 @@ ArrayInt64* array_int64_new(int length) {
 }
 
 ArrayInt64* array_int64_fill(ArrayInt64 *arr, int count, ...) {
-    if (count > 0) { 
+    if (count > 0) {
         va_list args;
         va_start(args, count);
         arr->items = (int64_t*)malloc(count * sizeof(int64_t));
         arr->length = count;  arr->capacity = count;
         for (int i = 0; i < count; i++) {
             arr->items[i] = va_arg(args, int64_t);
-        }       
+        }
         va_end(args);
     }
     log_debug("array_int64_filled");
@@ -192,12 +192,12 @@ ArrayFloat* array_float_fill(ArrayFloat *arr, int count, ...) {
     if (count > 0) {
         va_list args;
         va_start(args, count);
-        arr->type_id = LMD_TYPE_ARRAY_FLOAT;  
+        arr->type_id = LMD_TYPE_ARRAY_FLOAT;
         arr->items = (double*)malloc(count * sizeof(double));
         arr->length = count;  arr->capacity = count;
         for (int i = 0; i < count; i++) {
             arr->items[i] = va_arg(args, double);
-        }       
+        }
         va_end(args);
     }
     log_debug("array_float_filled");
@@ -224,7 +224,7 @@ double array_float_get_value(ArrayFloat *arr, int index) {
 
 // Wrapper function to return an Item instead of raw ArrayFloat*
 // Item array_float_item(int count, ...) {
-//     if (count <= 0) { 
+//     if (count <= 0) {
 //         ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
 //         arr->type_id = LMD_TYPE_ARRAY_FLOAT;
 //         arr->capacity = 0;
@@ -235,13 +235,13 @@ double array_float_get_value(ArrayFloat *arr, int index) {
 //     va_list args;
 //     va_start(args, count);
 //     ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
-//     arr->type_id = LMD_TYPE_ARRAY_FLOAT;  
+//     arr->type_id = LMD_TYPE_ARRAY_FLOAT;
 //     arr->capacity = count;
 //     arr->items = (double*)Malloc(count * sizeof(double));
 //     arr->length = count;
 //     for (int i = 0; i < count; i++) {
 //         arr->items[i] = va_arg(args, double);
-//     }       
+//     }
 //     va_end(args);
 //     return (Item){.array_float = arr};
 // }
@@ -262,10 +262,10 @@ void array_float_set_item(ArrayFloat *arr, int index, Item value) {
     if (!arr || index < 0 || index >= arr->capacity) {
         return;  // Invalid access, do nothing
     }
-    
+
     double dval = 0.0;
     TypeId type_id = get_type_id(value);
-    
+
     // Convert item to double based on its type
     switch (type_id) {
         case LMD_TYPE_FLOAT:
@@ -280,7 +280,7 @@ void array_float_set_item(ArrayFloat *arr, int index, Item value) {
         default:
             return;  // Unsupported type, do nothing
     }
-    
+
     arr->items[index] = dval;
     // Update length if we're setting beyond current length
     if (index >= arr->length) {
@@ -301,20 +301,20 @@ Item list_end(List *list) {
     if (list->type_id == LMD_TYPE_ELEMENT) {
         log_debug("elmt_end!");
         log_item({.list = list}, "elmt_end");
-        return {.list = list};        
+        return {.list = list};
     }
     else {
         log_debug("list_ended");
         if (list->length == 0) {
             return ItemNull;
-        } 
+        }
         // flatten list, not element
         else if (list->length == 1) {
             return list->items[0];
         } else {
             log_item({.list = list}, "list_end");
             return {.list = list};
-        }        
+        }
     }
 }
 
@@ -352,7 +352,7 @@ Map* map(int type_index) {
     map->type_id = LMD_TYPE_MAP;
     ArrayList* type_list = (ArrayList*)context->type_list;
     TypeMap *map_type = (TypeMap*)(type_list->data[type_index]);
-    map->type = map_type;    
+    map->type = map_type;
     frame_start();
     return map;
 }
@@ -388,12 +388,12 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
             continue;
         }
         // printf("map_get compare field: %.*s\n", (int)field->name->length, field->name->str);
-        if (strncmp(field->name->str, key, field->name->length) == 0 && 
+        if (strncmp(field->name->str, key, field->name->length) == 0 &&
             strlen(key) == field->name->length) {
             *is_found = true;
             TypeId type_id = field->type->type_id;
             void* field_ptr = (char*)map_data + field->byte_offset;
-            log_debug("map_get found field: %.*s, type: %d, ptr: %p", 
+            log_debug("map_get found field: %.*s, type: %d, ptr: %p",
                 (int)field->name->length, field->name->str, type_id, field_ptr);
             switch (type_id) {
             case LMD_TYPE_NULL:
@@ -421,7 +421,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
                 return {.item = y2it(*(char**)field_ptr)};
             case LMD_TYPE_BINARY:
                 return {.item = x2it(*(char**)field_ptr)};
-                
+
             case LMD_TYPE_RANGE:  case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
             case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
                 Container* container = *(Container**)field_ptr;
@@ -443,7 +443,7 @@ Item _map_get(TypeMap* map_type, void* map_data, char *key, bool *is_found) {
         field = field->next;
     }
     *is_found = false;
-    log_debug("map_get: key %s not found", key);
+    log_debug("map_get: key '%s' not found", key);
     return ItemNull;
 }
 
@@ -458,7 +458,7 @@ Item map_get(Map* map, Item key) {
         log_error("map_get: key must be string or symbol, got type %d", key.type_id);
         return ItemNull;  // only string or symbol keys are supported
     }
-        log_debug("map_get key: %s", key_str);
+    log_debug("map_get key:'%s'", key_str);
     return _map_get((TypeMap*)map->type, map->data, key_str, &is_found);
 }
 
@@ -474,7 +474,7 @@ Element* elmt(int type_index) {
     }
     // else - bare element
     return elmt;
-} 
+}
 
 Element* elmt_fill(Element* elmt, ...) {
     TypeElmt *elmt_type = (TypeElmt*)elmt->type;
