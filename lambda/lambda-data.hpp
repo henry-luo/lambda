@@ -15,8 +15,6 @@ extern "C" {
 #include <math.h>
 #include <mpdecimal.h>
 
-typedef struct NamePool NamePool;
-
 #include "../lib/strbuf.h"
 #include "../lib/stringbuf.h"
 #include "../lib/hashmap.h"
@@ -39,6 +37,8 @@ typedef struct NamePool NamePool;
 #undef max
 #undef min
 
+typedef struct NamePool NamePool;
+
 #ifdef __cplusplus
 }
 #endif
@@ -58,8 +58,8 @@ inline String* get_binary(Item item) { return (String*)item.pointer; }
 typedef struct TypeInfo {
     int byte_size;  // byte size of the type
     char* name;  // name of the type
-    Type *type;  // literal type
-    Type *lit_type;  // literal type_type
+    Type* type;  // literal type
+    Type* lit_type;  // literal type_type
     // char* c_type;  // C type of the type
 } TypeInfo;
 
@@ -70,10 +70,11 @@ extern TypeInfo type_info[];
 
 // mapping from data to its owner
 typedef struct DataOwner {
-    void *data;
-    void *owner;  // element/map/list/array that contains/owns the data
+    void* data;
+    void* owner;  // element/map/list/array that contains/owns the data
 } DataOwner;
 
+typedef struct mpd_t mpd_t;
 struct Decimal {
     uint16_t ref_cnt;
     mpd_t* dec_val;  // libmpdec decimal number
@@ -135,12 +136,12 @@ typedef struct TypeDateTime : TypeConst {
     DateTime datetime;
 } TypeDateTime;
 
-typedef struct TypeDecimal : TypeConst  {
-    Decimal *decimal;
+typedef struct TypeDecimal : TypeConst {
+    Decimal* decimal;
 } TypeDecimal;
 
 typedef struct TypeString : TypeConst {
-    String *string;
+    String* string;
 } TypeString;
 
 typedef TypeString TypeSymbol;
@@ -228,7 +229,7 @@ typedef enum SysFunc {
     SYSFUNC_TIME,
     SYSFUNC_JUSTNOW,
     SYSFUNC_SET,
-    SYSFUNC_SLICE,    
+    SYSFUNC_SLICE,
     SYSFUNC_ALL,
     SYSFUNC_ANY,
     SYSFUNC_MIN1,
@@ -270,12 +271,12 @@ typedef struct TypeUnary : Type {
 } TypeUnary;
 
 typedef struct TypeParam : Type {
-    struct TypeParam *next;
+    struct TypeParam* next;
 } TypeParam;
 
 typedef struct TypeFunc : Type {
-    TypeParam *param;
-    Type *returned;
+    TypeParam* param;
+    Type* returned;
     int param_count;
     int type_index;
     bool is_anonymous;
@@ -284,11 +285,11 @@ typedef struct TypeFunc : Type {
 } TypeFunc;
 
 typedef struct TypeSysFunc : Type {
-    SysFunc *fn;
+    SysFunc* fn;
 } TypeSysFunc;
 
 typedef struct TypeType : Type {
-    Type *type;  // full type defintion
+    Type* type;  // full type defintion
 } TypeType;
 
 struct Pack {
@@ -386,16 +387,13 @@ typedef struct Input {
     StringBuf* sb;
 } Input;
 
-Array* array_pooled(VariableMemPool *pool);
-void array_append(Array* arr, Item itm, VariableMemPool *pool);
-Map* map_pooled(VariableMemPool *pool);
+Array* array_pooled(VariableMemPool* pool);
+void array_append(Array* arr, Item itm, VariableMemPool* pool);
+Map* map_pooled(VariableMemPool* pool);
 TypedItem map_get_typed(Map* map, Item key);
 TypedItem list_get_typed(List* list, int index);
-Element* elmt_pooled(VariableMemPool *pool);
+Element* elmt_pooled(VariableMemPool* pool);
 TypedItem elmt_get_typed(Element* elmt, Item key);
 void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool);
 
 Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
-
-
-

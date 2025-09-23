@@ -1,7 +1,7 @@
 {
     "compiler": "clang",
     "output": "lambda.exe",
-    "source_dirs":[
+    "source_dirs": [
         "lambda/input",
         "lambda/format"
     ],
@@ -40,6 +40,7 @@
         "lambda/lambda-proc.cpp",
         "lambda/utf_string.cpp",
         "lambda/lambda-mem.cpp",
+        "lambda/validate.cpp",
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
@@ -146,7 +147,10 @@
         {
             "name": "lambda-lib",
             "description": "Unified runtime with all basic libraries for tests",
-            "includes": ["lib/mem-pool/include", "/opt/homebrew/include"],
+            "includes": [
+                "lib/mem-pool/include",
+                "/opt/homebrew/include"
+            ],
             "sources": [
                 "lib/mem-pool/src/variable.c",
                 "lib/mem-pool/src/buffer.c",
@@ -165,11 +169,15 @@
                 "lambda/input/mime-detect.c",
                 "lambda/input/mime-types.c"
             ],
-            "libraries": ["utf8proc"],
+            "libraries": [
+                "utf8proc"
+            ],
             "special_flags": "-DUTF8PROC_STATIC",
             "cpp_flags": "-I/opt/homebrew/include -DUTF8PROC_STATIC",
             "link": "static",
-            "defines": ["UTF8PROC_STATIC"]
+            "defines": [
+                "UTF8PROC_STATIC"
+            ]
         },
         {
             "name": "lambda-input-full",
@@ -179,11 +187,12 @@
                 "lambda/format/format*.cpp"
             ],
             "source_files": [
-                "lambda/print.cpp", 
+                "lambda/print.cpp",
                 "lambda/utf_string.cpp",
                 "lambda/name_pool.cpp",
                 "lambda/lambda-data.cpp",
                 "lambda/build_ast.cpp",
+                "lambda/validate.cpp",
                 "lambda/validator.cpp",
                 "lambda/validator/ast_validate.cpp",
                 "lambda/validator/error_reporting.cpp",
@@ -193,15 +202,28 @@
                 "lambda/input/css_tokenizer.c",
                 "lambda/input/css_parser.c",
                 "lambda/input/css_properties.c",
-                "lib/arraylist.c", 
+                "lib/arraylist.c",
                 "lib/hashmap.c",
-                "lib/file.c", 
+                "lib/file.c",
                 "lib/log.c",
                 "lib/utf.c"
             ],
-            "libraries": ["lambda-lib", "tree-sitter-lambda", "tree-sitter", "mpdec", "utf8proc", "nghttp2", "curl", "ssl", "crypto", "z"],
+            "libraries": [
+                "lambda-lib",
+                "tree-sitter-lambda",
+                "tree-sitter",
+                "mpdec",
+                "utf8proc",
+                "nghttp2",
+                "curl",
+                "ssl",
+                "crypto",
+                "z"
+            ],
             "include": "lib/mem-pool/include",
-            "defines": ["SIMPLE_SCHEMA_PARSER"],
+            "defines": [
+                "SIMPLE_SCHEMA_PARSER"
+            ],
             "special_flags": "-lstdc++",
             "link": "dynamic"
         }
@@ -254,8 +276,7 @@
                 "gline-tables-only",
                 "O0"
             ],
-            "linker_flags": [
-            ],
+            "linker_flags": [],
             "build_dir": "build_debug",
             "debug": true
         },
@@ -404,7 +425,7 @@
                 },
                 {
                     "name": "winmm",
-                    "lib": "-lwinmm", 
+                    "lib": "-lwinmm",
                     "link": "dynamic"
                 },
                 {
@@ -436,7 +457,6 @@
                     "name": "posix",
                     "link": "none"
                 },
-
                 {
                     "name": "setargv",
                     "link": "none"
@@ -629,64 +649,110 @@
                     {
                         "source": "test_strbuf_gtest.cpp",
                         "name": "📝 String Buffer Tests (GTest)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_strbuf_gtest.exe"
                     },
                     {
                         "source": "test_stringbuf_gtest.cpp",
                         "name": "🧵 StringBuf Tests (GTest)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_stringbuf_gtest.exe"
                     },
                     {
                         "source": "test_strview_gtest.cpp",
                         "name": "👀 String View Tests (GTest)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_strview_gtest.exe"
                     },
                     {
                         "source": "test_variable_pool_gtest.cpp",
                         "name": "🏊 Variable Pool Tests (GTest)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_variable_pool_gtest.exe"
                     },
                     {
                         "source": "test_num_stack_gtest.cpp",
                         "name": "🔢 Number Stack Tests (GTest)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_num_stack_gtest.exe"
                     },
                     {
                         "source": "test_datetime_gtest.cpp",
                         "name": "📅 DateTime Tests (GTest)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_datetime_gtest.exe"
                     },
                     {
                         "source": "test_url_gtest.cpp",
                         "name": "🔗 URL Tests (GTest)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_url_gtest.exe"
                     },
                     {
                         "source": "test_url_extra_gtest.cpp",
                         "name": "🌐 URL Extra Tests (GTest)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_url_extra_gtest.exe"
                     },
                     {
                         "source": "test_cmdedit_gtest.cpp",
                         "name": "⌨️ Command Line Editor Tests (GTest)",
-                        "dependencies": ["lambda-lib"],
-                        "libraries": ["gtest", "gtest_main", "utf8proc"],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "utf8proc"
+                        ],
                         "binary": "test_cmdedit_gtest.exe",
                         "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -DUTF8PROC_STATIC"
                     }
@@ -701,120 +767,205 @@
                     {
                         "source": "test_mime_detect_gtest.cpp",
                         "name": "📎 MIME Detection Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_mime_detect_gtest.exe"
                     },
                     {
                         "source": "test_math_gtest.cpp",
                         "name": "🔢 Math Roundtrip Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_math_gtest.exe"
                     },
                     {
                         "source": "test_math_ascii_gtest.cpp",
                         "name": "🔤 ASCII Math Roundtrip Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_math_ascii_gtest.exe"
                     },
                     {
                         "source": "test_markup_roundtrip_gtest.cpp",
                         "name": "📝 Markup Roundtrip Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_markup_roundtrip_gtest.exe"
                     },
                     {
                         "source": "test_input_roundtrip_gtest.cpp",
                         "name": "🔄 Input Roundtrip Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_input_roundtrip_gtest.exe"
                     },
                     {
                         "source": "test_dir_gtest.cpp",
                         "name": "📁 Directory Listing Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_dir_gtest.exe"
                     },
                     {
                         "source": "test/test_http_gtest.cpp",
                         "name": "🌐 HTTP/HTTPS Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_http_gtest.exe"
                     },
                     {
                         "source": "test/test_sysinfo_gtest.cpp",
                         "name": "🖥️ System Information Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_sysinfo_gtest.exe"
                     },
                     {
                         "source": "test/test_jsx_roundtrip_new_gtest.cpp",
                         "name": "🔢 JSX Roundtrip Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_jsx_roundtrip_new_gtest.exe"
                     },
                     {
                         "source": "test/test_mdx_roundtrip_new_gtest.cpp",
                         "name": "📝 MDX Roundtrip Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_mdx_roundtrip_new_gtest.exe"
                     },
                     {
                         "source": "test/test_css_tokenizer_gtest.cpp",
                         "name": "🎨 CSS Tokenizer Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_css_tokenizer_gtest.exe"
                     },
                     {
                         "source": "test/test_css_parser_gtest.cpp",
                         "name": "🎨 CSS Parser Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_css_parser_gtest.exe"
                     },
                     {
                         "source": "test/test_css_integration_gtest.cpp",
                         "name": "🎨 CSS Integration Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_css_integration_gtest.exe"
                     },
                     {
                         "source": "test_css_files_safe_gtest.cpp",
                         "name": "🎨 CSS Files Safe Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_css_files_safe_gtest.exe"
                     },
                     {
                         "source": "test_css_frameworks_gtest.cpp",
                         "name": "🎨 CSS Framework Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_css_frameworks_gtest.exe"
                     },
                     {
                         "source": "test/test_mdx_roundtrip_gtest.cpp",
                         "name": "📄 MDX Roundtrip Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_mdx_roundtrip_gtest.exe"
                     },
                     {
                         "source": "test/test_jsx_roundtrip_gtest.cpp",
                         "name": "⚛️ JSX Roundtrip Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test_jsx_roundtrip_gtest.exe"
                     }
                 ],
@@ -830,15 +981,25 @@
                     {
                         "source": "test/test_validator_gtest.cpp",
                         "name": "🔍 Validator Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test/test_validator_gtest.exe"
                     },
                     {
                         "source": "test/test_ast_validator_gtest.cpp",
                         "name": "🔍 AST Validator Tests (GTest)",
-                        "dependencies": ["lambda-input-full"],
-                        "libraries": ["gtest", "gtest_main"],
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
                         "binary": "test/test_ast_validator_gtest.exe"
                     }
                 ],
@@ -862,21 +1023,30 @@
                         "name": "🐑 Lambda Runtime Tests (GTest)",
                         "dependencies": [],
                         "binary": "test/test_lambda_gtest.exe",
-                        "libraries": ["gtest", "gtest_main"]
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ]
                     },
                     {
                         "source": "test/test_lambda_repl_gtest.cpp",
                         "name": "🎮 Lambda REPL Interface Tests (GTest)",
                         "dependencies": [],
                         "binary": "test/test_lambda_repl_gtest.exe",
-                        "libraries": ["gtest", "gtest_main"]
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ]
                     },
                     {
                         "source": "test/test_lambda_proc_gtest.cpp",
                         "name": "🐑 Lambda Procedural Tests (GTest)",
                         "dependencies": [],
                         "binary": "test/test_lambda_proc_gtest.exe",
-                        "libraries": ["gtest", "gtest_main"]
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ]
                     }
                 ],
                 "type": "lambda",
@@ -894,8 +1064,14 @@
                         "name": "🧪 Lambda Standard Tests",
                         "dependencies": [],
                         "binary": "test/lambda_test_runner",
-                        "libraries": ["c++fs"],
-                        "cxx_flags": ["-std=c++17", "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES", "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0"]
+                        "libraries": [
+                            "c++fs"
+                        ],
+                        "cxx_flags": [
+                            "-std=c++17",
+                            "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES",
+                            "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0"
+                        ]
                     }
                 ],
                 "type": "lambda-std",
@@ -906,21 +1082,42 @@
                 "parallel": true,
                 "platform_specific": {
                     "darwin": {
-                        "libraries": ["c++fs"],
-                        "cxx_flags": ["-std=c++17", "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES", "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0"]
+                        "libraries": [
+                            "c++fs"
+                        ],
+                        "cxx_flags": [
+                            "-std=c++17",
+                            "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES",
+                            "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0"
+                        ]
                     },
                     "linux": {
-                        "libraries": ["stdc++fs", "pthread"]
+                        "libraries": [
+                            "stdc++fs",
+                            "pthread"
+                        ]
                     }
                 },
                 "test_runner": {
                     "type": "custom",
                     "executable": "test/lambda_test_runner",
                     "test_dir": "test/std",
-                    "output_formats": ["json", "tap"],
+                    "output_formats": [
+                        "json",
+                        "tap"
+                    ],
                     "json_output": "test_output/lambda_test_runner_results.json",
                     "tap_output": "test_output/lambda_test_runner_results.tap",
-                    "command_args": ["--test-dir", "test/std", "--format", "both", "--json-output", "test_output/lambda_test_runner_results.json", "--tap-output", "test_output/lambda_test_runner_results.tap"],
+                    "command_args": [
+                        "--test-dir",
+                        "test/std",
+                        "--format",
+                        "both",
+                        "--json-output",
+                        "test_output/lambda_test_runner_results.json",
+                        "--tap-output",
+                        "test_output/lambda_test_runner_results.tap"
+                    ],
                     "platform_specific": {
                         "darwin": {
                             "executable": "./test/lambda_test_runner"
