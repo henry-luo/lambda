@@ -213,7 +213,7 @@ ValidationResult* validate_against_union_type(AstValidator* validator, TypedItem
 /**
  * Validate occurrence constraints (?, *, +, min/max)
  */
-ValidationResult* validate_occurrence_constraint(AstValidator* validator, TypedItem* items, long item_count, Type* expected_type, Operator occurrence_op, AstValidationContext* ctx);
+ValidationResult* validate_against_occurrence(AstValidator* validator, TypedItem* items, long item_count, Type* expected_type, Operator occurrence_op, AstValidationContext* ctx);
 
 // ==================== Error Handling ====================
 

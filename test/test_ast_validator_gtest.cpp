@@ -550,7 +550,7 @@ TEST_F(AstValidatorTest, OptionalConstraintZeroItems) {
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
-    AstValidationResult* result = validate_occurrence_constraint(validator, nullptr, 0, string_type, OPERATOR_OPTIONAL, &ctx);
+    AstValidationResult* result = validate_against_occurrence(validator, nullptr, 0, string_type, OPERATOR_OPTIONAL, &ctx);
     
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Optional constraint with 0 items should be valid";
@@ -572,7 +572,7 @@ TEST_F(AstValidatorTest, OptionalConstraintTooManyItems) {
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
-    AstValidationResult* result = validate_occurrence_constraint(validator, items, 2, string_type, OPERATOR_OPTIONAL, &ctx);
+    AstValidationResult* result = validate_against_occurrence(validator, items, 2, string_type, OPERATOR_OPTIONAL, &ctx);
     
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_FALSE(result->valid) << "Optional constraint with 2 items should be invalid";
@@ -589,7 +589,7 @@ TEST_F(AstValidatorTest, OneOrMoreConstraintZeroItems) {
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
-    AstValidationResult* result = validate_occurrence_constraint(validator, nullptr, 0, string_type, OPERATOR_ONE_MORE, &ctx);
+    AstValidationResult* result = validate_against_occurrence(validator, nullptr, 0, string_type, OPERATOR_ONE_MORE, &ctx);
     
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_FALSE(result->valid) << "One-or-more constraint with 0 items should be invalid";
@@ -614,7 +614,7 @@ TEST_F(AstValidatorTest, OneOrMoreConstraintMultipleItems) {
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
-    AstValidationResult* result = validate_occurrence_constraint(validator, items, 3, string_type, OPERATOR_ONE_MORE, &ctx);
+    AstValidationResult* result = validate_against_occurrence(validator, items, 3, string_type, OPERATOR_ONE_MORE, &ctx);
     
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "One-or-more constraint with 3 items should be valid";
@@ -636,7 +636,7 @@ TEST_F(AstValidatorTest, ZeroOrMoreConstraintAnyItems) {
     ctx.current_depth = 0;
     ctx.options.max_depth = 10;
     
-    AstValidationResult* result = validate_occurrence_constraint(validator, items, 5, string_type, OPERATOR_ZERO_MORE, &ctx);
+    AstValidationResult* result = validate_against_occurrence(validator, items, 5, string_type, OPERATOR_ZERO_MORE, &ctx);
     
     ASSERT_NE(result, nullptr) << "Should return validation result";
     EXPECT_TRUE(result->valid) << "Zero-or-more constraint with any number of items should be valid";
