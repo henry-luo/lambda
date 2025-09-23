@@ -235,12 +235,12 @@ define run_make_with_error_summary
 	echo ""; \
 	echo "📋 Build Summary:"; \
 	echo "================"; \
-	ERROR_COUNT=$$(grep -c -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" 2>/dev/null || echo "0"); \
-	WARNING_COUNT=$$(grep -c -E "(warning:|Warning:|WARNING:)" "$$BUILD_LOG" 2>/dev/null || echo "0"); \
+	ERROR_COUNT=`grep -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" 2>/dev/null | wc -l | tr -d ' '`; \
+	WARNING_COUNT=`grep -E "(warning:|Warning:|WARNING:)" "$$BUILD_LOG" 2>/dev/null | wc -l | tr -d ' '`; \
 	echo "Errors: $$ERROR_COUNT"; \
 	echo "Warnings: $$WARNING_COUNT"; \
 	echo ""; \
-	if [ "$$ERROR_COUNT" -gt 0 ]; then \
+	if [ "$$ERROR_COUNT" -gt 0 ] 2>/dev/null; then \
 		echo "🔴 ERRORS FOUND:"; \
 		echo "================"; \
 		grep -n -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" | while IFS=: read -r line_num content; do \
