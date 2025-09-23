@@ -56,13 +56,13 @@ void schema_validator_destroy(SchemaValidator* validator) {
     // Memory pool cleanup handles deallocation
 }
 
-int schema_validator_load_schema(SchemaValidator* validator, const char* schema_source, 
+int schema_validator_load_schema(SchemaValidator* validator, const char* schema_source,
                                 const char* schema_name) {
     // Stub implementation - always succeeds
     return 0;
 }
 
-ValidationResult* validate_document(SchemaValidator* validator, Item document, 
+ValidationResult* validate_document(SchemaValidator* validator, Item document,
                                    const char* schema_name) {
     // Stub implementation - always passes
     ValidationResult* result = create_validation_result(validator->pool);
@@ -94,16 +94,32 @@ typedef struct EnhancedValidationContext {
     HashMap* visited_nodes;  // For circular reference detection
 } EnhancedValidationContext;
 
+uint64_t strview_hash(const void *item, uint64_t seed0, uint64_t seed1) {
+    const StrView* key = (const StrView*)item;
+    return hashmap_sip(key->str, key->length, seed0, seed1);
+}
+
+// Compare function for StrView keys
+int strview_compare(const void *a, const void *b, void *udata) {
+    const StrView* key_a = (const StrView*)a;
+    const StrView* key_b = (const StrView*)b;
+
+    if (key_a->length != key_b->length) {
+        return (key_a->length < key_b->length) ? -1 : 1;
+    }
+    return memcmp(key_a->str, key_b->str, key_a->length);
+}
+
 // Create enhanced validation context for AST validation
 EnhancedValidationContext* create_enhanced_validation_context(VariableMemPool* pool) {
     EnhancedValidationContext* ctx = (EnhancedValidationContext*)pool_calloc(pool, sizeof(EnhancedValidationContext));
     if (!ctx) return nullptr;
-    
+
     ctx->pool = pool;
     ctx->current_path = nullptr;
     ctx->current_depth = 0;
     ctx->max_depth = 100;  // Reasonable depth limit
-    
+
     // Initialize default validation options
     ctx->options.strict_mode = false;
     ctx->options.allow_unknown_fields = true;
@@ -112,10 +128,11 @@ EnhancedValidationContext* create_enhanced_validation_context(VariableMemPool* p
     ctx->options.timeout_ms = 0;
     ctx->options.enabled_rules = nullptr;
     ctx->options.disabled_rules = nullptr;
-    
     // Create visited nodes hashmap for circular reference detection
-    ctx->visited_nodes = nullptr;  // Will initialize when needed
-    
+    ctx->visited_nodes = hashmap_new(
+         sizeof(VisitedEntry), 16, 0, 1,
+         strview_hash, strview_compare, nullptr, pool
+    );
     return ctx;
 }
 
@@ -123,10 +140,10 @@ EnhancedValidationContext* create_enhanced_validation_context(VariableMemPool* p
 PathSegment* create_path_segment(PathSegmentType type, const char* name, long index, VariableMemPool* pool) {
     PathSegment* segment = (PathSegment*)pool_calloc(pool, sizeof(PathSegment));
     if (!segment) return nullptr;
-    
+
     segment->type = type;
     segment->next = nullptr;
-    
+
     switch (type) {
         case PATH_FIELD:
             segment->data.field_name = strview_from_cstr(name);
@@ -141,14 +158,14 @@ PathSegment* create_path_segment(PathSegmentType type, const char* name, long in
             segment->data.attr_name = strview_from_cstr(name);
             break;
     }
-    
+
     return segment;
 }
 
 // Push path segment to validation context
 void push_path_segment(EnhancedValidationContext* ctx, PathSegmentType type, const char* name, long index) {
     if (!ctx) return;
-    
+
     PathSegment* segment = create_path_segment(type, name, index, ctx->pool);
     if (segment) {
         segment->next = ctx->current_path;
@@ -159,29 +176,29 @@ void push_path_segment(EnhancedValidationContext* ctx, PathSegmentType type, con
 // Pop path segment from validation context
 void pop_path_segment(EnhancedValidationContext* ctx) {
     if (!ctx || !ctx->current_path) return;
-    
+
     ctx->current_path = ctx->current_path->next;
 }
 
 // Create validation error with full context
-ValidationError* create_ast_validation_error(ValidationErrorCode code, const char* message, 
+ValidationError* create_ast_validation_error(ValidationErrorCode code, const char* message,
                                            EnhancedValidationContext* ctx) {
     if (!ctx || !ctx->pool) return nullptr;
-    
+
     ValidationError* error = create_validation_error(code, message, ctx->current_path, ctx->pool);
     if (!error) return nullptr;
-    
+
     // Add suggestions based on error type
     error->suggestions = suggest_corrections(error, ctx->pool);
-    
+
     return error;
 }
 
 // Add validation error to result
-void add_ast_validation_error(ValidationResult* result, ValidationErrorCode code, 
+void add_ast_validation_error(ValidationResult* result, ValidationErrorCode code,
                              const char* message, EnhancedValidationContext* ctx) {
     if (!result || !ctx) return;
-    
+
     ValidationError* error = create_ast_validation_error(code, message, ctx);
     if (error) {
         add_validation_error(result, error);
@@ -195,29 +212,29 @@ ValidationResult* validate_ast_node_recursive(AstNode* node, EnhancedValidationC
         add_ast_validation_error(result, VALID_ERROR_PARSE_ERROR, "Invalid AST node or context", ctx);
         return result;
     }
-    
+
     ValidationResult* result = create_validation_result(ctx->pool);
-    
+
     // Check depth limit
     if (ctx->current_depth >= ctx->max_depth) {
-        add_ast_validation_error(result, VALID_ERROR_CONSTRAINT_VIOLATION, 
+        add_ast_validation_error(result, VALID_ERROR_CONSTRAINT_VIOLATION,
                                "Maximum validation depth exceeded", ctx);
         return result;
     }
-    
+
     ctx->current_depth++;
-    
+
     // Basic AST node validation - simplified to avoid type system complexity
     push_path_segment(ctx, PATH_ELEMENT, "ast_node", 0);
-    
+
     // Basic validation - just check if node exists
     if (!node) {
-        add_ast_validation_error(result, VALID_ERROR_INVALID_ELEMENT, 
+        add_ast_validation_error(result, VALID_ERROR_INVALID_ELEMENT,
                                "AST node is null", ctx);
     }
-    
+
     pop_path_segment(ctx);
-    
+
     ctx->current_depth--;
     return result;
 }
@@ -226,25 +243,25 @@ ValidationResult* validate_ast_node_recursive(AstNode* node, EnhancedValidationC
 ValidationResult* validate_lambda_ast(AstNode* ast, VariableMemPool* pool) {
     if (!ast || !pool) {
         ValidationResult* result = create_validation_result(pool);
-        ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR, 
+        ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
                                                        "Invalid AST or memory pool", nullptr, pool);
         add_validation_error(result, error);
         return result;
     }
-    
+
     // Create validation context
     EnhancedValidationContext* ctx = create_enhanced_validation_context(pool);
     if (!ctx) {
         ValidationResult* result = create_validation_result(pool);
-        ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR, 
+        ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
                                                        "Failed to create validation context", nullptr, pool);
         add_validation_error(result, error);
         return result;
     }
-    
+
     // Perform comprehensive AST validation
     ValidationResult* result = validate_ast_node_recursive(ast, ctx);
-    
+
     return result;
 }
 
@@ -252,22 +269,22 @@ ValidationResult* validate_lambda_ast(AstNode* ast, VariableMemPool* pool) {
 ValidationResult* validate_lambda_source(const char* source_content, VariableMemPool* pool) {
     if (!source_content || !pool) {
         ValidationResult* result = create_validation_result(pool);
-        ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR, 
+        ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
                                                        "Invalid source content or memory pool", nullptr, pool);
         add_validation_error(result, error);
         return result;
     }
-    
+
     ValidationResult* result = create_validation_result(pool);
-    
+
     // Basic syntax check - verify it's not empty
     if (strlen(source_content) == 0) {
-        ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR, 
+        ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
                                                        "Empty Lambda source file", nullptr, pool);
         add_validation_error(result, error);
         return result;
     }
-    
+
     // Try to build AST using transpiler (if available)
     void* transpiler = transpiler_create(pool);
     if (transpiler) {
@@ -279,7 +296,7 @@ ValidationResult* validate_lambda_source(const char* source_content, VariableMem
                 merge_validation_results(result, ast_result);
             }
         } else {
-            ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR, 
+            ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
                                                            "Failed to parse Lambda source into AST", nullptr, pool);
             add_validation_error(result, error);
         }
@@ -287,22 +304,22 @@ ValidationResult* validate_lambda_source(const char* source_content, VariableMem
     } else {
         // Fallback to basic validation
         printf("Note: Using basic validation (transpiler not available)\n");
-        
+
         // Basic Lambda syntax patterns check
         bool has_lambda_syntax = false;
-        if (strstr(source_content, "=") || strstr(source_content, "{") || 
+        if (strstr(source_content, "=") || strstr(source_content, "{") ||
             strstr(source_content, "}") || strstr(source_content, "let") ||
             strstr(source_content, "for") || strstr(source_content, "if")) {
             has_lambda_syntax = true;
         }
-        
+
         if (!has_lambda_syntax) {
-            ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR, 
+            ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
                                                            "File does not appear to contain Lambda syntax", nullptr, pool);
             add_validation_error(result, error);
         }
     }
-    
+
     return result;
 }
 
@@ -310,12 +327,12 @@ ValidationResult* validate_lambda_source(const char* source_content, VariableMem
 ValidationResult* validate_lambda_file(const char* file_path, VariableMemPool* pool) {
     if (!file_path || !pool) {
         ValidationResult* result = create_validation_result(pool);
-        ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR, 
+        ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
                                                        "Invalid file path or memory pool", nullptr, pool);
         add_validation_error(result, error);
         return result;
     }
-    
+
     // Read file content using existing file utilities
     char* content = read_text_file(file_path);
     if (!content) {
@@ -326,20 +343,20 @@ ValidationResult* validate_lambda_file(const char* file_path, VariableMemPool* p
         add_validation_error(result, error);
         return result;
     }
-    
+
     // Validate the source with full validation
     ValidationResult* result = validate_lambda_source(content, pool);
-    
+
     // Cleanup
     free(content);
-    
+
     return result;
 }
 
 // Enhanced AST-based validation function with full validation flow
 extern "C" ValidationResult* run_ast_validation(const char* data_file, const char* schema_file, const char* input_format) {
     printf("Lambda AST Validator v2.0\n");
-    
+
     // Check if this is a Lambda file or should use schema validation
     bool is_lambda_file = false;
     if (!schema_file) {
@@ -350,7 +367,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
             is_lambda_file = true;
         }
     }
-    
+
     if (is_lambda_file) {
         printf("Validating '%s' using AST-based validation\n", data_file);
         if (schema_file) {
@@ -367,7 +384,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
             printf("Auto-detect format, Schema: %s\n", schema_file);
         }
     }
-    
+
     // Create memory pool for validation
     VariableMemPool* pool = nullptr;
     MemPoolError err = pool_variable_init(&pool, 1024 * 1024, MEM_POOL_NO_BEST_FIT);
@@ -375,9 +392,9 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
         printf("Error: Failed to create memory pool\n");
         return nullptr;
     }
-    
+
     ValidationResult* validation_result = nullptr;
-    
+
     if (is_lambda_file) {
         // Use AST-based validation for Lambda files
         printf("Loading and parsing Lambda source...\n");
@@ -385,7 +402,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
     } else {
         // Use schema-based validation for other formats
         printf("Loading schema and parsing data file...\n");
-        
+
         // Read schema file
         char* schema_contents = read_text_file(schema_file);
         if (!schema_contents) {
@@ -393,7 +410,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
             pool_variable_destroy(pool);
             return nullptr;
         }
-        
+
         // Create schema validator
         SchemaValidator* validator = schema_validator_create(pool);
         if (!validator) {
@@ -402,7 +419,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
             pool_variable_destroy(pool);
             return nullptr;
         }
-        
+
         // Determine root type based on schema file
         const char* root_type = "Document";  // Default
         if (strstr(schema_file, "html5_schema.ls")) {
@@ -414,7 +431,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
         } else if (strstr(schema_file, "vcf_schema.ls")) {
             root_type = "VCFDocument";
         }
-        
+
         // Load schema
         int schema_result = schema_validator_load_schema(validator, schema_contents, root_type);
         if (schema_result != 0) {
@@ -424,7 +441,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
             pool_variable_destroy(pool);
             return nullptr;
         }
-        
+
         // Parse data file using input system
         char cwd_path[1024];
         if (!getcwd(cwd_path, sizeof(cwd_path))) {
@@ -434,14 +451,14 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
             pool_variable_destroy(pool);
             return nullptr;
         }
-        
+
         char file_url[1200];
         if (data_file[0] == '/') {
             snprintf(file_url, sizeof(file_url), "file://%s", data_file);
         } else {
             snprintf(file_url, sizeof(file_url), "file://%s/%s", cwd_path, data_file);
         }
-        
+
         String* url_string = (String*)malloc(sizeof(String) + strlen(file_url) + 1);
         String* type_string = nullptr;
         if (input_format && strcmp(input_format, "auto-detect") != 0) {
@@ -452,13 +469,13 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
                 strcpy(type_string->chars, input_format);
             }
         }
-        
+
         Item data_item = {.item = ITEM_ERROR};
         if (url_string) {
             url_string->len = strlen(file_url);
             url_string->ref_cnt = 0;
             strcpy(url_string->chars, file_url);
-            
+
             Input* input = input_from_url(url_string, type_string, nullptr, nullptr);
             if (input && input->root.item != ITEM_ERROR) {
                 data_item = input->root;
@@ -466,11 +483,11 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
             } else {
                 printf("Error: Failed to parse input file\n");
             }
-            
+
             free(url_string);
             if (type_string) free(type_string);
         }
-        
+
         if (data_item.item == ITEM_ERROR) {
             printf("Error: Failed to parse data file\n");
             schema_validator_destroy(validator);
@@ -478,22 +495,22 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
             pool_variable_destroy(pool);
             return nullptr;
         }
-        
+
         // Validate using schema
         printf("Validating data against schema...\n");
         validation_result = validate_document(validator, data_item, root_type);
-        
+
         // Cleanup
         schema_validator_destroy(validator);
         free(schema_contents);
     }
-    
+
     if (!validation_result) {
         printf("Error: Validation failed to run\n");
         pool_variable_destroy(pool);
         return nullptr;
     }
-    
+
     // Print comprehensive results using sophisticated error reporting
     printf("\n=== Validation Results ===\n");
     String* report = generate_validation_report(validation_result, pool);
@@ -507,7 +524,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
         } else {
             printf("❌ Validation FAILED\n");
             printf("Errors found: %d\n", validation_result->error_count);
-            
+
             // Print detailed error information
             ValidationError* error = validation_result->errors;
             int error_num = 1;
@@ -518,7 +535,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
             }
         }
     }
-    
+
     // Return the validation result directly
     return validation_result;
 }
@@ -534,12 +551,12 @@ extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
         printf("Usage: validate [-s <schema>] [-f <format>] <file> [files...]\n");
         return NULL;
     }
-    
+
     const char* data_file = nullptr;
     const char* schema_file = nullptr;  // Will be determined based on format
     const char* input_format = nullptr;  // Auto-detect by default
     bool schema_explicitly_set = false;
-    
+
     // Parse validation arguments (skip argv[0] which would be "validate")
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-s") == 0 && i + 1 < argc) {
@@ -564,13 +581,13 @@ extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
             return NULL;
         }
     }
-    
+
     if (!data_file) {
         printf("Error: No input file specified\n");
         printf("Usage: validate [-s <schema>] [-f <format>] <file>\n");
         return NULL;
     }
-    
+
     // Auto-detect format if not specified
     if (!input_format) {
         const char* ext = strrchr(data_file, '.');
@@ -603,7 +620,7 @@ extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
                 input_format = "wiki";
             } else if (strcasecmp(ext, ".adoc") == 0 || strcasecmp(ext, ".asciidoc") == 0) {
                 input_format = "asciidoc";
-            } else if (strcasecmp(ext, ".1") == 0 || strcasecmp(ext, ".2") == 0 || 
+            } else if (strcasecmp(ext, ".1") == 0 || strcasecmp(ext, ".2") == 0 ||
                       strcasecmp(ext, ".3") == 0 || strcasecmp(ext, ".4") == 0 ||
                       strcasecmp(ext, ".5") == 0 || strcasecmp(ext, ".6") == 0 ||
                       strcasecmp(ext, ".7") == 0 || strcasecmp(ext, ".8") == 0 ||
@@ -617,7 +634,7 @@ extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
             // If no recognized extension, keep as nullptr for Lambda format
         }
     }
-    
+
     // Determine schema file if not explicitly set
     if (!schema_explicitly_set) {
         // Check if this is a Lambda file first
@@ -638,7 +655,7 @@ extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
         } else if (input_format && strcmp(input_format, "vcf") == 0) {
             schema_file = "lambda/input/vcf_schema.ls";
             printf("Using VCF schema for vCard input\n");
-        } else if (input_format && (strcmp(input_format, "asciidoc") == 0 || 
+        } else if (input_format && (strcmp(input_format, "asciidoc") == 0 ||
                                  strcmp(input_format, "man") == 0 ||
                                  strcmp(input_format, "markdown") == 0 ||
                                  strcmp(input_format, "rst") == 0 ||
@@ -658,7 +675,7 @@ extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
             return NULL;
         }
     }
-    
+
     // Call the validation function and return the ValidationResult directly
     if (schema_file) {
         printf("Starting validation of '%s' using schema '%s'...\n", data_file, schema_file);
@@ -666,7 +683,7 @@ extern "C" ValidationResult* exec_validation(int argc, char* argv[]) {
         printf("Starting AST validation of '%s'...\n", data_file);
     }
     ValidationResult* result = run_ast_validation(data_file, schema_file, input_format);
-    
+
     // Return the ValidationResult directly to the caller
     return result;
 }
@@ -678,10 +695,10 @@ extern "C" ValidationResult* run_validation(const char *data_file, const char *s
         printf("Error: No data file specified\n");
         return nullptr;
     }
-    
-    printf("Running validation for %s (schema: %s, format: %s)\n", 
+
+    printf("Running validation for %s (schema: %s, format: %s)\n",
            data_file, schema_file ? schema_file : "auto", input_format ? input_format : "auto");
-    
+
     return run_ast_validation(data_file, schema_file, input_format);
 }
 

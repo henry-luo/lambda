@@ -1,22 +1,16 @@
-/**
- * @file validator.cpp
- * @brief New AST-Based Lambda Validator - Implementation
- * @author Henry Luo
- * @license MIT
- */
-
+#include <cstring>
+#include <cstdio>
+#include <climits>
+#include <cstdint>
+#include "../lib/hashmap.h"
+#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/log.h"
+#include "../lib/arraylist.h"
 #include "validator.hpp"
 #include "transpiler.hpp"
 #include "ast.hpp"
 #include "lambda-data.hpp"
-#include "../lib/hashmap.h"
-#include "../lib/mem-pool/include/mem_pool.h"
-#include "../lib/log.h"
 #include "name_pool.h"
-#include "../lib/arraylist.h"
-#include <cstring>
-#include <cstdio>
-#include <climits>
 
 // External function declarations
 extern "C" {
@@ -53,7 +47,7 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
     if (!transpiler || !source) {
         return nullptr;
     }
-    
+
     // Initialize transpiler components if not already done
     if (!transpiler->parser) {
         transpiler->parser = lambda_parser();
@@ -61,14 +55,14 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
             return nullptr;
         }
     }
-    
+
     // Initialize memory pool if not already done
     if (!transpiler->ast_pool) {
         size_t grow_size = 4096;  // 4k
         size_t tolerance_percent = 20;
         pool_variable_init(&transpiler->ast_pool, grow_size, tolerance_percent);
     }
-    
+
     // Initialize type and const lists if not already done
     if (!transpiler->type_list) {
         transpiler->type_list = arraylist_new(16);
@@ -76,7 +70,7 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
     if (!transpiler->const_list) {
         transpiler->const_list = arraylist_new(16);
     }
-    
+
     // Initialize name pool if not already done
     if (!transpiler->name_pool) {
         transpiler->name_pool = name_pool_create(transpiler->ast_pool, nullptr);
@@ -84,14 +78,14 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
             return nullptr;
         }
     }
-    
+
     // Parse the source code to syntax tree
     transpiler->source = source;
     transpiler->syntax_tree = lambda_parse_source(transpiler->parser, source);
     if (!transpiler->syntax_tree) {
         return nullptr;
     }
-    
+
     // Get root node and validate
     TSNode root_node = ts_tree_root_node(transpiler->syntax_tree);
     if (ts_node_has_error(root_node)) {
@@ -99,16 +93,16 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
         find_errors(root_node);
         return nullptr;
     }
-    
+
     // Validate root node type
     if (strcmp(ts_node_type(root_node), "document") != 0) {
         return nullptr;
     }
-    
+
     // Build AST from syntax tree using existing build_script function
     AstNode* ast_root = build_script(transpiler, root_node);
     transpiler->ast_root = ast_root;
-    
+
     return ast_root;
 }
 
@@ -128,7 +122,7 @@ static int type_entry_compare(const void *a, const void *b, void *udata) {
     (void)udata;
     const TypeRegistryEntry* entry_a = (const TypeRegistryEntry*)a;
     const TypeRegistryEntry* entry_b = (const TypeRegistryEntry*)b;
-    
+
     if (entry_a->name.length != entry_b->name.length) {
         return (int)entry_a->name.length - (int)entry_b->name.length;
     }
@@ -139,66 +133,66 @@ static int type_entry_compare(const void *a, const void *b, void *udata) {
 
 AstValidator* ast_validator_create(VariableMemPool* pool) {
     if (!pool) return nullptr;
-    
+
     AstValidator* validator = (AstValidator*)pool_calloc(pool, sizeof(AstValidator));
     if (!validator) return nullptr;
-    
+
     // Initialize memory pool
     validator->pool = pool;
-    
+
     validator->transpiler = transpiler_create(pool);
     if (!validator->transpiler) {
         return nullptr;
     }
-    
+
     // Initialize type definitions registry
-    validator->type_definitions = hashmap_new(sizeof(TypeRegistryEntry), 0, 0, 0, 
+    validator->type_definitions = hashmap_new(sizeof(TypeRegistryEntry), 0, 0, 0,
                                    type_entry_hash, type_entry_compare, NULL, pool);
     if (!validator->type_definitions) {
         return nullptr;
     }
-    
+
     // Initialize default validation options
-    validator->default_options.strict_mode = false;
-    validator->default_options.allow_unknown_fields = true;
-    validator->default_options.allow_empty_elements = true;
-    validator->default_options.max_depth = 100;
-    
+    validator->options.strict_mode = false;
+    validator->options.allow_unknown_fields = true;
+    validator->options.allow_empty_elements = true;
+    validator->options.max_depth = 1024;
+
     return validator;
 }
 
 void ast_validator_destroy(AstValidator* validator) {
     if (!validator) return;
-    
+
     if (validator->type_definitions) {
         hashmap_free(validator->type_definitions);
     }
-    
+
     if (validator->transpiler) {
         transpiler_destroy(validator->transpiler);
     }
-    
+
     // Note: Memory pool cleanup handled by caller
 }
 
 int ast_validator_load_schema(AstValidator* validator, const char* source, const char* root_type) {
     if (!validator || !source || !root_type) return -1;
-    
+
     printf("[AST_VALIDATOR] Loading schema with root type: %s\n", root_type);
-    
+
     // Build AST using transpiler
     AstNode* ast = transpiler_build_ast(validator->transpiler, source);
     if (!ast) {
         printf("[AST_VALIDATOR] Failed to build AST from source\n");
         return -1;
     }
-    
+
     printf("[AST_VALIDATOR] AST built successfully, extracting type definitions\n");
-    
+
     // Extract type definitions from AST
     // For Phase 1, we'll implement a simple type extraction
     // TODO: Implement full AST traversal for type definitions
-    
+
     return 0;
 }
 
@@ -206,7 +200,7 @@ int ast_validator_load_schema(AstValidator* validator, const char* source, const
 
 Type* extract_type_from_ast_node(AstNode* node) {
     if (!node) return nullptr;
-    
+
     // For Phase 1, handle basic type extraction
     // This will be expanded in later phases
     switch (node->node_type) {
@@ -222,67 +216,19 @@ Type* extract_type_from_ast_node(AstNode* node) {
 
 Type* ast_validator_find_type(AstValidator* validator, const char* type_name) {
     if (!validator || !type_name) return nullptr;
-    
+
     StrView name_view = {.str = type_name, .length = strlen(type_name)};
     TypeRegistryEntry key = {.name = name_view, .type = nullptr};
-    
+
     const TypeRegistryEntry* entry = (const TypeRegistryEntry*)hashmap_get(validator->type_definitions, &key);
     return entry ? entry->type : nullptr;
-}
-
-// ==================== Validation Functions ====================
-
-ValidationResult* ast_validator_validate(AstValidator* validator, TypedItem item, const char* type_name) {
-    if (!validator || !type_name) {
-        ValidationResult* result = create_validation_result(validator ? validator->pool : nullptr);
-        if (result) {
-            add_validation_error(result, create_validation_error(
-                AST_VALID_ERROR_PARSE_ERROR, "Invalid validator or type name", 
-                nullptr, validator ? validator->pool : nullptr));
-        }
-        return result;
-    }
-    
-    Type* type = ast_validator_find_type(validator, type_name);
-    if (!type) {
-        ValidationResult* result = create_validation_result(validator->pool);
-        char error_msg[256];
-        snprintf(error_msg, sizeof(error_msg), "Type not found: %s", type_name);
-        ValidationError* error = create_validation_error(
-            AST_VALID_ERROR_PARSE_ERROR, error_msg, nullptr, validator->pool);
-        add_validation_error(result, error);
-        return result;
-    }
-    
-    return ast_validator_validate_type(validator, item, type);
-}
-
-ValidationResult* ast_validator_validate_type(AstValidator* validator, TypedItem item, Type* type) {
-    if (!validator || !type) {
-        ValidationResult* result = create_validation_result(validator ? validator->pool : nullptr);
-        ValidationError* error = create_validation_error(
-            AST_VALID_ERROR_PARSE_ERROR, "Invalid validator or type", 
-            nullptr, validator ? validator->pool : nullptr);
-        add_validation_error(result, error);
-        return result;
-    }
-    
-    // Create validation context
-    AstValidationContext ctx = {};
-    ctx.validator = validator;
-    ctx.current_path = nullptr;
-    ctx.current_depth = 0;
-    ctx.options = validator->default_options;
-    ctx.pool = validator->pool;
-    
-    return validate_against_type(validator, item, type, &ctx);
 }
 
 // ==================== Error Handling ====================
 
 ValidationResult* create_validation_result(VariableMemPool* pool) {
     ValidationResult* result;
-    
+
     if (pool) {
         result = (ValidationResult*)pool_calloc(pool, sizeof(ValidationResult));
     } else {
@@ -290,18 +236,17 @@ ValidationResult* create_validation_result(VariableMemPool* pool) {
         result = (ValidationResult*)calloc(1, sizeof(ValidationResult));
     }
     if (!result) return nullptr;
-    
+
     result->valid = true;
     result->error_count = 0;
     result->errors = nullptr;
-    
+
     return result;
 }
 
-ValidationError* create_validation_error(ValidationErrorCode code, const char* message,
-                                        PathSegment* path, VariableMemPool* pool) {
+ValidationError* create_validation_error(ValidationErrorCode code, const char* message, PathSegment* path, VariableMemPool* pool) {
     if (!message) return nullptr;
-    
+
     ValidationError* error;
     if (pool) {
         error = (ValidationError*)pool_calloc(pool, sizeof(ValidationError));
@@ -310,9 +255,9 @@ ValidationError* create_validation_error(ValidationErrorCode code, const char* m
         error = (ValidationError*)calloc(1, sizeof(ValidationError));
     }
     if (!error) return nullptr;
-    
+
     error->code = code;
-    
+
     // Copy message
     if (message) {
         size_t msg_len = strlen(message) + 1;
@@ -329,23 +274,23 @@ ValidationError* create_validation_error(ValidationErrorCode code, const char* m
             }
         }
     }
-    
+
     // Set path
     error->path = path;
-    
+
     error->expected = nullptr;
     error->actual = (Item){0};
     error->next = nullptr;
-    
+
     return error;
 }
 
 void add_validation_error(ValidationResult* result, ValidationError* error) {
     if (!result || !error) return;
-    
+
     result->valid = false;
     result->error_count++;
-    
+
     // Add to linked list
     if (!result->errors) {
         result->errors = error;
@@ -365,14 +310,14 @@ void free_ast_validation_result(ValidationResult* result) {
 
 bool is_item_compatible_with_type(TypedItem item, Type* type) {
     if (!type) return false;
-    
+
     // For Phase 1, simple type ID comparison
     return item.type_id == type->type_id;
 }
 
 const char* type_to_string(Type* type) {
     if (!type) return "unknown";
-    
+
     switch (type->type_id) {
         case LMD_TYPE_STRING: return "string";
         case LMD_TYPE_INT: return "int";
@@ -386,22 +331,21 @@ const char* type_to_string(Type* type) {
     }
 }
 
-
 void merge_validation_results(ValidationResult* dest, ValidationResult* src) {
     if (!dest || !src) return;
-    
+
     // If source has errors, merge them into destination
     if (src->errors) {
         dest->valid = false;
         dest->error_count += src->error_count;
-        
+
         // Add all source errors to destination
         ValidationError* src_error = src->errors;
         while (src_error) {
             ValidationError* copied_error = create_validation_error(
-                src_error->code, 
-                src_error->message ? src_error->message->chars : "Unknown error", 
-                src_error->path, 
+                src_error->code,
+                src_error->message ? src_error->message->chars : "Unknown error",
+                src_error->path,
                 nullptr);
             if (copied_error) {
                 add_validation_error(dest, copied_error);
@@ -409,10 +353,54 @@ void merge_validation_results(ValidationResult* dest, ValidationResult* src) {
             src_error = src_error->next;
         }
     }
-    
+
     // Merge warnings if present
     if (src->warnings) {
         dest->warning_count += src->warning_count;
         // Note: Warning merging implementation would go here
     }
+}
+
+// ==================== Validation Functions ====================
+
+// validate 'item' against type 'type'
+ValidationResult* ast_validator_validate_type(AstValidator* validator, TypedItem item, Type* type) {
+    if (!validator || !type) {
+        ValidationResult* result = create_validation_result(validator ? validator->pool : nullptr);
+        ValidationError* error = create_validation_error(
+            AST_VALID_ERROR_PARSE_ERROR, "Invalid validator or type",
+            nullptr, validator ? validator->pool : nullptr);
+        add_validation_error(result, error);
+        return result;
+    }
+    // init validation context
+    validator->current_path = nullptr;
+    validator->current_depth = 0;
+    return validate_against_type(validator, item, type);
+}
+
+// validate 'item' against type named 'type_name'
+ValidationResult* ast_validator_validate(AstValidator* validator, TypedItem item, const char* type_name) {
+    if (!validator || !type_name) {
+        ValidationResult* result = create_validation_result(validator ? validator->pool : nullptr);
+        if (result) {
+            add_validation_error(result, create_validation_error(
+                AST_VALID_ERROR_PARSE_ERROR, "Invalid validator or type name",
+                nullptr, validator ? validator->pool : nullptr));
+        }
+        return result;
+    }
+
+    Type* type = ast_validator_find_type(validator, type_name);
+    if (!type) {
+        ValidationResult* result = create_validation_result(validator->pool);
+        char error_msg[256];
+        snprintf(error_msg, sizeof(error_msg), "Type not found: %s", type_name);
+        ValidationError* error = create_validation_error(
+            AST_VALID_ERROR_PARSE_ERROR, error_msg, nullptr, validator->pool);
+        add_validation_error(result, error);
+        return result;
+    }
+
+    return ast_validator_validate_type(validator, item, type);
 }

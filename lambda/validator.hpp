@@ -14,7 +14,6 @@
 
 // Forward declarations
 typedef struct AstValidator AstValidator;
-typedef struct AstValidationContext AstValidationContext;
 typedef struct ValidationResult ValidationResult;
 typedef struct ValidationError ValidationError;
 typedef struct PathSegment PathSegment;
@@ -111,23 +110,21 @@ typedef ValidationErrorCode AstValidationErrorType;
 #define AST_VALID_ERROR_PARSE_ERROR VALID_ERROR_PARSE_ERROR
 #define AST_VALID_ERROR_OCCURRENCE_ERROR VALID_ERROR_OCCURRENCE_ERROR
 
+struct VisitedEntry {
+    StrView key;
+    bool visited;
+};
+
 // Validation context
-typedef struct AstValidationContext {
-    AstValidator* validator;
+typedef struct AstValidator {
+    Transpiler* transpiler;          // Direct use of transpiler for AST
+    VariableMemPool* pool;           // Memory pool
+    HashMap* type_definitions;       // Registry of Type* definitions
     PathSegment* current_path;
     int current_depth;
     int max_depth;
     ValidationOptions options;
-    VariableMemPool* pool;
-    HashMap* visited_nodes;  // For circular reference detection
-} AstValidationContext;
-
-// Main validator structure
-typedef struct AstValidator {
-    Transpiler* transpiler;           // Direct use of transpiler for AST
-    VariableMemPool* pool;           // Memory pool
-    HashMap* type_definitions;       // Registry of Type* definitions
-    ValidationOptions default_options;
+    HashMap* visited_nodes;         // For circular reference detection
 } AstValidator;
 
 // Schema validator structure
@@ -183,37 +180,37 @@ Type* ast_validator_find_type(AstValidator* validator, const char* type_name);
 /**
  * Main validation dispatcher
  */
-ValidationResult* validate_against_type(AstValidator* validator, TypedItem item, Type* type, AstValidationContext* ctx);
+ValidationResult* validate_against_type(AstValidator* validator, TypedItem item, Type* type);
 
 /**
  * Validate against primitive type
  */
-ValidationResult* validate_against_primitive_type(TypedItem item, Type* type, AstValidationContext* ctx);
+ValidationResult* validate_against_primitive_type(TypedItem item, Type* type);
 
 /**
  * Validate against array type
  */
-ValidationResult* validate_against_array_type(AstValidator* validator, TypedItem item, TypeArray* array_type, AstValidationContext* ctx);
+ValidationResult* validate_against_array_type(AstValidator* validator, TypedItem item, TypeArray* array_type);
 
 /**
  * Validate against map type
  */
-ValidationResult* validate_against_map_type(AstValidator* validator, TypedItem item, TypeMap* map_type, AstValidationContext* ctx);
+ValidationResult* validate_against_map_type(AstValidator* validator, TypedItem item, TypeMap* map_type);
 
 /**
  * Validate against element type
  */
-ValidationResult* validate_against_element_type(AstValidator* validator, TypedItem item, TypeElmt* element_type, AstValidationContext* ctx);
+ValidationResult* validate_against_element_type(AstValidator* validator, TypedItem item, TypeElmt* element_type);
 
 /**
  * Validate against union type (multiple valid types)
  */
-ValidationResult* validate_against_union_type(AstValidator* validator, TypedItem item, Type** union_types, int type_count, AstValidationContext* ctx);
+ValidationResult* validate_against_union_type(AstValidator* validator, TypedItem item, Type** union_types, int type_count);
 
 /**
  * Validate occurrence constraints (?, *, +, min/max)
  */
-ValidationResult* validate_against_occurrence(AstValidator* validator, TypedItem* items, long item_count, Type* expected_type, Operator occurrence_op, AstValidationContext* ctx);
+ValidationResult* validate_against_occurrence(AstValidator* validator, TypedItem* items, long item_count, Type* expected_type, Operator occurrence_op);
 
 // ==================== Error Handling ====================
 
@@ -225,8 +222,7 @@ ValidationResult* create_validation_result(VariableMemPool* pool);
 /**
  * Create validation error
  */
-ValidationError* create_validation_error(ValidationErrorCode code, const char* message,
-                                        PathSegment* path, VariableMemPool* pool);
+ValidationError* create_validation_error(ValidationErrorCode code, const char* message, PathSegment* path, VariableMemPool* pool);
 
 /**
  * Add error to validation result
