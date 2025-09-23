@@ -64,7 +64,7 @@ function binary_expr($, in_attr) {
     ['|', 'set_union'],
     ['&', 'set_intersect'],
     ['!', 'set_exclude'],  // set1 ! set2, elements in set1 but not in set2.
-    // ['^', 'set_exclude'],  // set1 ^ set2, elements in either set, but not both.    
+    // ['^', 'set_exclude'],  // set1 ^ set2, elements in either set, but not both.
     ['is', 'is_in'],
     ['in', 'is_in'],
   ].map(([operator, precedence, associativity]) =>
@@ -76,7 +76,7 @@ function binary_expr($, in_attr) {
   );
 }
 
-function type_pattern(type_expr) { 
+function type_pattern(type_expr) {
   return [
     ['|', 'set_union'],
     ['&', 'set_intersect'],
@@ -91,16 +91,16 @@ function type_pattern(type_expr) {
   );
 }
 
-function time() { 
+function time() {
   // time: hh:mm:ss.sss or hh:mm:ss or hh:mm or hh.hhh or hh:mm.mmm or hh
-  return seq(digit, digit, optional(seq(':', digit, digit)), optional(seq(':', digit, digit)), 
+  return seq(digit, digit, optional(seq(':', digit, digit)), optional(seq(':', digit, digit)),
     optional((seq('.', digit, digit, digit))),
     // timezone
     optional(choice('z', 'Z', seq(choice('+', '-'), digit, digit, optional(seq(':', digit, digit)))))
   );
 }
 
-function built_in_types(include_null) { 
+function built_in_types(include_null) {
   let types = [
     'any',
     'error',
@@ -115,7 +115,7 @@ function built_in_types(include_null) {
     'date',
     'time',
     'datetime',
-    'symbol',  
+    'symbol',
     'string',
     'binary',
     'list',
@@ -209,7 +209,7 @@ module.exports = grammar({
       seq(
         prec.left(seq(
           $._import_stam, repeat(seq(choice(linebreak, ';'), $._import_stam)),
-        )),        
+        )),
         optional(seq( choice(linebreak, ';'), $.content )),
       ),
       $.content
@@ -245,11 +245,11 @@ module.exports = grammar({
       $.escape_sequence,
     )),
 
-    symbol_content: _ => token.immediate(/[^\\'\n]+/),    
+    symbol_content: _ => token.immediate(/[^\\'\n]+/),
 
     escape_sequence: _ => token.immediate(seq(
       '\\',
-      /(\"|\\|\/|b|f|n|r|t|u)/,
+      /(\"|\\|\/|b|f|n|r|t|u[0-9a-fA-F]{4}|u\{[0-9a-fA-F]+\})/,
     )),
 
     binary: $ => seq("b'", /\s*/, choice($.hex_binary, $.base64_binary), /\s*/, "'"),
@@ -257,7 +257,7 @@ module.exports = grammar({
     // whitespace allowed in hex and base64 binary
     hex_binary: _ => token(seq(optional("\\x"), repeat1(/[0-9a-fA-F\s]/))),
 
-    base64_binary: _ => token(seq("\\64", 
+    base64_binary: _ => token(seq("\\64",
       repeat1(choice(base64_unit, /\s+/)), optional(base64_padding)
     )),
 
@@ -311,22 +311,22 @@ module.exports = grammar({
       $.pub_stam,
       $.fn_expr_stam,
       $.type_stam,
-    ),  
+    ),
 
     _content_expr: $ => choice(
       repeat1(choice($.string, $.map, $.element)),
-      $._attr_expr, 
+      $._attr_expr,
       $._expr_stam
     ),
-    
+
     // statement content
-    _statement: $ => choice(   
+    _statement: $ => choice(
       $.object_type,
       $.entity_type,
-      $.if_stam, 
+      $.if_stam,
       $.for_stam,
       $.fn_stam,
-      seq($._content_expr, choice(linebreak, ';')), 
+      seq($._content_expr, choice(linebreak, ';')),
     ),
 
     content: $ => choice(
@@ -365,12 +365,12 @@ module.exports = grammar({
 
     array: $ => seq(
       '[', comma_sep($._expression), ']',
-    ),    
+    ),
 
     range: $ => seq(
       $._expression, 'to', $._expression,
     ),
-    
+
     attr_binary_expr: $ => choice(
       ...binary_expr($, true),
     ),
@@ -390,11 +390,11 @@ module.exports = grammar({
       ':', field('as', $._attr_expr)
     ),
 
-    element: $ => seq('<', 
+    element: $ => seq('<',
       choice($.symbol, $.identifier), // string not accepted for element name
       choice(
-        seq(choice($.attr, seq('&', $._attr_expr)), 
-          repeat(seq(',', choice($.attr, seq('&', $._attr_expr)))), 
+        seq(choice($.attr, seq('&', $._attr_expr)),
+          repeat(seq(',', choice($.attr, seq('&', $._attr_expr)))),
           optional(
             seq(choice(linebreak, ';'), $.content),
           )
@@ -461,9 +461,9 @@ module.exports = grammar({
       field('object', $.primary_expr),
       '[', field('field', $._expression), ']',
     ),
-    
+
     member_expr: $ => seq(
-      field('object', $.primary_expr), ".", 
+      field('object', $.primary_expr), ".",
       field('field', choice($.identifier, $.symbol, $.index))
     ),
 
@@ -480,12 +480,12 @@ module.exports = grammar({
       // ECMAScript 2023-compliant identifier regex:
       // const identifierRegex = /^[$_\p{ID_Start}][$_\u200C\u200D\p{ID_Continue}]*$/u;
 
-      // 'alpha' and 'alphanumeric' here, copied from Tree-sitter JS grammar, 
+      // 'alpha' and 'alphanumeric' here, copied from Tree-sitter JS grammar,
       // are not exactly the same as ECMA standard, which is a limitation of Tree-sitter RegEx
       const alpha = /[^\x00-\x1F\s\p{Zs}0-9:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
       const alphanumeric = /[^\x00-\x1F\s\p{Zs}:;`"'@#.,|^&<=>+\-*/\\%?!~()\[\]{}\uFEFF\u2060\u200B\u2028\u2029]|\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/;
       return token(seq(alpha, repeat(alphanumeric)));
-    },  
+    },
 
     // JS Fn Parameter : Identifier | ObjectBinding | ArrayBinding, Initializer_opt
     parameter: $ => seq(
@@ -495,48 +495,48 @@ module.exports = grammar({
     // fn with stam body
     fn_stam: $ => seq(
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
-      field('kind', choice('fn','pn')), field('name', $.identifier), 
-      '(', optional(field('declare', $.parameter)), repeat(seq(',', field('declare', $.parameter))), ')', 
+      field('kind', choice('fn','pn')), field('name', $.identifier),
+      '(', optional(field('declare', $.parameter)), repeat(seq(',', field('declare', $.parameter))), ')',
       // return type
-      optional(seq(':', field('type', $._type_expr))),      
+      optional(seq(':', field('type', $._type_expr))),
       '{', field('body', $.content), '}',
     ),
 
     // fn with expr body
     fn_expr_stam: $ => seq(
       optional(field('pub', 'pub')), // note: pub fn is only allowed at global level
-      'fn', field('name', $.identifier), 
-      '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
+      'fn', field('name', $.identifier),
+      '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
       // return type
-      optional(seq(':', field('type', $._type_expr))),      
+      optional(seq(':', field('type', $._type_expr))),
       '=>', field('body', $._expression)
     ),
 
     // anonymous function
     fn_expr: $ => choice(
-      seq('fn', 
-        '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
+      seq('fn',
+        '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
         // return type
-        optional(seq(':', field('type', $._type_expr))),      
+        optional(seq(':', field('type', $._type_expr))),
         '{', field('body', $.content), '}'
       ),
       seq(
-        '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')', 
+        '(', field('declare', $.parameter), repeat(seq(',', field('declare', $.parameter))), ')',
         // return type
-        optional(seq(':', field('type', $._type_expr))),      
+        optional(seq(':', field('type', $._type_expr))),
         '=>', field('body', $._expression)
-      ),      
+      ),
     ),
 
     assign_expr: $ => seq(
-      field('name', $.identifier), 
+      field('name', $.identifier),
       optional(seq(':', field('type', $._type_expr))), '=', field('as', $._expression),
     ),
 
     let_expr: $ => seq(
       'let', field('declare', $.assign_expr)
-    ),    
-    
+    ),
+
     let_stam: $ => seq(
       'let', field('declare', $.assign_expr), repeat(seq(',', field('declare', $.assign_expr)))
     ),
@@ -559,12 +559,12 @@ module.exports = grammar({
     loop_expr: $ => seq(
       field('name', $.identifier), 'in', field('as', $._expression),
     ),
-    
+
     for_expr: $ => seq(
-      'for', '(', field('declare', $.loop_expr), 
-      repeat(seq(',', field('declare', $.loop_expr))), ')', 
+      'for', '(', field('declare', $.loop_expr),
+      repeat(seq(',', field('declare', $.loop_expr))), ')',
       field('then', $._expression),
-    ),  
+    ),
 
     for_stam: $ => seq(
       'for', seq(field('declare', $.loop_expr), repeat(seq(',', field('declare', $.loop_expr)))),
@@ -592,18 +592,18 @@ module.exports = grammar({
       field('name', choice($.identifier, $.symbol)), ':', field('as', $._type_expr)
     ),
 
-    map_type: $ => seq('{', 
+    map_type: $ => seq('{',
       $.map_type_item, repeat(seq(choice(linebreak, ','), $.map_type_item)), '}'
     ),
 
     attr_type: $ => seq(
-      field('name', choice($.string, $.symbol, $.identifier)), 
+      field('name', choice($.string, $.symbol, $.identifier)),
       ':', field('as', $._type_expr)
     ),
 
     content_type: $ => seq(
       $._type_expr,
-      repeat(seq(',', $._type_expr)), 
+      repeat(seq(',', $._type_expr)),
     ),
 
     element_type: $ => seq('<', $.identifier, _attr_content_type($), '>'),
@@ -614,8 +614,8 @@ module.exports = grammar({
     ),
 
     fn_type: $ => seq(
-      '(', optional(field('declare', $.fn_param)), repeat(seq(',', field('declare', $.fn_param))), ')', 
-      '->', field('type', $._type_expr),      
+      '(', optional(field('declare', $.fn_param)), repeat(seq(',', field('declare', $.fn_param))), ')',
+      '->', field('type', $._type_expr),
     ),
 
     primary_type: $ => choice(
@@ -630,7 +630,7 @@ module.exports = grammar({
     ),
 
     type_occurrence: $ => prec.right(seq(
-      field('operand', $._type_expr),      
+      field('operand', $._type_expr),
       field('operator', $.occurrence),
     )),
 
@@ -672,16 +672,14 @@ module.exports = grammar({
     ),
 
     import_module: $ => choice(
-        field('module', choice($.absolute_name, $.relative_name, $.symbol)), 
-        seq(field('alias', $.identifier), ':', 
+        field('module', choice($.absolute_name, $.relative_name, $.symbol)),
+        seq(field('alias', $.identifier), ':',
           field('module', choice($.absolute_name, $.relative_name, $.symbol)))
     ),
-    
+
     _import_stam: $ => seq(
       'import', $.import_module, repeat(seq(',', $.import_module)),
     ),
 
   },
 });
-
-

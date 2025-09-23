@@ -286,7 +286,7 @@ AstNode* build_call_expr(Transpiler* tp, TSNode call_node, TSSymbol symbol) {
 NameEntry* lookup_name(Transpiler* tp, StrView var_name) {
     // lookup the name
     NameScope* scope = tp->current_scope;
-FIND_VAR_NAME:
+    FIND_VAR_NAME:
     NameEntry* entry = scope->first;
     int entry_count = 0;
     while (entry) {
@@ -374,23 +374,160 @@ AstNode* build_identifier(Transpiler* tp, TSNode id_node) {
 
 Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
     // todo: exclude zero-length string
-    int start = ts_node_start_byte(node), end = ts_node_end_byte(node);
-    int len = end - start;
+    String* str;
     TypeString* str_type = (TypeString*)alloc_type(tp->ast_pool,
         symbol == SYM_STRING ? LMD_TYPE_STRING :
         symbol == SYM_BINARY ? LMD_TYPE_BINARY :
         LMD_TYPE_SYMBOL, sizeof(TypeString));
     str_type->is_const = 1;  str_type->is_literal = 1;
-    // copy the string, todo: handle escape sequence
-    String* str;
-    pool_variable_alloc(tp->ast_pool, sizeof(String) + len + 1, (void**)&str);
-    str_type->string = (String*)str;
-    const char* str_content = tp->source + start;
-    memcpy(str->chars, str_content, len);  // memcpy is probably faster than strcpy
-    str->chars[len] = '\0';  str->len = len;
-    str->ref_cnt = 1;  // set to 1 to prevent it from being freed
-    // printf("build lit string: %.*s, len: %d, type: %d\n",
-    //     (int)str->len, str->chars, str->len, str_type->type_id);
+
+    int cnt = ts_node_named_child_count(node);
+    log_debug("string child count:: %d", cnt);
+    if (cnt == 1) {
+        TSNode child = ts_node_named_child(node, 0);
+        int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
+        int len = end - start;
+        // copy the string
+        pool_variable_alloc(tp->ast_pool, sizeof(String) + len + 1, (void**)&str);
+        str_type->string = (String*)str;
+        const char* str_content = tp->source + start;
+        memcpy(str->chars, str_content, len);  // memcpy is probably faster than strcpy
+        str->chars[len] = '\0';  str->len = len;
+        str->ref_cnt = 1;  // set to 1 to prevent it from being freed
+    }
+    else { // got escape sequence
+        StringBuf *str_buf = stringbuf_new(tp->ast_pool);  // todo: reuse the stringbuf
+        TSNode child = ts_node_named_child(node, 0);
+        while (!ts_node_is_null(child)) {
+            TSSymbol symbol = ts_node_symbol(child);
+            if (symbol == SYM_STRING_CONTENT) {
+                // handle normnal string
+                stringbuf_append_str_n(str_buf, tp->source + ts_node_start_byte(child), ts_node_end_byte(child) - ts_node_start_byte(child));
+            }
+            else if (symbol == SYM_ESCAPE_SEQUENCE) {
+                // handle escape sequences: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX, \u{...}
+                const char* escape_start = tp->source + ts_node_start_byte(child);
+                int escape_len = ts_node_end_byte(child) - ts_node_start_byte(child);
+
+                if (escape_len >= 2 && escape_start[0] == '\\') {
+                    char escape_char = escape_start[1];
+                    switch (escape_char) {
+                    case '"':
+                        stringbuf_append_char(str_buf, '"');
+                        break;
+                    case '\\':
+                        stringbuf_append_char(str_buf, '\\');
+                        break;
+                    case '/':
+                        stringbuf_append_char(str_buf, '/');
+                        break;
+                    case 'b':
+                        stringbuf_append_char(str_buf, '\b');
+                        break;
+                    case 'f':
+                        stringbuf_append_char(str_buf, '\f');
+                        break;
+                    case 'n':
+                        stringbuf_append_char(str_buf, '\n');
+                        break;
+                    case 'r':
+                        stringbuf_append_char(str_buf, '\r');
+                        break;
+                    case 't':
+                        stringbuf_append_char(str_buf, '\t');
+                        break;
+                    case 'u':
+                        // handle Unicode escape sequences: \uXXXX or \u{...}
+                        if (escape_len >= 6 && escape_start[2] != '{') {
+                            // \uXXXX format (exactly 4 hex digits)
+                            char hex_digits[5] = {0};
+                            memcpy(hex_digits, escape_start + 2, 4);
+                            char* endptr;
+                            uint32_t code_point = strtoul(hex_digits, &endptr, 16);
+                            if (endptr == hex_digits + 4) {  // successful parsing
+                                // Convert Unicode code point to UTF-8
+                                if (code_point <= 0x7F) {
+                                    stringbuf_append_char(str_buf, (char)code_point);
+                                } else if (code_point <= 0x7FF) {
+                                    stringbuf_append_char(str_buf, 0xC0 | (code_point >> 6));
+                                    stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                                } else if (code_point <= 0xFFFF) {
+                                    stringbuf_append_char(str_buf, 0xE0 | (code_point >> 12));
+                                    stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
+                                    stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                                }
+                            } else {
+                                log_error("Invalid Unicode escape sequence: %.*s", escape_len, escape_start);
+                                // append as-is on error
+                                stringbuf_append_str_n(str_buf, escape_start, escape_len);
+                            }
+                        }
+                        else if (escape_len > 4 && escape_start[2] == '{') {
+                            // \u{...} format (variable length hex digits)
+                            const char* hex_start = escape_start + 3;
+                            const char* hex_end = escape_start + escape_len - 1;  // should be '}'
+                            if (hex_end > hex_start && *hex_end == '}') {
+                                int hex_len = hex_end - hex_start;
+                                char* hex_str = (char*)malloc(hex_len + 1);
+                                memcpy(hex_str, hex_start, hex_len);
+                                hex_str[hex_len] = '\0';
+                                char* endptr;
+                                uint32_t code_point = strtoul(hex_str, &endptr, 16);
+                                if (endptr == hex_str + hex_len && code_point <= 0x10FFFF) {
+                                    // Convert Unicode code point to UTF-8
+                                    if (code_point <= 0x7F) {
+                                        stringbuf_append_char(str_buf, (char)code_point);
+                                    } else if (code_point <= 0x7FF) {
+                                        stringbuf_append_char(str_buf, 0xC0 | (code_point >> 6));
+                                        stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                                    } else if (code_point <= 0xFFFF) {
+                                        stringbuf_append_char(str_buf, 0xE0 | (code_point >> 12));
+                                        stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
+                                        stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                                    } else {
+                                        // 4-byte UTF-8 encoding for code points > 0xFFFF
+                                        stringbuf_append_char(str_buf, 0xF0 | (code_point >> 18));
+                                        stringbuf_append_char(str_buf, 0x80 | ((code_point >> 12) & 0x3F));
+                                        stringbuf_append_char(str_buf, 0x80 | ((code_point >> 6) & 0x3F));
+                                        stringbuf_append_char(str_buf, 0x80 | (code_point & 0x3F));
+                                    }
+                                } else {
+                                    log_error("Invalid Unicode escape sequence: %.*s", escape_len, escape_start);
+                                    // append as-is on error
+                                    stringbuf_append_str_n(str_buf, escape_start, escape_len);
+                                }
+                                free(hex_str);
+                            } else {
+                                log_error("Malformed Unicode escape sequence: %.*s", escape_len, escape_start);
+                                stringbuf_append_str_n(str_buf, escape_start, escape_len);
+                            }
+                        } else {
+                            log_error("Invalid Unicode escape sequence length: %.*s", escape_len, escape_start);
+                            stringbuf_append_str_n(str_buf, escape_start, escape_len);
+                        }
+                        break;
+                    default:
+                        // unknown escape sequence, append as-is
+                        log_warn("Unknown escape sequence: \\%c", escape_char);
+                        stringbuf_append_str_n(str_buf, escape_start, escape_len);
+                        break;
+                    }
+                } else {
+                    // malformed escape sequence
+                    log_error("Malformed escape sequence: %.*s", escape_len, escape_start);
+                    stringbuf_append_str_n(str_buf, escape_start, escape_len);
+                }
+            }
+            else {
+                log_error("Unknown string child symbol: %d", symbol);
+            }
+            child = ts_node_next_named_sibling(child);
+        }
+        // convert StringBuf to String
+        str = stringbuf_to_string(str_buf);
+        log_debug("final string: %.*s", str->len, str->chars);
+        str_type->string = str;
+    }
     // add to const list
     arraylist_append(tp->const_list, str);
     str_type->const_index = tp->const_list->length - 1;
@@ -557,8 +694,7 @@ AstNode* build_primary_expr(Transpiler* tp, TSNode pri_node) {
         ast_node->type = build_lit_float(tp, child);
     }
     else if (symbol == SYM_STRING || symbol == SYM_SYMBOL || symbol == SYM_BINARY) {
-        TSNode str_node = ts_node_named_child(child, 0);
-        ast_node->type = build_lit_string(tp, str_node, symbol);
+        ast_node->type = build_lit_string(tp, child, symbol);
     }
     else if (symbol == SYM_DATETIME || symbol == SYM_TIME) {
         ast_node->type = build_lit_datetime(tp, child, symbol);
@@ -1854,9 +1990,10 @@ AstNode* build_content(Transpiler* tp, TSNode list_node, bool flattern, bool is_
 
 AstNode* build_lit_node(Transpiler* tp, TSNode lit_node, bool quoted_value, TSSymbol symbol) {
     log_debug("build lit node");
+    // string, symbol, binary, datetime, time
     AstPrimaryNode* ast_node = (AstPrimaryNode*)alloc_ast_node(tp, AST_NODE_PRIMARY, lit_node, sizeof(AstPrimaryNode));
-    TSNode val_node = quoted_value ? ts_node_named_child(lit_node, 0) : lit_node;
-    ast_node->type = build_lit_string(tp, val_node, symbol);
+    // TSNode val_node = quoted_value ? ts_node_named_child(lit_node, 0) : lit_node;
+    ast_node->type = build_lit_string(tp, lit_node, symbol);
     return (AstNode*)ast_node;
 }
 
