@@ -244,15 +244,15 @@ define run_make_with_error_summary
 		echo "🔴 ERRORS FOUND:"; \
 		echo "================"; \
 		grep -n -E "(error:|Error:|ERROR:|fatal:|Failed:|failed:)" "$$BUILD_LOG" | while IFS=: read -r line_num content; do \
-			file_info=$$(echo "$$content" | grep -oE "\.\./[^\s:]+\.[ch]p?p?:[0-9]+:[0-9]+:" | head -1); \
+			file_info=$$(echo "$$content" | grep -oE "\.\.\/[^[:space:]]+\.[ch]p*p?:[0-9]+:[0-9]+:" | head -1); \
 			if [ -z "$$file_info" ]; then \
-				file_info=$$(echo "$$content" | grep -oE "\.\./[^\s:]+\.[ch]p?p?:[0-9]+:" | head -1); \
+				file_info=$$(echo "$$content" | grep -oE "\.\.\/[^[:space:]]+\.[ch]p*p?:[0-9]+:" | head -1); \
 			fi; \
 			if [ -z "$$file_info" ]; then \
-				file_info=$$(echo "$$content" | grep -oE "[^/\s]*\.[ch]p?p?:[0-9]+:[0-9]+:" | head -1); \
+				file_info=$$(echo "$$content" | grep -oE "[^[:space:]]+\.[ch]p*p?:[0-9]+:[0-9]+:" | head -1); \
 			fi; \
 			if [ -z "$$file_info" ]; then \
-				file_info=$$(echo "$$content" | grep -oE "[^/\s]*\.[ch]p?p?:[0-9]+:" | head -1); \
+				file_info=$$(echo "$$content" | grep -oE "[^[:space:]]+\.[ch]p*p?:[0-9]+:" | head -1); \
 			fi; \
 			if [ -n "$$file_info" ]; then \
 				rel_path=$$(echo "$$file_info" | cut -d: -f1); \
@@ -268,7 +268,7 @@ define run_make_with_error_summary
 				else \
 					location="$$line_no"; \
 				fi; \
-				clean_content=$$(echo "$$content" | sed "s|[^[:space:]]*\.[ch]p*:[0-9]*:[0-9]*:||" | sed "s|[^[:space:]]*\.[ch]p*:[0-9]*:||"); \
+				clean_content=$$(echo "$$content" | sed "s|[^[:space:]]*\.[ch]p*p*:[0-9]*:[0-9]*:||" | sed "s|[^[:space:]]*\.[ch]p*p*:[0-9]*:||"); \
 				echo "   file://$$abs_path:$$location -$$clean_content"; \
 			else \
 				echo "   $$content"; \
