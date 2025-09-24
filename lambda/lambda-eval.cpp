@@ -82,6 +82,42 @@ String *fn_strcat(String *left, String *right) {
     return result;
 }
 
+Item fn_join(Item left, Item right) {
+    // concat two scalars, or join two lists/arrays/maps, or join scalar with list/array, or join two binaries, else error
+    TypeId left_type = get_type_id(left), right_type = get_type_id(right);
+    log_debug("fn_join: %d, %d", left_type, right_type);
+    if (left_type == LMD_TYPE_STRING || right_type == LMD_TYPE_STRING) {
+        String *left_str = fn_string(left), *right_str = fn_string(right);
+        String *result = fn_strcat(left_str, right_str);
+        return {.item = s2it(result)};
+    }
+    else if (left_type == LMD_TYPE_SYMBOL || right_type == LMD_TYPE_SYMBOL) {
+        String *left_str = fn_string(left), *right_str = fn_string(right);
+        String *result = fn_strcat(left_str, right_str);
+        return {.item = y2it(result)};
+    }
+    // todo: support binary concat
+    else if (left_type == LMD_TYPE_LIST && right_type == LMD_TYPE_LIST) {
+        List *left_list = left.list;  List *right_list = right.list;
+        int total_len = left_list->length + right_list->length, total_extra = left_list->extra + right_list->extra; 
+        List *result_list = (List *)heap_calloc(sizeof(List) + sizeof(Item)*(total_len + total_extra), LMD_TYPE_LIST);
+        result_list->type_id = LMD_TYPE_LIST;
+        result_list->length = total_len;  result_list->extra = total_extra;
+        result_list->items = (Item*)(result_list + 1);
+        // copy the items
+        memcpy(result_list->items, left_list->items, sizeof(Item)*left_list->length);
+        memcpy(result_list->items + left_list->length, right_list->items, sizeof(Item)*right_list->length);
+        // need to handle extra and ref_cnt
+        return {.item = l2it(result_list)};
+    }
+    // else if (left_type == LMD_TYPE_ARRAY && right_type == LMD_TYPE_ARRAY) {
+    // }
+    else {
+        log_error("fn_join: unsupported operand types: %d and %d", left_type, right_type);
+        return ItemError;   // type mismatch
+    }
+}
+
 String *str_repeat(String *str, int64_t times) {
     if (times <= 0) {
         // Return empty string
