@@ -1,6 +1,6 @@
 "===== COMPREHENSIVE COMPARISON OPERATIONS TEST ====="
-"Error Cases - Type Mismatches (should produce errors):"
-"Testing invalid comparisons..."
+'Error Cases - Type Mismatches (should produce errors):'
+'Testing invalid comparisons...'
 "154."
 error
 "155."
@@ -13,7 +13,7 @@ error
 error
 "159."
 error
-"Additional Error Cases - Invalid Type Comparisons:"
+'Additional Error Cases - Invalid Type Comparisons:'
 "160."
 error
 "161."
@@ -34,7 +34,7 @@ error
 error
 "169."
 error
-"Error Cases - String Comparisons (non-equality):"
+'Error Cases - String Comparisons (non-equality):'
 "170."
 true
 "171."
@@ -43,26 +43,26 @@ false
 false
 "173."
 false
-"Error Cases - Boolean with String Operations:"
+'Error Cases - Boolean with String Operations:'
 "174."
 true
 "175."
 false
 "176."
-"str"
+'str'
 "177."
 false
 "178."
-"str"
+'str'
 "179."
-"str"
+'str'
 "180."
 true
 "181."
-"str"
+'str'
 "182."
-"world"
-"Error Cases - Null Comparisons:"
+'world'
+'Error Cases - Null Comparisons:'
 "183."
 error
 "184."
@@ -87,7 +87,7 @@ error
 error
 "194."
 error
-"Error Cases - Null with Boolean Operations:"
+'Error Cases - Null with Boolean Operations:'
 "195."
 [null]
 "196."
@@ -108,7 +108,7 @@ error
 [null]
 "204."
 [null]
-"Error Cases - Mixed Invalid Types:"
+'Error Cases - Mixed Invalid Types:'
 "205."
 error
 "206."
@@ -120,9 +120,9 @@ error
 "209."
 5
 "210."
-"string"
+'string'
 "211."
-"string"
+'string'
 "212."
 5
 "213."
@@ -133,16 +133,16 @@ true
 2.71
 "216."
 2.71
-"Conditional Expressions with Comparisons:"
+'Conditional Expressions with Comparisons:'
 "217."
-"five is greater"
+'five is greater'
 "218."
-"equal"
+'equal'
 "219."
-"not less than"
+'not less than'
 "220."
-"both true"
-"Variable Comparisons:"
+'both true'
+'Variable Comparisons:'
 "221."
 true
 "222."
@@ -157,7 +157,7 @@ true
 true
 "227."
 true
-"Complex Arithmetic in Comparisons:"
+'Complex Arithmetic in Comparisons:'
 "228."
 true
 "229."
@@ -168,7 +168,7 @@ true
 true
 "232."
 true
-"Chained Comparisons Logic:"
+'Chained Comparisons Logic:'
 "233."
 true
 "234."
@@ -177,10 +177,10 @@ true
 true
 "236."
 true
-"Edge Cases with Very Large Numbers:"
+'Edge Cases with Very Large Numbers:'
 "237."
 true
-"Float Precision Comparisons:"
+'Float Precision Comparisons:'
 "240."
 false
 "241."

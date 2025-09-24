@@ -3,7 +3,7 @@
 
 "===== INT64 COMPREHENSIVE TEST SUITE ====="
 
-"=== Basic Int64 Literals and Type Inference ==="
+'=== Basic Int64 Literals and Type Inference ==='
 
 // Test 1: large int literals promoted to double
 9223372036854775807

@@ -184,11 +184,12 @@ let timeseries_data = [
 ];
 
 // Execute comprehensive analysis pipeline
-"=== Data Science Pipeline Results ==="
+'=== Data Science Pipeline Results ==='
 
 let preprocessing_results = preprocess_dataset(synthetic_dataset);
 "Preprocessing completed for " + string(len(preprocessing_results.processed_data)) + " samples"
 
+'---'
 let feature_engineering_results = engineer_features(preprocessing_results.processed_data);
 "Feature engineering completed with " + string(len(feature_engineering_results[0].engineered_features.poly_features)) + " polynomial features"
 

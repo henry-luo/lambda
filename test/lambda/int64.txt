@@ -1,5 +1,5 @@
 "===== INT64 COMPREHENSIVE TEST SUITE ====="
-"=== Basic Int64 Literals and Type Inference ==="
+'=== Basic Int64 Literals and Type Inference ==='
 9.22337e+18
 -9.22337e+18
 42
