@@ -16,7 +16,7 @@
 #endif
 #include "validator.hpp"
 
-extern __thread Context* context;
+extern __thread EvalContext* context;
 
 // External typeset function
 extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* output_file);
@@ -636,7 +636,7 @@ String* fn_string(Item itm) {
                 }
             }
 
-            return heap_string(buf, len);
+            return heap_strcpy(buf, len);
         } else {
             return &STR_NULL;
         }
@@ -646,28 +646,28 @@ String* fn_string(Item itm) {
         int int_val = itm.int_val;
         snprintf(buf, sizeof(buf), "%d", int_val);
         int len = strlen(buf);
-        return heap_string(buf, len);
+        return heap_strcpy(buf, len);
     }
     case LMD_TYPE_INT64: {
         char buf[32];
         int64_t long_val = *(int64_t*)itm.pointer;
         snprintf(buf, sizeof(buf), "%ld", long_val);
         int len = strlen(buf);
-        return heap_string(buf, len);
+        return heap_strcpy(buf, len);
     }
     case LMD_TYPE_FLOAT: {
         char buf[32];
         double dval = *(double*)itm.pointer;
         snprintf(buf, sizeof(buf), "%g", dval);
         int len = strlen(buf);
-        return heap_string(buf, len);
+        return heap_strcpy(buf, len);
     }
     case LMD_TYPE_DECIMAL:  case LMD_TYPE_RANGE:  case LMD_TYPE_LIST:  case LMD_TYPE_ARRAY:
     case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
     case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT: {
         StrBuf* sb = strbuf_new();
         print_item(sb, itm, 1, null);  // make list print as list, instead of beaking onto multiple lines
-        String* result = heap_string(sb->str, sb->length);
+        String* result = heap_strcpy(sb->str, sb->length);
         strbuf_free(sb);
         return result;
     }

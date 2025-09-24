@@ -2,7 +2,7 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
 
-extern __thread Context* context;
+extern __thread EvalContext* context;
 void array_set(Array* arr, int index, Item itm);
 void array_push(Array* arr, Item itm);
 void set_fields(TypeMap *map_type, void* map_data, va_list args);
@@ -221,30 +221,6 @@ double array_float_get_value(ArrayFloat *arr, int index) {
     }
     return arr->items[index];
 }
-
-// Wrapper function to return an Item instead of raw ArrayFloat*
-// Item array_float_item(int count, ...) {
-//     if (count <= 0) {
-//         ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
-//         arr->type_id = LMD_TYPE_ARRAY_FLOAT;
-//         arr->capacity = 0;
-//         arr->items = NULL;
-//         arr->length = 0;
-//         return (Item){.array_float = arr};
-//     }
-//     va_list args;
-//     va_start(args, count);
-//     ArrayFloat *arr = (ArrayFloat*)heap_alloc(sizeof(ArrayFloat), LMD_TYPE_ARRAY_FLOAT);
-//     arr->type_id = LMD_TYPE_ARRAY_FLOAT;
-//     arr->capacity = count;
-//     arr->items = (double*)Malloc(count * sizeof(double));
-//     arr->length = count;
-//     for (int i = 0; i < count; i++) {
-//         arr->items[i] = va_arg(args, double);
-//     }
-//     va_end(args);
-//     return (Item){.array_float = arr};
-// }
 
 void array_float_set(ArrayFloat *arr, int index, double value) {
     if (!arr || index < 0 || index >= arr->capacity) {
@@ -535,7 +511,7 @@ Item item_at(Item data, int index) {
         if (index < 0 || index >= str->len) { return ItemNull; }
         // return a single character string
         char buf[2] = {str->chars[index], '\0'};
-        String *ch_str = heap_string(buf, 1);
+        String *ch_str = heap_strcpy(buf, 1);
         if (type_id == LMD_TYPE_SYMBOL) return {.item = y2it(ch_str)};
         else return {.item = s2it(ch_str)};
     }

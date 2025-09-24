@@ -60,7 +60,7 @@ int dataowner_compare(const void *a, const void *b, void *udata);
 uint64_t dataowner_hash(const void *item, uint64_t seed0, uint64_t seed1);
 
 // thread-specific runtime context
-__thread Context* context = NULL;
+__thread EvalContext* context = NULL;
 
 void find_errors(TSNode node) {
     const char *node_type = ts_node_type(node);

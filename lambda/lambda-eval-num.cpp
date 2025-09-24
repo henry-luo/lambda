@@ -8,7 +8,7 @@
 #include <errno.h>  // for errno checking
 #include <inttypes.h>  // for PRId64
 
-extern __thread Context* context;
+extern __thread EvalContext* context;
 
 String* str_repeat(String* str, int64_t times);
 String* fn_strcat(String* left, String* right);
