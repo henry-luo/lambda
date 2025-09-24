@@ -45,6 +45,7 @@ function binary_expr($, in_attr) {
   let operand = in_attr ? choice($.primary_expr, $.unary_expr, alias($.attr_binary_expr, $.binary_expr)) : $._expression;
   return [
     ['+', 'binary_plus'],
+    ['++', 'binary_plus'],
     ['-', 'binary_plus'],
     ['*', 'binary_times'],
     ['/', 'binary_times'],

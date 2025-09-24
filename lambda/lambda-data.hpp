@@ -198,6 +198,7 @@ typedef enum Operator {
 
     // binary
     OPERATOR_ADD,
+    OPERATOR_JOIN,
     OPERATOR_SUB,
     OPERATOR_MUL,
     OPERATOR_POW,

@@ -485,15 +485,7 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
     }
     else if (bi_node->op == OPERATOR_ADD) {
         if (left_type == right_type) {
-            if (left_type == LMD_TYPE_STRING) {
-                strbuf_append_str(tp->code_buf, "fn_strcat(");
-                transpile_expr(tp, bi_node->left);
-                strbuf_append_char(tp->code_buf, ',');
-                transpile_expr(tp, bi_node->right);
-                strbuf_append_char(tp->code_buf, ')');
-                return;
-            }
-            else if (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT) {
+            if (left_type == LMD_TYPE_INT || left_type == LMD_TYPE_INT64 || left_type == LMD_TYPE_FLOAT) {
                 strbuf_append_str(tp->code_buf, "(");
                 transpile_expr(tp, bi_node->left);
                 strbuf_append_char(tp->code_buf, '+');
@@ -731,7 +723,14 @@ void transpile_binary_expr(Transpiler* tp, AstBinaryNode *bi_node) {
             transpile_expr(tp, bi_node->right);
             strbuf_append_char(tp->code_buf, ')');
         }
-    }    
+    } 
+    else if (bi_node->op == OPERATOR_JOIN) { 
+        strbuf_append_str(tp->code_buf, "fn_join(");
+        transpile_box_item(tp, bi_node->left);
+        strbuf_append_char(tp->code_buf, ',');
+        transpile_box_item(tp, bi_node->right);
+        strbuf_append_char(tp->code_buf, ')');
+    }
     else {
         log_error("Error: unknown binary operator %d", bi_node->op);
         strbuf_append_str(tp->code_buf, "null");  // should be error
