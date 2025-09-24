@@ -1,3 +1,6 @@
+"Text with escapes ==============="
+"hello
+world!Ω"
 "Scalar values ==============="
 true
 false
@@ -8,7 +11,7 @@ false
 5e-9
 -7.9
 "hello"
-"multiline 
+"multiline
 text"
 'symbol'
 t'2025'
