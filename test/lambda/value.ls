@@ -1,6 +1,6 @@
-"Text with escapes ==============="
+"Text/symbol with escapes ==============="
 "hello\nworld!\u03A9"
-
+'hello\nworld!\u03A9'
 "Scalar values ==============="
 (null, true, false, 123, 0.5, 3.14159, -6, 5e-9, -7.9, "hello", "multiline
 text", 'symbol',

@@ -1,6 +1,8 @@
-"Text with escapes ==============="
+"Text/symbol with escapes ==============="
 "hello
 world!Ω"
+'hello
+world!Ω'
 "Scalar values ==============="
 true
 false
