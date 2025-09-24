@@ -1,5 +1,6 @@
-"=== Data Science Pipeline Results ==="
+'=== Data Science Pipeline Results ==='
 "Preprocessing completed for 8 samples"
+'---'
 "Feature engineering completed with 10 polynomial features"
 {
   dataset_summary: {

@@ -416,7 +416,7 @@ let sample_environmental_sensors = [
 
 let sample_traffic_data = [
     {
-        intersection_id: "INT_001",
+        intersection_id: 'INT_001',
         location: {lat: 40.7589, lon: -73.9851, zone: "downtown"},
         timestamp: t'2024-09-05 08:00:00',
         vehicle_count: 145,
@@ -425,7 +425,7 @@ let sample_traffic_data = [
         incident_reports: ["minor_fender_bender", "pedestrian_jaywalking"]
     },
     {
-        intersection_id: "INT_002",
+        intersection_id: 'INT_002',
         location: {lat: 40.7505, lon: -73.9934, zone: "residential"},
         timestamp: t'2024-09-05 08:00:00',
         vehicle_count: 78,
@@ -434,7 +434,7 @@ let sample_traffic_data = [
         incident_reports: []
     },
     {
-        intersection_id: "INT_003",
+        intersection_id: 'INT_003',
         location: {lat: 40.7614, lon: -73.9776, zone: "industrial"},
         timestamp: t'2024-09-05 08:00:00',
         vehicle_count: 210,
@@ -476,13 +476,13 @@ let sample_energy_data = [
 
 // Execute comprehensive smart city analytics
 "=== Smart City IoT Analytics Results ==="
-
+'-'
 let environmental_analysis = process_environmental_data(sample_environmental_sensors);
 "Environmental data processed from " + string(environmental_analysis.data_quality.total_readings) + " sensors"
-
+'-'
 let traffic_analysis = analyze_traffic_patterns(sample_traffic_data);
 "Traffic analysis completed for " + string(traffic_analysis.traffic_summary.monitoring_coverage) + " intersections"
-
+'-'
 let energy_analysis = analyze_energy_consumption(sample_energy_data);
 "Energy consumption analyzed for " + string(energy_analysis.energy_overview.monitored_meters) + " meters"
 

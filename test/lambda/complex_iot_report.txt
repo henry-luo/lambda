@@ -1,6 +1,9 @@
 "=== Smart City IoT Analytics Results ==="
+'-'
 "Environmental data processed from 4 sensors"
+'-'
 "Traffic analysis completed for 3 intersections"
+'-'
 "Energy consumption analyzed for 3 meters"
 {
   smart_city_overview: {
