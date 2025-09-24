@@ -12,7 +12,7 @@
 1
 5
 "Statistical Functions Tests"
-"Test 10: Sum function on various arrays"
+'Test 10: Sum function on various arrays'
 15
 16.59955
 42

@@ -1,5 +1,5 @@
 "===== COMPREHENSIVE COMPARISON OPERATIONS TEST ====="
-"Basic Equality Comparisons (==):"
+'Basic Equality Comparisons (==):'
 "1."
 true
 "2."
@@ -20,7 +20,7 @@ true
 true
 "10."
 true
-"Basic Inequality Comparisons (!=):"
+'Basic Inequality Comparisons (!=):'
 "11."
 true
 "12."
@@ -39,7 +39,7 @@ true
 true
 "19."
 true
-"Less Than Comparisons (<):"
+'Less Than Comparisons (<):'
 "20."
 true
 "21."
@@ -64,7 +64,7 @@ true
 true
 "31."
 false
-"Greater Than Comparisons (>):"
+'Greater Than Comparisons (>):'
 "32."
 true
 "33."
@@ -89,7 +89,7 @@ true
 true
 "43."
 false
-"Less Than or Equal Comparisons (<=):"
+'Less Than or Equal Comparisons (<=):'
 "44."
 true
 "45."
@@ -120,7 +120,7 @@ true
 false
 "58."
 true
-"Greater Than or Equal Comparisons (>=):"
+'Greater Than or Equal Comparisons (>=):'
 "59."
 true
 "60."
@@ -151,7 +151,7 @@ true
 false
 "73."
 true
-"Logical NOT Operations (not):"
+'Logical NOT Operations (not):'
 "74."
 false
 "75."
@@ -168,7 +168,7 @@ true
 false
 "81."
 false
-"Logical AND Operations (and):"
+'Logical AND Operations (and):'
 "82."
 true
 "83."
@@ -189,7 +189,7 @@ true
 true
 "91."
 true
-"Logical OR Operations (or):"
+'Logical OR Operations (or):'
 "92."
 true
 "93."
@@ -210,7 +210,7 @@ true
 true
 "101."
 true
-"Mixed Boolean Logic:"
+'Mixed Boolean Logic:'
 "102."
 true
 "103."
@@ -223,7 +223,7 @@ true
 true
 "107."
 false
-"Logical Operations with Mixed Types:"
+'Logical Operations with Mixed Types:'
 "108."
 true
 "109."
@@ -240,7 +240,7 @@ true
 5
 "115."
 0
-"Large Number Comparisons:"
+'Large Number Comparisons:'
 "116."
 true
 "117."
@@ -253,7 +253,7 @@ true
 true
 "121."
 true
-"Negative Number Comparisons:"
+'Negative Number Comparisons:'
 "122."
 true
 "123."
@@ -266,7 +266,7 @@ true
 true
 "127."
 true
-"Zero Comparisons:"
+'Zero Comparisons:'
 "128."
 true
 "129."
@@ -285,7 +285,7 @@ true
 true
 "136."
 true
-"Mixed Type Comparisons:"
+'Mixed Type Comparisons:'
 "137."
 true
 "138."
@@ -302,7 +302,7 @@ true
 true
 "144."
 true
-"Complex Boolean Expressions:"
+'Complex Boolean Expressions:'
 "145."
 true
 "146."
@@ -313,7 +313,7 @@ true
 true
 "149."
 true
-"Nested Comparisons:"
+'Nested Comparisons:'
 "150."
 true
 "151."

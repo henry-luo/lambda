@@ -1,5 +1,5 @@
 "===== COMPREHENSIVE NUMERIC OPERATIONS TEST ====="
-"Basic Operations:"
+'Basic Operations:'
 8
 2
 15
@@ -107,8 +107,7 @@ error
 "String with Numbers (errors):"
 error
 error
-"testtesttesttesttest"
-"testtesttesttesttest"
+error
 "Additional Data Type Errors:"
 error
 error
@@ -154,10 +153,6 @@ nan
 0.5
 -8
 4
-"String Repetition:"
-"hellohellohello"
-""
-"worldworldworldworldworld"
 "Complex Expressions:"
 16
 11
@@ -180,8 +175,6 @@ nan
 "Large Numbers:"
 9.22337e+18
 -9.2233e+18
-"Concatenation:"
-"helloworld"
+"Concatenation: hello world"
 'foobarbaz'
 "===== END OF COMPREHENSIVE TEST ====="
-"All numeric tests completed successfully."

@@ -50,7 +50,7 @@ last_elem
 "Statistical Functions Tests"
 // ========================================
 
-"Test 10: Sum function on various arrays"
+'Test 10: Sum function on various arrays'
 let sum_float = sum(float_arr)        // Should be 15.0 (1+2+3+4+5)
 let sum_mixed = sum(mixed_arr)        // Should be 16.59955
 let sum_single = sum(single_arr)      // Should be 42.0

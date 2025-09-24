@@ -2,7 +2,7 @@
 
 "===== COMPREHENSIVE COMPARISON OPERATIONS TEST ====="
 
-"Basic Equality Comparisons (==):"
+'Basic Equality Comparisons (==):'
 "1."; (5 == 5)
 "2."; (5 == 3)
 "3."; (3.14 == 3.14)
@@ -14,7 +14,7 @@
 "9."; (0.0 == 0.0)
 "10."; (-0.0 == 0.0)
 
-"Basic Inequality Comparisons (!=):"
+'Basic Inequality Comparisons (!=):'
 "11."; (5 != 3)
 "12."; (5 != 5)
 "13."; (3.14 != 2.71)
@@ -25,7 +25,7 @@
 "18."; (0 != 1)
 "19."; (0.0 != 0.1)
 
-"Less Than Comparisons (<):"
+'Less Than Comparisons (<):'
 "20."; (3 < 5)
 "21."; (5 < 3)
 "22."; (5 < 5)
@@ -39,7 +39,7 @@
 "30."; (5 < 5.1)
 "31."; (5.1 < 5)
 
-"Greater Than Comparisons (>):"
+'Greater Than Comparisons (>):'
 "32."; (5 > 3)
 "33."; (3 > 5)
 "34."; (5 > 5)
@@ -53,7 +53,7 @@
 "42."; (5.1 > 5)
 "43."; (5 > 5.1)
 
-"Less Than or Equal Comparisons (<=):"
+'Less Than or Equal Comparisons (<=):'
 "44."; (3 <= 5)
 "45."; (5 <= 3)
 "46."; (5 <= 5)
@@ -70,7 +70,7 @@
 "57."; (5.1 <= 5)
 "58."; (5.0 <= 5)
 
-"Greater Than or Equal Comparisons (>=):"
+'Greater Than or Equal Comparisons (>=):'
 "59."; (5 >= 3)
 "60."; (3 >= 5)
 "61."; (5 >= 5)
@@ -87,7 +87,7 @@
 "72."; (5 >= 5.1)
 "73."; (5 >= 5.0)
 
-"Logical NOT Operations (not):"
+'Logical NOT Operations (not):'
 "74."; not true
 "75."; not false
 "76."; not (5 == 5)
@@ -97,7 +97,7 @@
 "80."; not (5 <= 5)
 "81."; not (5 > 3)
 
-"Logical AND Operations (and):"
+'Logical AND Operations (and):'
 "82."; (true and true)
 "83."; (true and false)
 "84."; (false and true)
@@ -109,7 +109,7 @@
 "90."; ((3 < 5) and (10 >= 10))
 "91."; (not (5 == 3) and (7 > 2))
 
-"Logical OR Operations (or):"
+'Logical OR Operations (or):'
 "92."; (true or true)
 "93."; (true or false)
 "94."; (false or true)
@@ -121,7 +121,7 @@
 "100."; ((3 > 5) or (10 <= 10))
 "101."; (not (5 == 5) or (7 > 2))
 
-"Mixed Boolean Logic:"
+'Mixed Boolean Logic:'
 "102."; (true and (false or true))
 "103."; (false or (true and false))
 "104."; ((true or false) and (true or false))
@@ -129,7 +129,7 @@
 "106."; ((5 == 5) and ((3 < 7) or (10 > 5)))
 "107."; ((5 != 5) or ((3 >= 7) and (10 <= 5)))
 
-"Logical Operations with Mixed Types:"
+'Logical Operations with Mixed Types:'
 "108."; (5 and true)
 "109."; (0 and true)
 "110."; (true and 5)
@@ -139,7 +139,7 @@
 "114."; (false or 5)
 "115."; (false or 0)
 
-"Large Number Comparisons:"
+'Large Number Comparisons:'
 "116."; (999999999 == 999999999)
 "117."; (999999999 != 999999998)
 "118."; (999999999 > 999999998)
@@ -147,7 +147,7 @@
 "120."; (1000000000 >= 1000000000)
 "121."; (1000000000 <= 1000000000)
 
-"Negative Number Comparisons:"
+'Negative Number Comparisons:'
 "122."; (-999 == -999)
 "123."; (-999 != -998)
 "124."; (-999 < -998)
@@ -155,7 +155,7 @@
 "126."; (-1000 <= -999)
 "127."; (-999 >= -1000)
 
-"Zero Comparisons:"
+'Zero Comparisons:'
 "128."; (0 == 0)
 "129."; (0 != 1)
 "130."; (0 < 1)
@@ -166,7 +166,7 @@
 "135."; (0.0 == 0)
 "136."; (0 == 0.0)
 
-"Mixed Type Comparisons:"
+'Mixed Type Comparisons:'
 "137."; (5 == 5.0)
 "138."; (5.0 == 5)
 "139."; (5 != 5.1)
@@ -176,14 +176,14 @@
 "143."; (5 <= 5.0)
 "144."; (5.0 >= 5)
 
-"Complex Boolean Expressions:"
+'Complex Boolean Expressions:'
 "145."; ((5 == 5) and (3 < 7))
 "146."; ((5 != 3) or (10 < 5))
 "147."; (not (5 == 3) and (7 > 2))
 "148."; ((5 > 3) and not (2 > 5))
 "149."; (((5 == 5) and (3 < 7)) or (10 != 10))
 
-"Nested Comparisons:"
+'Nested Comparisons:'
 "150."; (5 < 10) == (3 < 7)
 "151."; (5 > 10) != (3 < 7)
 "152."; (5 <= 5) == (10 >= 10)

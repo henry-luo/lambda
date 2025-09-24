@@ -2,7 +2,7 @@
 
 "===== COMPREHENSIVE NUMERIC OPERATIONS TEST ====="
 
-"Basic Operations:"
+'Basic Operations:'
 5 + 3
 5 - 3
 5 * 3
@@ -140,7 +140,6 @@ null ^ 5
 5 + "hello"
 "hello" + 5
 5 * "test"
-"test" * 5
 
 "Additional Data Type Errors:"
 t'2025-10-01' + 2
@@ -193,11 +192,6 @@ true _/ false
 (-2) ^ 3
 (-2) ^ 2
 
-"String Repetition:"
-"hello" * 3
-"a" * 0
-5 * "world"
-
 "Complex Expressions:"
 (5 + 3) * 2
 5 + (3 * 2)
@@ -224,10 +218,8 @@ true _/ false
 9223372036854775807 + 1
 -9223302036854775808 - 1
 
-"Concatenation:"
-"hello" + "world"
+"Concatenation: "
+"hello" + " world"
 'foo' + 'bar' + 'baz'
 
 "===== END OF COMPREHENSIVE TEST ====="
-
-"All numeric tests completed successfully."
