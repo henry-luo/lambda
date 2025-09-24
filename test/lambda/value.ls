@@ -1,11 +1,14 @@
+"Text with escapes ==============="
+"hello\nworld!\u03A9"
+
 "Scalar values ==============="
-(null, true, false, 123, 0.5, 3.14159, -6, 5e-9, -7.9, "hello", "multiline 
+(null, true, false, 123, 0.5, 3.14159, -6, 5e-9, -7.9, "hello", "multiline
 text", 'symbol',
 t'2025', t'2025-06', t'2025-04-26', t' 2025-05-01  10:30 ', t'-1000-12-25', t' 10:08:05.125z ', t'10:08+08',
 b'A0FE', b'\xA0FE', b'\xA0FE af0d')
 (b'\64 A0FE', b'\64A0FE gh8=', b'\64A0FE gh==')
 (5e7, 5e10, 5e-6, 5e-7, 5e-8, 5e-9, 5e-10, inf, nan, -inf, -nan)
-- 123;  - inf 
+- 123;  - inf
 - nan
 
 "Array ==============="
@@ -14,8 +17,8 @@ b'A0FE', b'\xA0FE', b'\xA0FE af0d')
 [1, ['symbol-xyz', null], 0.5, ("great", "!")]
 
 "Map ==============="
-{}  {a:123}  {a:123, b:-456, c:0.5, d:true, e:false, f:null, 
-g:"hello", h:'world', i:t'2025-05-01', j:b'\xA0FE', 
+{}  {a:123}  {a:123, b:-456, c:0.5, d:true, e:false, f:null,
+g:"hello", h:'world', i:t'2025-05-01', j:b'\xA0FE',
 k:(120, 1e-2), l:[121], m:[true, 124], n:{a:'hello', b:0.5}}
 
 "Element ==============="
@@ -26,15 +29,13 @@ b:456, c:789>
 <elmt a:123, b:'symbol', c:<d>; "text"; 222; <br> <br>; <br> "test" " and " "
 more text">
 <elmt [456]; "text"; 789; {a:123}; 'symbol'; (1,2,"many items to test list_push"); <br> <br> <br> "test"; " and "; "more text" + "!">
-<body a:'b', b:123, c:true; 123; "text" 
-    <div b:123, c:true; "test"; 
+<body a:'b', b:123, c:true; 123; "text"
+    <div b:123, c:true; "test";
         <span b:123, c:true; "test"; 123; "a">; 123;
         <span <br> "test">
-        <hr> "package:" 
+        <hr> "package:"
         {"license": "MIT",
         "engines": {
             "node": ">=14.0.0"
         }, e:<f <g> "test">, h:{i:'j', k:'l'}
         }>>
-
-
