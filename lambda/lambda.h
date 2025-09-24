@@ -297,25 +297,14 @@ typedef struct Element Element;
 Element* elmt_fill(Element *elmt, ...);
 
 typedef struct Heap Heap;
-typedef struct Pack Pack;
-typedef struct mpd_context_t mpd_context_t;
-typedef struct num_stack_t num_stack_t;
 typedef struct Url Url;
 typedef struct _ArrayList ArrayList;
 typedef struct VariableMemPool VariableMemPool;
-typedef struct AstValidator AstValidator;
 
 typedef struct Context {
     Heap* heap;
-    VariableMemPool* ast_pool;
     void** consts;
-    ArrayList* type_list;
-    num_stack_t* num_stack;  // for long and double pointers
-    void* type_info;  // meta info for the base types
     Url* cwd;  // current working directory
-    Item result; // final exec result
-    mpd_context_t* decimal_ctx; // libmpdec context for decimal operations
-    AstValidator* validator; // AST validator
     bool run_main; // whether to run main procedure on start
 } Context;
 

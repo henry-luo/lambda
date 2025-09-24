@@ -36,12 +36,26 @@ extern "C" {
 #include "lambda.h"
 #undef max
 #undef min
-
 typedef struct NamePool NamePool;
 
 #ifdef __cplusplus
 }
 #endif
+
+typedef struct Pack Pack;
+typedef struct mpd_context_t mpd_context_t;
+typedef struct num_stack_t num_stack_t;
+typedef struct AstValidator AstValidator;
+
+typedef struct EvalContext : Context {
+    VariableMemPool* ast_pool;
+    ArrayList* type_list;
+    num_stack_t* num_stack;  // for long and double pointers
+    void* type_info;  // meta info for the base types
+    Item result; // final exec result
+    mpd_context_t* decimal_ctx; // libmpdec context for decimal operations
+    AstValidator* validator; // AST validator
+} EvalContext;
 
 // get raw value out of an Item
 inline double get_double(Item item) { return *(double*)item.pointer; }

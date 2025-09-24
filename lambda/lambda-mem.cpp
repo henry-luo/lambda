@@ -1,7 +1,7 @@
 #include "transpiler.hpp"
 #include "../lib/log.h"
 
-extern __thread Context* context;
+extern __thread EvalContext* context;
 
 int dataowner_compare(const void *a, const void *b, void *udata) {
     const DataOwner *da = (const DataOwner *)a;
@@ -44,10 +44,10 @@ void* heap_calloc(size_t size, TypeId type_id) {
     return ptr;
 }
 
-String* heap_string(char* src, int len) {
+String* heap_strcpy(char* src, int len) {
     String *str = (String *)heap_alloc(len + 1 + sizeof(String), LMD_TYPE_STRING);
     strcpy(str->chars, src);
-    str->len = len;  str->ref_cnt = 0;    
+    str->len = len;  str->ref_cnt = 0;
     return str;
 }
 
@@ -79,7 +79,7 @@ Item push_k(DateTime val) {
     if (!context->num_stack) {
         log_error("push_k called with invalid context");
         return ItemError;
-    }    
+    }
     DateTime *dtptr = num_stack_push_datetime(context->num_stack, val);
     return {.item = k2it(dtptr)};
 }
@@ -91,7 +91,7 @@ void heap_destroy() {
     }
 }
 
-Item HEAP_ENTRY_START = {.item = ((uint64_t)LMD_CONTAINER_HEAP_START << 56)}; 
+Item HEAP_ENTRY_START = {.item = ((uint64_t)LMD_CONTAINER_HEAP_START << 56)};
 
 void print_heap_entries() {
     ArrayList *entries = context->heap->entries;
@@ -106,10 +106,10 @@ void print_heap_entries() {
             log_debug("heap entry data: type: %s", type_info[type_id].name);
             if (LMD_TYPE_LIST <= type_id && type_id <= LMD_TYPE_ELEMENT) {
                 Container *cont = (Container*)data;
-                log_debug("heap entry container: type: %s, ref_cnt: %d", 
+                log_debug("heap entry container: type: %s, ref_cnt: %d",
                     type_info[type_id].name, cont->ref_cnt);
             }
-        }        
+        }
     }
 }
 
@@ -150,11 +150,11 @@ void check_memory_leak() {
             }
             else if (type_id == LMD_TYPE_MAP || type_id == LMD_TYPE_ELEMENT) {
                 Map *map = (Map*)data;
-                log_debug("heap entry map: %p, length: %ld, ref_cnt: %d", map, 
+                log_debug("heap entry map: %p, length: %ld, ref_cnt: %d", map,
                     ((TypeMap*)map->type)->length, map->ref_cnt);
             }
         }
-    }  
+    }
 }
 
 void free_container(Container* cont, bool clear_entry);
@@ -171,7 +171,7 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
                 if (!nested_map->ref_cnt) free_container((Container*)nested_map, clear_entry);
             }
         }
-        else if (field->type->type_id == LMD_TYPE_STRING || field->type->type_id == LMD_TYPE_SYMBOL || 
+        else if (field->type->type_id == LMD_TYPE_STRING || field->type->type_id == LMD_TYPE_SYMBOL ||
             field->type->type_id == LMD_TYPE_BINARY) {
             String *str = *(String**)field_ptr;
             if (str) {
@@ -271,11 +271,11 @@ void free_container(Container* cont, bool clear_entry) {
             if (elmt->items) free(elmt->items);
             pool_variable_free(context->heap->pool, cont);
         }
-    }    
+    }
 }
 
 void free_item(Item item, bool clear_entry) {
-    if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL || 
+    if (item.type_id == LMD_TYPE_STRING || item.type_id == LMD_TYPE_SYMBOL ||
         item.type_id == LMD_TYPE_BINARY) {
         String *str = (String*)item.pointer;
         if (str && !str->ref_cnt) {
@@ -301,12 +301,12 @@ void free_item(Item item, bool clear_entry) {
         // remove the entry from heap entries
         for (int i = entries->length - 1; i >= 0; i--) {
             void *data = entries->data[i];
-            if (data == item.raw_pointer) { 
+            if (data == item.raw_pointer) {
                 entries->data[i] = NULL;  break;
             }
         }
     }
-} 
+}
 
 void frame_start() {
     size_t stack_pos = context->num_stack->total_length;
@@ -325,7 +325,7 @@ void frame_end() {
         log_debug("frame_end loop: %d, i: %d, original_length: %d", loop_count, i, original_length);
         loop_count++;
         if (loop_count > original_length + 100) {
-            log_error("frame_end infinite loop detected! loop_count=%d, i=%d, original_length=%d", 
+            log_error("frame_end infinite loop detected! loop_count=%d, i=%d, original_length=%d",
                    loop_count, i, original_length);
             break;
         }
@@ -333,7 +333,7 @@ void frame_end() {
         void *data = entries->data[i];
         if (!data) { continue; }  // skip NULL entries
         Item itm = {.raw_pointer = data};
-        if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL || 
+        if (itm.type_id == LMD_TYPE_STRING || itm.type_id == LMD_TYPE_SYMBOL ||
             itm.type_id == LMD_TYPE_BINARY) {
             String *str = (String*)itm.pointer;
             if (str && !str->ref_cnt) {
@@ -353,7 +353,7 @@ void frame_end() {
             if (cont) {
                 if (cont->ref_cnt > 0) {
                     // clear the heap entry, and keep the container to be freed by ref_cnt
-                    entries->data[i] = NULL;  
+                    entries->data[i] = NULL;
                 }
                 else free_container(cont, false);
             }
