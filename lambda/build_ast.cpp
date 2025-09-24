@@ -402,7 +402,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         TSNode child = ts_node_named_child(node, 0);
         while (!ts_node_is_null(child)) {
             TSSymbol symbol = ts_node_symbol(child);
-            if (symbol == SYM_STRING_CONTENT) {
+            if (symbol == SYM_STRING_CONTENT || symbol == SYM_SYMBOL_CONTENT) {
                 // handle normnal string
                 stringbuf_append_str_n(str_buf, tp->source + ts_node_start_byte(child), ts_node_end_byte(child) - ts_node_start_byte(child));
             }
