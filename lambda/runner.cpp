@@ -61,6 +61,7 @@ uint64_t dataowner_hash(const void *item, uint64_t seed0, uint64_t seed1);
 
 // thread-specific runtime context
 __thread EvalContext* context = NULL;
+extern __thread Context* input_context;
 
 void find_errors(TSNode node) {
     const char *node_type = ts_node_type(node);
@@ -320,12 +321,13 @@ void runner_setup_context(Runner* runner) {
     runner->context.cwd = get_current_dir();  // proper URL object for current directory
     // initialize decimal context
     runner->context.decimal_ctx = (mpd_context_t*)malloc(sizeof(mpd_context_t));
+    runner->context.context_alloc = heap_alloc;
     mpd_defaultcontext(runner->context.decimal_ctx);
     // init AST validator
     runner->context.validator = ast_validator_create(runner->context.ast_pool);
-
-    context = &runner->context;
+    input_context = context = &runner->context;
     heap_init();
+    context->pool = context->heap->pool;
     frame_start();
 }
 

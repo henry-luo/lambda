@@ -1,8 +1,6 @@
-"Text/symbol with escapes ==============="
-"hello
-world!Ω"
-'hello
-world!Ω'
+["Text/symbol with escapes ===============", "hello
+world!Ω", 'hello
+world!Ω']
 "Scalar values ==============="
 true
 false
@@ -12,8 +10,7 @@ false
 -6
 5e-9
 -7.9
-"hello"
-"multiline
+"hellomultiline
 text"
 'symbol'
 t'2025'
@@ -48,7 +45,7 @@ nan
 [1, -2, 0]
 [1, true, "str"]
 [false, null]
-[1, ['symbol-xyz', null], 0.5, "great", "!"]
+[1, ['symbol-xyz', null], 0.5, "great!"]
 "Map ==============="
 {}
 {
@@ -88,9 +85,7 @@ nan
   <br>
   <br>
   <br>
-  "test"
-  " and "
-  "
+  "test and 
 more text">
 <elmt
   [456]
@@ -106,9 +101,7 @@ more text">
   <br>
   <br>
   <br>
-  "test"
-  " and "
-  "more text!">
+  "test and more text!">
 <body a: 'b', b: 123, c: true
   123
   "text"

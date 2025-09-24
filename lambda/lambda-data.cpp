@@ -67,6 +67,8 @@ String EMPTY_STRING = {.len = sizeof("lambda.nil") - 1, .ref_cnt = 0, .chars = "
 TypedItem error_result = {.type_id = LMD_TYPE_ERROR};
 TypedItem null_result = {.type_id = LMD_TYPE_NULL};
 
+extern __thread Context* input_context;
+
 void init_typetype() {
     *(Type*)&TYPE_ARRAY = {.type_id = LMD_TYPE_ARRAY};
     TYPE_ARRAY.nested = &TYPE_ANY;  // default nested type
@@ -270,27 +272,32 @@ void list_push(List *list, Item item) {
         }
         return;
     }
-    // else if (type_id == LMD_TYPE_STRING) {
-    //     // need to merge with previous string if any
-    //     if (list->length > 0) {
-    //         Item prev_item = list->items[list->length - 1];
-    //         if (get_type_id(prev_item) == LMD_TYPE_STRING) {
-    //             String *prev_str = (String*)prev_item.pointer;
-    //             String *new_str = (String*)item.pointer;
-    //             // merge the two strings
-    //             size_t new_len = prev_str->len + new_str->len;
-    //             String *merged_str = (String *)heap_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
-    //             memcpy(merged_str->chars, prev_str->chars, prev_str->len);
-    //             memcpy(merged_str->chars + prev_str->len, new_str->chars, new_str->len);
-    //             merged_str->chars[new_len] = '\0';
-    //             // replace previous string with new merged string
-    //             new_str->ref_cnt = prev_str->ref_cnt;
-    //             prev_str->ref_cnt = 0;  // to be freed later
-    //             list->items[list->length - 1] = (Item){.item = s2it(merged_str)};
-    //             return;
-    //         }
-    //     }
-    // }
+    else if (type_id == LMD_TYPE_STRING) {
+        // need to merge with previous string if any
+        if (list->length > 0) {
+            Item prev_item = list->items[list->length - 1];
+            if (get_type_id(prev_item) == LMD_TYPE_STRING) {
+                String *prev_str = (String*)prev_item.pointer;
+                String *new_str = (String*)item.pointer;
+                // merge the two strings
+                size_t new_len = prev_str->len + new_str->len;
+                String *merged_str;
+                if (input_context->consts) {
+                    merged_str = (String *)input_context->context_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
+                } else {
+                    pool_variable_alloc(input_context->pool, sizeof(String) + new_len + 1, (void**)&merged_str);
+                }
+                memcpy(merged_str->chars, prev_str->chars, prev_str->len);
+                memcpy(merged_str->chars + prev_str->len, new_str->chars, new_str->len);
+                merged_str->chars[new_len] = '\0';  merged_str->len = new_len;
+                // replace previous string with new merged string
+                merged_str->ref_cnt = prev_str->ref_cnt;
+                prev_str->ref_cnt = 0;  // to be freed later
+                list->items[list->length - 1] = (Item){.item = s2it(merged_str)};
+                return;
+            }
+        }
+    }
     else if (LMD_TYPE_RANGE <= type_id && type_id <= LMD_TYPE_ELEMENT) {
         Container *container = item.container;
         container->ref_cnt++;

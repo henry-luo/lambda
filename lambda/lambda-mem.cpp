@@ -23,7 +23,7 @@ void heap_init() {
     context->heap->entries = arraylist_new(1024);
 }
 
-void* heap_alloc(size_t size, TypeId type_id) {
+void* heap_alloc(int size, TypeId type_id) {
     Heap *heap = context->heap;
     void *data;
     pool_variable_alloc(heap->pool, size, (void**)&data);

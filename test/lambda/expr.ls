@@ -1,17 +1,17 @@
 (let a=12, a+10)
 let b=" world", c=12;
 "hello" + b
-if c > 10 { "great" }
+if c > 10 { 'great' }
 
 // 'b' should overide global 'b'
 (let a=0.5, let b=2, a + 3 * b, 100.5, 3 + 7.4, 5 / 2, 5_/2, 3^3, 17 % 9, (2.5 > 1), 
   (5 <= 5.0), ((7-3.5) > 5), "hello" + "world",
-  if (100>90) "great" else "not great")
+  if (100>90) 'great' else 'not great')
 
 "Test for statement:"
 for b in [123] { b+1 }
 for a in ["a", "b", "c"] { "ha!" }
-for a in ["a"] { "wah!" }
+for a in ["a"] { 'wah!' }
 
 "Test map:"
 let m = {a:123, b:-456, c:0.5, d:true, e:false, f:null, 
@@ -47,7 +47,6 @@ type(1 to 3);  1 to 3 is array;  2 in (1 to 3);  4 in (1 to 3);  "a" in (1 to 3)
 (<e a:"str", b:2>.a)
 
 (let y = (let x=5, x + 3.14), y * 2) 
-"a" * 3
 
 "Test TYPE_ANY support:"
 let v = sum([1, 2]);

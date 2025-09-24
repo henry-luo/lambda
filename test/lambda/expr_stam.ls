@@ -30,7 +30,7 @@ for i in 1 to 10 {
 (let bin = b'\xDEADBEEF', bin)  // binary
 (let n = null, n)  // null
 
-"# Let statements with scalar types"
+'# Let statements with scalar types'
 let a = 42, b = 3.14, c = true;
 let str1 = "hello", str2 = " world";
 let symbol1 = 'test1', symbol2 = 'test2';
@@ -39,18 +39,18 @@ let binary1 = b'\xDEAD', binary2 = b'\xBEEF';
 let null_val = null;
 
 // === COMPLEX DATA STRUCTURE TESTS ===
-"# Let expressions with arrays"
+'# Let expressions with arrays'
 (let arr = [1, 2, 3], arr[1])
 (let nested = [[1, 2], [3, 4]], nested[0][1])
 (let mixed = [1, "two", 3.0, true, null], mixed[2])
 
-"# Let statements with arrays"
+'# Let statements with arrays'
 let numbers = [1, 2, 3, 4, 5];
 let strings = ["a", "b", "c"];
 let bools = [true, false, true];
 let mixed_array = [42, "hello", 3.14, true, null, [1, 2]];
 
-"# Let expressions with maps"
+'# Let expressions with maps'
 (let m = {a: 1, b: 2}, m.a + m.b)
 (let person = {name: "Alice", age: 30}, person.name)
 (let nested_map = {outer: {inner: 42}}, nested_map.outer.inner)
@@ -69,24 +69,24 @@ let complex_map = {
 
 // === IF EXPRESSION vs STATEMENT TESTS ===
 "# Simple if expressions"
-(if (true) "yes" else "no")
+(if (true) 'yes' else 'no')
 (if (1 > 0) 42 else 0)
-(if (false) null else "default")
+(if (false) null else 'default')
 
 "# Nested if expressions"
-(let choice = 1, if (choice == 1) 42 else if (choice == 2) "string" else "other")
+(let choice = 1, if (choice == 1) 42 else if (choice == 2) 'string' else 'other')
 
 "# If expressions with let"
-(let x = 5, if (x > 3) "big" else "small")
-(let score = 85, if (score >= 90) "A" else if (score >= 80) "B" else "C")
+(let x = 5, if (x > 3) 'big' else 'small')
+(let score = 85, if (score >= 90) 'A' else if (score >= 80) 'B' else 'C')
 
 "# Nested if expressions"
 (if (true) (if (false) 1 else 2) else 3)
-(let val = 10, if (val > 5) (if (val > 15) "very big" else "medium") else "small")
+(let val = 10, if (val > 5) (if (val > 15) 'very big' else 'medium') else 'small')
 
 "# If statements"
 if (a > 40) {
-    "a is greater than 40"
+    'a is greater than 40'
 }
 if (str1 == "hello") {
     str1 + str2
@@ -94,6 +94,7 @@ if (str1 == "hello") {
     "no match"
 }
 
+'user:'
 if (user.active) {
     user.name + " is active"
 } else {
@@ -101,8 +102,7 @@ if (user.active) {
 }
 
 // === FOR EXPRESSION vs STATEMENT TESTS ===
-
-"# For expressions with arrays"
+'# For expressions with arrays'
 (for (x in [1, 2, 3]) x * 2)
 (for (item in strings) item + "!")
 (for (num in numbers) (if (num % 2 == 0) num else 0))
@@ -140,19 +140,19 @@ for index in 0 to 4 {
  let filtered = (for (x in data) if (x % 2 == 0) x else 0),
  filtered)
 
-"# If expression with let expressions in branches"
+'# If expression with let expressions in branches'
 (if ((let temp = 25, temp > 20)) 
     (let msg = "warm", msg + " weather")
  else 
     (let msg = "cool", msg + " weather"))
 
-"# For expression with if expressions"
+'# For expression with if expressions'
 (for (n in 1 to 10) 
     if (n % 3 == 0) "fizz" 
     else if (n % 5 == 0) "buzz" 
     else n)
 
-"# Nested let expressions"
+'# Nested let expressions'
 (let x = (let a = 10, let b = 20, a + b),
  let y = (let c = x * 2, c + 5),
  x + y)
@@ -203,17 +203,17 @@ if (numbers[0] > 0) {
 
 "=== EDGE CASES AND ERROR CONDITIONS ==="
 
-"# Empty collections"
+'# Empty collections'
 (for (x in []) x)  // empty array
 (for (y in {}) y)  // empty map
 
-"# Null handling"
+'# Null handling'
 (let maybe_null = null, if (maybe_null) "has value" else "is null")
 (for (item in [1, null, 3]) (if (item) item else "empty"))
 
-"# Zero and negative numbers"
-(let zero = 0, if (zero) "truthy" else "falsy")
-(let negative = -5, if (negative > 0) "positive" else "not positive")
+'# Zero and negative numbers'
+(let zero = 0, if (zero) 'truthy' else 'falsy')
+(let negative = -5, if (negative > 0) 'positive' else 'not positive')
 (for (n in -2 to 2) (if (n == 0) "zero" else n))
 
 "# Very nested expressions"

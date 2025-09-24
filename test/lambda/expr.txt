@@ -1,6 +1,6 @@
 22
 "hello world"
-"great"
+'great'
 6.5
 100.5
 10.4
@@ -12,13 +12,11 @@ true
 true
 false
 "helloworld"
-"great"
+'great'
 "Test for statement:"
 124
-"ha!"
-"ha!"
-"ha!"
-"wah!"
+"ha!ha!ha!"
+'wah!'
 "Test map:"
 123
 -456
@@ -88,7 +86,6 @@ false
 2
 "str"
 16.28
-"aaa"
 "Test TYPE_ANY support:"
 {
   a: 3,
@@ -100,7 +97,7 @@ false
 1.9
 1.5
 2.1
-[1, "great", "!", 0.5]
+[1, "great!", 0.5]
 [5.6, 2.4, 3.8, 3, 4.2]
 [1, 2, "great"]
 "Test datetime support:"

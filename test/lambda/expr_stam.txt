@@ -2,9 +2,7 @@
 2
 4
 6
-"a!"
-"b!"
-"c!"
+"a!b!c!"
 0
 2
 0
@@ -42,13 +40,13 @@ false
 'test'
 t'2025-01-01'
 b'\xDEADBEEF'
-"# Let statements with scalar types"
-"# Let expressions with arrays"
+'# Let statements with scalar types'
+'# Let expressions with arrays'
 2
 2
 3
-"# Let statements with arrays"
-"# Let expressions with maps"
+'# Let statements with arrays'
+'# Let expressions with maps'
 3
 "Alice"
 42
@@ -57,28 +55,27 @@ b'\xDEADBEEF'
 2
 3
 "# Simple if expressions"
-"yes"
+'yes'
 42
-"default"
+'default'
 "# Nested if expressions"
 42
 "# If expressions with let"
-"big"
-"B"
+'big'
+'B'
 "# Nested if expressions"
 2
-"medium"
+'medium'
 "# If statements"
-"a is greater than 40"
+'a is greater than 40'
 "hello world"
+'user:'
 "Bob is active"
-"# For expressions with arrays"
+'# For expressions with arrays'
 2
 4
 6
-"a!"
-"b!"
-"c!"
+"a!b!c!"
 0
 2
 0
@@ -127,20 +124,18 @@ true
 0
 4
 0
-"# If expression with let expressions in branches"
+'# If expression with let expressions in branches'
 "warm weather"
-"# For expression with if expressions"
+'# For expression with if expressions'
 1
 2
 "fizz"
 4
-"buzz"
-"fizz"
+"buzzfizz"
 7
 8
-"fizz"
-"buzz"
-"# Nested let expressions"
+"fizzbuzz"
+'# Nested let expressions'
 95
 "# Complex nested statements"
 1
@@ -155,7 +150,7 @@ true
 "# Let statement with complex initialization"
 {
   numbers_squared: (1, 4, 9, 16, 25),
-  strings_doubled: ("aa", "bb", "cc"),
+  strings_doubled: "aabbcc",
   conditions: (false, false, true, true)
 }
 "# If statement with for expressions in branches"
@@ -176,15 +171,15 @@ true
 false
 123
 "=== EDGE CASES AND ERROR CONDITIONS ==="
-"# Empty collections"
-"# Null handling"
+'# Empty collections'
+'# Null handling'
 "is null"
 1
 "empty"
 3
-"# Zero and negative numbers"
-"truthy"
-"not positive"
+'# Zero and negative numbers'
+'truthy'
+'not positive'
 -2
 -1
 "zero"

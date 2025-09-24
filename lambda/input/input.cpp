@@ -36,6 +36,8 @@ Item input_markup(Input *input, const char* content);
 #include "markup-parser.h"
 Item input_markup_with_format(Input *input, const char* content, MarkupFormat format);
 
+__thread Context* input_context = NULL;
+
 // Helper function to create string from char content
 String* create_input_string(Input* input, const char* text, int start, int len) {
     // Allocate string from pool instead of using shared StrBuf
@@ -76,12 +78,12 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         if (!map_type) { return; }
         mp->type = map_type;
         arraylist_append(input->type_list, map_type);
-        map_type->type_index = input->type_list->length - 1;        
+        map_type->type_index = input->type_list->length - 1;
         int byte_cap = 64;
         mp->data = pool_calloc(input->pool, byte_cap);  mp->data_cap = byte_cap;
         if (!mp->data) return;
     }
-    
+
     TypeId type_id = get_type_id(value);
     ShapeEntry* shape_entry = alloc_shape_entry(input->pool, key, type_id, map_type->last);
     if (!map_type->shape) { map_type->shape = shape_entry; }
@@ -109,14 +111,14 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         *(void**)field_ptr = NULL;
         break;
     case LMD_TYPE_BOOL:
-        *(bool*)field_ptr = value.bool_val;             
+        *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT:
         *(int64_t*)field_ptr = value.int_val;
         break;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = *(int64_t*)value.pointer;
-        break;        
+        break;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = *(double*)value.pointer;
         break;
@@ -135,14 +137,14 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
 Element* input_create_element(Input *input, const char* tag_name) {
     Element* element = elmt_pooled(input->pool);
     if (!element) return NULL;
-    
+
     TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
     if (!element_type) return NULL;
     element->type = element_type;
     arraylist_append(input->type_list, element_type);
-    element_type->type_index = input->type_list->length - 1;    
+    element_type->type_index = input->type_list->length - 1;
     // initialize with no attributes
-    
+
     // Set element name
     String* name_str = input_create_string(input, tag_name);
     if (name_str) {
@@ -185,14 +187,14 @@ void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool) {
         *(void**)field_ptr = NULL;
         break;
     case LMD_TYPE_BOOL:
-        *(bool*)field_ptr = value.bool_val;             
+        *(bool*)field_ptr = value.bool_val;
         break;
     case LMD_TYPE_INT:
         *(int64_t*)field_ptr = value.int_val;
         break;
     case LMD_TYPE_INT64:
         *(int64_t*)field_ptr = *(int64_t*)value.pointer;
-        break;        
+        break;
     case LMD_TYPE_FLOAT:
         *(double*)field_ptr = *(double*)value.pointer;
         break;
@@ -230,7 +232,7 @@ Input* input_new(Url* abs_url) {
 // Helper function to map MIME types to parser types
 static const char* mime_to_parser_type(const char* mime_type) {
     if (!mime_type) return "text";
-    
+
     // Direct mappings
     if (strcmp(mime_type, "application/json") == 0) return "json";
     if (strcmp(mime_type, "text/csv") == 0) return "csv";
@@ -259,21 +261,21 @@ static const char* mime_to_parser_type(const char* mime_type) {
     if (strcmp(mime_type, "application/x-mark") == 0) return "mark";
     if (strcmp(mime_type, "text/css") == 0) return "css";
     if (strcmp(mime_type, "application/css") == 0) return "css";
-    
+
     // Check for XML-based formats
     if (strstr(mime_type, "+xml") || strstr(mime_type, "xml")) return "xml";
-    
+
     // Check for text formats
     if (strstr(mime_type, "text/") == mime_type) {
         // Handle specific text subtypes
-        if (strstr(mime_type, "x-c") || strstr(mime_type, "x-java") || 
+        if (strstr(mime_type, "x-c") || strstr(mime_type, "x-java") ||
             strstr(mime_type, "javascript") || strstr(mime_type, "x-python")) {
             return "text";
         }
         if (strstr(mime_type, "ini")) return "ini";
         return "text";
     }
-    
+
     // For unsupported formats, default to text if it might be readable
     if (strstr(mime_type, "application/") == mime_type) {
         if (strstr(mime_type, "javascript") || strstr(mime_type, "typescript") ||
@@ -281,7 +283,7 @@ static const char* mime_to_parser_type(const char* mime_type) {
             return "text";
         }
     }
-    
+
     // Default fallback
     return "text";
 }
@@ -313,32 +315,32 @@ int input_count_leading_chars(const char* str, char ch) {
 
 char* input_trim_whitespace(const char* str) {
     if (!str) return NULL;
-    
+
     // Find start
     while (isspace(*str)) str++;
-    
+
     if (*str == '\0') return strdup("");
-    
+
     // Find end
     const char* end = str + strlen(str) - 1;
     while (end > str && isspace(*end)) end--;
-    
+
     // Create trimmed copy
     int len = end - str + 1;
     char* result = (char*)malloc(len + 1);
     strncpy(result, str, len);
     result[len] = '\0';
-    
+
     return result;
 }
 
 char** input_split_lines(const char* text, int* line_count) {
     *line_count = 0;
-    
+
     if (!text) {
         return NULL;
     }
-    
+
     // Count lines
     const char* ptr = text;
     while (*ptr) {
@@ -348,19 +350,19 @@ char** input_split_lines(const char* text, int* line_count) {
     if (ptr > text && *(ptr-1) != '\n') {
         (*line_count)++; // Last line without \n
     }
-    
+
     if (*line_count == 0) {
         return NULL;
     }
-    
+
     // Allocate array
     char** lines = (char**)malloc(*line_count * sizeof(char*));
-    
+
     // Split into lines
     int line_index = 0;
     const char* line_start = text;
     ptr = text;
-    
+
     while (*ptr && line_index < *line_count) {
         if (*ptr == '\n') {
             int len = ptr - line_start;
@@ -372,7 +374,7 @@ char** input_split_lines(const char* text, int* line_count) {
         }
         ptr++;
     }
-    
+
     // Handle last line if it doesn't end with newline
     if (line_index < *line_count && line_start < ptr) {
         int len = ptr - line_start;
@@ -381,10 +383,10 @@ char** input_split_lines(const char* text, int* line_count) {
         lines[line_index][len] = '\0';
         line_index++;
     }
-    
+
     // Adjust line count to actual lines created
     *line_count = line_index;
-    
+
     return lines;
 }
 
@@ -414,7 +416,6 @@ void input_add_attribute_item_to_element(Input *input, Element* element, const c
 
 extern "C" Input* input_from_source(const char* source, Url* abs_url, String* type, String* flavor) {
     const char* effective_type = NULL;
-    
     // Determine the effective type to use
     if (!type || strcmp(type->chars, "auto") == 0) {
         // Auto-detect MIME type
@@ -437,7 +438,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         effective_type = type->chars;
     }
     printf("Effective type for input: %s\n", effective_type);
-    
+
     Input* input = NULL;
     if (!effective_type || strcmp(effective_type, "text") == 0) { // treat as plain text
         input = (Input*)calloc(1, sizeof(Input));
@@ -448,7 +449,12 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         input->root = {.item = s2it(str)};
     }
     else {
+        Context context;  Context *pa_input_context = input_context;
         input = input_new(abs_url);
+        context.pool = input->pool;  context.consts = NULL;
+        context.cwd = NULL;  context.run_main = false;
+        input_context = &context;
+
         if (strcmp(effective_type, "json") == 0) {
             parse_json(input, source);
         }
@@ -550,6 +556,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         else {
             printf("Unknown input type: %s\n", effective_type);
         }
+        input_context = pa_input_context;
     }
     // Note: don't free(source) here - it's the caller's responsibility
     return input;
@@ -564,53 +571,53 @@ static char* read_file_from_url(Url* url) {
     const char* pathname = url_get_pathname(url);
     if (!pathname) return NULL;
     log_debug("Reading file from path: %s", pathname);
-    
+
     FILE* file = fopen(pathname, "r");
     if (!file) {
         perror("Failed to open file");
         return NULL;
     }
-    
+
     // Get file size
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
     fseek(file, 0, SEEK_SET);
-    
+
     if (file_size <= 0) {
         fclose(file);
         return NULL;
     }
-    
+
     // Allocate buffer and read file
     char* content = (char*)malloc(file_size + 1);
     if (!content) {
         fclose(file);
         return NULL;
     }
-    
+
     size_t bytes_read = fread(content, 1, file_size, file);
     content[bytes_read] = '\0';
-    
+
     fclose(file);
     return content;
 }
 
 Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
     log_debug("input_data at: %s, type: %s, cwd: %p", url ? url->chars : "null", type ? type->chars : "null", cwd);
-    
+
     Url* abs_url;
     if (cwd) {
         abs_url = url_parse_with_base(url->chars, cwd);
     } else {
         abs_url = url_parse(url->chars);
     }
-    if (!abs_url) { 
-        log_error("Failed to parse URL\n");  
-        return NULL; 
+    if (!abs_url) {
+        log_error("Failed to parse URL\n");
+        return NULL;
     }
-    log_debug("Parsed URL: scheme=%d, host=%s, pathname=%s", abs_url->scheme, abs_url->host ? abs_url->host->chars : "null", 
+    log_debug("Parsed URL: scheme=%d, host=%s, pathname=%s", abs_url->scheme, abs_url->host ? abs_url->host->chars : "null",
         abs_url->pathname ? abs_url->pathname->chars : "null");
-    
+
     // Handle different URL schemes
     if (abs_url->scheme == URL_SCHEME_FILE) {
         // Check if URL points to a directory (only for file:// URLs)
@@ -631,7 +638,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
                 return input;
             }
         }
-        
+
         // URL points to a file - read as normal
         log_debug("reading file from path: %s", pathname ? pathname : "null");
         char* source = read_text_file(pathname);
@@ -640,7 +647,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
             url_destroy(abs_url);
             return NULL;
         }
-        
+
         Input* input = input_from_source(source, abs_url, type, flavor);
         free(source);  // Free the source string after parsing
         url_destroy(abs_url);
@@ -649,10 +656,10 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
     else if (abs_url->scheme == URL_SCHEME_HTTP || abs_url->scheme == URL_SCHEME_HTTPS) {
         // Handle HTTP/HTTPS URLs
         log_debug("HTTP/HTTPS URL detected, using HTTP client\n");
-        
+
         const char* type_str = type ? type->chars : NULL;
         const char* flavor_str = flavor ? flavor->chars : NULL;
-        
+
         Input* input = input_from_http(url->chars, type_str, flavor_str, "./temp/cache");
         url_destroy(abs_url);
         return input;
@@ -660,7 +667,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
     else if (abs_url->scheme == URL_SCHEME_SYS) {
         // Handle sys:// URLs for system information
         printf("sys:// URL detected, using system information provider\n");
-        
+
         // Create a variable pool for the input
         VariableMemPool* pool;
         MemPoolError pool_err = pool_variable_init(&pool, 4096, 10);
@@ -669,7 +676,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
             url_destroy(abs_url);
             return NULL;
         }
-        
+
         Input* input = input_from_sysinfo(abs_url, pool);
         if (!input) {
             pool_variable_destroy(pool);
@@ -683,4 +690,3 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         return NULL;
     }
 }
-

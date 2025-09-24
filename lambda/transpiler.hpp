@@ -14,7 +14,7 @@ typedef struct Heap {
 } Heap;
 
 void heap_init();
-void* heap_alloc(size_t size, TypeId type_id);
+void* heap_alloc(int size, TypeId type_id);
 void* heap_calloc(size_t size, TypeId type_id);
 String* heap_strcpy(char* src, int len);
 void heap_destroy();
