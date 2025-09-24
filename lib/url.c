@@ -14,12 +14,12 @@
 // String allocation helper
 String* url_create_string(const char* value) {
     if (!value) return NULL;
-    
+
     size_t len = strlen(value);
     // Allocate space for String struct plus the string data
     String* str = malloc(sizeof(String) + len + 1);
     if (!str) return NULL;
-    
+
     str->len = len;
     str->ref_cnt = 1;
     strcpy(str->chars, value);
@@ -42,7 +42,7 @@ String* url_string_clone(const String* str) {
 Url* url_create() {
     Url* url = malloc(sizeof(Url));
     if (!url) return NULL;
-    
+
     // Initialize all fields to NULL - they will be set during parsing
     url->scheme = URL_SCHEME_UNKNOWN;
     url->username = NULL;
@@ -58,22 +58,22 @@ Url* url_create() {
     url->host = url_create_string("");  // Default empty host
     url->port_number = 0;
     url->is_valid = false;
-    
+
     return url;
 }
 
 // Clone URL structure
 Url* url_clone(const Url* src) {
     if (!src) return NULL;
-    
+
     Url* url = url_create();
     if (!url) return NULL;
-    
+
     // Copy primitive fields
     url->scheme = src->scheme;
     url->port_number = src->port_number;
     url->is_valid = src->is_valid;
-    
+
     // Clone string fields
     if (src->href) url->href = url_string_clone(src->href);
     if (src->origin) url->origin = url_string_clone(src->origin);
@@ -86,14 +86,14 @@ Url* url_clone(const Url* src) {
     if (src->pathname) url->pathname = url_string_clone(src->pathname);
     if (src->search) url->search = url_string_clone(src->search);
     if (src->hash) url->hash = url_string_clone(src->hash);
-    
+
     return url;
 }
 
 // Destroy URL structure
 void url_destroy(Url* url) {
     if (!url) return;
-    
+
     url_free_string(url->href);
     url_free_string(url->origin);
     url_free_string(url->protocol);
@@ -105,7 +105,7 @@ void url_destroy(Url* url) {
     url_free_string(url->pathname);
     url_free_string(url->search);
     url_free_string(url->hash);
-    
+
     free(url);
 }
 
@@ -131,17 +131,17 @@ const char* url_scheme_to_string(UrlScheme scheme) {
 
 UrlScheme url_scheme_from_string(const char* scheme) {
     if (!scheme) return URL_SCHEME_UNKNOWN;
-    
+
     // Convert to lowercase for comparison
     char lower[32];
     size_t len = strlen(scheme);
     if (len >= sizeof(lower)) return URL_SCHEME_UNKNOWN;
-    
+
     for (size_t i = 0; i < len; i++) {
         lower[i] = tolower(scheme[i]);
     }
     lower[len] = '\0';
-    
+
     if (strcmp(lower, "http") == 0) return URL_SCHEME_HTTP;
     if (strcmp(lower, "https") == 0) return URL_SCHEME_HTTPS;
     if (strcmp(lower, "ftp") == 0) return URL_SCHEME_FTP;
@@ -153,7 +153,7 @@ UrlScheme url_scheme_from_string(const char* scheme) {
     if (strcmp(lower, "ws") == 0) return URL_SCHEME_WS;
     if (strcmp(lower, "wss") == 0) return URL_SCHEME_WSS;
     if (strcmp(lower, "sys") == 0) return URL_SCHEME_SYS;
-    
+
     return URL_SCHEME_UNKNOWN;
 }
 
@@ -193,12 +193,12 @@ bool url_is_valid(const Url* url) {
 // Main URL serialization function
 String* url_serialize(const Url* url) {
     if (!url) return NULL;
-    
+
     // If we have a complete href, use it for exact roundtrip compatibility
     if (url->href) {
         return url_string_clone(url->href);
     }
-    
+
     // Otherwise, construct the URL from components
     return url_construct_href(url);
 }
@@ -206,21 +206,21 @@ String* url_serialize(const Url* url) {
 // Construct complete URL from components
 String* url_construct_href(const Url* url) {
     if (!url) return NULL;
-    
+
     // Calculate required buffer size
     size_t total_size = 0;
-    
+
     // Protocol
     if (url->protocol) total_size += url->protocol->len;
     else if (url->scheme != URL_SCHEME_UNKNOWN) {
         total_size += strlen(url_scheme_to_string(url->scheme)) + 1; // +1 for ':'
     }
-    
+
     // Authority section (//)
-    bool has_authority = (url->hostname && url->hostname->len > 0) || 
+    bool has_authority = (url->hostname && url->hostname->len > 0) ||
                         (url->host && url->host->len > 0);
     if (has_authority) total_size += 2; // "//"
-    
+
     // Credentials
     if (url->username && url->username->len > 0) {
         total_size += url->username->len;
@@ -229,7 +229,7 @@ String* url_construct_href(const Url* url) {
         }
         total_size += 1; // "@"
     }
-    
+
     // Host
     if (url->host && url->host->len > 0) {
         total_size += url->host->len;
@@ -243,26 +243,26 @@ String* url_construct_href(const Url* url) {
             }
         }
     }
-    
+
     // Path
     if (url->pathname) total_size += url->pathname->len;
     else if (has_authority) total_size += 1; // default "/"
-    
+
     // Query
     if (url->search) total_size += url->search->len;
-    
+
     // Fragment
     if (url->hash) total_size += url->hash->len;
-    
+
     // Allocate buffer
     String* result = malloc(sizeof(String) + total_size + 1);
     if (!result) return NULL;
-    
+
     result->len = 0;
     result->ref_cnt = 1;
     char* buffer = result->chars;
     size_t pos = 0;
-    
+
     // Build URL string
     // Protocol
     if (url->protocol) {
@@ -274,17 +274,17 @@ String* url_construct_href(const Url* url) {
         pos += strlen(scheme_str);
         buffer[pos++] = ':';
     }
-    
+
     // Authority
     if (has_authority) {
         buffer[pos++] = '/';
         buffer[pos++] = '/';
-        
+
         // Credentials
         if (url->username && url->username->len > 0) {
             strcpy(buffer + pos, url->username->chars);
             pos += url->username->len;
-            
+
             if (url->password && url->password->len > 0) {
                 buffer[pos++] = ':';
                 strcpy(buffer + pos, url->password->chars);
@@ -292,7 +292,7 @@ String* url_construct_href(const Url* url) {
             }
             buffer[pos++] = '@';
         }
-        
+
         // Host
         if (url->host && url->host->len > 0) {
             strcpy(buffer + pos, url->host->chars);
@@ -300,7 +300,7 @@ String* url_construct_href(const Url* url) {
         } else if (url->hostname && url->hostname->len > 0) {
             strcpy(buffer + pos, url->hostname->chars);
             pos += url->hostname->len;
-            
+
             // Port (only if not default for scheme)
             if (url->port && url->port->len > 0) {
                 uint16_t default_port = url_default_port_for_scheme(url->scheme);
@@ -312,7 +312,7 @@ String* url_construct_href(const Url* url) {
             }
         }
     }
-    
+
     // Path
     if (url->pathname && url->pathname->len > 0) {
         strcpy(buffer + pos, url->pathname->chars);
@@ -320,49 +320,49 @@ String* url_construct_href(const Url* url) {
     } else if (has_authority) {
         buffer[pos++] = '/';
     }
-    
+
     // Query
     if (url->search && url->search->len > 0) {
         strcpy(buffer + pos, url->search->chars);
         pos += url->search->len;
     }
-    
+
     // Fragment
     if (url->hash && url->hash->len > 0) {
         strcpy(buffer + pos, url->hash->chars);
         pos += url->hash->len;
     }
-    
+
     buffer[pos] = '\0';
     result->len = pos;
-    
+
     return result;
 }
 
 // Serialize URL without fragment
 String* url_serialize_without_fragment(const Url* url) {
     if (!url) return NULL;
-    
+
     // Create a copy of the URL without fragment
     Url temp_url = *url;
     temp_url.hash = NULL;
-    
+
     return url_construct_href(&temp_url);
 }
 
 // Serialize origin (scheme + host + port)
 String* url_serialize_origin(const Url* url) {
     if (!url) return NULL;
-    
+
     // Calculate required buffer size
     size_t total_size = 0;
-    
+
     // Protocol
     if (url->protocol) total_size += url->protocol->len;
     else if (url->scheme != URL_SCHEME_UNKNOWN) {
         total_size += strlen(url_scheme_to_string(url->scheme)) + 1;
     }
-    
+
     // For origin, prefer hostname + port over combined host
     if (url->hostname && url->hostname->len > 0) {
         total_size += 2 + url->hostname->len; // "//"
@@ -373,16 +373,16 @@ String* url_serialize_origin(const Url* url) {
     } else if (url->host && url->host->len > 0) {
         total_size += 2 + url->host->len; // "//"
     }
-    
+
     // Allocate buffer
     String* result = malloc(sizeof(String) + total_size + 1);
     if (!result) return NULL;
-    
+
     result->len = 0;
     result->ref_cnt = 1;
     char* buffer = result->chars;
     size_t pos = 0;
-    
+
     // Protocol
     if (url->protocol) {
         strcpy(buffer + pos, url->protocol->chars);
@@ -393,14 +393,14 @@ String* url_serialize_origin(const Url* url) {
         pos += strlen(scheme_str);
         buffer[pos++] = ':';
     }
-    
+
     // Host - prefer hostname + port for proper origin construction
     if (url->hostname && url->hostname->len > 0) {
         buffer[pos++] = '/';
         buffer[pos++] = '/';
         strcpy(buffer + pos, url->hostname->chars);
         pos += url->hostname->len;
-        
+
         // For origin, include port if it was explicitly specified
         if (url->port && url->port->len > 0) {
             buffer[pos++] = ':';
@@ -413,17 +413,17 @@ String* url_serialize_origin(const Url* url) {
         strcpy(buffer + pos, url->host->chars);
         pos += url->host->len;
     }
-    
+
     buffer[pos] = '\0';
     result->len = pos;
-    
+
     return result;
 }
 
 // Component serialization functions
 String* url_serialize_scheme(const Url* url) {
     if (!url) return NULL;
-    
+
     if (url->protocol) {
         return url_string_clone(url->protocol);
     } else if (url->scheme != URL_SCHEME_UNKNOWN) {
@@ -431,22 +431,22 @@ String* url_serialize_scheme(const Url* url) {
         size_t len = strlen(scheme_str);
         String* result = malloc(sizeof(String) + len + 2); // +1 for ':' +1 for '\0'
         if (!result) return NULL;
-        
+
         result->len = len + 1;
         result->ref_cnt = 1;
         strcpy(result->chars, scheme_str);
         result->chars[len] = ':';
         result->chars[len + 1] = '\0';
-        
+
         return result;
     }
-    
+
     return NULL;
 }
 
 String* url_serialize_host(const Url* url) {
     if (!url) return NULL;
-    
+
     // Prefer hostname + port logic over combined host for proper serialization
     if (url->hostname && url->hostname->len > 0) {
         // Include port if it was explicitly set and is not the default
@@ -457,39 +457,39 @@ String* url_serialize_host(const Url* url) {
                 size_t total_len = url->hostname->len + 1 + url->port->len;
                 String* result = malloc(sizeof(String) + total_len + 1);
                 if (!result) return NULL;
-                
+
                 result->len = total_len;
                 result->ref_cnt = 1;
                 strcpy(result->chars, url->hostname->chars);
                 result->chars[url->hostname->len] = ':';
                 strcpy(result->chars + url->hostname->len + 1, url->port->chars);
-                
+
                 return result;
             }
         }
-        
+
         return url_string_clone(url->hostname);
     } else if (url->host && url->host->len > 0) {
         return url_string_clone(url->host);
     }
-    
+
     return NULL;
 }
 
 String* url_serialize_path(const Url* url) {
     if (!url) return NULL;
-    
+
     if (url->pathname) {
         return url_string_clone(url->pathname);
     }
-    
+
     // Default path for URLs with authority is "/"
-    bool has_authority = (url->hostname && url->hostname->len > 0) || 
+    bool has_authority = (url->hostname && url->hostname->len > 0) ||
                         (url->host && url->host->len > 0);
     if (has_authority) {
         return url_create_string("/");
     }
-    
+
     return NULL;
 }
 
@@ -497,9 +497,9 @@ String* url_serialize_path(const Url* url) {
 bool url_equals(const Url* a, const Url* b) {
     if (!a || !b) return false;
     if (a == b) return true;
-    
+
     if (!a->href || !b->href) return false;
-    
+
     return strcmp(a->href->chars, b->href->chars) == 0;
 }
 
@@ -559,7 +559,7 @@ UrlScheme url_get_scheme(const Url* url) {
 // Basic component setters
 UrlError url_set_protocol(Url* url, const char* protocol) {
     if (!url || !protocol) return URL_ERROR_INVALID_INPUT;
-    
+
     url_free_string(url->protocol);
     url->protocol = url_create_string(protocol);
     return url->protocol ? URL_OK : URL_ERROR_MEMORY_ALLOCATION;
@@ -628,11 +628,11 @@ Url* get_current_dir() {
         return NULL;
     }
     log_debug("Current working directory: %s", cwd);
-    
+
     // Convert to file:// URL format
     char file_url[1200];
     if (cwd[0] == '/') {  // Mac or Linux
-        snprintf(file_url, sizeof(file_url), "file://%s", cwd);
+        snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
     } else { // Windows
         // convert \ to /
         int slen = strlen(cwd);
