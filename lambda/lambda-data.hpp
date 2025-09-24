@@ -42,12 +42,14 @@ typedef struct NamePool NamePool;
 }
 #endif
 
+typedef struct Heap Heap;
 typedef struct Pack Pack;
 typedef struct mpd_context_t mpd_context_t;
 typedef struct num_stack_t num_stack_t;
 typedef struct AstValidator AstValidator;
 
 typedef struct EvalContext : Context {
+    Heap* heap;
     VariableMemPool* ast_pool;
     ArrayList* type_list;
     num_stack_t* num_stack;  // for long and double pointers

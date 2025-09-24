@@ -3,6 +3,7 @@
 6.5
 true
 "string"
+'symbol-xyz'
 "Numeric exprs: ============"
 100.5
 10.4

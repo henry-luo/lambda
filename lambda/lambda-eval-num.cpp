@@ -231,16 +231,16 @@ Item fn_mul(Item item_a, Item item_b) {
     else if (type_a == LMD_TYPE_FLOAT && type_b == LMD_TYPE_INT) {
         return push_d(*(double*)item_a.pointer * (double)item_b.int_val);
     }
-    else if (type_a == LMD_TYPE_STRING && type_b == LMD_TYPE_INT) {
-        String* str_a = (String*)item_a.pointer;
-        String* result = str_repeat(str_a, item_b.int_val);
-        return { .item = s2it(result) };
-    }
-    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_STRING) {
-        String* str_b = (String*)item_b.pointer;
-        String* result = str_repeat(str_b, item_a.int_val);
-        return { .item = s2it(result) };
-    }
+    // else if (type_a == LMD_TYPE_STRING && type_b == LMD_TYPE_INT) {
+    //     String* str_a = (String*)item_a.pointer;
+    //     String* result = str_repeat(str_a, item_b.int_val);
+    //     return { .item = s2it(result) };
+    // }
+    // else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_STRING) {
+    //     String* str_b = (String*)item_b.pointer;
+    //     String* result = str_repeat(str_b, item_a.int_val);
+    //     return { .item = s2it(result) };
+    // }
     // Add libmpdec decimal support
     else if (type_a == LMD_TYPE_DECIMAL || type_b == LMD_TYPE_DECIMAL) {
         mpd_t* a_dec = convert_to_decimal(item_a, context->decimal_ctx);

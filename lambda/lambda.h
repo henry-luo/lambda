@@ -296,15 +296,15 @@ Map* map_fill(Map* map, ...);
 typedef struct Element Element;
 Element* elmt_fill(Element *elmt, ...);
 
-typedef struct Heap Heap;
 typedef struct Url Url;
 typedef struct _ArrayList ArrayList;
 typedef struct VariableMemPool VariableMemPool;
 
 typedef struct Context {
-    Heap* heap;
+    VariableMemPool* pool;
     void** consts;
     Url* cwd;  // current working directory
+    void* (*context_alloc)(int size, TypeId type_id);
     bool run_main; // whether to run main procedure on start
 } Context;
 
