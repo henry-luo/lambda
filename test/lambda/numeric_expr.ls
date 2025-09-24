@@ -219,7 +219,7 @@ true _/ false
 -9223302036854775808 - 1
 
 "Concatenation: "
-"hello" + " world"
-'foo' + 'bar' + 'baz'
+"hello" ++ " world"
+'foo' ++ 'bar' ++ 'baz'
 
 "===== END OF COMPREHENSIVE TEST ====="

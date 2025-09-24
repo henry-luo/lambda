@@ -187,11 +187,11 @@ let timeseries_data = [
 '=== Data Science Pipeline Results ==='
 
 let preprocessing_results = preprocess_dataset(synthetic_dataset);
-"Preprocessing completed for " + string(len(preprocessing_results.processed_data)) + " samples"
+"Preprocessing completed for " ++ string(len(preprocessing_results.processed_data)) ++ " samples"
 
 '---'
 let feature_engineering_results = engineer_features(preprocessing_results.processed_data);
-"Feature engineering completed with " + string(len(feature_engineering_results[0].engineered_features.poly_features)) + " polynomial features"
+"Feature engineering completed with " ++ string(len(feature_engineering_results[0].engineered_features.poly_features)) ++ " polynomial features"
 
 let correlation_analysis = (
     let feature_1 = for (row in preprocessing_results.processed_data) row.features[0],

@@ -4,7 +4,7 @@
 // === BASIC FOR EXPRESSION ===
 "# Fixed for expressions with arrays"
 (for (x in [1, 2, 3]) x * 2)
-(for (item in ["a", "b", "c"]) item + "!")
+(for (item in ["a", "b", "c"]) item ++ "!")
 (for (num in [1, 2, 3, 4, 5]) (if (num % 2 == 0) num else 0))
 
 "# Fixed for expressions with ranges"
@@ -24,7 +24,7 @@ for i in 1 to 10 {
 (let x = 42, x + 1)  // int
 (let y = 3.14, y * 2)  // float  
 (let z = true, not z)  // bool
-(let s = "hello", s + " world")  // string
+(let s = "hello", s ++ " world")  // string
 (let sym = 'test', sym)  // symbol
 (let dt = t'2025-01-01', dt)  // datetime
 (let bin = b'\xDEADBEEF', bin)  // binary
@@ -89,22 +89,22 @@ if (a > 40) {
     'a is greater than 40'
 }
 if (str1 == "hello") {
-    str1 + str2
+    str1 ++ str2
 } else {
     "no match"
 }
 
 'user:'
 if (user.active) {
-    user.name + " is active"
+    user.name ++ " is active"
 } else {
-    user.name + " is inactive"
+    user.name ++ " is inactive"
 }
 
 // === FOR EXPRESSION vs STATEMENT TESTS ===
 '# For expressions with arrays'
 (for (x in [1, 2, 3]) x * 2)
-(for (item in strings) item + "!")
+(for (item in strings) item ++ "!")
 (for (num in numbers) (if (num % 2 == 0) num else 0))
 
 "# For expressions with ranges"
@@ -142,9 +142,9 @@ for index in 0 to 4 {
 
 '# If expression with let expressions in branches'
 (if ((let temp = 25, temp > 20)) 
-    (let msg = "warm", msg + " weather")
+    (let msg = "warm", msg ++ " weather")
  else 
-    (let msg = "cool", msg + " weather"))
+    (let msg = "cool", msg ++ " weather"))
 
 '# For expression with if expressions'
 (for (n in 1 to 10) 
@@ -173,7 +173,7 @@ for row in matrix {
 "# Let statement with complex initialization"
 let complex_init = {
     numbers_squared: (for (i in 1 to 5) i * i),
-    strings_doubled: (for (s in ["a", "b", "c"]) s + s),
+    strings_doubled: (for (s in ["a", "b", "c"]) s++s),
     conditions: (for (x in [1, 2, 3, 4]) (if (x > 2) true else false))
 };
 complex_init

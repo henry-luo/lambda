@@ -1,8 +1,8 @@
 (let a=0.5, let b=2, 
 a + 3 * b, a + 1, 0.5 + 3 * 2,
 (2.5 > 1))
-"str" + "ing"
-'symbol' + '-xyz'
+"str" ++ "ing"
+'symbol' ++ '-xyz'
 "Numeric exprs: ============"
 let a=0.5, b=2, c = 1e2
 100.5; 3 + 7.4; 23 - c; 
