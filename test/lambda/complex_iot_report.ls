@@ -478,13 +478,13 @@ let sample_energy_data = [
 "=== Smart City IoT Analytics Results ==="
 '-'
 let environmental_analysis = process_environmental_data(sample_environmental_sensors);
-"Environmental data processed from " + string(environmental_analysis.data_quality.total_readings) + " sensors"
+"Environmental data processed from " ++ environmental_analysis.data_quality.total_readings ++ " sensors"
 '-'
 let traffic_analysis = analyze_traffic_patterns(sample_traffic_data);
-"Traffic analysis completed for " + string(traffic_analysis.traffic_summary.monitoring_coverage) + " intersections"
+"Traffic analysis completed for " ++ traffic_analysis.traffic_summary.monitoring_coverage ++ " intersections"
 '-'
 let energy_analysis = analyze_energy_consumption(sample_energy_data);
-"Energy consumption analyzed for " + string(energy_analysis.energy_overview.monitored_meters) + " meters"
+"Energy consumption analyzed for " ++ energy_analysis.energy_overview.monitored_meters ++ " meters"
 
 // Comprehensive smart city intelligence dashboard
 {
