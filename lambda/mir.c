@@ -112,6 +112,7 @@ func_obj_t func_list[] = {
     {"fn_index", (fn_ptr) fn_index},
     {"fn_member", (fn_ptr) fn_member},
     {"fn_len", (fn_ptr) fn_len},
+    {"fn_join", (fn_ptr) fn_join},
     // procedures
     {"pn_print", (fn_ptr) pn_print},
     {"pn_cmd", (fn_ptr) pn_cmd},

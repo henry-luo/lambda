@@ -405,6 +405,7 @@ String *fn_strcat(String *left, String *right);
 Item fn_normalize(Item str, Item type);
 Item fn_substring(Item str, Item start, Item end);
 Item fn_contains(Item str, Item substr);
+Item fn_join(Item a, Item b);
 
 Function* to_fn(fn_ptr ptr);
 Type* base_type(TypeId type_id);

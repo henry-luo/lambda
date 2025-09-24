@@ -82,22 +82,7 @@ bool decimal_is_zero(mpd_t* dec_val) {
 Item fn_add(Item item_a, Item item_b) {
     TypeId type_a = get_type_id(item_a);  TypeId type_b = get_type_id(item_b);
     log_debug("fn_add called with types: %d and %d", type_a, type_b);
-    if (type_a == LMD_TYPE_STRING && type_b == LMD_TYPE_STRING) {
-        String* str_a = (String*)item_a.pointer;  String* str_b = (String*)item_b.pointer;
-        String* result = fn_strcat(str_a, str_b);
-        return { .item = s2it(result) };
-    }
-    else if (type_a == LMD_TYPE_SYMBOL && type_b == LMD_TYPE_SYMBOL) {
-        String* str_a = (String*)item_a.pointer;  String* str_b = (String*)item_b.pointer;
-        String* result = fn_strcat(str_a, str_b);
-        return { .item = y2it(result) };
-    }
-    else if (type_a == LMD_TYPE_BINARY && type_b == LMD_TYPE_BINARY) {
-        String* str_a = (String*)item_a.pointer;  String* str_b = (String*)item_b.pointer;
-        String* result = fn_strcat(str_a, str_b);
-        return { .item = x2it(result) };
-    }
-    else if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
+    if (type_a == LMD_TYPE_INT && type_b == LMD_TYPE_INT) {
         log_debug("add int + int: %lld + %d", item_a.int_val, item_b.int_val);
         return { .item = i2it(item_a.int_val + item_b.int_val) };
     }
