@@ -313,6 +313,10 @@
             "named": false
           },
           {
+            "type": "++",
+            "named": false
+          },
+          {
             "type": "-",
             "named": false
           },
@@ -2266,6 +2270,10 @@
     "named": false
   },
   {
+    "type": "++",
+    "named": false
+  },
+  {
     "type": ",",
     "named": false
   },
@@ -2395,11 +2403,11 @@
   },
   {
     "type": "decimal",
-    "named": false
+    "named": true
   },
   {
     "type": "decimal",
-    "named": true
+    "named": false
   },
   {
     "type": "element",

@@ -816,6 +816,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     if (strview_equal(&op, "and")) { ast_node->op = OPERATOR_AND; }
     else if (strview_equal(&op, "or")) { ast_node->op = OPERATOR_OR; }
     else if (strview_equal(&op, "+")) { ast_node->op = OPERATOR_ADD; }
+    else if (strview_equal(&op, "++")) { ast_node->op = OPERATOR_JOIN; }
     else if (strview_equal(&op, "-")) { ast_node->op = OPERATOR_SUB; }
     else if (strview_equal(&op, "*")) { ast_node->op = OPERATOR_MUL; }
     else if (strview_equal(&op, "^")) { ast_node->op = OPERATOR_POW; }
@@ -874,9 +875,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
         }
     }
     else if (ast_node->op == OPERATOR_ADD) {
-        if (left_type == right_type && (left_type == LMD_TYPE_STRING ||
-            left_type == LMD_TYPE_SYMBOL || left_type == LMD_TYPE_BINARY ||
-            left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_LIST)) {
+        if (left_type == right_type && (left_type == LMD_TYPE_ARRAY || left_type == LMD_TYPE_LIST)) {
             type_id = left_type;
         }
         else if (LMD_TYPE_INT <= left_type && left_type <= LMD_TYPE_FLOAT &&
@@ -927,7 +926,7 @@ AstNode* build_binary_expr(Transpiler* tp, TSNode bi_node) {
     else if (ast_node->op == OPERATOR_TO) {
         type_id = LMD_TYPE_RANGE;
     }
-    else {
+    else {  // OPERATOR_JOIN, etc.
         type_id = LMD_TYPE_ANY;
     }
     ast_node->type = alloc_type(tp->ast_pool, type_id, sizeof(Type));
