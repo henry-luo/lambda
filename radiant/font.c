@@ -1,7 +1,11 @@
 
+#include <string.h>
+#include <stdlib.h>
 #include "view.h"
-
 #include "../lib/log.h"
+
+/* Explicit strdup declaration for compatibility */
+extern char *strdup(const char *s);
 typedef struct FontfaceEntry {
     char* name;
     FT_Face face;

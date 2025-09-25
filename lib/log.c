@@ -1,7 +1,10 @@
 /* Lambda Script Log Library - zlog-compatible implementation with log_ prefix */
+#include <string.h>
 #include "log.h"
 #include <stdlib.h>
-#include <string.h>
+
+/* Explicit strdup declaration for compatibility */
+extern char *strdup(const char *s);
 #include <time.h>
 #include <unistd.h>
 #include <ctype.h>

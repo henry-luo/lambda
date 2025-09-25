@@ -265,11 +265,13 @@ project "lambda-input-full"
     }
     
 
-project "radian"
+project "radiant"
     kind "ConsoleApp"
     language "C"
-    targetname "radian"
-    -- Native HTML/CSSS/SVG rendering engine
+    targetname "radiant.exe"
+    targetdir "."
+    objdir "build/obj/%{prj.name}"
+    -- Native HTML/CSS/SVG rendering engine
     
     files {
         "radiant/window.c",
@@ -297,41 +299,56 @@ project "radian"
         "lib/mem-pool/src/utils.c",
         "lib/file.c",
         "lib/url.c",
+        "lib/url_parser.c",
         "lib/utf.c",
     }
     
     includedirs {
         ".",
         "lib",
-        "/usr/local/include",
-        "/opt/homebrew/Cellar/freetype/2.14.1_1/include/freetype2",
+        "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/opt/sdl2/include/SDL2",
         "/opt/homebrew/opt/sdl2_image/include",
         "/opt/homebrew/include",
     }
     
+    libdirs {
+        "/opt/homebrew/lib",
+        "/usr/local/lib",
+        "build/lib",
+        "/opt/homebrew/opt/sdl2_image/lib",
+    }
+    
     links {
-        "lexbor",
-        "freetype",
-        "png",
-        "bzip2",
-        "fontconfig",
-        "expat",
-        "zlib",
-        "glfw",
-        "thorvg",
         "SDL2_image",
+        "ThorVG",
+        "iconv",
+    }
+    
+    linkoptions {
+        "../../lexbor/liblexbor_static.a",
+        "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
+        "/opt/homebrew/lib/libpng.a",
+        "/opt/homebrew/opt/bzip2/lib/libbz2.a",
+        "/opt/homebrew/lib/libfontconfig.a",
+        "/opt/homebrew/opt/expat/lib/libexpat.a",
+        "/opt/homebrew/opt/zlib/lib/libz.a",
+        "/opt/homebrew/lib/libintl.a",
+        "/opt/homebrew/lib/libglfw3.a",
     }
     
     linkoptions {
         "-framework OpenGL",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     disablewarnings {
         "incompatible-pointer-types",
         "undef",
-        "no-common",
         "uninitialized",
         "sign-compare",
         "implicit-function-declaration",
@@ -346,13 +363,19 @@ project "radian"
         "pointer-compare",
         "pointer-sign",
         "pointer-to-int-cast",
-        "pointer-truncate",
-        "no-microsoft-anon-tag",
+        "microsoft-anon-tag",
     }
     
     buildoptions {
         "-fwrapv",
         "-fms-extensions",
+        "-pedantic",
+        "-fcolor-diagnostics",
+    }
+    
+    defines {
+        "_POSIX_C_SOURCE=200809L",
+        "_GNU_SOURCE",
     }
     
 
