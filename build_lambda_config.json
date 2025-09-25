@@ -260,6 +260,8 @@
                 "radiant/layout_text.cpp",
                 "radiant/layout_flex_nodes.cpp",
                 "radiant/layout_flex.cpp",
+                "radiant/flex_layout_new.cpp",
+                "radiant/view_pool_new.cpp",
                 "radiant/resolve_style.cpp",
                 "radiant/scroller.cpp",
                 "radiant/view_pool.cpp",
@@ -1191,6 +1193,84 @@
                 ],
                 "type": "input",
                 "special_flags": "-fms-extensions -lstdc++",
+                "cpp_flags": "-std=c++17",
+                "parallel": true
+            },
+            {
+                "suite": "radiant",
+                "name": "🎨 Radiant Layout Engine Tests",
+                "tests": [
+                    {
+                        "source": "test/test_radiant_flex_gtest.cpp",
+                        "name": "📦 Radiant Flex Layout Tests (GTest)",
+                        "dependencies": [
+                            "radiant"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_radiant_flex_gtest.exe",
+                        "includes": [
+                            "radiant",
+                            "lib/mem-pool/include",
+                            "lexbor/source",
+                            "/opt/homebrew/Cellar/fontconfig/2.17.1/include",
+                            "/opt/homebrew/include"
+                        ]
+                    },
+                    {
+                        "source": "test/test_radiant_flex_algorithm_gtest.cpp",
+                        "name": "⚙️ Radiant Flex Algorithm Tests (GTest)",
+                        "dependencies": [
+                            "radiant"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_radiant_flex_algorithm_gtest.exe",
+                        "includes": [
+                            "radiant",
+                            "lib/mem-pool/include",
+                            "lexbor/source",
+                            "/opt/homebrew/Cellar/fontconfig/2.17.1/include",
+                            "/opt/homebrew/include"
+                        ]
+                    },
+                    {
+                        "source": "test/test_radiant_flex_integration_gtest.cpp",
+                        "name": "🔗 Radiant Flex Integration Tests (GTest)",
+                        "dependencies": [
+                            "radiant"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_radiant_flex_integration_gtest.exe",
+                        "includes": [
+                            "radiant",
+                            "lib/mem-pool/include",
+                            "lexbor/source",
+                            "/opt/homebrew/Cellar/fontconfig/2.17.1/include",
+                            "/opt/homebrew/include"
+                        ]
+                    },
+                    {
+                        "source": "test/test_flex_minimal.cpp",
+                        "name": "🧪 Minimal Flex Layout Tests (GTest)",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_flex_minimal.exe",
+                        "includes": []
+                    }
+                ],
+                "type": "radiant",
+                "special_flags": "-std=c++17 -lstdc++",
                 "cpp_flags": "-std=c++17",
                 "parallel": true
             },

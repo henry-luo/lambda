@@ -1173,82 +1173,70 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_ALIGN_SELF: {
         const lxb_css_property_align_self_t *align_self = declr->u.align_self;
-        if (!span->flex_item) { span->flex_item = alloc_flex_item_prop(lycon); }
-        span->flex_item->align_self = resolve_align_type(align_self->type);
+        span->align_self = resolve_align_type(align_self->type);
         break;
     }
     case LXB_CSS_PROPERTY_ORDER: {
         const lxb_css_property_order_t *order = declr->u.order;
-        if (!span->flex_item) { span->flex_item = alloc_flex_item_prop(lycon); }
-        span->flex_item->order = order->integer.num;
+        span->order = order->integer.num;
         break;
     }
     case LXB_CSS_PROPERTY_FLEX: {
         const lxb_css_property_flex_t *flex = declr->u.flex;
-        if (!span->flex_item) { span->flex_item = alloc_flex_item_prop(lycon); }
         // handle flex-grow
         if (flex->grow.type != LXB_CSS_VALUE__UNDEF) {
-            span->flex_item->flex_grow = flex->grow.number.num;
+            span->flex_grow = flex->grow.number.num;
         } 
-        // else if (flex->none) {
-        //     span->flex_item->flex_grow = 0;
-        // } 
         else {
-            span->flex_item->flex_grow = 1;  // Default for 'flex: auto'
+            span->flex_grow = 1;  // Default for 'flex: auto'
         }
         // handle flex-shrink
         if (flex->shrink.type != LXB_CSS_VALUE__UNDEF) {
-            span->flex_item->flex_shrink = flex->shrink.number.num;
+            span->flex_shrink = flex->shrink.number.num;
         } 
-        // else if (flex->none) {
-        //     span->flex_item->flex_shrink = 0;
-        // } 
         else {
-            span->flex_item->flex_shrink = 1;  // Default for 'flex: auto'
+            span->flex_shrink = 1;  // Default for 'flex: auto'
         }
         // handle flex-basis
         if (flex->basis.type == LXB_CSS_VALUE__LENGTH) {
-            span->flex_item->flex_basis = flex->basis.u.length.num;
-            span->flex_item->is_flex_basis_percent = 0;
+            span->flex_basis = flex->basis.u.length.num;
+            span->flex_basis_is_percent = false;
         } else if (flex->basis.type == LXB_CSS_VALUE__PERCENTAGE) {
-            span->flex_item->flex_basis = flex->basis.u.percentage.num;
-            span->flex_item->is_flex_basis_percent = 1;
+            span->flex_basis = flex->basis.u.percentage.num;
+            span->flex_basis_is_percent = true;
         } else if (flex->basis.type == LXB_CSS_VALUE_AUTO ) { // || flex->none
-            span->flex_item->flex_basis = -1; // auto
-            span->flex_item->is_flex_basis_percent = 0;
+            span->flex_basis = -1; // auto
+            span->flex_basis_is_percent = false;
         } else {
-            span->flex_item->flex_basis = 0;  // content
-            span->flex_item->is_flex_basis_percent = 0;
+            span->flex_basis = 0;  // content
+            span->flex_basis_is_percent = false;
         }
         break;
     }
     case LXB_CSS_PROPERTY_FLEX_GROW: {
         const lxb_css_property_flex_grow_t *flex_grow = declr->u.flex_grow;
-        if (!span->flex_item) { span->flex_item = alloc_flex_item_prop(lycon); }
-        span->flex_item->flex_grow = flex_grow->number.num;
+        span->flex_grow = flex_grow->number.num;
         break;
     }
     case LXB_CSS_PROPERTY_FLEX_SHRINK: {
         const lxb_css_property_flex_shrink_t *flex_shrink = declr->u.flex_shrink;
-        if (!span->flex_item) { span->flex_item = alloc_flex_item_prop(lycon); }
-        span->flex_item->flex_shrink = flex_shrink->number.num;
+        span->flex_shrink = flex_shrink->number.num;
         break;
     }
     case LXB_CSS_PROPERTY_FLEX_BASIS: {
         const lxb_css_property_flex_basis_t *flex_basis = declr->u.flex_basis;
-        if (!span->flex_item) { span->flex_item = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp)); }
         if (flex_basis->type == LXB_CSS_VALUE__LENGTH) {
-            span->flex_item->flex_basis = flex_basis->u.length.num;
-            span->flex_item->is_flex_basis_percent = 0;
+            span->flex_basis = flex_basis->u.length.num;
+            span->flex_basis_is_percent = false;
         } else if (flex_basis->type == LXB_CSS_VALUE__PERCENTAGE) {
-            span->flex_item->flex_basis = flex_basis->u.percentage.num;
-            span->flex_item->is_flex_basis_percent = 1;
+            span->flex_basis = flex_basis->u.percentage.num;
+            span->flex_basis_is_percent = true;
         } else if (flex_basis->type == LXB_CSS_VALUE_AUTO) {
-            span->flex_item->flex_basis = -1; // auto
-            span->flex_item->is_flex_basis_percent = 0;
+            span->flex_basis = -1; // auto
+            span->flex_basis_is_percent = false;
         } else {
-            span->flex_item->flex_basis = 0;  // content
-            span->flex_item->is_flex_basis_percent = 0;
+            span->flex_basis = 0;  // content
+            span->flex_basis_is_percent = false;
         }
         break;
     }

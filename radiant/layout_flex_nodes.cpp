@@ -83,14 +83,14 @@ void reflow_flex_item(LayoutContext* lycon, ViewBlock* block) {
     log_debug("block view: %d, end block>>\n", block->type);
 }
 
-void layout_flex_nodes(LayoutContext* lycon, DomNode *first_child) {
+void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     log_debug("layout flex nodes");
     ViewBlock* block = (ViewBlock*)lycon->view;
     alloc_flex_container_prop(lycon, block); 
     
     // Count children first
     int child_count = 0;
-    DomNode *child = first_child;
+    DomNode *child = (DomNode*)first_child;
     while (child) {
         child_count++;
         child = child->next_sibling();
@@ -113,20 +113,19 @@ void layout_flex_nodes(LayoutContext* lycon, DomNode *first_child) {
     flex_container.align_items = block->embed->flex_container->align_items;
     flex_container.align_content = block->embed->flex_container->align_content;
     flex_container.row_gap = block->embed->flex_container->row_gap;
-    flex_container.column_gap = block->embed->flex_container->column_gap;
     
     // Allocate items array
     flex_container.items = (FlexItem*)calloc(child_count, sizeof(FlexItem));
     flex_container.item_count = child_count;
     
     // First phase: layout each child as inline-block to determine its natural size
-    child = first_child;
+    child = (DomNode*)first_child;
     int index = 0;
     
     // Create temporary ViewBlock items for measuring children
     ViewBlock** child_blocks = (ViewBlock**)calloc(child_count, sizeof(ViewBlock*));
-            
-    DisplayValue display = {.outer = LXB_CSS_VALUE_INLINE_BLOCK, .inner = LXB_CSS_VALUE_FLOW};
+    
+    DisplayValue display = {LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_FLOW};
     while (child && index < child_count) {
         // Layout child in measuring mode to determine its size 
         if (child->is_element()) {
@@ -159,24 +158,13 @@ void layout_flex_nodes(LayoutContext* lycon, DomNode *first_child) {
                     item->is_margin_left_auto = (child_block->bound->margin.left == LENGTH_AUTO) ? 1 : 0;
                 }
                 
-                // Copy flex item properties if available
-                if (child_block->flex_item) {
-                    item->flex_basis = child_block->flex_item->flex_basis;
-                    item->flex_grow = child_block->flex_item->flex_grow;
-                    item->flex_shrink = child_block->flex_item->flex_shrink;
-                    item->align_self = child_block->flex_item->align_self;
-                    item->order = child_block->flex_item->order;
-                    item->aspect_ratio = child_block->flex_item->aspect_ratio;
-                    item->is_flex_basis_percent = child_block->flex_item->is_flex_basis_percent;
-                    item->baseline_offset = child_block->flex_item->baseline_offset;
-                } else {
-                    // Default values
-                    item->flex_basis = -1;  // auto
-                    item->flex_grow = 0;
-                    item->flex_shrink = 1;
-                    item->align_self = ALIGN_START; // will be replaced with container's align-items
-                    item->order = 0;
-                }
+                // Copy flex item properties from embedded ViewSpan properties
+                item->flex_basis = child_block->flex_basis;
+                item->flex_grow = child_block->flex_grow;
+                item->flex_shrink = child_block->flex_shrink;
+                item->align_self = child_block->align_self;
+                item->order = child_block->order;
+                item->is_flex_basis_percent = child_block->flex_basis_is_percent;
                 index++;
             }
         }
