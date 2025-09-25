@@ -238,7 +238,7 @@
         },
         {
             "name": "radiant",
-            "description": "Native HTML/CSS/SVG rendering engine", 
+            "description": "Native HTML/CSS/SVG rendering engine",
             "output": "radiant.exe",
             "includes": [
                 ".",
@@ -286,7 +286,7 @@
                     "_include_original": "/opt/homebrew/opt/lexbor/include",
                     "_lib_original": "/opt/homebrew/opt/lexbor/lib/liblexbor_static.a",
                     "include": "lexbor/source",
-                    "lib": "../../lexbor/liblexbor_static.a",            
+                    "lib": "../../lexbor/liblexbor_static.a",
                     "link": "static"
                 },
                 {
@@ -318,7 +318,7 @@
                     "include": null,
                     "lib": "/opt/homebrew/opt/expat/lib/libexpat.a",
                     "link": "static"
-                },      
+                },
                 {
                     "name": "SDL2_image",
                     "include": "/opt/homebrew/opt/sdl2/include/SDL2 -I/opt/homebrew/opt/sdl2_image/include",
@@ -327,9 +327,10 @@
                 },
                 {
                     "name": "ThorVG",
-                    "include": "/opt/homebrew/include",
-                    "lib": "thorvg",
-                    "link": "dynamic"
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/libthorvg.a",
+                    "link": "static",
+                    "version": "v1.0-pre11"
                 },
                 {
                     "name": "zlib",
@@ -366,7 +367,7 @@
                     "include": null,
                     "lib": "-framework IOKit",
                     "link": "dynamic"
-                },    
+                },
                 {
                     "name": "CoreVideo",
                     "include": null,
@@ -378,7 +379,19 @@
                     "include": null,
                     "lib": "iconv",
                     "link": "dynamic"
-                }     
+                },
+                {
+                    "name": "stdc++",
+                    "include": null,
+                    "lib": "stdc++",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "turbojpeg",
+                    "include": null,
+                    "lib": "/opt/homebrew/lib/libturbojpeg.a",
+                    "link": "static"
+                }
             ],
             "lib_dirs": [
                 "/opt/homebrew/lib",
