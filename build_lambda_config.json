@@ -238,8 +238,19 @@
         },
         {
             "name": "radiant",
-            "description": "Native HTML/CSSS/SVG rendering engine",
-            "output": "radian.exe",
+            "description": "Native HTML/CSS/SVG rendering engine", 
+            "output": "radiant.exe",
+            "includes": [
+                ".",
+                "lambda/tree-sitter/lib/include",
+                "lambda/tree-sitter-lambda/bindings/c",
+                "lib/mem-pool/include",
+                "lexbor/source",
+                "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+                "/opt/homebrew/include/fontconfig",
+                "/opt/homebrew/opt/sdl2/include/SDL2 -I/opt/homebrew/opt/sdl2_image/include",
+                "/opt/homebrew/include"
+            ],
             "source_files": [
                 "radiant/window.c",
                 "radiant/ui_context.c",
@@ -266,6 +277,7 @@
                 "lib/mem-pool/src/utils.c",
                 "lib/file.c",
                 "lib/url.c",
+                "lib/url_parser.c",
                 "lib/utf.c"
             ],
             "libraries": [
@@ -273,14 +285,14 @@
                     "name": "lexbor",
                     "_include_original": "/opt/homebrew/opt/lexbor/include",
                     "_lib_original": "/opt/homebrew/opt/lexbor/lib/liblexbor_static.a",
-                    "include": "/usr/local/include",
-                    "lib": "/usr/local/lib/liblexbor_static.a",
+                    "include": "lexbor/source",
+                    "lib": "../../lexbor/liblexbor_static.a",            
                     "link": "static"
                 },
                 {
                     "name": "freetype",
-                    "include": "/opt/homebrew/Cellar/freetype/2.14.1_1/include/freetype2",
-                    "lib": "/opt/homebrew/Cellar/freetype/2.14.1_1/lib/libfreetype.a",
+                    "include": "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+                    "lib": "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
                     "link": "static"
                 },
                 {
@@ -306,17 +318,29 @@
                     "include": null,
                     "lib": "/opt/homebrew/opt/expat/lib/libexpat.a",
                     "link": "static"
-                },
+                },      
                 {
                     "name": "SDL2_image",
                     "include": "/opt/homebrew/opt/sdl2/include/SDL2 -I/opt/homebrew/opt/sdl2_image/include",
-                    "lib": "/opt/homebrew/opt/sdl2_image/lib/",
+                    "lib": "SDL2_image",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "ThorVG",
+                    "include": "/opt/homebrew/include",
+                    "lib": "thorvg",
                     "link": "dynamic"
                 },
                 {
                     "name": "zlib",
                     "include": null,
                     "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
+                    "link": "static"
+                },
+                {
+                    "name": "intl",
+                    "include": "/opt/homebrew/include",
+                    "lib": "/opt/homebrew/lib/libintl.a",
                     "link": "static"
                 },
                 {
@@ -329,19 +353,42 @@
                     "name": "GL",
                     "include": null,
                     "lib": "-framework OpenGL",
-                    "link": "static"
+                    "link": "dynamic"
                 },
                 {
-                    "name": "thorvg",
-                    "include": "/usr/local/include",
-                    "lib": "/usr/local/lib/libthorvg.a",
-                    "link": "static"
-                }
+                    "name": "Cocoa",
+                    "include": null,
+                    "lib": "-framework Cocoa",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "IOKit",
+                    "include": null,
+                    "lib": "-framework IOKit",
+                    "link": "dynamic"
+                },    
+                {
+                    "name": "CoreVideo",
+                    "include": null,
+                    "lib": "-framework CoreVideo",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "iconv",
+                    "include": null,
+                    "lib": "iconv",
+                    "link": "dynamic"
+                }     
+            ],
+            "lib_dirs": [
+                "/opt/homebrew/lib",
+                "/usr/local/lib",
+                "build/lib",
+                "/opt/homebrew/opt/sdl2_image/lib"
             ],
             "warnings": [
                 "incompatible-pointer-types",
                 "undef",
-                "no-common",
                 "uninitialized",
                 "sign-compare",
                 "implicit-function-declaration",
@@ -356,12 +403,17 @@
                 "pointer-compare",
                 "pointer-sign",
                 "pointer-to-int-cast",
-                "pointer-truncate",
-                "no-microsoft-anon-tag"
+                "microsoft-anon-tag"
             ],
             "flags": [
                 "fwrapv",
-                "fms-extensions"
+                "fms-extensions",
+                "pedantic",
+                "fcolor-diagnostics"
+            ],
+            "defines": [
+                "_POSIX_C_SOURCE=200809L",
+                "_GNU_SOURCE"
             ]
         }
     ],

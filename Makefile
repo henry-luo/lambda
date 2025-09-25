@@ -315,7 +315,7 @@ clean-tree-sitter-minimal:
 .DEFAULT_GOAL := build
 
 # Phony targets (don't correspond to actual files)
-.PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-input run help install uninstall \
+.PHONY: all build build-ascii clean clean-test clean-grammar clean-radiant generate-grammar debug release rebuild test test-input run help install uninstall \
         lambda radiant window format lint check docs intellisense analyze-size \
         build-windows build-linux build-debug build-release clean-all distclean \
         build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
@@ -353,6 +353,7 @@ help:
 	@echo "  clean         - Remove build artifacts"
 	@echo "  clean-test    - Remove test output and temporary files"
 	@echo "  clean-grammar - Remove generated grammar and embed files (parser.c, ts-enum.h, lambda-embed.h)"
+	@echo "  clean-radiant - Remove radiant build outputs (executable, premake files, object files)"
 	@echo "  clean-all     - Remove all build directories and tree-sitter libraries"
 	@echo "  distclean     - Complete cleanup (build dirs + executables + tests)"
 	@echo "  intellisense  - Update VS Code IntelliSense database (compile_commands.json)"
@@ -426,9 +427,9 @@ ifeq ($(IS_MSYS2),yes)
 	@echo "🔧 Windows/MSYS2 detected - using optimized build configuration..."
 	@echo "🔧 Setting up MINGW64 toolchain environment..."
 	@echo "Building $(PROJECT_NAME) using Premake build system..."
-	PATH="/mingw64/bin:$$PATH" $(PYTHON) utils/generate_premake.py
+	PATH="/mingw64/bin:$$PATH" $(PYTHON) utils/generate_premake.py --output premake5.mac.lua
 	@echo "Generating makefiles..."
-	PATH="/mingw64/bin:$$PATH" $(PREMAKE5) gmake
+	PATH="/mingw64/bin:$$PATH" $(PREMAKE5) gmake --file=premake5.mac.lua
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	PATH="/mingw64/bin:$$PATH" $(MAKE) -C build/premake -j$(JOBS) lambda CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w"
 	@echo "✅ Build completed successfully!"
@@ -437,9 +438,9 @@ else
 	$(call mingw64_env_check)
 	$(call mingw64_toolchain_verify)
 	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py
+	$(PYTHON) utils/generate_premake.py --output premake5.mac.lua
 	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake
+	$(PREMAKE5) gmake --file=premake5.mac.lua
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	# Ensure explicit compiler variables are passed to Premake build
 	@echo "Using CC=$(CC) CXX=$(CXX)"
@@ -473,9 +474,9 @@ build-mingw64: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Setting MINGW64 environment variables..."
 	@export CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib" PATH="/mingw64/bin:$$PATH"
 	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py
+	$(PYTHON) utils/generate_premake.py --output premake5.mac.lua
 	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake
+	$(PREMAKE5) gmake --file=premake5.mac.lua
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="gcc" CXX="g++" AR="ar" RANLIB="ranlib" --no-print-directory -s CFLAGS="-w" CXXFLAGS="-w" 2>&1 | grep -v "warning:"
 	@echo "✅ MINGW64 build completed. Executable: lambda.exe"
@@ -492,9 +493,9 @@ debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	$(call mingw64_env_check)
 	$(call mingw64_toolchain_verify)
 	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py
+	$(PYTHON) utils/generate_premake.py --output premake5.mac.lua
 	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake
+	$(PREMAKE5) gmake --file=premake5.mac.lua
 	@echo "Building lambda executable (debug) with $(JOBS) parallel jobs..."
 	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 	@echo "Debug build completed. Executable: lambda.exe"
@@ -508,9 +509,9 @@ build-release: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	$(call mingw64_env_check)
 	$(call mingw64_toolchain_verify)
 	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py
+	$(PYTHON) utils/generate_premake.py --output premake5.mac.lua
 	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake
+	$(PREMAKE5) gmake --file=premake5.mac.lua
 	@echo "Building lambda executable (release) with $(JOBS) parallel jobs..."
 	$(MAKE) -C build/premake config=release_x64 lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 	@echo "Release build completed. Executable: lambda.exe"
@@ -520,9 +521,9 @@ build-release: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 rebuild: clean $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Force rebuilding $(PROJECT_NAME) using Premake build system..."
 	@echo "Generating Premake configuration..."
-	$(PYTHON) utils/generate_premake.py
+	$(PYTHON) utils/generate_premake.py --output premake5.mac.lua
 	@echo "Generating makefiles..."
-	$(PREMAKE5) gmake
+	$(PREMAKE5) gmake --file=premake5.mac.lua
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	$(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 	@echo "Rebuild completed. Executable: lambda.exe"
@@ -533,10 +534,10 @@ lambda: build
 # Radiant HTML/CSS/SVG rendering engine build
 build-radiant: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building Radiant HTML/CSS/SVG rendering engine..."
-	@echo "Generating Premake configuration for Radiant..."
-	$(PYTHON) utils/generate_premake.py --config $(RADIANT_CONFIG) --output premake5.radiant.lua
-	@echo "Generating makefiles for Radiant..."
-	$(PREMAKE5) gmake --file=premake5.radiant.lua
+	@echo "Generating unified Premake configuration (includes radiant target)..."
+	$(PYTHON) utils/generate_premake.py --config $(DEFAULT_CONFIG) --output premake5.mac.lua
+	@echo "Generating makefiles for unified build..."
+	$(PREMAKE5) gmake --file=premake5.mac.lua
 	@echo "Building radiant executable with $(JOBS) parallel jobs..."
 	$(MAKE) -C build/premake config=debug_native radiant -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 	@echo "✅ Radiant build completed. Executable: radiant.exe"
@@ -619,6 +620,13 @@ clean-grammar:
 	@rm -f $(LAMBDA_EMBED_H_FILE)
 	@echo "Generated grammar and embed files cleaned."
 
+clean-radiant:
+	@echo "Cleaning radiant build outputs..."
+	@rm -f $(RADIANT_EXE)
+	@rm -rf build/premake/radiant.make 2>/dev/null || true
+	@if [ -d "build/obj/radiant" ]; then rm -rf build/obj/radiant; fi
+	@echo "Radiant build outputs cleaned."
+
 # IntelliSense support
 intellisense:
 	@echo "Updating IntelliSense database..."
@@ -628,7 +636,7 @@ intellisense:
 generate-grammar: $(TS_ENUM_H)
 	@echo "Grammar generation complete."
 
-clean-all: clean-premake clean-test
+clean-all: clean-premake clean-test clean-radiant
 	@echo "Removing all build directories..."
 	@rm -rf $(BUILD_DIR)
 	@rm -rf $(BUILD_DEBUG_DIR)
@@ -1288,12 +1296,15 @@ benchmark:
 # Premake5 Build System Targets
 generate-premake:
 	@echo "Generating Premake5 configuration from JSON..."
-	$(PYTHON) utils/generate_premake.py
+	$(PYTHON) utils/generate_premake.py --output premake5.mac.lua
 
 clean-premake:
 	@echo "Cleaning Premake5 build artifacts..."
 	@rm -rf build/premake
 	@rm -f premake5.lua
+	@rm -f premake5.mac.lua
+	@rm -f premake5.linux.lua
+	@rm -f premake5.win.lua
 	@rm -f premake5-linux.lua
 	@rm -f *.make
 	@rm -f dummy.cpp

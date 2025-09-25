@@ -1,9 +1,11 @@
-#define _POSIX_C_SOURCE 200809L
+#include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <errno.h>
-#include <string.h>
+
+/* Explicit strdup declaration for compatibility */
+extern char *strdup(const char *s);
 #include <stdbool.h>
 #include "file.h"
 #include "log.h"

@@ -1034,16 +1034,23 @@ class PremakeGenerator:
         warnings = target.get('warnings', [])
         flags = target.get('flags', [])
         
-        # Remove .exe extension for project name
+        # Remove .exe extension for project name (used for premake project naming)
         project_name = output_file.replace('.exe', '')
+        # Keep the full output filename for targetname (preserves .exe extension as specified in config)
+        target_filename = output_file  # Use full output file name including .exe
         
         print(f"DEBUG: Generating executable target: {target_name} -> {output_file}")
+        
+        # Get target directory - default to project root for executables
+        target_dir = target.get('target_dir', '.')
         
         self.premake_content.extend([
             f'project "{project_name}"',
             '    kind "ConsoleApp"',
             '    language "C"',  # Default to C, will be overridden if C++ files are found
-            f'    targetname "{project_name}"',
+            f'    targetname "{target_filename}"',
+            f'    targetdir "{target_dir}"',
+            f'    objdir "build/obj/%{{prj.name}}"',
             f'    -- {description}',
             '    ',
         ])
@@ -1100,7 +1107,11 @@ class PremakeGenerator:
                         else:
                             dynamic_libs.append(lib_name)
                     else:
-                        static_libs.append(lib_name)
+                        # For static libraries, use the full path if provided or if it's a .a file
+                        if lib_path and (lib_path.startswith('/') or lib_path.endswith('.a')):
+                            static_libs.append(lib_path)  # Use full path for absolute paths and .a files
+                        else:
+                            static_libs.append(lib_name)  # Use name for relative paths
                 elif isinstance(lib, str):
                     static_libs.append(lib)
             
@@ -1125,11 +1136,36 @@ class PremakeGenerator:
                     '    '
                 ])
             
+            # Add library directories
+            lib_dirs = target.get('lib_dirs', [])
+            if lib_dirs:
+                self.premake_content.append('    libdirs {')
+                for lib_dir in lib_dirs:
+                    self.premake_content.append(f'        "{lib_dir}",')
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
+            
             # Add library references
-            if static_libs or dynamic_libs:
+            # Separate static libs into full paths and names
+            static_lib_names = [lib for lib in static_libs if not lib.startswith('/') and not lib.endswith('.a')]
+            static_lib_paths = [lib for lib in static_libs if lib.startswith('/') or lib.endswith('.a')]
+            
+            if static_lib_names or dynamic_libs:
                 self.premake_content.append('    links {')
-                for lib in static_libs + dynamic_libs:
+                for lib in static_lib_names + dynamic_libs:
                     self.premake_content.append(f'        "{lib}",')
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
+            
+            # Add static library paths to linkoptions
+            if static_lib_paths:
+                self.premake_content.append('    linkoptions {')
+                for lib_path in static_lib_paths:
+                    self.premake_content.append(f'        "{lib_path}",')
                 self.premake_content.extend([
                     '    }',
                     '    '
@@ -1171,6 +1207,17 @@ class PremakeGenerator:
             for flag in flags:
                 formatted_flag = flag if flag.startswith('-') else f'-{flag}'
                 self.premake_content.append(f'        "{formatted_flag}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+        
+        # Add defines
+        defines = target.get('defines', [])
+        if defines:
+            self.premake_content.append('    defines {')
+            for define in defines:
+                self.premake_content.append(f'        "{define}",')
             self.premake_content.extend([
                 '    }',
                 '    '
@@ -2579,8 +2626,8 @@ def main():
         elif current_platform == 'Windows' or current_platform.startswith('MINGW') or current_platform.startswith('MSYS'):
             output_file = "premake5.win.lua"
         else:
-            print(f"Warning: Unknown platform '{current_platform}', defaulting to premake5.lua")
-            output_file = "premake5.lua"
+            print(f"Warning: Unknown platform '{current_platform}', defaulting to premake5.mac.lua")
+            output_file = "premake5.mac.lua"
     
     print(f"DEBUG: Final config_file={config_file}, output_file={output_file}")
     
