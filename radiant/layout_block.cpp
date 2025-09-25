@@ -123,7 +123,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
     log_debug("layout block content");
     
     if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe
-        uintptr_t elmt_name = block->node->local_name();
+        uintptr_t elmt_name = block->node->tag();
         if (elmt_name == LXB_TAG_IFRAME) {
             layout_iframe(lycon, block, display);
         }
@@ -169,7 +169,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
     // lycon->block.line_height // inherit
 
-    uintptr_t elmt_name = elmt->local_name();
+    uintptr_t elmt_name = elmt->tag();
     ViewBlock* block = (ViewBlock*)alloc_view(lycon, 
         display.outer == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK : 
         (display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM : RDT_VIEW_BLOCK), 

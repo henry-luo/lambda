@@ -81,21 +81,19 @@ typedef struct DomNode {
         }
         return (char*)"#null";
     }
-    
-    uintptr_t local_name() {
+    uintptr_t tag() {
         if (type == LEXBOR_ELEMENT && lxb_elmt) {
-            return lxb_elmt->element.node.local_name;
+            return lxb_dom_interface_element(lxb_elmt)->node.local_name;
         }
         return 0;
     }
     
     bool is_element() {
-        return (type == LEXBOR_ELEMENT || 
-                (type == LEXBOR_NODE && lxb_node && lxb_node->type == LXB_DOM_NODE_TYPE_ELEMENT));
+        return (type == LEXBOR_ELEMENT);
     }
     
     bool is_text() {
-        return (type == LEXBOR_NODE && lxb_node && lxb_node->type == LXB_DOM_NODE_TYPE_TEXT);
+        return (type == LEXBOR_NODE);
     }
     
     // Text node data access

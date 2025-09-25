@@ -175,7 +175,7 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     if (span->in_line && span->in_line->cursor) {
         evcon->new_cursor = span->in_line->cursor;
     }
-    uintptr_t name = span->node->local_name();
+    uintptr_t name = span->node->tag();
     printf("fired at view %s\n", span->node->name());
     if (name == LXB_TAG_A) {
         printf("fired at anchor tag\n");
