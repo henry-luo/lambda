@@ -303,7 +303,7 @@ void apply_header_style(LayoutContext* lycon) {
                     lxb_dom_attr_t* href = lxb_dom_element_attr_by_id((lxb_dom_element_t *)child_elmt, LXB_DOM_ATTR_HREF);
                     
                     if (href) {
-                        lxb_url_t* abs_url = parse_url(lycon->ui_context->document->url, (const char*)href->value->data);
+                        lxb_url_t* abs_url = parse_lexbor_url(lycon->ui_context->document->url, (const char*)href->value->data);
                         if (!abs_url) {
                             printf("Failed to parse URL\n");
                             goto NEXT;

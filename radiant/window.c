@@ -5,10 +5,12 @@
 #include <wchar.h>
 #include <assert.h>
 #include <stdbool.h>
+#include <unistd.h>
+#include <string.h>
 #include "../lib/log.h"
 #include "layout.h"
 
-lxb_url_t* get_current_dir();
+lxb_url_t* get_current_dir_lexbor();
 void render(GLFWwindow* window);
 void render_html_doc(UiContext* uicon, View* root_view);
 Document* load_html_doc(lxb_url_t *base, char* doc_filename);
@@ -202,18 +204,61 @@ void render(GLFWwindow* window) {
     glFinish(); // important, this waits until rendering result is actually visible, thus making resizing less ugly
 }
 
-void log_init() {
+void log_init_wrapper() {
     // empty existing log file
     FILE *file = fopen("log.txt", "w");
     if (file ) { fclose(file); }
-    int rc = log_default_init("log.conf", "default");
+    log_init("log.conf");
 }
 void log_cleanup() {
-    log_fini();
+    log_finish();
+}
+
+lxb_url_t* get_current_dir_lexbor() {
+    char cwd[1024];
+    if (getcwd(cwd, sizeof(cwd)) == NULL) {
+        return NULL;
+    }
+    
+    // Convert to file:// URL format
+    char file_url[1200];
+    snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
+    
+    // Create memory pool for URL parsing
+    lexbor_mraw_t *mraw = lexbor_mraw_create();
+    if (!mraw) {
+        return NULL;
+    }
+    
+    lxb_status_t status = lexbor_mraw_init(mraw, 1024 * 16);
+    if (status != LXB_STATUS_OK) {
+        lexbor_mraw_destroy(mraw, true);
+        return NULL;
+    }
+    
+    lxb_url_parser_t *parser = lxb_url_parser_create();
+    if (!parser) {
+        lexbor_mraw_destroy(mraw, true);
+        return NULL;
+    }
+    
+    status = lxb_url_parser_init(parser, mraw);
+    if (status != LXB_STATUS_OK) {
+        lxb_url_parser_destroy(parser, true);
+        lexbor_mraw_destroy(mraw, true);
+        return NULL;
+    }
+    
+    lxb_url_t *url = lxb_url_parse(parser, NULL, (const lxb_char_t*)file_url, strlen(file_url));
+    
+    lxb_url_parser_destroy(parser, false);
+    // Note: don't destroy mraw here as url depends on it
+    
+    return url;
 }
 
 int main() {
-    log_init();
+    log_init_wrapper();
     ui_context_init(&ui_context);
     GLFWwindow* window = ui_context.window;
     if (!window) {
@@ -245,9 +290,9 @@ int main() {
     double deltaTime = 0.0;
     int frames = 0;
 
-    lxb_url_t* cwd = get_current_dir();
+    lxb_url_t* cwd = get_current_dir_lexbor();
     if (cwd) {
-        show_html_doc(cwd, "test/index.html");
+        show_html_doc(cwd, "test/html/index.html");
         lxb_url_destroy(cwd);
     }
 

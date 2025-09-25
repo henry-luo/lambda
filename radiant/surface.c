@@ -23,7 +23,7 @@ uint64_t image_hash(const void *item, uint64_t seed0, uint64_t seed1) {
 }
 
 ImageSurface* load_image(UiContext* uicon, const char *img_url) {
-    lxb_url_t* abs_url = parse_url(uicon->document->url, img_url);
+    lxb_url_t* abs_url = parse_lexbor_url(uicon->document->url, img_url);
     if (!abs_url) {
         printf("Failed to parse URL: %s\n", img_url);
         return NULL;

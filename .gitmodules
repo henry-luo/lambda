@@ -1,0 +1,3 @@
+[submodule "lexbor"]
+	path = lexbor
+	url = https://github.com/henry-luo/lexbor.git
