@@ -123,11 +123,16 @@ void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block) {
         block->embed = block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp)); 
     }
     if (!block->embed->flex_container) {
-        FlexContainerProp* prop = (FlexContainerProp*)alloc_prop(lycon, sizeof(FlexContainerProp));
+        FlexContainerLayout* prop = (FlexContainerLayout*)alloc_prop(lycon, sizeof(FlexContainerLayout));
         // set defaults
         prop->direction = DIR_ROW;  prop->wrap = WRAP_NOWRAP;  prop->justify = JUSTIFY_START;
         prop->align_items = ALIGN_STRETCH;  prop->align_content = ALIGN_START;
-        // prop->row_gap = 0;  prop->column_gap = 0;
+        prop->row_gap = 0;  prop->column_gap = 0;
+        prop->needs_reflow = true;
+        prop->main_axis_size = 0;
+        prop->cross_axis_size = 0;
+        prop->item_count = 0;
+        prop->line_count = 0;
         block->embed->flex_container = prop;
     }
 }

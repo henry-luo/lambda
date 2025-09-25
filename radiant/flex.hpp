@@ -1,3 +1,6 @@
+#ifndef RADIANT_FLEX_HPP
+#define RADIANT_FLEX_HPP
+
 // enums
 typedef enum { DIR_ROW, DIR_ROW_REVERSE, DIR_COLUMN, DIR_COLUMN_REVERSE } FlexDirection;
 typedef enum { WRAP_NOWRAP, WRAP_WRAP, WRAP_WRAP_REVERSE } FlexWrap;
@@ -77,3 +80,5 @@ typedef struct FlexContainer: FlexContainerProp {
     WritingMode writing_mode;
     TextDirection text_direction;
 } FlexContainer;
+
+#endif // RADIANT_FLEX_HPP

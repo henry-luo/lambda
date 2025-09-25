@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "flex_layout_new.hpp"
 
 #include "../lib/log.h"
 
@@ -144,7 +145,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 if (!lycon->line.is_line_start) { line_break(lycon); }                
             }
             else if (display.inner == LXB_CSS_VALUE_FLEX) {
-                layout_flex_nodes(lycon, child);
+                // Use new integrated flex layout system
+                ViewBlock* flex_container = (ViewBlock*)lycon->parent;
+                if (flex_container && flex_container->embed && flex_container->embed->flex_container) {
+                    layout_flex_container_new(lycon, flex_container);
+                } else {
+                    // Fallback to old system for compatibility
+                    layout_flex_nodes(lycon, (lxb_dom_node_t*)child);
+                }
             }
             else {
                 log_debug("unknown display type\n");

@@ -180,7 +180,13 @@ typedef struct ViewSpan : ViewGroup {
     FontProp* font;  // font style
     BoundaryProp* bound;  // block boundary properties
     InlineProp* in_line;  // inline specific style properties
-    FlexItemProp* flex_item; // flex item properties
+    // Integrated flex item properties (no separate allocation)
+    float flex_grow;
+    float flex_shrink;
+    int flex_basis;  // -1 for auto
+    AlignType align_self;
+    int order;
+    bool flex_basis_is_percent;
 } ViewSpan;
 
 typedef struct {
@@ -205,10 +211,39 @@ typedef struct {
     bool has_clip;
 } ScrollProp;
 
+// Integrated flex container layout state
+typedef struct {
+    // CSS properties
+    FlexDirection direction;
+    FlexWrap wrap;
+    JustifyContent justify;
+    AlignType align_items;
+    AlignType align_content;
+    int row_gap;
+    int column_gap;
+    WritingMode writing_mode;
+    TextDirection text_direction;
+    
+    // Layout state (computed during layout)
+    struct ViewBlock** flex_items;  // Array of child flex items
+    int item_count;
+    int allocated_items;  // For dynamic array growth
+    
+    // Line information
+    struct FlexLineInfo* lines;
+    int line_count;
+    int allocated_lines;
+    
+    // Cached calculations
+    int main_axis_size;
+    int cross_axis_size;
+    bool needs_reflow;
+} FlexContainerLayout;
+
 typedef struct {
     ImageSurface* img;  // image surface
     Document* doc;  // iframe document
-    FlexContainerProp* flex_container; // flex container properties
+    FlexContainerLayout* flex_container; // integrated flex container layout
 } EmbedProp;
 
 typedef struct ViewBlock : ViewSpan {
