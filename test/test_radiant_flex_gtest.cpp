@@ -37,11 +37,11 @@ protected:
         container->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
         
         // Set default flex container properties
-        container->embed->flex_container->direction = DIR_ROW;
-        container->embed->flex_container->wrap = WRAP_NOWRAP;
-        container->embed->flex_container->justify = JUSTIFY_START;
-        container->embed->flex_container->align_items = ALIGN_START;
-        container->embed->flex_container->align_content = ALIGN_START;
+        container->embed->flex_container->direction = LXB_CSS_VALUE_ROW;
+        container->embed->flex_container->wrap = LXB_CSS_VALUE_NOWRAP;
+        container->embed->flex_container->justify = LXB_CSS_VALUE_FLEX_START;
+        container->embed->flex_container->align_items = LXB_CSS_VALUE_FLEX_START;
+        container->embed->flex_container->align_content = LXB_CSS_VALUE_FLEX_START;
         container->embed->flex_container->row_gap = 0;
         container->embed->flex_container->column_gap = 0;
         
@@ -86,11 +86,11 @@ TEST_F(FlexLayoutTest, FlexContainerInitialization) {
     ASSERT_NE(container->embed, nullptr);
     ASSERT_NE(container->embed->flex_container, nullptr);
     
-    FlexContainerProp* flex = container->embed->flex_container;
-    EXPECT_EQ(flex->direction, DIR_ROW);
-    EXPECT_EQ(flex->wrap, WRAP_NOWRAP);
-    EXPECT_EQ(flex->justify, JUSTIFY_START);
-    EXPECT_EQ(flex->align_items, ALIGN_START);
+    FlexContainerLayout* flex = container->embed->flex_container;
+    EXPECT_EQ(flex->direction, LXB_CSS_VALUE_ROW);
+    EXPECT_EQ(flex->wrap, LXB_CSS_VALUE_NOWRAP);
+    EXPECT_EQ(flex->justify, LXB_CSS_VALUE_FLEX_START);
+    EXPECT_EQ(flex->align_items, LXB_CSS_VALUE_FLEX_START);
     EXPECT_EQ(flex->row_gap, 0);
     EXPECT_EQ(flex->column_gap, 0);
 }
@@ -228,23 +228,23 @@ TEST_F(FlexLayoutTest, JustifyContentAlignment) {
     ViewBlock* container = createFlexContainer(800, 200);
     
     // Test different justify-content values
-    container->embed->flex_container->justify = JUSTIFY_START;
-    EXPECT_EQ(container->embed->flex_container->justify, JUSTIFY_START);
+    container->embed->flex_container->justify = LXB_CSS_VALUE_FLEX_START;
+    EXPECT_EQ(container->embed->flex_container->justify, LXB_CSS_VALUE_FLEX_START);
     
-    container->embed->flex_container->justify = JUSTIFY_CENTER;
-    EXPECT_EQ(container->embed->flex_container->justify, JUSTIFY_CENTER);
+    container->embed->flex_container->justify = LXB_CSS_VALUE_CENTER;
+    EXPECT_EQ(container->embed->flex_container->justify, LXB_CSS_VALUE_CENTER);
     
-    container->embed->flex_container->justify = JUSTIFY_END;
-    EXPECT_EQ(container->embed->flex_container->justify, JUSTIFY_END);
+    container->embed->flex_container->justify = LXB_CSS_VALUE_FLEX_END;
+    EXPECT_EQ(container->embed->flex_container->justify, LXB_CSS_VALUE_FLEX_END);
     
-    container->embed->flex_container->justify = JUSTIFY_SPACE_BETWEEN;
-    EXPECT_EQ(container->embed->flex_container->justify, JUSTIFY_SPACE_BETWEEN);
+    container->embed->flex_container->justify = LXB_CSS_VALUE_SPACE_BETWEEN;
+    EXPECT_EQ(container->embed->flex_container->justify, LXB_CSS_VALUE_SPACE_BETWEEN);
     
-    container->embed->flex_container->justify = JUSTIFY_SPACE_AROUND;
-    EXPECT_EQ(container->embed->flex_container->justify, JUSTIFY_SPACE_AROUND);
+    container->embed->flex_container->justify = LXB_CSS_VALUE_SPACE_AROUND;
+    EXPECT_EQ(container->embed->flex_container->justify, LXB_CSS_VALUE_SPACE_AROUND);
     
-    container->embed->flex_container->justify = JUSTIFY_SPACE_EVENLY;
-    EXPECT_EQ(container->embed->flex_container->justify, JUSTIFY_SPACE_EVENLY);
+    container->embed->flex_container->justify = LXB_CSS_VALUE_SPACE_EVENLY;
+    EXPECT_EQ(container->embed->flex_container->justify, LXB_CSS_VALUE_SPACE_EVENLY);
 }
 
 // Test align-items alignment
@@ -252,20 +252,20 @@ TEST_F(FlexLayoutTest, AlignItemsAlignment) {
     ViewBlock* container = createFlexContainer(800, 200);
     
     // Test different align-items values
-    container->embed->flex_container->align_items = ALIGN_START;
-    EXPECT_EQ(container->embed->flex_container->align_items, ALIGN_START);
+    container->embed->flex_container->align_items = LXB_CSS_VALUE_FLEX_START;
+    EXPECT_EQ(container->embed->flex_container->align_items, LXB_CSS_VALUE_FLEX_START);
     
-    container->embed->flex_container->align_items = ALIGN_CENTER;
-    EXPECT_EQ(container->embed->flex_container->align_items, ALIGN_CENTER);
+    container->embed->flex_container->align_items = LXB_CSS_VALUE_CENTER;
+    EXPECT_EQ(container->embed->flex_container->align_items, LXB_CSS_VALUE_CENTER);
     
-    container->embed->flex_container->align_items = ALIGN_END;
-    EXPECT_EQ(container->embed->flex_container->align_items, ALIGN_END);
+    container->embed->flex_container->align_items = LXB_CSS_VALUE_FLEX_END;
+    EXPECT_EQ(container->embed->flex_container->align_items, LXB_CSS_VALUE_FLEX_END);
     
-    container->embed->flex_container->align_items = ALIGN_STRETCH;
-    EXPECT_EQ(container->embed->flex_container->align_items, ALIGN_STRETCH);
+    container->embed->flex_container->align_items = LXB_CSS_VALUE_STRETCH;
+    EXPECT_EQ(container->embed->flex_container->align_items, LXB_CSS_VALUE_STRETCH);
     
-    container->embed->flex_container->align_items = ALIGN_BASELINE;
-    EXPECT_EQ(container->embed->flex_container->align_items, ALIGN_BASELINE);
+    container->embed->flex_container->align_items = LXB_CSS_VALUE_BASELINE;
+    EXPECT_EQ(container->embed->flex_container->align_items, LXB_CSS_VALUE_BASELINE);
 }
 
 // Test flex-wrap behavior
@@ -273,16 +273,16 @@ TEST_F(FlexLayoutTest, FlexWrapBehavior) {
     ViewBlock* container = createFlexContainer(400, 300);
     
     // Test nowrap (default)
-    container->embed->flex_container->wrap = WRAP_NOWRAP;
-    EXPECT_EQ(container->embed->flex_container->wrap, WRAP_NOWRAP);
+    container->embed->flex_container->wrap = LXB_CSS_VALUE_NOWRAP;
+    EXPECT_EQ(container->embed->flex_container->wrap, LXB_CSS_VALUE_NOWRAP);
     
     // Test wrap
-    container->embed->flex_container->wrap = WRAP_WRAP;
-    EXPECT_EQ(container->embed->flex_container->wrap, WRAP_WRAP);
+    container->embed->flex_container->wrap = LXB_CSS_VALUE_WRAP;
+    EXPECT_EQ(container->embed->flex_container->wrap, LXB_CSS_VALUE_WRAP);
     
     // Test wrap-reverse
-    container->embed->flex_container->wrap = WRAP_WRAP_REVERSE;
-    EXPECT_EQ(container->embed->flex_container->wrap, WRAP_WRAP_REVERSE);
+    container->embed->flex_container->wrap = LXB_CSS_VALUE_WRAP_REVERSE;
+    EXPECT_EQ(container->embed->flex_container->wrap, LXB_CSS_VALUE_WRAP_REVERSE);
     
     // Create items that would overflow in a single line
     ViewBlock* item1 = createFlexItem(container, 200, 100);
@@ -371,11 +371,11 @@ TEST_F(FlexLayoutTest, NestedFlexContainers) {
     // Create child flex container
     ViewBlock* child_container = createFlexItem(parent, 400, 200);
     child_container->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-    child_container->embed->flex_container = (FlexContainerProp*)calloc(1, sizeof(FlexContainerProp));
-    child_container->embed->flex_container->direction = DIR_COLUMN;
-    child_container->embed->flex_container->wrap = WRAP_NOWRAP;
-    child_container->embed->flex_container->justify = JUSTIFY_CENTER;
-    child_container->embed->flex_container->align_items = ALIGN_CENTER;
+    child_container->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
+    child_container->embed->flex_container->direction = LXB_CSS_VALUE_COLUMN;
+    child_container->embed->flex_container->wrap = LXB_CSS_VALUE_NOWRAP;
+    child_container->embed->flex_container->justify = LXB_CSS_VALUE_CENTER;
+    child_container->embed->flex_container->align_items = LXB_CSS_VALUE_CENTER;
     
     // Add items to nested container
     ViewBlock* nested_item1 = createFlexItem(child_container, 100, 50);
@@ -388,9 +388,9 @@ TEST_F(FlexLayoutTest, NestedFlexContainers) {
     EXPECT_EQ(nested_item1->next_sibling, nested_item2);
     
     // Verify nested container properties
-    EXPECT_EQ(child_container->embed->flex_container->direction, DIR_COLUMN);
-    EXPECT_EQ(child_container->embed->flex_container->justify, JUSTIFY_CENTER);
-    EXPECT_EQ(child_container->embed->flex_container->align_items, ALIGN_CENTER);
+    EXPECT_EQ(child_container->embed->flex_container->direction, LXB_CSS_VALUE_COLUMN);
+    EXPECT_EQ(child_container->embed->flex_container->justify, LXB_CSS_VALUE_CENTER);
+    EXPECT_EQ(child_container->embed->flex_container->align_items, LXB_CSS_VALUE_CENTER);
 }
 
 // Test edge cases and error conditions
@@ -452,11 +452,11 @@ TEST_F(FlexLayoutTest, CSSLikeProperties) {
     ViewBlock* container = createFlexContainer(800, 300);
     
     // Set CSS-like flex container properties
-    container->embed->flex_container->direction = DIR_ROW;
-    container->embed->flex_container->wrap = WRAP_WRAP;
-    container->embed->flex_container->justify = JUSTIFY_SPACE_BETWEEN;
-    container->embed->flex_container->align_items = ALIGN_CENTER;
-    container->embed->flex_container->align_content = ALIGN_STRETCH;
+    container->embed->flex_container->direction = LXB_CSS_VALUE_ROW;
+    container->embed->flex_container->wrap = LXB_CSS_VALUE_WRAP;
+    container->embed->flex_container->justify = LXB_CSS_VALUE_SPACE_BETWEEN;
+    container->embed->flex_container->align_items = LXB_CSS_VALUE_CENTER;
+    container->embed->flex_container->align_content = LXB_CSS_VALUE_STRETCH;
     container->embed->flex_container->row_gap = 10;
     container->embed->flex_container->column_gap = 15;
     
@@ -466,18 +466,18 @@ TEST_F(FlexLayoutTest, CSSLikeProperties) {
     ViewBlock* item3 = createFlexItem(container, 150, 100, 0.0f, 0.0f);    // flex: none (0 0 auto)
     
     // Set align-self on individual items
-    item1->align_self = ALIGN_START;
-    item2->align_self = ALIGN_END;
-    item3->align_self = ALIGN_CENTER;
+    item1->align_self = LXB_CSS_VALUE_FLEX_START;
+    item2->align_self = LXB_CSS_VALUE_FLEX_END;
+    item3->align_self = LXB_CSS_VALUE_CENTER;
     
-    EXPECT_EQ(item1->align_self, ALIGN_START);
-    EXPECT_EQ(item2->align_self, ALIGN_END);
-    EXPECT_EQ(item3->align_self, ALIGN_CENTER);
+    EXPECT_EQ(item1->align_self, LXB_CSS_VALUE_FLEX_START);
+    EXPECT_EQ(item2->align_self, LXB_CSS_VALUE_FLEX_END);
+    EXPECT_EQ(item3->align_self, LXB_CSS_VALUE_CENTER);
     
     // Verify container properties match CSS specification
-    EXPECT_EQ(container->embed->flex_container->direction, DIR_ROW);
-    EXPECT_EQ(container->embed->flex_container->wrap, WRAP_WRAP);
-    EXPECT_EQ(container->embed->flex_container->justify, JUSTIFY_SPACE_BETWEEN);
-    EXPECT_EQ(container->embed->flex_container->align_items, ALIGN_CENTER);
-    EXPECT_EQ(container->embed->flex_container->align_content, ALIGN_STRETCH);
+    EXPECT_EQ(container->embed->flex_container->direction, LXB_CSS_VALUE_ROW);
+    EXPECT_EQ(container->embed->flex_container->wrap, LXB_CSS_VALUE_WRAP);
+    EXPECT_EQ(container->embed->flex_container->justify, LXB_CSS_VALUE_SPACE_BETWEEN);
+    EXPECT_EQ(container->embed->flex_container->align_items, LXB_CSS_VALUE_CENTER);
+    EXPECT_EQ(container->embed->flex_container->align_content, LXB_CSS_VALUE_STRETCH);
 }

@@ -1240,19 +1240,65 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
         break;
     }
-    // case LXB_CSS_PROPERTY_ROW_GAP:
-    //     if (!block) { break; }
-    //     const lxb_css_property_row_gap_t *row_gap = declr->u.row_gap;
-    //     alloc_flex_container_prop(lycon, block);
-    //     block->flex_container->row_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_ROW_GAP, &row_gap->length);
-    //     break;
-        
-    // case LXB_CSS_PROPERTY_COLUMN_GAP:
-    //     if (!block) { break; }
-    //     const lxb_css_property_column_gap_t *column_gap = declr->u.column_gap;
-    //     alloc_flex_container_prop(lycon, block);
-    //     block->flex_container->column_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_COLUMN_GAP, &column_gap->length);
-    //     break;
+    case LXB_CSS_PROPERTY_ORDER: {
+        const lxb_css_property_order_t *order = declr->u.order;
+        span->order = order->integer.num;
+        break;
+    }
+    case LXB_CSS_PROPERTY_ALIGN_SELF: {
+        const lxb_css_property_align_self_t *align_self = declr->u.align_self;
+        span->align_self = align_self->type;
+        break;
+    }
+    case LXB_CSS_PROPERTY_FLEX_DIRECTION: {
+        if (!block) { break; }
+        const lxb_css_property_flex_direction_t *flex_direction = declr->u.flex_direction;
+        alloc_flex_container_prop(lycon, block);
+        block->embed->flex_container->direction = flex_direction->type;
+        break;
+    }
+    case LXB_CSS_PROPERTY_FLEX_WRAP: {
+        if (!block) { break; }
+        const lxb_css_property_flex_wrap_t *flex_wrap = declr->u.flex_wrap;
+        alloc_flex_container_prop(lycon, block);
+        block->embed->flex_container->wrap = flex_wrap->type;
+        break;
+    }
+    case LXB_CSS_PROPERTY_JUSTIFY_CONTENT: {
+        if (!block) { break; }
+        const lxb_css_property_justify_content_t *justify_content = declr->u.justify_content;
+        alloc_flex_container_prop(lycon, block);
+        block->embed->flex_container->justify = justify_content->type;
+        break;
+    }
+    case LXB_CSS_PROPERTY_ALIGN_ITEMS: {
+        if (!block) { break; }
+        const lxb_css_property_align_items_t *align_items = declr->u.align_items;
+        alloc_flex_container_prop(lycon, block);
+        block->embed->flex_container->align_items = align_items->type;
+        break;
+    }
+    case LXB_CSS_PROPERTY_ALIGN_CONTENT: {
+        if (!block) { break; }
+        const lxb_css_property_align_content_t *align_content = declr->u.align_content;
+        alloc_flex_container_prop(lycon, block);
+        block->embed->flex_container->align_content = align_content->type;
+        break;
+    }
+    case LXB_CSS_PROPERTY_ROW_GAP: {
+        if (!block) { break; }
+        const lxb_css_property_row_gap_t *row_gap = declr->u.row_gap;
+        alloc_flex_container_prop(lycon, block);
+        block->embed->flex_container->row_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_ROW_GAP, &row_gap->length);
+        break;
+    }
+    case LXB_CSS_PROPERTY_COLUMN_GAP: {
+        if (!block) { break; }
+        const lxb_css_property_column_gap_t *column_gap = declr->u.column_gap;
+        alloc_flex_container_prop(lycon, block);
+        block->embed->flex_container->column_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_COLUMN_GAP, &column_gap->length);
+        break;
+    }
         
     // case LXB_CSS_PROPERTY_GAP:
     //     if (!block) { break; }
