@@ -2588,7 +2588,13 @@ def main():
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
-        if arg in ['--platform', '-p'] and i + 1 < len(sys.argv):
+        if arg in ['--output', '-o'] and i + 1 < len(sys.argv):
+            output_file = sys.argv[i + 1]
+            i += 2
+        elif arg in ['--config', '-c'] and i + 1 < len(sys.argv):
+            config_file = sys.argv[i + 1]
+            i += 2
+        elif arg in ['--platform', '-p'] and i + 1 < len(sys.argv):
             explicit_platform = sys.argv[i + 1].lower()
             i += 2
         elif arg.endswith('.json'):
