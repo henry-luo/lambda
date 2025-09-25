@@ -165,7 +165,7 @@ void line_align(LayoutContext* lycon) {
 }
 
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
-    uintptr_t elmt_name = span->node->local_name();
+    uintptr_t elmt_name = span->node->tag();
     switch (elmt_name) {
     case LXB_TAG_B:
         if (!span->font) { span->font = alloc_font_prop(lycon); }
@@ -206,7 +206,7 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
 
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     printf("layout inline %s\n", elmt->name());
-    if (elmt->as_element() && elmt->local_name() == LXB_TAG_BR) { line_break(lycon); return; }
+    if (elmt->tag() == LXB_TAG_BR) { line_break(lycon); return; }
 
     // save parent context
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
