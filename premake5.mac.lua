@@ -311,6 +311,7 @@ project "radiant"
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/opt/sdl2/include/SDL2",
         "/opt/homebrew/opt/sdl2_image/include",
+        "/usr/local/include",
         "/opt/homebrew/include",
     }
     
@@ -323,8 +324,8 @@ project "radiant"
     
     links {
         "SDL2_image",
-        "ThorVG",
         "iconv",
+        "stdc++",
     }
     
     linkoptions {
@@ -334,9 +335,11 @@ project "radiant"
         "/opt/homebrew/opt/bzip2/lib/libbz2.a",
         "/opt/homebrew/lib/libfontconfig.a",
         "/opt/homebrew/opt/expat/lib/libexpat.a",
+        "/usr/local/lib/libthorvg.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
         "/opt/homebrew/lib/libintl.a",
         "/opt/homebrew/lib/libglfw3.a",
+        "/opt/homebrew/lib/libturbojpeg.a",
     }
     
     linkoptions {

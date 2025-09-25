@@ -211,84 +211,76 @@ cleanup_intermediate_files() {
     echo "Cleanup completed."
 }
 
-# Function to build lexbor for Mac
-build_lexbor_for_mac() {
-    echo "Building lexbor for Mac..."
+# Function to build lexbor submodule for Mac
+build_lexbor_submodule_for_mac() {
+    echo "Building lexbor submodule for Mac..."
     
-    # Check if already installed in system location
-    if [ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ]; then
-        echo "lexbor already installed in system location"
+    # Check if already built in submodule directory
+    if [ -f "lexbor/liblexbor_static.a" ]; then
+        echo "lexbor submodule already built"
         return 0
     fi
     
-    # Try Homebrew first
-    if command -v brew >/dev/null 2>&1; then
-        echo "Attempting to install lexbor via Homebrew..."
-        if brew list lexbor >/dev/null 2>&1; then
-            echo "lexbor already installed via Homebrew"
-            return 0
-        else
-            echo "Installing lexbor via Homebrew..."
-            if brew install lexbor; then
-                echo "✅ lexbor installed successfully via Homebrew"
-                return 0
-            else
-                echo "Homebrew installation failed, building from source..."
-            fi
-        fi
-    fi
-    
-    # Build from source if Homebrew is not available or failed
-    if [ ! -d "build_temp/lexbor" ]; then
-        cd build_temp
-        echo "Cloning lexbor repository..."
-        git clone https://github.com/lexbor/lexbor.git || {
-            echo "Warning: Could not clone lexbor repository"
-            cd - > /dev/null
+    # Ensure submodule is initialized
+    if [ ! -f "lexbor/CMakeLists.txt" ]; then
+        echo "Initializing lexbor submodule..."
+        git submodule update --init lexbor || {
+            echo "❌ Failed to initialize lexbor submodule"
             return 1
         }
-        cd - > /dev/null
     fi
-    
-    cd "build_temp/lexbor"
     
     # Check if CMakeLists.txt exists
-    if [ ! -f "CMakeLists.txt" ]; then
-        echo "Warning: CMakeLists.txt not found in lexbor directory"
-        cd - > /dev/null
+    if [ ! -f "lexbor/CMakeLists.txt" ]; then
+        echo "❌ CMakeLists.txt not found in lexbor submodule directory"
         return 1
     fi
+    
+    cd lexbor
+    
+    # Clean previous builds
+    rm -rf build-mac liblexbor_static.a 2>/dev/null || true
     
     # Create build directory
     mkdir -p build-mac
     cd build-mac
     
-    echo "Configuring lexbor with CMake..."
+    echo "Configuring lexbor submodule with CMake..."
     if cmake \
         -DCMAKE_BUILD_TYPE=Release \
-        -DLEXBOR_BUILD_SHARED=ON \
+        -DLEXBOR_BUILD_SHARED=OFF \
         -DLEXBOR_BUILD_STATIC=ON \
         -DLEXBOR_BUILD_TESTS=OFF \
         -DLEXBOR_BUILD_EXAMPLES=OFF \
-        -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" \
+        -DLEXBOR_INSTALL=OFF \
         ..; then
         
-        echo "Building lexbor..."
+        echo "Building lexbor submodule..."
         if make -j$(sysctl -n hw.ncpu); then
-            echo "Installing lexbor to system location (requires sudo)..."
-            sudo make install
-            
-            # Verify the build
-            if [ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ]; then
-                echo "✅ lexbor built successfully"
+            # Copy the static library to the lexbor root directory where build config expects it
+            if [ -f "source/liblexbor_static.a" ]; then
+                cp source/liblexbor_static.a ../liblexbor_static.a
+                echo "✅ lexbor submodule built successfully"
                 cd - > /dev/null
                 cd - > /dev/null
                 return 0
+            elif [ -f "liblexbor_static.a" ]; then
+                cp liblexbor_static.a ../liblexbor_static.a
+                echo "✅ lexbor submodule built successfully"
+                cd - > /dev/null
+                cd - > /dev/null
+                return 0
+            else
+                echo "❌ lexbor static library not found after build"
+                find . -name "*lexbor*" -type f | head -5
+                cd - > /dev/null
+                cd - > /dev/null
+                return 1
             fi
         fi
     fi
     
-    echo "❌ lexbor build failed"
+    echo "❌ lexbor submodule build failed"
     cd - > /dev/null
     cd - > /dev/null
     return 1
@@ -347,13 +339,13 @@ build_mir_for_mac() {
     return 1
 }
 
-# Function to build ThorVG for Mac
-build_thorvg_for_mac() {
-    echo "Building ThorVG for Mac..."
+# Function to build ThorVG v1.0-pre11 for Mac
+build_thorvg_v1_0_pre11_for_mac() {
+    echo "Building ThorVG v1.0-pre11 for Mac..."
     
     # Check if already installed in system location
     if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ]; then
-        echo "ThorVG already installed in system location"
+        echo "ThorVG v1.0-pre11 already installed in system location"
         return 0
     fi
     
@@ -369,6 +361,15 @@ build_thorvg_for_mac() {
     fi
     
     cd "build_temp/thorvg"
+    
+    # Checkout v1.0-pre11 specifically
+    echo "Checking out ThorVG v1.0-pre11..."
+    git fetch --tags
+    git checkout v1.0-pre11 || {
+        echo "❌ Failed to checkout ThorVG v1.0-pre11"
+        cd - > /dev/null
+        return 1
+    }
     
     # Check for meson build system
     if [ -f "meson.build" ]; then
@@ -411,11 +412,11 @@ build_thorvg_for_mac() {
             -Dtests=false \
             -Dexamples=false; then
             
-            echo "Building ThorVG..."
+            echo "Building ThorVG v1.0-pre11..."
             if meson compile -C build-mac; then
-                echo "Installing ThorVG to system location (requires sudo)..."
+                echo "Installing ThorVG v1.0-pre11 to system location (requires sudo)..."
                 if sudo meson install -C build-mac; then
-                    echo "✅ ThorVG built successfully"
+                    echo "✅ ThorVG v1.0-pre11 built successfully"
                     cd - > /dev/null
                     return 0
                 fi
@@ -427,7 +428,7 @@ build_thorvg_for_mac() {
         return 1
     fi
     
-    echo "❌ ThorVG build failed"
+    echo "❌ ThorVG v1.0-pre1 build failed"
     cd - > /dev/null
     return 1
 }
@@ -490,6 +491,85 @@ build_gtest_for_mac() {
     return 1
 }
 
+# Function to setup FreeType 2.13.3 for Mac (specific version required by build config)
+setup_freetype_2_13_3_for_mac() {
+    echo "Setting up FreeType 2.13.3 for Mac..."
+    
+    # Expected paths from build config
+    EXPECTED_FREETYPE_PATH="/opt/homebrew/Cellar/freetype/2.13.3"
+    EXPECTED_INCLUDE_PATH="$EXPECTED_FREETYPE_PATH/include/freetype2"
+    EXPECTED_LIB_PATH="$EXPECTED_FREETYPE_PATH/lib/libfreetype.a"
+    
+    # Check if the exact version is already installed
+    if [ -d "$EXPECTED_FREETYPE_PATH" ] && [ -f "$EXPECTED_INCLUDE_PATH/ft2build.h" ] && [ -f "$EXPECTED_LIB_PATH" ]; then
+        echo "✅ FreeType 2.13.3 already available at expected location"
+        return 0
+    fi
+    
+    if command -v brew >/dev/null 2>&1; then
+        echo "Installing FreeType 2.13.3 via Homebrew..."
+        
+        # Try to install the specific version
+        # First check if we need to unlink current version
+        if brew list freetype >/dev/null 2>&1; then
+            CURRENT_VERSION=$(brew list --versions freetype | cut -d' ' -f2)
+            if [ "$CURRENT_VERSION" != "2.13.3" ]; then
+                echo "Current FreeType version: $CURRENT_VERSION, need 2.13.3"
+                echo "Attempting to install FreeType 2.13.3..."
+                
+                # Try to install the specific version using Homebrew formula
+                if brew install freetype@2.13.3 2>/dev/null || brew install freetype; then
+                    echo "FreeType installation completed"
+                else
+                    echo "❌ Failed to install FreeType via Homebrew"
+                    return 1
+                fi
+            fi
+        else
+            # FreeType not installed, install it
+            if brew install freetype; then
+                echo "✅ FreeType installed successfully"
+            else
+                echo "❌ Failed to install FreeType via Homebrew"
+                return 1
+            fi
+        fi
+        
+        # Check what we actually got after installation
+        ACTUAL_PATH=$(find /opt/homebrew/Cellar/freetype -name "2.13.3*" -type d 2>/dev/null | head -1)
+        if [ -z "$ACTUAL_PATH" ]; then
+            # Try to find any freetype version and create symlink if needed
+            LATEST_VERSION=$(ls /opt/homebrew/Cellar/freetype/ | sort -V | tail -1)
+            ACTUAL_PATH="/opt/homebrew/Cellar/freetype/$LATEST_VERSION"
+            
+            if [ -d "$ACTUAL_PATH" ]; then
+                echo "Found FreeType $LATEST_VERSION, creating compatibility symlink for 2.13.3..."
+                ln -sf "$ACTUAL_PATH" "$EXPECTED_FREETYPE_PATH" 2>/dev/null || {
+                    echo "⚠️  Warning: Could not create symlink, build config may need manual adjustment"
+                    echo "Available at: $ACTUAL_PATH"
+                    echo "Expected at: $EXPECTED_FREETYPE_PATH"
+                    return 1
+                }
+            else
+                echo "❌ Could not find installed FreeType"
+                return 1
+            fi
+        fi
+        
+        # Final verification
+        if [ -f "$EXPECTED_INCLUDE_PATH/ft2build.h" ]; then
+            echo "✅ FreeType 2.13.3 setup completed successfully"
+            return 0
+        else
+            echo "❌ FreeType headers not found at expected location: $EXPECTED_INCLUDE_PATH"
+            return 1
+        fi
+    else
+        echo "❌ Homebrew not available - cannot install FreeType"
+        return 1
+    fi
+}
+
 echo "Found native compiler: $(which gcc)"
 
 # Build tree-sitter library for Mac
@@ -527,18 +607,16 @@ else
     echo "Tree-sitter-lambda already built for Mac"
 fi
 
-# Build lexbor for Mac
-echo "Setting up lexbor..."
-if [ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ]; then
-    echo "lexbor already available"
-elif command -v brew >/dev/null 2>&1 && brew list lexbor >/dev/null 2>&1; then
-    echo "lexbor already installed via Homebrew"
+# Build lexbor submodule for Mac
+echo "Setting up lexbor submodule..."
+if [ -f "lexbor/liblexbor_static.a" ]; then
+    echo "lexbor submodule already built"
 else
-    if ! build_lexbor_for_mac; then
-        echo "Warning: lexbor build failed"
+    if ! build_lexbor_submodule_for_mac; then
+        echo "❌ lexbor submodule build failed - required for Lambda project"
         exit 1
     else
-        echo "lexbor built successfully"
+        echo "✅ lexbor submodule built successfully"
     fi
 fi
 
@@ -555,17 +633,21 @@ else
     fi
 fi
 
-# Build ThorVG for Mac
-echo "Setting up ThorVG..."
-if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ]; then
-    echo "ThorVG already available"
+# Build ThorVG v1.0-pre1 for Mac
+echo "Setting up ThorVG ..."
+# Force rebuild to ensure we have the correct version (v1.0-pre1)
+echo "Removing existing ThorVG installation to ensure correct version..."
+sudo rm -f "$SYSTEM_PREFIX/lib/libthorvg"* 2>/dev/null || true
+sudo rm -f "$SYSTEM_PREFIX/include/thorvg"* 2>/dev/null || true
+sudo rm -rf "$SYSTEM_PREFIX/include/thorvg" 2>/dev/null || true
+sudo rm -f "$SYSTEM_PREFIX/lib/pkgconfig/thorvg.pc" 2>/dev/null || true
+rm -rf "build_temp/thorvg" 2>/dev/null || true
+
+if ! build_thorvg_v1_0_pre11_for_mac; then
+    echo "❌ ThorVG v1.0-pre11 build failed - required for Radiant project"
+    exit 1
 else
-    if ! build_thorvg_for_mac; then
-        echo "Warning: ThorVG build failed"
-        exit 1
-    else
-        echo "ThorVG built successfully"
-    fi
+    echo "✅ ThorVG v1.0-pre11 built successfully"
 fi
 
 # Build Google Test for Mac
@@ -579,6 +661,15 @@ else
     else
         echo "Google Test built successfully"
     fi
+fi
+
+# Setup FreeType 2.13.3 for Mac (required by Radiant project)
+echo "Setting up FreeType 2.13.3..."
+if ! setup_freetype_2_13_3_for_mac; then
+    echo "❌ FreeType 2.13.3 setup failed - required for Radiant project"
+    exit 1
+else
+    echo "✅ FreeType 2.13.3 setup completed successfully"
 fi
 
 # Install Homebrew dependencies that are required by build_lambda_config.json
@@ -597,9 +688,9 @@ HOMEBREW_DEPS=(
 )
 
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
+# Note: freetype is handled separately to ensure specific version 2.13.3
+# Note: lexbor is built from submodule instead of Homebrew
 RADIANT_DEPS=(
-    "lexbor"     # HTML/CSS parser library
-    "freetype"   # Font rendering library
     "sdl2"       # Cross-platform multimedia library
     "sdl2_image" # SDL2 image loading support
     "glfw"       # OpenGL window and context management
@@ -612,7 +703,7 @@ RADIANT_DEPS=(
 
 # Optional Radiant dependencies (not available in Homebrew, need manual installation)
 RADIANT_OPTIONAL_DEPS=(
-    # ThorVG will be built from source - see build_thorvg_for_mac function
+    # ThorVG will be built from source - see build_thorvg_v1_0_pre11_for_mac function
 )
 
 if command -v brew >/dev/null 2>&1; then
@@ -913,7 +1004,7 @@ if command -v brew >/dev/null 2>&1; then
     echo "- timeout: $([ -f "$BREW_PREFIX/bin/timeout" ] && command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo ""
     echo "Radiant project dependencies:"
-    echo "- lexbor: $(brew list lexbor >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+    echo "- lexbor (submodule): $([ -f "lexbor/liblexbor_static.a" ] && echo "✓ Built" || echo "✗ Missing")"
     echo "- freetype: $(brew list freetype >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- SDL2: $(brew list sdl2 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- SDL2_image: $(brew list sdl2_image >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
