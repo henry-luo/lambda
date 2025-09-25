@@ -21,6 +21,15 @@ bool is_only_whitespace(const char* str) {
     return true;
 }
 
+// DomNode style resolution function
+void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
+    log_debug("resolving style for node %p of type %d\n", node, node ? node->type : -1);
+    if (node && node->type == LEXBOR_ELEMENT && node->lxb_elmt && node->lxb_elmt->element.style) {
+        lexbor_avl_foreach_recursion(NULL, node->lxb_elmt->element.style, resolve_element_style, lycon);
+        log_debug("resolved element style for node %p: %p\n", node, node->lxb_elmt->element.style);
+    }
+}
+
 int calculate_vertical_align_offset(PropValue align, int item_height, int line_height, int baseline_pos, int item_baseline) {
     switch (align) {
     case LXB_CSS_VALUE_BASELINE:
@@ -209,11 +218,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // resolve element default styles
     resolve_inline_default(lycon, span);
     // resolve CSS styles
-    if (elmt->style) {
-        // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt); // doc->css->styles
-        // lexbor_avl_foreach_recursion(NULL, elmt->style, resolve_element_style, lycon);
-        // TODO: CSS style resolution via DomNode interface
-    }
+    dom_node_resolve_style(elmt, lycon);
     
     if (span->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, span->font);
@@ -241,11 +246,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     if (!node) {
         printf("Error: null node passed to layout_flow_node\n");
-        return;
-    }
-    // Check for invalid pointer addresses
-    if ((uintptr_t)node < 0x1000) {
-        printf("Error: invalid node pointer %p passed to layout_flow_node\n", node);
         return;
     }
     printf("layout node %s\n", node->name());
@@ -392,10 +392,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     lycon->block.given_width = lycon->ui_context->window_width;
     lycon->block.given_height = lycon->ui_context->window_height;    
     // load CSS stylesheets
-    if (elmt->style) {
-        // lexbor_avl_foreach_recursion(NULL, elmt->style, resolve_element_style, lycon);
-        // TODO: CSS style resolution via DomNode interface
-    }
+    dom_node_resolve_style(elmt, lycon);
 
     if (html->font) {
         setup_font(lycon->ui_context, &lycon->font, lycon->font.face->family_name, html->font);
