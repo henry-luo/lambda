@@ -88,8 +88,7 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
     if (!(block->embed && block->embed->doc)) { 
         // load iframe document
         size_t value_len;
-        const lxb_char_t *value = lxb_dom_element_get_attribute((lxb_dom_element_t *)block->node, 
-            (lxb_char_t*)"src", 3, &value_len);
+        const lxb_char_t *value = block->node->get_attribute("src", &value_len);
         if (value && value_len) {
             StrBuf* src = strbuf_new_cap(value_len);
             strbuf_append_str_n(src, (const char*)value, value_len);
@@ -121,21 +120,24 @@ void layout_iframe(LayoutContext* lycon, ViewBlock* block, DisplayValue display)
 
 void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue display) {
     log_debug("layout block content");
-    lxb_html_element_t *elmt = (lxb_html_element_t*)block->node;
+    
     if (block->display.inner == RDT_DISPLAY_REPLACED) {  // image, iframe
-        uintptr_t elmt_name = elmt->element.node.local_name;
+        uintptr_t elmt_name = block->node->local_name();
         if (elmt_name == LXB_TAG_IFRAME) {
             layout_iframe(lycon, block, display);
         }
         // else LXB_TAG_IMG
     } else {  // layout block child content
-        lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
+        DomNode *child = block->node->first_child();
         if (child) {
             lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
             if (display.inner == LXB_CSS_VALUE_FLOW) {
                 do {
+                    printf("Processing child %p\n", child);
                     layout_flow_node(lycon, child);
-                    child = lxb_dom_node_next(child);
+                    DomNode* next_child = child->next_sibling();
+                    printf("Got next sibling %p\n", next_child);
+                    child = next_child;
                 } while (child);
                 // handle last line
                 if (!lycon->line.is_line_start) { line_break(lycon); }                
@@ -152,9 +154,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
     }
 }
 
-void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue display) {
+void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
-    log_debug("<<layout block %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
+    log_debug("<<layout block %s\n", elmt->name());
     if (display.outer != LXB_CSS_VALUE_INLINE_BLOCK) {
         if (!lycon->line.is_line_start) { line_break(lycon); }
     }
@@ -166,11 +168,11 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
     // lycon->block.line_height // inherit
 
-    uintptr_t elmt_name = elmt->element.node.local_name;
+    uintptr_t elmt_name = elmt->local_name();
     ViewBlock* block = (ViewBlock*)alloc_view(lycon, 
         display.outer == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK : 
         (display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM : RDT_VIEW_BLOCK), 
-        (lxb_dom_node_t*)elmt);
+        elmt);
     block->display = display;
     // handle element default styles
     float em_size = 0;  size_t value_len;  const lxb_char_t *value;
@@ -224,14 +226,14 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
         block->blk->text_align = LXB_CSS_VALUE_CENTER;
         break;    
     case LXB_TAG_IMG:  // get html width and height (before the css styles)
-        value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"width", 5, &value_len);
+        value = elmt->get_attribute("width", &value_len);
         if (value) {
             StrView width_view = strview_init(value, value_len);
             int width = call_strview_to_int(&width_view);
             if (width >= 0) lycon->block.given_width = width * lycon->ui_context->pixel_ratio;
             // else width attr ignored
         }
-        value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"height", 6, &value_len);
+        value = elmt->get_attribute("height", &value_len);
         if (value) {
             StrView height_view = strview_init(value, value_len);
             int height = call_strview_to_int(&height_view);
@@ -257,10 +259,11 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     lycon->block.line_height = lycon->font.style.font_size * 1.2;  // default line height
 
     // resolve CSS styles
-    if (elmt->element.style) {
-        // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt);
-        lexbor_avl_foreach_recursion(NULL, elmt->element.style, resolve_element_style, lycon);
-        log_debug("resolved element style: %p\n", elmt->element.style);
+    lxb_html_element_t* lexbor_elmt = elmt->as_element();
+    if (lexbor_elmt && lexbor_elmt->element.style) {
+        // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)lexbor_elmt);
+        lexbor_avl_foreach_recursion(NULL, lexbor_elmt->element.style, resolve_element_style, lycon);
+        log_debug("resolved element style: %p\n", lexbor_elmt->element.style);
     }
  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
@@ -271,7 +274,7 @@ void layout_block(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue d
     block->x = pa_line.left;  block->y = pa_block.advance_y;
 
     if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
-        value = lxb_dom_element_get_attribute((lxb_dom_element_t *)elmt, (lxb_char_t*)"src", 3, &value_len);
+        value = elmt->get_attribute("src", &value_len);
         if (value && value_len) {
             StrBuf* src = strbuf_new_cap(value_len);
             strbuf_append_str_n(src, (const char*)value, value_len);

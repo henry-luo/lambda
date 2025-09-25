@@ -20,13 +20,13 @@ void target_children(EventContext* evcon, View* view) {
             view->type == RDT_VIEW_LIST_ITEM) {
             ViewBlock* block = (ViewBlock*)view;
             printf("target view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
-                lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
+                block->node->name(),
                 block->x, block->y, block->width, block->height);                
             target_block_view(evcon, block);
         }
         else if (view->type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
-            printf("target view inline:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));                
+            printf("target view inline:%s\n", span->node->name());                
             target_inline_view(evcon, span);
         }
         else if (view->type == RDT_VIEW_TEXT) {
@@ -42,7 +42,7 @@ void target_children(EventContext* evcon, View* view) {
 
 void target_text_view(EventContext* evcon, ViewText* text) {
     float x = evcon->block.x + text->x, y = evcon->block.y + text->y;
-    unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
+    unsigned char* str = text->node->text_data();  
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
     printf("target text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d\n", 
         str, text->start_index, text->length, text->x, text->y, text->width, text->height, evcon->block.x);
@@ -92,7 +92,7 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
 }
 
 void target_block_view(EventContext* evcon, ViewBlock* block) {
-    printf("targetting block: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL));
+    printf("targetting block: %s\n", block->node->name());
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
     evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
     MousePositionEvent* event = &evcon->event.mouse_position;
@@ -102,7 +102,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     if (block->scroller && block->scroller->pane) {
         hover = scrollpane_target(evcon, block);
         if (hover) {
-            printf("hit on block scroll: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL));
+            printf("hit on block scroll: %s\n", block->node->name());
             evcon->target = (View*)block;
             evcon->offset_x = event->x - evcon->block.x;
             evcon->offset_y = event->y - evcon->block.y;
@@ -125,7 +125,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             int x = evcon->block.x, y = evcon->block.y;
             if (x <= event->x && event->x < x + block->width &&
                 y <= event->y && event->y < y + block->height) {
-                printf("hit on block: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL));
+                printf("hit on block: %s\n", block->node->name());
                 evcon->target = (View*)block;
                 evcon->offset_x = event->x - evcon->block.x;
                 evcon->offset_y = event->y - evcon->block.y;                
@@ -175,18 +175,17 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
     if (span->in_line && span->in_line->cursor) {
         evcon->new_cursor = span->in_line->cursor;
     }
-    int name = ((lxb_html_element_t*)span->node)->element.node.local_name;
-    printf("fired at view %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));
+    uintptr_t name = span->node->local_name();
+    printf("fired at view %s\n", span->node->name());
     if (name == LXB_TAG_A) {
         printf("fired at anchor tag\n");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
             log_debug("mouse down at anchor tag");
-            lxb_dom_attr_t *href = lxb_dom_element_attr_by_id(lxb_dom_interface_element(span->node), LXB_DOM_ATTR_HREF);
+            const lxb_char_t *href = span->node->get_attribute("href");
             if (href) {
-                printf("got anchor href: %s\n", href->value->data);
-                evcon->new_url = (char*)href->value->data;
-                lxb_char_t *target = (lxb_char_t*)lxb_dom_element_get_attribute(
-                    lxb_dom_interface_element(span->node), (const lxb_char_t *)"target", 6, NULL);
+                printf("got anchor href: %s\n", href);
+                evcon->new_url = (char*)href;
+                const lxb_char_t *target = span->node->get_attribute("target");
                 if (target) {
                     log_debug("got anchor target: %s", target);
                     evcon->new_target = (char*)target;
@@ -304,7 +303,7 @@ lxb_dom_element_t *set_iframe_src_by_name(lxb_html_document_t *document,
 
 // find the sub-view that matches the given node
 View* find_view(View* view, lxb_dom_node_t *node) {
-    if (view->node == node) { return view; }
+    if (view->node && view->node->as_node() == node) { return view; }
     if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
         view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_INLINE) {
         ViewGroup* group = (ViewGroup*)view;

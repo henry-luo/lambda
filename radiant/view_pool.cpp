@@ -3,7 +3,7 @@
 #include "../lib/log.h"
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
 
-View* alloc_view(LayoutContext* lycon, ViewType type, lxb_dom_node_t *node) {
+View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
     View* view;  MemPoolError err;
     ViewTree* tree = lycon->doc->view_tree;
     switch (type) {
@@ -259,7 +259,7 @@ void print_block(ViewBlock* block, StrBuf* buf, int indent) {
         block->type == RDT_VIEW_BLOCK ? "block" : 
         block->type == RDT_VIEW_INLINE_BLOCK ? "inline-block" : 
         block->type == RDT_VIEW_LIST_ITEM ? "list-item" : "image",
-        lxb_dom_element_local_name(lxb_dom_interface_element(block->node), NULL),
+        block->node->name(),
         block->x, block->y, block->width, block->height);
     print_block_props(block, buf, indent + 2);
     print_inline_props((ViewSpan*)block, buf, indent+2);              
@@ -280,7 +280,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                 strbuf_append_char_n(buf, ' ', indent);
                 ViewSpan* span = (ViewSpan*)view;
                 strbuf_append_format(buf, "[view-inline:%s\n",
-                    lxb_dom_element_local_name(lxb_dom_interface_element(span->node), NULL));
+                    span->node->name());
                 print_inline_props(span, buf, indent + 2);
                 print_view_group((ViewGroup*)view, buf, indent + 2);
                 strbuf_append_char_n(buf, ' ', indent);
@@ -289,9 +289,9 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
             else if (view->type == RDT_VIEW_TEXT) {
                 strbuf_append_char_n(buf, ' ', indent);
                 ViewText* text = (ViewText*)view;
-                lxb_dom_text_t *node = lxb_dom_interface_text(view->node);
-                unsigned char* str = node->char_data.data.data + text->start_index;
-                if (!(*str) || text->length <= 0) {
+                unsigned char* text_data = view->node->text_data();
+                unsigned char* str = text_data ? text_data + text->start_index : nullptr;
+                if (!str || !(*str) || text->length <= 0) {
                     strbuf_append_format(buf, "invalid text node: len:%d\n", text->length); 
                 } else {
                     strbuf_append_str(buf, "text:'");

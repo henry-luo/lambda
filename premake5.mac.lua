@@ -148,6 +148,9 @@ project "lambda-input-full-c"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
 
@@ -245,6 +248,9 @@ project "lambda-input-full-cpp"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
 
@@ -538,9 +544,6 @@ project "lambda"
         "/opt/homebrew/lib/libhpdf.a",
         "/opt/homebrew/lib/libnghttp2.a",
         "../../lexbor/liblexbor_static.a",
-        "../../-framework Cocoa",
-        "../../-framework IOKit",
-        "../../-framework CoreVideo",
         "/opt/homebrew/lib/libmpdec.a",
         "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
@@ -561,6 +564,9 @@ project "lambda"
             "-framework CoreFoundation",
             "-framework CoreServices",
             "-framework SystemConfiguration",
+            "-framework Cocoa",
+            "-framework IOKit",
+            "-framework CoreVideo",
         }
     
     filter {}
@@ -1170,6 +1176,9 @@ project "test_mime_detect_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -1264,6 +1273,9 @@ project "test_math_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -1358,6 +1370,9 @@ project "test_math_ascii_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -1452,6 +1467,9 @@ project "test_markup_roundtrip_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -1546,6 +1564,9 @@ project "test_input_roundtrip_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -1640,6 +1661,9 @@ project "test_dir_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -1734,6 +1758,9 @@ project "test_http_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -1828,6 +1855,9 @@ project "test_sysinfo_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -1922,6 +1952,9 @@ project "test_jsx_roundtrip_new_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -2016,6 +2049,9 @@ project "test_mdx_roundtrip_new_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -2110,6 +2146,9 @@ project "test_css_tokenizer_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -2204,6 +2243,9 @@ project "test_css_parser_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -2298,6 +2340,9 @@ project "test_css_integration_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -2392,6 +2437,9 @@ project "test_css_files_safe_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -2486,6 +2534,9 @@ project "test_css_frameworks_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -2580,6 +2631,9 @@ project "test_mdx_roundtrip_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -2674,6 +2728,9 @@ project "test_jsx_roundtrip_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -2768,6 +2825,9 @@ project "test_validator_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
@@ -2861,6 +2921,9 @@ project "test_ast_validator_gtest"
         "-framework CoreFoundation",
         "-framework CoreServices",
         "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
     }
     
     links { "stdc++" }
