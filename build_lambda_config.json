@@ -1234,8 +1234,10 @@
                             "radiant",
                             "lib/mem-pool/include",
                             "lexbor/source",
-                            "/opt/homebrew/Cellar/fontconfig/2.17.1/include",
                             "/opt/homebrew/include"
+                        ],
+                        "defines": [
+                            "FLEX_TEST_MODE"
                         ]
                     },
                     {
@@ -1267,6 +1269,26 @@
                         ],
                         "binary": "test_flex_minimal.exe",
                         "includes": []
+                    },
+                    {
+                        "source": "test/test_flex_layout.cpp",
+                        "name": "📦 Comprehensive Flex Layout Tests (Criterion)",
+                        "dependencies": [
+                            "radiant"
+                        ],
+                        "libraries": [
+                            "criterion"
+                        ],
+                        "binary": "test_flex_layout.exe",
+                        "includes": [
+                            "radiant",
+                            "lib/mem-pool/include",
+                            "lexbor/source",
+                            "/opt/homebrew/include"
+                        ],
+                        "defines": [
+                            "FLEX_TEST_MODE"
+                        ]
                     }
                 ],
                 "type": "radiant",

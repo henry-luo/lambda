@@ -2840,6 +2840,10 @@ project "test_radiant_flex_algorithm_gtest"
         "/opt/homebrew/include",
     }
     
+    defines {
+        "FLEX_TEST_MODE",
+    }
+    
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
@@ -2971,6 +2975,64 @@ project "test_flex_minimal"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-std=c++17",
+    }
+    
+
+project "test_flex_layout"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_flex_layout.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lexbor/source",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    defines {
+        "FLEX_TEST_MODE",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "criterion",
+        "nanomsg",
+        "git2",
     }
     
     links { "stdc++" }

@@ -5,10 +5,12 @@
 extern "C" {
 #endif
 #include <GLFW/glfw3.h>
+#ifndef FLEX_TEST_MODE
 #include <fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <thorvg_capi.h>
+#endif
 #ifdef __cplusplus
 }
 #endif
