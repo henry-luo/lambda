@@ -80,3 +80,6 @@ void free_flex_container(FlexContainer* container);
 void line_init(LayoutContext* lycon);
 int calculate_vertical_align_offset(PropValue align, int item_height, int line_height, int baseline_pos, int item_baseline);
 void view_vertical_align(LayoutContext* lycon, View* view);
+
+// DomNode style resolution
+void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);

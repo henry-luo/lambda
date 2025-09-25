@@ -208,7 +208,7 @@ void log_init_wrapper() {
     // empty existing log file
     FILE *file = fopen("log.txt", "w");
     if (file ) { fclose(file); }
-    log_init("log.conf");
+    log_parse_config_file("log.conf");
 }
 void log_cleanup() {
     log_finish();

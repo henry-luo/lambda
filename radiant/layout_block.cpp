@@ -13,6 +13,7 @@ static int call_strview_to_int(StrView* s) {
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
+void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display) {
     // finalize the block size
@@ -259,12 +260,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->block.line_height = lycon->font.style.font_size * 1.2;  // default line height
 
     // resolve CSS styles
-    lxb_html_element_t* lexbor_elmt = elmt->as_element();
-    if (lexbor_elmt && lexbor_elmt->element.style) {
-        // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)lexbor_elmt);
-        lexbor_avl_foreach_recursion(NULL, lexbor_elmt->element.style, resolve_element_style, lycon);
-        log_debug("resolved element style: %p\n", lexbor_elmt->element.style);
-    }
+    dom_node_resolve_style(elmt, lycon);
  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     if (block->blk) lycon->block.text_align = block->blk->text_align;
