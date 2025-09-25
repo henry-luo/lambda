@@ -9,9 +9,18 @@
                 "${workspaceFolder}/lambda/tree-sitter-lambda/bindings/c",
                 "${workspaceFolder}/mac-deps/curl-8.10.1/include",
                 "${workspaceFolder}/include",
+                "${workspaceFolder}/lexbor/source",
+                "${workspaceFolder}/radiant",
                 "/usr/local/include",
                 "/opt/homebrew/include",
                 "/opt/homebrew/include/openssl",
+                "/opt/homebrew/include/fontconfig",
+                "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+                "/opt/homebrew/opt/sdl2/include/SDL2",
+                "/opt/homebrew/opt/sdl2_image/include",
+                "/opt/homebrew/opt/bzip2/include",
+                "/opt/homebrew/opt/expat/include",
+                "/opt/homebrew/opt/zlib/include",
                 "/Library/Developer/CommandLineTools/usr/lib/clang/17/include",
                 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1",
                 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -25,7 +34,8 @@
                 "_GNU_SOURCE",
                 "__STDC_LIMIT_MACROS",
                 "__STDC_CONSTANT_MACROS",
-                "_WIN32=0"
+                "_WIN32=0",
+                "_POSIX_C_SOURCE=200809L"
             ],
             "macFrameworkPath": [
                 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
@@ -47,6 +57,8 @@
                     "${workspaceFolder}/typeset",
                     "${workspaceFolder}/test",
                     "${workspaceFolder}/include",
+                    "${workspaceFolder}/lexbor",
+                    "${workspaceFolder}/radiant",
                     "/usr/local/include",
                     "/opt/homebrew/include"
                 ],
@@ -63,9 +75,18 @@
                 "${workspaceFolder}/lambda/tree-sitter-lambda/bindings/c",
                 "${workspaceFolder}/mac-deps/curl-8.10.1/include",
                 "${workspaceFolder}/include",
+                "${workspaceFolder}/lexbor/source",
+                "${workspaceFolder}/radiant",
                 "/usr/local/include",
                 "/opt/homebrew/include",
                 "/opt/homebrew/include/openssl",
+                "/opt/homebrew/include/fontconfig",
+                "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+                "/opt/homebrew/opt/sdl2/include/SDL2",
+                "/opt/homebrew/opt/sdl2_image/include",
+                "/opt/homebrew/opt/bzip2/include",
+                "/opt/homebrew/opt/expat/include",
+                "/opt/homebrew/opt/zlib/include",
                 "/Library/Developer/CommandLineTools/usr/lib/clang/17/include",
                 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1",
                 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -79,7 +100,8 @@
                 "_GNU_SOURCE",
                 "__STDC_LIMIT_MACROS",
                 "__STDC_CONSTANT_MACROS",
-                "_DEBUG"
+                "_DEBUG",
+                "_POSIX_C_SOURCE=200809L"
             ],
             "macFrameworkPath": [
                 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
@@ -105,6 +127,8 @@
                     "${workspaceFolder}/typeset",
                     "${workspaceFolder}/test",
                     "${workspaceFolder}/include",
+                    "${workspaceFolder}/lexbor",
+                    "${workspaceFolder}/radiant",
                     "/usr/local/include",
                     "/opt/homebrew/include"
                 ],
@@ -121,9 +145,18 @@
                 "${workspaceFolder}/lambda/tree-sitter-lambda/bindings/c",
                 "${workspaceFolder}/mac-deps/curl-8.10.1/include",
                 "${workspaceFolder}/include",
+                "${workspaceFolder}/lexbor/source",
+                "${workspaceFolder}/radiant",
                 "/usr/local/include",
                 "/opt/homebrew/include",
                 "/opt/homebrew/include/openssl",
+                "/opt/homebrew/include/fontconfig",
+                "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+                "/opt/homebrew/opt/sdl2/include/SDL2",
+                "/opt/homebrew/opt/sdl2_image/include",
+                "/opt/homebrew/opt/bzip2/include",
+                "/opt/homebrew/opt/expat/include",
+                "/opt/homebrew/opt/zlib/include",
                 "/Library/Developer/CommandLineTools/usr/lib/clang/17/include",
                 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1",
                 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
@@ -137,7 +170,8 @@
                 "_GNU_SOURCE",
                 "__STDC_LIMIT_MACROS",
                 "__STDC_CONSTANT_MACROS",
-                "NDEBUG"
+                "NDEBUG",
+                "_POSIX_C_SOURCE=200809L"
             ],
             "macFrameworkPath": [
                 "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks"
@@ -161,6 +195,8 @@
                     "${workspaceFolder}/typeset",
                     "${workspaceFolder}/test",
                     "${workspaceFolder}/include",
+                    "${workspaceFolder}/lexbor",
+                    "${workspaceFolder}/radiant",
                     "/usr/local/include",
                     "/opt/homebrew/include"
                 ],
