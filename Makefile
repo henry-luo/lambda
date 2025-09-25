@@ -534,11 +534,11 @@ lambda: build
 build-radiant: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building Radiant HTML/CSS/SVG rendering engine..."
 	@echo "Generating Premake configuration for Radiant..."
-	$(PYTHON) utils/generate_premake.py --config $(DEFAULT_CONFIG) --output premake5.radiant.lua
+	$(PYTHON) utils/generate_premake.py --config $(RADIANT_CONFIG) --output premake5.radiant.lua
 	@echo "Generating makefiles for Radiant..."
 	$(PREMAKE5) gmake --file=premake5.radiant.lua
 	@echo "Building radiant executable with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native radian -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+	$(MAKE) -C build/premake config=debug_native radiant -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
 	@echo "✅ Radiant build completed. Executable: radiant.exe"
 
 radiant: build-radiant

@@ -1,5 +1,5 @@
 {
-    "output": "window.exe",
+    "output": "radiant.exe",
     "source_files": [
         "radiant/window.c",
         "radiant/ui_context.c",
@@ -26,6 +26,7 @@
         "lib/mem-pool/src/utils.c",
         "lib/file.c",
         "lib/url.c",
+        "lib/url_parser.c",
         "lib/utf.c"
     ],
     "libraries": [
@@ -33,8 +34,8 @@
             "name": "lexbor",
             "_include_original": "/opt/homebrew/opt/lexbor/include",
             "_lib_original": "/opt/homebrew/opt/lexbor/lib/liblexbor_static.a",
-            "include": "/usr/local/include",
-            "lib": "/usr/local/lib/liblexbor_static.a",            
+            "include": "lexbor/source",
+            "lib": "lexbor/liblexbor_static.a",            
             "link": "static"
         },
         {
@@ -70,19 +71,25 @@
         {
             "name": "SDL2_image",
             "include": "/opt/homebrew/opt/sdl2/include/SDL2 -I/opt/homebrew/opt/sdl2_image/include",
-            "lib": "/opt/homebrew/opt/sdl2_image/lib/",
+            "lib": "SDL2_image",
             "link": "dynamic"
         },
         {
             "name": "ThorVG",
             "include": "/opt/homebrew/include",
-            "lib": "/opt/homebrew/lib",
+            "lib": "thorvg",
             "link": "dynamic"
         },
         {
             "name": "zlib",
             "include": null,
             "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
+            "link": "static"
+        },
+        {
+            "name": "intl",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libintl.a",
             "link": "static"
         },
         {
@@ -95,26 +102,36 @@
             "name": "GL",
             "include": null,
             "lib": "-framework OpenGL",
-            "link": "static"
+            "link": "dynamic"
         },
         {
             "name": "Cocoa",
             "include": null,
             "lib": "-framework Cocoa",
-            "link": "static"
+            "link": "dynamic"
         },
         {
             "name": "IOKit",
             "include": null,
             "lib": "-framework IOKit",
-            "link": "static"
+            "link": "dynamic"
         },    
         {
             "name": "CoreVideo",
             "include": null,
             "lib": "-framework CoreVideo",
-            "link": "static"
+            "link": "dynamic"
+        },
+        {
+            "name": "iconv",
+            "include": null,
+            "lib": "iconv",
+            "link": "dynamic"
         }     
+    ],
+    "lib_dirs": [
+        "/opt/homebrew/lib",
+        "/opt/homebrew/opt/sdl2_image/lib"
     ],
     "warnings": [
         "incompatible-pointer-types",

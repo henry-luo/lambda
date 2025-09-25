@@ -129,6 +129,13 @@
             "include": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
             "lib": "-lz",
             "link": "dynamic"
+        },
+        {
+            "name": "lexbor",
+            "description": "Fast HTML/CSS parser and manipulation library (custom build)",
+            "include": "lexbor/source",
+            "lib": "lexbor/liblexbor_static.a",
+            "link": "static"
         }
     ],
     "dev_libraries": [

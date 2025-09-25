@@ -2102,7 +2102,7 @@ class PremakeGenerator:
         project_name = output.replace('.exe', '')
         
         # Use platform-specific target names
-        target_name = 'lambda'
+        target_name = output.replace('.exe', '')  # Use the config output name without .exe
         target_extension = '.exe'
         
         # Add files from source directories explicitly

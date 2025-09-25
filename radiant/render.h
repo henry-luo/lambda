@@ -8,7 +8,7 @@ typedef struct {
     BlockBlot block;
     ListBlot list;
     Color color; 
-    Tvg_Canvas* canvas;    // ThorVG canvas
+    Tvg_Canvas* canvas;   // ThorVG canvas
     
     UiContext* ui_context;
 } RenderContext;

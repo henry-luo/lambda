@@ -60,7 +60,7 @@ typedef struct ImageSurface {
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit    
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
-    Tvg_Paint* pic;        // ThorVG picture for SVG image
+    Tvg_Paint* pic;       // ThorVG picture for SVG image
     int max_render_width;  // maximum width for rendering the image
     lxb_url_t* url;        // the resolved absolute URL of the image
 } ImageSurface;

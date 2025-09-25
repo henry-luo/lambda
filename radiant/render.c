@@ -223,7 +223,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
             view->bound->border->radius.bottom_right > 0)) {
             // fill the background with rounded corners
             tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
-            Tvg_Paint *bg_shape = tvg_shape_new();
+            Tvg_Paint* bg_shape = tvg_shape_new();
             tvg_shape_append_rect(bg_shape, rect.x, rect.y, rect.width, rect.height, 
                 view->bound->border->radius.top_left, view->bound->border->radius.top_right);
             Color bgcolor = view->bound->background->color;
