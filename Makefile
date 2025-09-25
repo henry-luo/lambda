@@ -224,13 +224,15 @@ define mingw64_dll_check
 endef
 
 # Function to run make with error collection and summary
+# Usage: $(call run_make_with_error_summary,TARGET)
+# TARGET: The make target to build (e.g., lambda, radiant)
 define run_make_with_error_summary
-	@echo "🔨 Starting build process..."
+	@echo "🔨 Starting build process for target: $(1)..."
 	@BUILD_LOG=$$(mktemp) && \
-	if $(MAKE) -C build/premake config=debug_native lambda -j$(JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)" 2>&1 | tee "$$BUILD_LOG"; then \
-		echo "✅ Build completed successfully."; \
+	if $(MAKE) -C build/premake config=debug_native $(1) -j$(JOBS) CC="$(CC)" CXX="$(CXX)" AR="$(AR)" RANLIB="$(RANLIB)" LINK_JOBS="$(LINK_JOBS)" 2>&1 | tee "$$BUILD_LOG"; then \
+		echo "✅ Build completed successfully for target: $(1)"; \
 	else \
-		echo "❌ Build failed."; \
+		echo "❌ Build failed for target: $(1)"; \
 	fi; \
 	echo ""; \
 	echo "📋 Build Summary:"; \
@@ -444,7 +446,7 @@ else
 	@echo "Building lambda executable with $(JOBS) parallel jobs..."
 	# Ensure explicit compiler variables are passed to Premake build
 	@echo "Using CC=$(CC) CXX=$(CXX)"
-	$(call run_make_with_error_summary)
+	$(call run_make_with_error_summary,lambda)
 endif
 
 print-vars:
@@ -539,8 +541,9 @@ build-radiant: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Generating makefiles for unified build..."
 	$(PREMAKE5) gmake --file=premake5.mac.lua
 	@echo "Building radiant executable with $(JOBS) parallel jobs..."
-	$(MAKE) -C build/premake config=debug_native radiant -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
-	@echo "✅ Radiant build completed. Executable: radiant.exe"
+	# Ensure explicit compiler variables are passed to Premake build
+	@echo "Using CC=$(CC) CXX=$(CXX)"
+	$(call run_make_with_error_summary,radiant)
 
 radiant: build-radiant
 
@@ -549,8 +552,6 @@ radiant: build-radiant
 # Build all projects
 all: lambda
 	@echo "All projects built successfully."
-
-
 
 # Debugging builds with specific directories
 build-debug:
