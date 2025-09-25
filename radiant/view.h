@@ -4,6 +4,8 @@
 #include <fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+// #include "lib/arraylist.h"
+#include "lib/log.h"
 #include <thorvg_capi.h>
 #include "../lib/mem-pool/include/mem_pool.h"
 #include "event.h"

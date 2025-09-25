@@ -10,7 +10,7 @@
 #include <lexbor/css/css.h>
 #include <lexbor/style/style.h>
 #include <lexbor/url/url.h>
-#include <zlog.h> 
+#include "../lib/log.h"
 #include "../lib/strview.h"
 #include "../lib/strbuf.h"
 #include "../lib/hashmap.h"

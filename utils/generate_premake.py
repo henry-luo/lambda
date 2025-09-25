@@ -632,13 +632,17 @@ class PremakeGenerator:
         ])
     
     def generate_complex_libraries(self) -> None:
-        """Generate complex library projects like lambda-runtime-full"""
+        """Generate complex library projects and executable targets"""
         targets = self.config.get('targets', [])
         
         for lib in targets:
             lib_name = lib.get('name', '')
+            # Handle library targets
             if lib_name in ['lambda-runtime-full', 'lambda-input-full', 'lambda-lib']:
                 self._generate_complex_library(lib)
+            # Handle executable targets
+            elif lib.get('output'):  # If target has an output field, treat it as an executable
+                self._generate_target_executable(lib)
     
     def _generate_complex_library(self, lib: Dict[str, Any]) -> None:
         """Generate complex library with multiple source files and dependencies"""
@@ -1013,6 +1017,160 @@ class PremakeGenerator:
                     if lib_flag.startswith('-framework '):
                         self.premake_content.append(f'        "{lib_flag}",')
             
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+        
+        self.premake_content.append('')
+    
+    def _generate_target_executable(self, target: Dict[str, Any]) -> None:
+        """Generate an executable target like radiant"""
+        target_name = target.get('name', '')
+        output_file = target.get('output', f"{target_name}.exe")
+        description = target.get('description', f"{target_name} executable")
+        source_files = target.get('source_files', [])
+        libraries = target.get('libraries', [])
+        warnings = target.get('warnings', [])
+        flags = target.get('flags', [])
+        
+        # Remove .exe extension for project name
+        project_name = output_file.replace('.exe', '')
+        
+        print(f"DEBUG: Generating executable target: {target_name} -> {output_file}")
+        
+        self.premake_content.extend([
+            f'project "{project_name}"',
+            '    kind "ConsoleApp"',
+            '    language "C"',  # Default to C, will be overridden if C++ files are found
+            f'    targetname "{project_name}"',
+            f'    -- {description}',
+            '    ',
+        ])
+        
+        # Set language based on source files
+        has_cpp = any(f.endswith('.cpp') for f in source_files)
+        if has_cpp:
+            self.premake_content.append('    language "C++"')
+        
+        # Add source files
+        if source_files:
+            self.premake_content.append('    files {')
+            for source_file in source_files:
+                self.premake_content.append(f'        "{source_file}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+        
+        # Add libraries and include paths
+        if libraries:
+            # Collect include paths and group libraries by type
+            include_paths = []
+            static_libs = []
+            dynamic_libs = []
+            framework_libs = []
+            system_libs = []
+            
+            for lib in libraries:
+                if isinstance(lib, dict):
+                    lib_name = lib.get('name', '')
+                    lib_path = lib.get('lib', '')
+                    include_path = lib.get('include', '')
+                    link_type = lib.get('link', 'static')
+                    
+                    # Add include path if specified
+                    if include_path and include_path not in include_paths:
+                        # Handle multiple include paths separated by spaces (like SDL2)
+                        if ' -I' in include_path:
+                            paths = include_path.split(' -I')
+                            include_paths.append(paths[0])  # First path
+                            for path in paths[1:]:
+                                if path.strip():
+                                    include_paths.append(path.strip())
+                        else:
+                            include_paths.append(include_path)
+                    
+                    # Categorize library for linking
+                    if lib_path.startswith('-framework'):
+                        framework_libs.append(lib_path)
+                    elif link_type == 'dynamic':
+                        if lib_path.startswith('-l'):
+                            system_libs.append(lib_path[2:])  # Remove -l prefix
+                        else:
+                            dynamic_libs.append(lib_name)
+                    else:
+                        static_libs.append(lib_name)
+                elif isinstance(lib, str):
+                    static_libs.append(lib)
+            
+            # Add include paths (always include project root and lib directories)
+            all_include_paths = ['.', 'lib']  # Start with project root and lib directory
+            all_include_paths.extend(include_paths)
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_include_paths = []
+            for path in all_include_paths:
+                if path and path not in seen:
+                    unique_include_paths.append(path)
+                    seen.add(path)
+            
+            if unique_include_paths:
+                self.premake_content.append('    includedirs {')
+                for include_path in unique_include_paths:
+                    self.premake_content.append(f'        "{include_path}",')
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
+            
+            # Add library references
+            if static_libs or dynamic_libs:
+                self.premake_content.append('    links {')
+                for lib in static_libs + dynamic_libs:
+                    self.premake_content.append(f'        "{lib}",')
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
+            
+            # Add system libraries
+            if system_libs:
+                self.premake_content.append('    links {')
+                for lib in system_libs:
+                    self.premake_content.append(f'        "{lib}",')
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
+            
+            # Add framework libraries (macOS)
+            if framework_libs:
+                self.premake_content.append('    linkoptions {')
+                for framework in framework_libs:
+                    self.premake_content.append(f'        "{framework}",')
+                self.premake_content.extend([
+                    '    }',
+                    '    '
+                ])
+        
+        # Add warnings
+        if warnings:
+            self.premake_content.append('    disablewarnings {')
+            for warning in warnings:
+                self.premake_content.append(f'        "{warning}",')
+            self.premake_content.extend([
+                '    }',
+                '    '
+            ])
+        
+        # Add flags
+        if flags:
+            self.premake_content.append('    buildoptions {')
+            for flag in flags:
+                formatted_flag = flag if flag.startswith('-') else f'-{flag}'
+                self.premake_content.append(f'        "{formatted_flag}",')
             self.premake_content.extend([
                 '    }',
                 '    '
