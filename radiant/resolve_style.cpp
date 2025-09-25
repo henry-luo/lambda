@@ -228,8 +228,10 @@ void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* d
     printf("resolve font size property\n");
     if (!decl) {
         printf("no decl\n");
-        if (lycon->elmt->element.style) {
-            decl = lxb_dom_element_style_by_id((lxb_dom_element_t*)lycon->elmt, LXB_CSS_PROPERTY_FONT_SIZE);
+        if (lycon->elmt->style) {
+            if (lycon->elmt->as_element()) {
+                decl = lxb_dom_element_style_by_id((lxb_dom_element_t*)lycon->elmt->as_element(), LXB_CSS_PROPERTY_FONT_SIZE);
+            }
         }
     }
     if (decl) {

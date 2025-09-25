@@ -83,17 +83,17 @@ void reflow_flex_item(LayoutContext* lycon, ViewBlock* block) {
     log_debug("block view: %d, end block>>\n", block->type);
 }
 
-void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
+void layout_flex_nodes(LayoutContext* lycon, DomNode *first_child) {
     log_debug("layout flex nodes");
     ViewBlock* block = (ViewBlock*)lycon->view;
     alloc_flex_container_prop(lycon, block); 
     
     // Count children first
     int child_count = 0;
-    lxb_dom_node_t *child = first_child;
+    DomNode *child = first_child;
     while (child) {
         child_count++;
-        child = lxb_dom_node_next(child);
+        child = child->next_sibling();
     }
     
     if (child_count == 0) return;
@@ -129,10 +129,10 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
     DisplayValue display = {.outer = LXB_CSS_VALUE_INLINE_BLOCK, .inner = LXB_CSS_VALUE_FLOW};
     while (child && index < child_count) {
         // Layout child in measuring mode to determine its size 
-        if (child->type == LXB_DOM_NODE_TYPE_ELEMENT) {
+        if (child->is_element()) {
             // reset avance_x and advance_y for each child
             lycon->line.advance_x = 0;  lycon->block.advance_y = 0;
-            layout_block(lycon, (lxb_html_element_t*)child, display);
+            layout_block(lycon, child, display);
 
             if (lycon->prev_view && lycon->prev_view->type >= RDT_VIEW_INLINE_BLOCK) {
                 ViewBlock* child_block = (ViewBlock*)lycon->prev_view;
@@ -180,7 +180,7 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
                 index++;
             }
         }
-        child = lxb_dom_node_next(child);
+        child = child->next_sibling();
     }
     
     // Run flex layout algorithm

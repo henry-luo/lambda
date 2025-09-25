@@ -842,19 +842,19 @@
                     "name": "Cocoa",
                     "include": null,
                     "lib": "-framework Cocoa",
-                    "link": "static"
+                    "link": "dynamic"
                 },
                 {
                     "name": "IOKit",
                     "include": null,
                     "lib": "-framework IOKit",
-                    "link": "static"
+                    "link": "dynamic"
                 },
                 {
                     "name": "CoreVideo",
                     "include": null,
                     "lib": "-framework CoreVideo",
-                    "link": "static"
+                    "link": "dynamic"
                 }
             ]
         }

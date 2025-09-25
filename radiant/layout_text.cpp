@@ -1,7 +1,18 @@
 #include "layout.hpp"
 
 #include "../lib/log.h"
-LineFillStatus span_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* span);
+
+// Forward declarations
+LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node);
+LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode *text_node);
+LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span) {
+    DomNode *node = span->first_child();
+    if (node) {
+        LineFillStatus result = node_has_line_filled(lycon, node);
+        if (result) { return result; }
+    }
+    return RDT_NOT_SURE;
+}
 
 void line_init(LayoutContext* lycon) {
     lycon->line.max_ascender = lycon->line.max_descender = 0;
@@ -41,8 +52,10 @@ void line_break(LayoutContext* lycon) {
     line_init(lycon);
 }
 
-LineFillStatus text_has_line_filled(LayoutContext* lycon, lxb_dom_text_t *text_node) {
-    int text_width = 0;  unsigned char *str = text_node->char_data.data.data;
+LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode *text_node) {
+    unsigned char *str = text_node->text_data();
+    if (!str) return RDT_LINE_NOT_FILLED;  // null check
+    int text_width = 0;
     do {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
         if (FT_Load_Char(lycon->font.face, *str, FT_LOAD_RENDER)) {
@@ -60,14 +73,14 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, lxb_dom_text_t *text_n
     return RDT_NOT_SURE;
 }
 
-LineFillStatus node_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* node) {
+LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
     do {
-        if (node->type == LXB_DOM_NODE_TYPE_TEXT) {
-            LineFillStatus result = text_has_line_filled(lycon, (lxb_dom_text_t *)node);
+        if (node->is_text()) {
+            LineFillStatus result = text_has_line_filled(lycon, node);
             if (result) { return result; }        
         }
-        else if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-            lxb_html_element_t *elmt = lxb_html_interface_element(node);
+        else if (node->is_element()) {
+            lxb_html_element_t *elmt = node->as_element();
             PropValue outer_display = resolve_display(elmt).outer;  
             if (outer_display == LXB_CSS_VALUE_BLOCK) { return RDT_LINE_NOT_FILLED; }
             else if (outer_display == LXB_CSS_VALUE_INLINE) {
@@ -79,25 +92,18 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* node) 
             printf("unknown node type\n");
             // skip the node
         }
-        node = lxb_dom_node_next(node);
+        node = node->next_sibling();
     } while (node);
     return RDT_NOT_SURE;
 }
 
-LineFillStatus span_has_line_filled(LayoutContext* lycon, lxb_dom_node_t* span) {
-    lxb_dom_node_t *node = lxb_dom_node_first_child(lxb_dom_interface_node(span));
-    if (node) {
-        LineFillStatus result = node_has_line_filled(lycon, node);
-        if (result) { return result; }
-    }
-    return RDT_NOT_SURE;
-}
+// This function was replaced by the DomNode version above
 
-LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, lxb_dom_node_t* node) {
+LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNode* node) {
     // note: this function navigates to parenets through laid out view tree, 
     // and siblings through non-processed html nodes
     printf("check if view has line filled\n");
-    node = lxb_dom_node_next(node);
+    node = node->next_sibling();
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
         if (result) { return result; }        
@@ -123,9 +129,10 @@ void output_text(LayoutContext* lycon, ViewText* text, int text_length, int text
     printf("text view: x %d, y %d, width %d, height %d\n", text->x, text->y, text->width, text->height);
 }
 
-void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
+void layout_text(LayoutContext* lycon, DomNode *text_node) {
     unsigned char* next_ch;
-    unsigned char* text_start = text_node->char_data.data.data;  
+    unsigned char* text_start = text_node->text_data();
+    if (!text_start) return;  // null check for text data
     unsigned char* str = text_start;  
     if ((lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) { // skip space at start of line
         do { str++; } while (is_space(*str));
@@ -133,7 +140,7 @@ void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node) {
     }
     LAYOUT_TEXT:
     // assume style_text has at least one character
-    ViewText* text = (ViewText*)alloc_view(lycon, RDT_VIEW_TEXT, (lxb_dom_node_t*)text_node);
+    ViewText* text = (ViewText*)alloc_view(lycon, RDT_VIEW_TEXT, text_node);
     lycon->prev_view = (View*)text;    
     text->start_index = str - text_start;
     int font_height = lycon->font.face->size->metrics.height >> 6;

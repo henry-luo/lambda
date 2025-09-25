@@ -4,12 +4,21 @@
 void print_view_tree(ViewGroup* view_block);
 void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
-void layout_text(LayoutContext* lycon, lxb_dom_text_t *text_node);
+// Function declaration moved to layout.hpp
 char* read_text_file(const char *filename);
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display);
 
 bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
+}
+
+bool is_only_whitespace(const char* str) {
+    if (!str) return true;
+    while (*str) {
+        if (!is_space(*str)) return false;
+        str++;
+    }
+    return true;
 }
 
 int calculate_vertical_align_offset(PropValue align, int item_height, int line_height, int baseline_pos, int item_baseline) {
@@ -147,7 +156,7 @@ void line_align(LayoutContext* lycon) {
 }
 
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
-    uintptr_t elmt_name = span->node->local_name;
+    uintptr_t elmt_name = span->node->local_name();
     switch (elmt_name) {
     case LXB_TAG_B:
         if (!span->font) { span->font = alloc_font_prop(lycon); }
@@ -167,8 +176,11 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
         break;
     case LXB_TAG_FONT: {
         // parse font style
-        lxb_dom_attr_t* color = lxb_dom_element_attr_by_id((lxb_dom_element_t *)span->node, LXB_DOM_ATTR_COLOR);
-        if (color) { printf("font color: %s\n", color->value->data); }
+        // Get color attribute using DomNode interface
+        const lxb_char_t* color_attr = span->node->get_attribute("color");
+        if (color_attr) {
+            printf("font color: %s\n", color_attr);
+        }
         break;
     }
     case LXB_TAG_A: {
@@ -183,23 +195,24 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
     }
 }
 
-void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue display) {
-    printf("layout inline %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(elmt), NULL));
-    if (elmt->element.node.local_name == LXB_TAG_BR) { line_break(lycon); return; }
+void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
+    printf("layout inline %s\n", elmt->name());
+    if (elmt->as_element() && elmt->local_name() == LXB_TAG_BR) { line_break(lycon); return; }
 
     // save parent context
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
     PropValue pa_line_align = lycon->line.vertical_align;
     lycon->elmt = elmt;
 
-    ViewSpan* span = (ViewSpan*)alloc_view(lycon, RDT_VIEW_INLINE, (lxb_dom_node_t*)elmt);
+    ViewSpan* span = (ViewSpan*)alloc_view(lycon, RDT_VIEW_INLINE, elmt);
     span->display = display;
     // resolve element default styles
     resolve_inline_default(lycon, span);
     // resolve CSS styles
-    if (elmt->element.style) {
+    if (elmt->style) {
         // lxb_dom_document_t *doc = lxb_dom_element_document((lxb_dom_element_t*)elmt); // doc->css->styles
-        lexbor_avl_foreach_recursion(NULL, elmt->element.style, resolve_element_style, lycon);
+        // lexbor_avl_foreach_recursion(NULL, elmt->style, resolve_element_style, lycon);
+        // TODO: CSS style resolution via DomNode interface
     }
     
     if (span->font) {
@@ -211,12 +224,12 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue 
     // line.max_ascender and max_descender to be changed only when there's output from the span   
 
     // layout inline content
-    lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(elmt));
+    DomNode *child = elmt->first_child();
     if (child) {
         lycon->parent = (ViewGroup*)span;  lycon->prev_view = NULL;
         do {
             layout_flow_node(lycon, child);
-            child = lxb_dom_node_next(child);
+            child = child->next_sibling();
         } while (child);
         lycon->parent = span->parent;
     }
@@ -225,19 +238,28 @@ void layout_inline(LayoutContext* lycon, lxb_html_element_t *elmt, DisplayValue 
     printf("inline view: %d, self %p, child %p\n", span->type, span, span->child);
 }
 
-void layout_flow_node(LayoutContext* lycon, lxb_dom_node_t *node) {
-    printf("layout node %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(node), NULL));
-    if (node->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-        printf("Element: %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(node), NULL));
-        lxb_html_element_t *elmt = lxb_html_interface_element(node);
+void layout_flow_node(LayoutContext* lycon, DomNode *node) {
+    if (!node) {
+        printf("Error: null node passed to layout_flow_node\n");
+        return;
+    }
+    // Check for invalid pointer addresses
+    if ((uintptr_t)node < 0x1000) {
+        printf("Error: invalid node pointer %p passed to layout_flow_node\n", node);
+        return;
+    }
+    printf("layout node %s\n", node->name());
+    if (node->is_element()) {
+        printf("Element: %s\n", node->name());
+        lxb_html_element_t *elmt = node->as_element();
         DisplayValue display = resolve_display(elmt);
         switch (display.outer) {
         case LXB_CSS_VALUE_BLOCK:  case LXB_CSS_VALUE_INLINE_BLOCK:
         case LXB_CSS_VALUE_LIST_ITEM:
-            layout_block(lycon, elmt, display);
+            layout_block(lycon, node, display);
             break;
         case LXB_CSS_VALUE_INLINE:
-            layout_inline(lycon, elmt, display);
+            layout_inline(lycon, node, display);
             break;
         case LXB_CSS_VALUE_NONE:
             printf("skipping elemnt of display: none\n");
@@ -247,11 +269,12 @@ void layout_flow_node(LayoutContext* lycon, lxb_dom_node_t *node) {
             // skip the element
         }
     }
-    else if (node->type == LXB_DOM_NODE_TYPE_TEXT) {
-        lxb_dom_text_t *text = lxb_dom_interface_text(node);
-        const unsigned char* str = text->char_data.data.data;
+    else if (node->is_text()) {
+        const unsigned char* str = node->text_data();
         printf(" Text: %s\n", str);
-        layout_text(lycon, text);
+        if (str && *str && !is_only_whitespace((const char*)str)) { // text is not empty
+            layout_text(lycon, node);
+        }
     }
     else {
         printf("layout unknown node type: %d\n", node->type);
@@ -340,7 +363,7 @@ void apply_header_style(LayoutContext* lycon) {
     }
 }
 
-void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
+void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     printf("layout html root\n");
     apply_header_style(lycon);
 
@@ -358,7 +381,7 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
     line_init(lycon);
     Blockbox pa_block = lycon->block;  lycon->block.pa_block = &pa_block;
 
-    ViewBlock* html = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, (lxb_dom_node_t*)elmt);
+    ViewBlock* html = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, elmt);
     html->width = lycon->block.width;  html->height = lycon->block.height;
     lycon->doc->view_tree->root = (View*)html;  lycon->parent = (ViewGroup*)html;
     lycon->elmt = elmt;
@@ -369,8 +392,9 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
     lycon->block.given_width = lycon->ui_context->window_width;
     lycon->block.given_height = lycon->ui_context->window_height;    
     // load CSS stylesheets
-    if (elmt->element.style) {
-        lexbor_avl_foreach_recursion(NULL, elmt->element.style, resolve_element_style, lycon);
+    if (elmt->style) {
+        // lexbor_avl_foreach_recursion(NULL, elmt->style, resolve_element_style, lycon);
+        // TODO: CSS style resolution via DomNode interface
     }
 
     if (html->font) {
@@ -384,9 +408,14 @@ void layout_html_root(LayoutContext* lycon, lxb_html_element_t *elmt) {
     lycon->block.init_descender = (-lycon->font.face->size->metrics.descender) >> 6;
 
     // layout body content
-    lxb_dom_element_t *body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);
-    if (body) {
-        layout_block(lycon, (lxb_html_element_t*)body, 
+    lxb_dom_element_t *lexbor_body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);
+    if (lexbor_body) {
+        // Create DomNode wrapper for body
+        DomNode body_node;
+        memset(&body_node, 0, sizeof(DomNode));
+        body_node.type = LEXBOR_ELEMENT;
+        body_node.lxb_node = (lxb_dom_node_t*)lexbor_body;
+        layout_block(lycon, &body_node, 
             (DisplayValue){.outer = LXB_CSS_VALUE_BLOCK, .inner = LXB_CSS_VALUE_FLOW});  
     } else {
         printf("No body element found\n");
@@ -423,9 +452,14 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     printf("start to layout DOM tree\n");
     layout_init(&lycon, doc, uicon);
 
-    lxb_html_element_t *root = (lxb_html_element_t *)doc->dom_tree->dom_document.element;
-    printf("layout html root %s\n", lxb_dom_element_local_name(lxb_dom_interface_element(root), NULL));
-    layout_html_root(&lycon, root);
+    lxb_html_element_t *lexbor_root = (lxb_html_element_t *)doc->dom_tree->dom_document.element;
+    // Create DomNode wrapper for root
+    DomNode root_node;
+    memset(&root_node, 0, sizeof(DomNode));
+    root_node.type = LEXBOR_ELEMENT;
+    root_node.lxb_node = (lxb_dom_node_t*)lexbor_root;
+    printf("layout html root %s\n", root_node.name());
+    layout_html_root(&lycon, &root_node);
 
     printf("end layout\n");
     layout_cleanup(&lycon);

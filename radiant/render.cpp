@@ -53,7 +53,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         return;
     }    
     float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
-    unsigned char* str = lxb_dom_interface_text(text->node)->char_data.data.data;  
+    unsigned char* str = text->node->text_data();  
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
     // printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)\n", 
     //     str, text->start_index, text->length, text->x, text->y, text->width, text->height, x, y);
@@ -180,11 +180,23 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         StrBuf* num = strbuf_new_cap(10);
         strbuf_append_format(num, "%d.", rdcon->list.item_index);
         // output the number as VIEW_TEXT
-        lxb_dom_text_t node;  ViewText text;
+        lxb_dom_text_t lxb_node;  ViewText text;
+        // Initialize the lexbor text node structure properly
+        memset(&lxb_node, 0, sizeof(lxb_dom_text_t));
+        lxb_node.char_data.node.type = LXB_DOM_NODE_TYPE_TEXT;
+        lxb_node.char_data.data.data = (lxb_char_t *)num->str;  
+        lxb_node.char_data.data.length = num->length;
+        
+        // Initialize the ViewText structure
         text.type = RDT_VIEW_TEXT;  text.next = NULL;  text.parent = NULL;
         text.start_index = 0;  text.length = num->length;
-        node.char_data.data.data = (lxb_char_t *)num->str;  node.char_data.data.length = text.length;
-        text.node = (lxb_dom_node_t *)&node;
+        
+        // Create DomNode wrapper
+        DomNode dom_wrapper;
+        memset(&dom_wrapper, 0, sizeof(DomNode));
+        dom_wrapper.type = LEXBOR_NODE;
+        dom_wrapper.lxb_node = (lxb_dom_node_t*)&lxb_node;
+        text.node = &dom_wrapper;
         int font_size = rdcon->font.face->size->metrics.y_ppem >> 6;
         text.x = list_item->x - 20 * ratio;
         text.y = list_item->y;  // align at top the list item
@@ -198,14 +210,14 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
 }
 
 void render_litem_view(RenderContext* rdcon, ViewBlock* list_item) {
-    printf("view list item:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(list_item->node), NULL)); 
+    printf("view list item:%s\n", list_item->node->name()); 
     rdcon->list.item_index++;
     render_block_view(rdcon, list_item);
 }
 
 void render_list_view(RenderContext* rdcon, ViewBlock* view) {
     ViewBlock* list = (ViewBlock*)view;
-    printf("view list:%s\n", lxb_dom_element_local_name(lxb_dom_interface_element(list->node), NULL)); 
+    printf("view list:%s\n", list->node->name()); 
     ListBlot pa_list = rdcon->list;
     rdcon->list.item_index = 0;  rdcon->list.list_style_type = list->blk->list_style_type;
     render_block_view(rdcon, list);

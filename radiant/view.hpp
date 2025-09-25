@@ -161,7 +161,7 @@ typedef struct ViewGroup ViewGroup;
 
 struct View {
     ViewType type;
-    lxb_dom_node_t *node;  // future optimization: use 32-bit pointer for style node
+    DomNode *node;  // DOM node abstraction instead of direct lexbor dependency
     View* next;
     ViewGroup* parent;  // corrected the type to ViewGroup
 };
