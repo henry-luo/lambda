@@ -347,6 +347,91 @@ build_mir_for_mac() {
     return 1
 }
 
+# Function to build ThorVG for Mac
+build_thorvg_for_mac() {
+    echo "Building ThorVG for Mac..."
+    
+    # Check if already installed in system location
+    if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ]; then
+        echo "ThorVG already installed in system location"
+        return 0
+    fi
+    
+    if [ ! -d "build_temp/thorvg" ]; then
+        cd build_temp
+        echo "Cloning ThorVG repository..."
+        git clone https://github.com/thorvg/thorvg.git || {
+            echo "Warning: Could not clone ThorVG repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+    
+    cd "build_temp/thorvg"
+    
+    # Check for meson build system
+    if [ -f "meson.build" ]; then
+        # Check if meson is available
+        if ! command -v meson >/dev/null 2>&1; then
+            echo "Installing meson via pip3..."
+            if command -v pip3 >/dev/null 2>&1; then
+                pip3 install --user meson ninja || {
+                    echo "Failed to install meson via pip3"
+                    cd - > /dev/null
+                    return 1
+                }
+                # Add user bin to PATH if not already there
+                export PATH="$HOME/.local/bin:$PATH"
+            else
+                echo "pip3 not found, trying Homebrew..."
+                if command -v brew >/dev/null 2>&1; then
+                    brew install meson ninja
+                else
+                    echo "Cannot install meson - no pip3 or Homebrew available"
+                    cd - > /dev/null
+                    return 1
+                fi
+            fi
+        fi
+        
+        # Create build directory
+        mkdir -p build-mac
+        
+        echo "Configuring ThorVG with Meson..."
+        if meson setup build-mac \
+            --buildtype=release \
+            --default-library=both \
+            --prefix="$SYSTEM_PREFIX" \
+            -Dengines=sw,gl \
+            -Dloaders=svg,png,jpg \
+            -Dsavers= \
+            -Dbindings=capi \
+            -Dtools= \
+            -Dtests=false \
+            -Dexamples=false; then
+            
+            echo "Building ThorVG..."
+            if meson compile -C build-mac; then
+                echo "Installing ThorVG to system location (requires sudo)..."
+                if sudo meson install -C build-mac; then
+                    echo "✅ ThorVG built successfully"
+                    cd - > /dev/null
+                    return 0
+                fi
+            fi
+        fi
+    else
+        echo "❌ ThorVG meson.build not found - unsupported build system"
+        cd - > /dev/null
+        return 1
+    fi
+    
+    echo "❌ ThorVG build failed"
+    cd - > /dev/null
+    return 1
+}
+
 # Function to build Google Test for Mac
 build_gtest_for_mac() {
     echo "Building Google Test for Mac..."
@@ -470,6 +555,19 @@ else
     fi
 fi
 
+# Build ThorVG for Mac
+echo "Setting up ThorVG..."
+if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ]; then
+    echo "ThorVG already available"
+else
+    if ! build_thorvg_for_mac; then
+        echo "Warning: ThorVG build failed"
+        exit 1
+    else
+        echo "ThorVG built successfully"
+    fi
+fi
+
 # Build Google Test for Mac
 echo "Setting up Google Test..."
 if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
@@ -498,7 +596,27 @@ HOMEBREW_DEPS=(
     "libharu"    # For PDF generation - referenced in build config
 )
 
+# Radiant project dependencies - for HTML/CSS/SVG rendering engine
+RADIANT_DEPS=(
+    "lexbor"     # HTML/CSS parser library
+    "freetype"   # Font rendering library
+    "sdl2"       # Cross-platform multimedia library
+    "sdl2_image" # SDL2 image loading support
+    "glfw"       # OpenGL window and context management
+    "libpng"     # PNG image format support
+    "fontconfig" # Font configuration library
+    "expat"      # XML parser library (dependency of fontconfig)
+    "zlib"       # Compression library
+    "bzip2"      # Alternative compression library
+)
+
+# Optional Radiant dependencies (not available in Homebrew, need manual installation)
+RADIANT_OPTIONAL_DEPS=(
+    # ThorVG will be built from source - see build_thorvg_for_mac function
+)
+
 if command -v brew >/dev/null 2>&1; then
+    # Install core Lambda dependencies
     for dep in "${HOMEBREW_DEPS[@]}"; do
         echo "Installing $dep..."
         if brew list "$dep" >/dev/null 2>&1; then
@@ -510,6 +628,35 @@ if command -v brew >/dev/null 2>&1; then
                 echo "❌ Failed to install $dep"
                 exit 1
             fi
+        fi
+    done
+    
+    # Install Radiant project dependencies
+    echo "Installing Radiant project dependencies..."
+    for dep in "${RADIANT_DEPS[@]}"; do
+        echo "Installing $dep..."
+        if brew list "$dep" >/dev/null 2>&1; then
+            echo "$dep already installed"
+        else
+            if brew install "$dep"; then
+                echo "✅ $dep installed successfully"
+            else
+                echo "❌ Failed to install $dep"
+                exit 1
+            fi
+        fi
+    done
+    
+    # Try to install optional dependencies, but don't fail if they're not available
+    echo "Installing optional Radiant dependencies (will continue if not available)..."
+    for dep in "${RADIANT_OPTIONAL_DEPS[@]}"; do
+        echo "Installing optional $dep..."
+        if brew list "$dep" >/dev/null 2>&1; then
+            echo "$dep already installed"
+        elif brew install "$dep" 2>/dev/null; then
+            echo "✅ $dep installed successfully"
+        else
+            echo "⚠️  $dep not available in Homebrew - skipping (can be built from source if needed)"
         fi
     done
 else
@@ -764,17 +911,32 @@ if command -v brew >/dev/null 2>&1; then
     echo "- criterion: $([ -d "$BREW_PREFIX/Cellar/criterion" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- coreutils: $([ -f "$BREW_PREFIX/bin/gtimeout" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- timeout: $([ -f "$BREW_PREFIX/bin/timeout" ] && command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+    echo ""
+    echo "Radiant project dependencies:"
+    echo "- lexbor: $(brew list lexbor >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+    echo "- freetype: $(brew list freetype >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+    echo "- SDL2: $(brew list sdl2 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+    echo "- SDL2_image: $(brew list sdl2_image >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+    echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- GLFW: $(brew list glfw >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+    echo "- libpng: $(brew list libpng >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+    echo "- fontconfig: $(brew list fontconfig >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+    echo "- expat: $(brew list expat >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+    echo "- zlib: $(brew list zlib >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+    echo "- bzip2: $(brew list bzip2 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 else
     echo "- Homebrew not available for dependency checks"
 fi
 
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Google Test: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- libcurl with HTTP/2: $([ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo ""
 echo "Next steps:"
-echo "1. Run: make"
-echo "2. Run: make test"
+echo "1. Run: make build           # Build Lambda main project"
+echo "2. Run: make build-radiant   # Build Radiant HTML/CSS renderer"
+echo "3. Run: make test            # Run tests"
 echo ""
 echo "To clean up intermediate files later, run: ./setup-mac-deps.sh clean"

@@ -1,4 +1,6 @@
 {
+    "name": "lambda",
+    "description": "Lambda: A modern functional scripting language for data processing and editing",
     "compiler": "clang",
     "output": "lambda.exe",
     "source_dirs": [
@@ -226,6 +228,134 @@
             ],
             "special_flags": "-lstdc++",
             "link": "dynamic"
+        },
+        {
+            "name": "radiant",
+            "description": "Native HTML/CSSS/SVG rendering engine",
+            "output": "radian.exe",
+            "source_files": [
+                "radiant/window.c",
+                "radiant/ui_context.c",
+                "radiant/parse_html.c",
+                "radiant/layout.c",
+                "radiant/layout_block.c",
+                "radiant/layout_text.c",
+                "radiant/layout_flex_nodes.c",
+                "radiant/layout_flex.c",
+                "radiant/resolve_style.c",
+                "radiant/scroller.c",
+                "radiant/view_pool.c",
+                "radiant/font.c",
+                "radiant/surface.c",
+                "radiant/render.c",
+                "radiant/event.c",
+                "lib/strview.c",
+                "lib/strbuf.c",
+                "lib/hashmap.c",
+                "lib/arraylist.c",
+                "lib/log.c",
+                "lib/mem-pool/src/variable.c",
+                "lib/mem-pool/src/buffer.c",
+                "lib/mem-pool/src/utils.c",
+                "lib/file.c",
+                "lib/url.c",
+                "lib/utf.c"
+            ],
+            "libraries": [
+                {
+                    "name": "lexbor",
+                    "_include_original": "/opt/homebrew/opt/lexbor/include",
+                    "_lib_original": "/opt/homebrew/opt/lexbor/lib/liblexbor_static.a",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/liblexbor_static.a",
+                    "link": "static"
+                },
+                {
+                    "name": "freetype",
+                    "include": "/opt/homebrew/Cellar/freetype/2.14.1_1/include/freetype2",
+                    "lib": "/opt/homebrew/Cellar/freetype/2.14.1_1/lib/libfreetype.a",
+                    "link": "static"
+                },
+                {
+                    "name": "png",
+                    "include": null,
+                    "lib": "/opt/homebrew/lib/libpng.a",
+                    "link": "static"
+                },
+                {
+                    "name": "bzip2",
+                    "include": null,
+                    "lib": "/opt/homebrew/opt/bzip2/lib/libbz2.a",
+                    "link": "static"
+                },
+                {
+                    "name": "fontconfig",
+                    "include": "/opt/homebrew/include/fontconfig",
+                    "lib": "/opt/homebrew/lib/libfontconfig.a",
+                    "link": "static"
+                },
+                {
+                    "name": "expat",
+                    "include": null,
+                    "lib": "/opt/homebrew/opt/expat/lib/libexpat.a",
+                    "link": "static"
+                },
+                {
+                    "name": "SDL2_image",
+                    "include": "/opt/homebrew/opt/sdl2/include/SDL2 -I/opt/homebrew/opt/sdl2_image/include",
+                    "lib": "/opt/homebrew/opt/sdl2_image/lib/",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "zlib",
+                    "include": null,
+                    "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
+                    "link": "static"
+                },
+                {
+                    "name": "glfw",
+                    "include": "/opt/homebrew/include",
+                    "lib": "/opt/homebrew/lib/libglfw3.a",
+                    "link": "static"
+                },
+                {
+                    "name": "GL",
+                    "include": null,
+                    "lib": "-framework OpenGL",
+                    "link": "static"
+                },
+                {
+                    "name": "thorvg",
+                    "include": "/usr/local/include",
+                    "lib": "/usr/local/lib/libthorvg.a",
+                    "link": "static"
+                }
+            ],
+            "warnings": [
+                "incompatible-pointer-types",
+                "undef",
+                "no-common",
+                "uninitialized",
+                "sign-compare",
+                "implicit-function-declaration",
+                "implicit-int",
+                "return-type",
+                "format",
+                "free-nonheap-object",
+                "shadow",
+                "array-bounds",
+                "null-dereference",
+                "pointer-arith",
+                "pointer-compare",
+                "pointer-sign",
+                "pointer-to-int-cast",
+                "pointer-truncate",
+                "no-microsoft-anon-tag"
+            ],
+            "flags": [
+                "fwrapv",
+                "fms-extensions"
+            ]
         }
     ],
     "warnings": [
@@ -242,7 +372,6 @@
         "O2"
     ],
     "build_dir": "build",
-    "cross_compile": false,
     "platforms": {
         "release": {
             "output": "lambda_release.exe",
@@ -281,7 +410,7 @@
             "debug": true
         },
         "windows": {
-            "output": "lambda-windows.exe",
+            "output": "lambda.exe",
             "compiler": "gcc",
             "exclude_source_files": [],
             "libraries": [
@@ -635,6 +764,24 @@
                     "include": "",
                     "lib": "-framework SystemConfiguration",
                     "link": "dynamic"
+                },
+                {
+                    "name": "Cocoa",
+                    "include": null,
+                    "lib": "-framework Cocoa",
+                    "link": "static"
+                },
+                {
+                    "name": "IOKit",
+                    "include": null,
+                    "lib": "-framework IOKit",
+                    "link": "static"
+                },
+                {
+                    "name": "CoreVideo",
+                    "include": null,
+                    "lib": "-framework CoreVideo",
+                    "link": "static"
                 }
             ]
         }

@@ -316,12 +316,12 @@ clean-tree-sitter-minimal:
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-test clean-grammar generate-grammar debug release rebuild test test-input run help install uninstall \
-        lambda radiant window cross-compile format lint check docs intellisense analyze-size \
+        lambda radiant window format lint check docs intellisense analyze-size \
         build-windows build-linux build-debug build-release clean-all distclean \
         build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
         verify-windows verify-linux test-windows test-linux tree-sitter-libs \
         generate-premake clean-premake build-test build-test-linux \
-        build-mingw64 build-tree-sitter clean-tree-sitter-minimal
+        build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant
 
 # Help target - shows available commands
 help:
@@ -331,10 +331,13 @@ help:
 	@echo "  build         - Build lambda project using Premake build system (incremental, default)"
 	@echo "                  On Windows/MSYS2: Automatically configures MINGW64 toolchain with PATH fixes"
 	@echo "                  On other platforms: Prefers MINGW64 over CLANG64 to avoid Universal CRT"
+	@echo "  build-radiant - Build Radiant HTML/CSS/SVG rendering engine using Premake"
+	@echo "                  Automatically installs graphics libraries (lexbor, SDL2, freetype, etc.)"
 	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
 	@echo "  release       - Build optimized release version using Premake"
 	@echo "  rebuild       - Force complete rebuild using Premake"
 	@echo "  lambda        - Build lambda project specifically using Premake"
+	@echo "  radiant       - Alias for build-radiant"
 	@echo "  all           - Build all projects"
 	@echo ""
 	@echo "MINGW64 Targets (Universal CRT Avoidance):"
@@ -342,7 +345,6 @@ help:
 	@echo "                  Ensures traditional MSVCRT.dll usage instead of Universal CRT"
 	@echo ""
 	@echo "Cross-compilation:"
-	@echo "  cross-compile - Cross-compile for Windows (now defaults to MINGW64)"
 	@echo "  build-windows - Same as cross-compile (now defaults to MINGW64)"
 	@echo "  build-linux   - Cross-compile for Linux (musl static)"
 	@echo "  build-test-linux - Cross-compile tests for Linux"
@@ -384,8 +386,6 @@ help:
 	@echo "  test-fuzz     - Run fuzzing tests for robustness"
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
-	@echo "  verify-windows - Verify Windows cross-compiled executable with Wine"
-	@echo "  verify-linux  - Verify Linux cross-compiled executable"
 	@echo "  test-windows  - Run CI tests for Windows executable"
 	@echo "  test-linux    - Run CI tests for Linux executable"
 	@echo "  run           - Build and run the default executable"
@@ -483,12 +483,9 @@ build-mingw64: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@./lambda.exe --help >/dev/null 2>&1 && echo "✅ Executable runs successfully" || echo "⚠️  Executable test failed"
 	$(call mingw64_dll_check)
 
-# Windows cross-compilation (legacy target, now redirects to build-mingw64)
-build-windows: build-mingw64
-	@echo "Note: build-windows now uses MINGW64 by default"
 
-cross-compile: build-mingw64
-	@echo "Note: cross-compile now uses MINGW64 by default"
+
+
 # Debug build - Now uses Premake with MINGW64 preference
 debug: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building debug version using Premake build system..."
@@ -533,9 +530,18 @@ rebuild: clean $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 # Specific project builds
 lambda: build
 
-# radiant:
-# 	@echo "Building radiant project..."
-# 	$(COMPILE_SCRIPT) $(RADIANT_CONFIG) --jobs=$(JOBS)
+# Radiant HTML/CSS/SVG rendering engine build
+build-radiant: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
+	@echo "Building Radiant HTML/CSS/SVG rendering engine..."
+	@echo "Generating Premake configuration for Radiant..."
+	$(PYTHON) utils/generate_premake.py --config $(DEFAULT_CONFIG) --output premake5.radiant.lua
+	@echo "Generating makefiles for Radiant..."
+	$(PREMAKE5) gmake --file=premake5.radiant.lua
+	@echo "Building radiant executable with $(JOBS) parallel jobs..."
+	$(MAKE) -C build/premake config=debug_native radian -j$(JOBS) CC="$(CC)" CXX="$(CXX)"
+	@echo "✅ Radiant build completed. Executable: radiant.exe"
+
+radiant: build-radiant
 
 # window: radiant
 
