@@ -459,18 +459,32 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
     if (block->node) {
         const char* node_name = block->node->name();
         if (node_name) {
-            // Handle special cases for better debugging
+            // CRITICAL ISSUE: #null elements should not exist in proper DOM structure
             if (strcmp(node_name, "#null") == 0) {
-                // Try to infer the element type from context
+                printf("ERROR: Found #null element! This indicates DOM structure issue.\n");
+                printf("ERROR: Element details - parent: %p, parent_node: %p\n", 
+                       (void*)block->parent, 
+                       block->parent ? (void*)block->parent->node : nullptr);
+                
+                if (block->parent && block->parent->node) {
+                    printf("ERROR: Parent node name: %s\n", block->parent->node->name());
+                }
+                
+                // Try to infer the element type from context (TEMPORARY WORKAROUND)
                 if (block->parent == nullptr) {
-                    tag_name = "html-root";
-                } else if (block->parent && block->parent->node == nullptr) {
+                    tag_name = "html";  // Root element should be html, not html-root
+                    printf("WORKAROUND: Mapping root #null -> html\n");
+                } else if (block->parent && block->parent->node && 
+                          strcmp(block->parent->node->name(), "html") == 0) {
                     tag_name = "body";
+                    printf("WORKAROUND: Mapping child of html #null -> body\n");
                 } else {
                     tag_name = "div";  // Most #null elements are divs
+                    printf("WORKAROUND: Mapping other #null -> div\n");
                 }
             } else {
                 tag_name = node_name;
+                printf("DEBUG: Using proper node name: %s\n", node_name);
             }
         }
     } else {
@@ -517,15 +531,27 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
     }
     strbuf_append_str(buf, ",\n");
     
-    // Layout properties
+    // Layout properties - calculate absolute positions for browser compatibility
+    int abs_x = block->x;
+    int abs_y = block->y;
+    
+    // Calculate absolute position by traversing up the parent chain
+    ViewGroup* parent = block->parent;
+    while (parent && parent->type == RDT_VIEW_BLOCK) {
+        ViewBlock* parent_block = (ViewBlock*)parent;
+        abs_x += parent_block->x;
+        abs_y += parent_block->y;
+        parent = parent_block->parent;
+    }
+    
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"x\": %d,\n", block->x);
+    strbuf_append_format(buf, "\"x\": %d,\n", abs_x);
     
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"y\": %d,\n", block->y);
+    strbuf_append_format(buf, "\"y\": %d,\n", abs_y);
     
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"width\": %d,\n", block->width);

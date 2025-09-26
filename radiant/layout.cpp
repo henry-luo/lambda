@@ -381,7 +381,9 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     lycon->font.style = lycon->ui_context->default_font;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
     lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;  
-    lycon->block.height = lycon->ui_context->window_height;
+    // CRITICAL FIX: Let HTML element auto-size to content instead of forcing viewport height
+    // This matches browser behavior where HTML element fits content, not viewport
+    lycon->block.height = 0;  // Will be calculated based on content
     lycon->block.advance_y = 0;
     lycon->block.line_height = round(1.2 * lycon->ui_context->default_font.font_size * lycon->ui_context->pixel_ratio);  
     lycon->block.text_align = LXB_CSS_VALUE_LEFT;
@@ -399,7 +401,8 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     html->scroller->overflow_x = LXB_CSS_VALUE_AUTO;
     html->scroller->overflow_y = LXB_CSS_VALUE_AUTO;
     lycon->block.given_width = lycon->ui_context->window_width;
-    lycon->block.given_height = lycon->ui_context->window_height;    
+    // CRITICAL FIX: Don't force HTML height to viewport - let it auto-size to content
+    lycon->block.given_height = -1;  // -1 means auto-size to content    
     // load CSS stylesheets
     dom_node_resolve_style(elmt, lycon);
 
@@ -416,15 +419,17 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     // layout body content
     lxb_dom_element_t *lexbor_body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);
     if (lexbor_body) {
-        // Create DomNode wrapper for body
-        DomNode body_node;
-        memset(&body_node, 0, sizeof(DomNode));
-        body_node.type = LEXBOR_ELEMENT;
-        body_node.lxb_node = (lxb_dom_node_t*)lexbor_body;
-        layout_block(lycon, &body_node, 
+        // CRITICAL FIX: Allocate DomNode dynamically to avoid dangling pointer
+        DomNode* body_node = (DomNode*)malloc(sizeof(DomNode));
+        memset(body_node, 0, sizeof(DomNode));
+        body_node->type = LEXBOR_ELEMENT;
+        body_node->lxb_node = (lxb_dom_node_t*)lexbor_body;
+        
+        printf("DEBUG: Created proper body DOM node: %p\n", (void*)body_node);
+        layout_block(lycon, body_node, 
             (DisplayValue){.outer = LXB_CSS_VALUE_BLOCK, .inner = LXB_CSS_VALUE_FLOW});  
     } else {
-        printf("No body element found\n");
+        printf("ERROR: No body element found in DOM tree\n");
     }
 
     finalize_block_flow(lycon, html, LXB_CSS_VALUE_BLOCK);
