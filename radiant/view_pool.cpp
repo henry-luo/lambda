@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include <time.h>
 
 #include "../lib/log.h"
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
@@ -347,4 +348,222 @@ void print_view_tree(ViewGroup* view_root) {
     printf("=================\n");
     write_string_to_file("view_tree.txt", buf->str);
     strbuf_free(buf);
+    
+    // Also generate JSON output
+    print_view_tree_json(view_root);
+}
+
+// Helper function to get view type name for JSON
+const char* get_view_type_name_json(ViewType type) {
+    switch (type) {
+        case RDT_VIEW_BLOCK: return "block";
+        case RDT_VIEW_INLINE_BLOCK: return "inline-block";
+        case RDT_VIEW_LIST_ITEM: return "list-item";
+        case RDT_VIEW_INLINE: return "inline";
+        case RDT_VIEW_TEXT: return "text";
+        default: return "unknown";
+    }
+}
+
+// Helper function to escape JSON strings
+void append_json_string(StrBuf* buf, const char* str) {
+    if (!str) {
+        strbuf_append_str(buf, "null");
+        return;
+    }
+    
+    strbuf_append_char(buf, '"');
+    for (const char* p = str; *p; p++) {
+        switch (*p) {
+            case '"': strbuf_append_str(buf, "\\\""); break;
+            case '\\': strbuf_append_str(buf, "\\\\"); break;
+            case '\n': strbuf_append_str(buf, "\\n"); break;
+            case '\r': strbuf_append_str(buf, "\\r"); break;
+            case '\t': strbuf_append_str(buf, "\\t"); break;
+            default: strbuf_append_char(buf, *p); break;
+        }
+    }
+    strbuf_append_char(buf, '"');
+}
+
+// Recursive JSON generation for view blocks
+void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
+    if (!block) {
+        strbuf_append_str(buf, "null");
+        return;
+    }
+    
+    // Add indentation
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "{\n");
+    
+    // Basic view properties
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"type\": ");
+    append_json_string(buf, get_view_type_name_json(block->type));
+    strbuf_append_str(buf, ",\n");
+    
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"tag\": ");
+    append_json_string(buf, block->node ? block->node->name() : "unknown");
+    strbuf_append_str(buf, ",\n");
+    
+    // Layout properties
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"layout\": {\n");
+    
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"x\": %d,\n", block->x);
+    
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"y\": %d,\n", block->y);
+    
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"width\": %d,\n", block->width);
+    
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"height\": %d\n", block->height);
+    
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "},\n");
+    
+    // CSS properties (basic for now)
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"css_properties\": {\n");
+    
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "\"display\": ");
+    const char* display = "block";
+    if (block->type == RDT_VIEW_INLINE_BLOCK) display = "inline-block";
+    else if (block->type == RDT_VIEW_LIST_ITEM) display = "list-item";
+    append_json_string(buf, display);
+    strbuf_append_str(buf, "\n");
+    
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "},\n");
+    
+    // Children
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"children\": [\n");
+    
+    View* child = ((ViewGroup*)block)->child;
+    bool first_child = true;
+    while (child) {
+        if (!first_child) {
+            strbuf_append_str(buf, ",\n");
+        }
+        first_child = false;
+        
+        if (child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK ||
+            child->type == RDT_VIEW_LIST_ITEM) {
+            print_block_json((ViewBlock*)child, buf, indent + 4);
+        } else if (child->type == RDT_VIEW_TEXT) {
+            print_text_json((ViewText*)child, buf, indent + 4);
+        } else {
+            // Handle other view types
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "{\n");
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_str(buf, "\"type\": ");
+            append_json_string(buf, get_view_type_name_json(child->type));
+            strbuf_append_str(buf, "\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "}");
+        }
+        
+        child = child->next;
+    }
+    
+    strbuf_append_str(buf, "\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "]\n");
+    
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "}");
+}
+
+// JSON generation for text nodes
+void print_text_json(ViewText* text, StrBuf* buf, int indent) {
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "{\n");
+    
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"type\": \"text\",\n");
+    
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"content\": ");
+    
+    // Extract text content
+    if (text->node) {
+        unsigned char* text_data = text->node->text_data();
+        if (text_data && text->length > 0) {
+            char* content = (char*)malloc(text->length + 1);
+            strncpy(content, (char*)(text_data + text->start_index), text->length);
+            content[text->length] = '\0';
+            append_json_string(buf, content);
+            free(content);
+        } else {
+            append_json_string(buf, "");
+        }
+    } else {
+        append_json_string(buf, "");
+    }
+    strbuf_append_str(buf, ",\n");
+    
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"layout\": {\n");
+    
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"x\": %d,\n", text->x);
+    
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"y\": %d,\n", text->y);
+    
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"width\": %d,\n", text->width);
+    
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"height\": %d\n", text->height);
+    
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "}\n");
+    
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "}");
+}
+
+// Main JSON generation function
+void print_view_tree_json(ViewGroup* view_root) {
+    StrBuf* json_buf = strbuf_new_cap(2048);
+    
+    strbuf_append_str(json_buf, "{\n");
+    strbuf_append_str(json_buf, "  \"test_info\": {\n");
+    
+    // Add timestamp
+    strbuf_append_str(json_buf, "    \"timestamp\": \"");
+    time_t now = time(0);
+    char* time_str = ctime(&now);
+    if (time_str) {
+        time_str[strlen(time_str) - 1] = '\0'; // Remove newline
+        strbuf_append_str(json_buf, time_str);
+    }
+    strbuf_append_str(json_buf, "\",\n");
+    
+    strbuf_append_str(json_buf, "    \"radiant_version\": \"1.0\",\n");
+    strbuf_append_str(json_buf, "    \"viewport\": { \"width\": 1200, \"height\": 800 }\n");
+    strbuf_append_str(json_buf, "  },\n");
+    
+    strbuf_append_str(json_buf, "  \"layout_tree\": ");
+    if (view_root) {
+        print_block_json((ViewBlock*)view_root, json_buf, 2);
+    } else {
+        strbuf_append_str(json_buf, "null");
+    }
+    strbuf_append_str(json_buf, "\n}\n");
+    
+    // Write to file
+    write_string_to_file("view_tree.json", json_buf->str);
+    
+    printf("JSON layout data written to: view_tree.json\n");
+    strbuf_free(json_buf);
 }
