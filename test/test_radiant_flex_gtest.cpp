@@ -155,7 +155,10 @@ TEST_F(FlexLayoutTest, BasicRowLayout) {
     ViewBlock* item3 = createFlexItem(container, 100, 100);
     
     // *** ENHANCED: RUN ACTUAL LAYOUT ALGORITHM ***
+    // *** DEBUG: Try to call init_flex_container to see if it works ***
+    printf("TEST: About to call layout_flex_container_new\n");
     layout_flex_container_new(lycon, container);
+    printf("TEST: Returned from layout_flex_container_new\n");
     
     // *** ENHANCED: VALIDATE ACTUAL LAYOUT RESULTS ***
     // Expected: Item1(0,0), Item2(110,0), Item3(220,0) with 10px gaps

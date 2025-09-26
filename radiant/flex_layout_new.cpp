@@ -63,7 +63,9 @@ void cleanup_flex_container(ViewBlock* container) {
 
 // Main flex layout algorithm entry point
 void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
-    if (!container || !container->embed || !container->embed->flex_container) return;
+    if (!container || !container->embed || !container->embed->flex_container) {
+        return;
+    }
     
     FlexContainerLayout* flex_layout = container->embed->flex_container;
     
@@ -213,7 +215,13 @@ void sort_flex_items_by_order(ViewBlock** items, int count) {
 int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout) {
     if (item->flex_basis == -1) {
         // auto - use content size
-        return is_main_axis_horizontal(flex_layout) ? item->width : item->height;
+        int basis = is_main_axis_horizontal(flex_layout) ? item->width : item->height;
+        // *** DEBUG: Ensure we don't return 0 for auto basis ***
+        if (basis <= 0) {
+            // Fallback to content dimensions if width/height is 0
+            basis = is_main_axis_horizontal(flex_layout) ? item->content_width : item->content_height;
+        }
+        return basis;
     } else if (item->flex_basis_is_percent) {
         // percentage basis
         int container_size = is_main_axis_horizontal(flex_layout) ? 
@@ -448,11 +456,14 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
     
     int container_main_size = flex_layout->main_axis_size;
     
+    // *** CRITICAL FIX: Ensure items maintain their sizes if no flex-grow/shrink ***
+    
     // Calculate initial main sizes based on flex-basis
     int total_basis_size = 0;
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
         int basis = calculate_flex_basis(item, flex_layout);
+        
         set_main_axis_size(item, basis, flex_layout);
         total_basis_size += basis;
     }
@@ -465,7 +476,16 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
     int free_space = container_main_size - total_basis_size;
     line->free_space = free_space;
     
-    if (free_space == 0) return;  // No space to distribute
+    // *** CRITICAL FIX: Even if free_space == 0, items should keep their basis sizes ***
+    if (free_space == 0) {
+        // Ensure all items maintain their flex-basis sizes
+        for (int i = 0; i < line->item_count; i++) {
+            ViewBlock* item = line->items[i];
+            int basis = calculate_flex_basis(item, flex_layout);
+            set_main_axis_size(item, basis, flex_layout);
+        }
+        return;  // No space to distribute
+    }
     
     if (free_space > 0 && line->total_flex_grow > 0) {
         // Find the last item with flex-grow > 0 to handle rounding
@@ -502,10 +522,11 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
                     }
                 }
                 
-                // Apply constraints after flex adjustment
-                apply_constraints(item, 
-                    is_main_axis_horizontal(flex_layout) ? flex_layout->main_axis_size : flex_layout->cross_axis_size,
-                    is_main_axis_horizontal(flex_layout) ? flex_layout->cross_axis_size : flex_layout->main_axis_size);
+                // *** FIX: Don't apply constraints after flex-grow as it overwrites calculated sizes ***
+                // Apply constraints only to cross-axis and aspect ratio, not main axis size
+                // apply_constraints(item, 
+                //     is_main_axis_horizontal(flex_layout) ? flex_layout->main_axis_size : flex_layout->cross_axis_size,
+                //     is_main_axis_horizontal(flex_layout) ? flex_layout->cross_axis_size : flex_layout->main_axis_size);
             }
         }
     } else if (free_space < 0 && line->total_flex_shrink > 0) {
@@ -538,12 +559,19 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
                         }
                     }
                     
-                    // Apply constraints after flex adjustment
-                    apply_constraints(item, 
-                        is_main_axis_horizontal(flex_layout) ? flex_layout->main_axis_size : flex_layout->cross_axis_size,
-                        is_main_axis_horizontal(flex_layout) ? flex_layout->cross_axis_size : flex_layout->main_axis_size);
+                    // *** FIX: Don't apply constraints after flex-shrink as it overwrites calculated sizes ***
+                    // apply_constraints(item, 
+                    //     is_main_axis_horizontal(flex_layout) ? flex_layout->main_axis_size : flex_layout->cross_axis_size,
+                    //     is_main_axis_horizontal(flex_layout) ? flex_layout->cross_axis_size : flex_layout->main_axis_size);
                 }
             }
+        }
+    } else {
+        // *** CRITICAL FIX: No flex-grow or flex-shrink, ensure items keep their basis sizes ***
+        for (int i = 0; i < line->item_count; i++) {
+            ViewBlock* item = line->items[i];
+            int basis = calculate_flex_basis(item, flex_layout);
+            set_main_axis_size(item, basis, flex_layout);
         }
     }
 }
@@ -553,13 +581,12 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     if (!flex_layout || !line || line->item_count == 0) return;
     
     int container_size = flex_layout->main_axis_size;
+    
+    // *** FIX 1: Calculate total item size WITHOUT gaps (gaps handled separately) ***
     int total_item_size = 0;
     for (int i = 0; i < line->item_count; i++) {
         total_item_size += get_main_axis_size(line->items[i], flex_layout);
     }
-    
-    int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
-    total_item_size += gap_space;
     
     // Check for auto margins on main axis
     int auto_margin_count = 0;
@@ -578,9 +605,13 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     int spacing = 0;
     float auto_margin_size = 0;
     
-    if (auto_margin_count > 0 && container_size > total_item_size) {
+    // *** FIX 2: For justify-content calculations, include gaps in total size ***
+    int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
+    int total_size_with_gaps = total_item_size + gap_space;
+    
+    if (auto_margin_count > 0 && container_size > total_size_with_gaps) {
         // Distribute free space among auto margins
-        auto_margin_size = (float)(container_size - total_item_size) / auto_margin_count;
+        auto_margin_size = (float)(container_size - total_size_with_gaps) / auto_margin_count;
     } else {
         // Apply justify-content if no auto margins
         int justify = convert_justify_to_lexbor(flex_layout->justify);
@@ -589,26 +620,30 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
                 current_pos = 0;
                 break;
             case LXB_CSS_VALUE_FLEX_END:
-                current_pos = container_size - total_item_size;
+                current_pos = container_size - total_size_with_gaps;
                 break;
             case LXB_CSS_VALUE_CENTER:
-                current_pos = (container_size - total_item_size) / 2;
+                current_pos = (container_size - total_size_with_gaps) / 2;
                 break;
             case LXB_CSS_VALUE_SPACE_BETWEEN:
                 current_pos = 0;
                 if (line->item_count > 1) {
-                    spacing = (container_size - total_item_size) / (line->item_count - 1);
+                    // *** FIX 3: Space-between distributes remaining space, not total space ***
+                    int remaining_space = container_size - total_size_with_gaps;
+                    spacing = remaining_space / (line->item_count - 1);
                 }
                 break;
             case LXB_CSS_VALUE_SPACE_AROUND:
                 if (line->item_count > 0) {
-                    spacing = (container_size - total_item_size) / line->item_count;
+                    int remaining_space = container_size - total_size_with_gaps;
+                    spacing = remaining_space / line->item_count;
                     current_pos = spacing / 2;
                 }
                 break;
             case LXB_CSS_VALUE_SPACE_EVENLY:
                 if (line->item_count > 0) {
-                    spacing = (container_size - total_item_size) / (line->item_count + 1);
+                    int remaining_space = container_size - total_size_with_gaps;
+                    spacing = remaining_space / (line->item_count + 1);
                     current_pos = spacing;
                 }
                 break;
@@ -618,6 +653,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         }
     }
     
+    // *** FIX 4: Simplified positioning loop - gaps handled explicitly ***
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
         
@@ -641,14 +677,21 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
                 if (right_auto) current_pos += (int)auto_margin_size;
             }
         } else {
+            // *** FIX 5: Set position, advance by item size, add spacing, then add gap ***
             set_main_axis_position(item, current_pos, flex_layout);
-            current_pos += get_main_axis_size(item, flex_layout) + spacing;
-        }
-        
-        // Add gap between items
-        if (i < line->item_count - 1) {
-            current_pos += is_main_axis_horizontal(flex_layout) ? 
-                          flex_layout->column_gap : flex_layout->row_gap;
+            current_pos += get_main_axis_size(item, flex_layout);
+            
+            // Add justify-content spacing (for space-between, space-around, etc.)
+            if (spacing > 0) {
+                current_pos += spacing;
+            }
+            
+            // Add gap between items (but not after the last item)
+            if (i < line->item_count - 1) {
+                int gap = is_main_axis_horizontal(flex_layout) ? 
+                         flex_layout->column_gap : flex_layout->row_gap;
+                current_pos += gap;
+            }
         }
     }
 }
