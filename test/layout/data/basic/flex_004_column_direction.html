@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Column Direction</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            border: 2px solid #333;
+        }
+        .item {
+            width: 200px;
+            height: 100px;
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            position: relative;
+        }
+        .item:nth-child(1) { background-color: #ffcccc; }
+        .item:nth-child(2) { background-color: #ccffcc; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Item 1</div>
+        <div class="item">Item 2</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "flex_004_column_direction",
+        "category": "basic",
+        "features": ["flex-direction", "column", "gap"],
+        "description": "Items are laid out in a column direction with a 10px gap",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#flex-direction-property"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

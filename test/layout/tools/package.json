@@ -1,0 +1,17 @@
+{
+  "name": "layout-test-tools",
+  "version": "1.0.0",
+  "description": "Automated layout testing tools for Radiant engine",
+  "main": "extract_layout.js",
+  "scripts": {
+    "extract": "node extract_layout.js",
+    "validate": "node validate_all.js"
+  },
+  "dependencies": {
+    "puppeteer": "^21.0.0",
+    "glob": "^10.0.0"
+  },
+  "devDependencies": {},
+  "author": "Lambda Project",
+  "license": "MIT"
+}

@@ -1,0 +1,51 @@
+{
+  "test_file": "flex_001_basic_layout.html",
+  "extraction_date": "2025-09-26T13:52:08.000Z",
+  "browser_info": {
+    "userAgent": "Manual Test Reference",
+    "viewport": {
+      "width": 1200,
+      "height": 800
+    }
+  },
+  "expected_layout": {
+    "container": {
+      "width": 404,
+      "height": 304,
+      "content_width": 400,
+      "content_height": 300,
+      "gap": 10
+    },
+    "items": [
+      {
+        "id": "item1",
+        "x": 2,
+        "y": 2,
+        "width": 100,
+        "height": 100,
+        "description": "First item at container start with border offset"
+      },
+      {
+        "id": "item2", 
+        "x": 112,
+        "y": 2,
+        "width": 100,
+        "height": 100,
+        "description": "Second item with 10px gap from first item (2 + 100 + 10 = 112)"
+      },
+      {
+        "id": "item3",
+        "x": 222,
+        "y": 2,
+        "width": 100,
+        "height": 100,
+        "description": "Third item with 10px gap from second item (112 + 100 + 10 = 222)"
+      }
+    ]
+  },
+  "test_notes": {
+    "gap_behavior": "CSS gap property creates 10px spacing between flex items",
+    "border_offset": "Container has 2px border, so items start at x=2, y=2",
+    "total_width_used": "3 items (100px each) + 2 gaps (10px each) + 2 borders (2px each) = 324px of 400px available"
+  }
+}
