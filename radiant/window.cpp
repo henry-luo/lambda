@@ -257,7 +257,91 @@ lxb_url_t* get_current_dir_lexbor() {
     return url;
 }
 
-int main() {
+// Layout test function for headless testing
+int run_layout_test(const char* html_file) {
+    printf("Radiant Layout Test Mode\n");
+    printf("========================\n");
+    printf("Testing file: %s\n\n", html_file);
+    
+    // Initialize without GUI
+    log_init_wrapper();
+    
+    // Initialize UI context without creating window
+    memset(&ui_context, 0, sizeof(UiContext));
+    
+    // Set consistent test viewport
+    ui_context.window_width = 1200;
+    ui_context.window_height = 800;
+    ui_context.pixel_ratio = 1.0;
+    
+    // Initialize UI context properly
+    if (ui_context_init(&ui_context) != 0) {
+        fprintf(stderr, "Error: Failed to initialize UI context\n");
+        return 1;
+    }
+    
+    // Create surface for layout calculations (no actual rendering)
+    ui_context_create_surface(&ui_context, ui_context.window_width, ui_context.window_height);
+    
+    // Get current directory for relative path resolution
+    lxb_url_t* cwd = get_current_dir_lexbor();
+    if (!cwd) {
+        fprintf(stderr, "Error: Could not get current directory\n");
+        ui_context_cleanup(&ui_context);
+        return 1;
+    }
+    
+    // Load HTML document
+    printf("Loading HTML document...\n");
+    Document* doc = load_html_doc(cwd, (char*)html_file);
+    if (!doc) {
+        fprintf(stderr, "Error: Could not load HTML file: %s\n", html_file);
+        lxb_url_destroy(cwd);
+        ui_context_cleanup(&ui_context);
+        return 1;
+    }
+    
+    ui_context.document = doc;
+    
+    // Layout the document
+    printf("Performing layout...\n");
+    layout_html_doc(&ui_context, doc, false);
+    
+    printf("Layout completed successfully!\n\n");
+    
+    // Print view tree (existing functionality)
+    if (doc->view_tree && doc->view_tree->root) {
+        print_view_tree((ViewGroup*)doc->view_tree->root);
+    } else {
+        printf("Warning: No view tree generated\n");
+    }
+    
+    // Cleanup
+    lxb_url_destroy(cwd);
+    ui_context_cleanup(&ui_context);
+    log_cleanup();
+    
+    printf("\nLayout test completed successfully!\n");
+    return 0;
+}
+
+int main(int argc, char* argv[]) {
+    // Check for layout sub-command
+    if (argc >= 3 && strcmp(argv[1], "layout") == 0) {
+        return run_layout_test(argv[2]);
+    }
+    
+    // Check for help
+    if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
+        printf("Radiant HTML/CSS Layout Engine\n");
+        printf("Usage:\n");
+        printf("  %s                    # Run GUI mode (default)\n", argv[0]);
+        printf("  %s layout <file.html> # Run layout test on HTML file\n", argv[0]);
+        printf("  %s --help            # Show this help\n", argv[0]);
+        return 0;
+    }
+    
+    // Original GUI mode
     log_init_wrapper();
     ui_context_init(&ui_context);
     GLFWwindow* window = ui_context.window;
