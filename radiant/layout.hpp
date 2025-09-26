@@ -95,4 +95,10 @@ void view_vertical_align(LayoutContext* lycon, View* view);
 // DomNode style resolution
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
+// View tree printing functions
+void print_view_tree(ViewGroup* view_root);
+void print_view_tree_json(ViewGroup* view_root);
+void print_block_json(ViewBlock* block, StrBuf* buf, int indent);
+void print_text_json(ViewText* text, StrBuf* buf, int indent);
+
 #endif // LAYOUT_HPP
