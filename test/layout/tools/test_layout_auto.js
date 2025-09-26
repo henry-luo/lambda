@@ -520,7 +520,7 @@ class LayoutTester {
         
         await this.ensureDirectories();
         
-        const categories = ['basic', 'intermediate', 'advanced'];
+        const categories = ['basic', 'intermediate', 'medium', 'advanced'];
         const allResults = [];
         let totalTests = 0;
         let totalPassed = 0;
@@ -589,7 +589,7 @@ async function main() {
             case '--category':
             case '-c':
                 category = args[++i];
-                if (!['basic', 'intermediate', 'advanced'].includes(category)) {
+                if (!['basic', 'intermediate', 'medium', 'advanced'].includes(category)) {
                     console.error(`❌ Invalid category: ${category}`);
                     process.exit(1);
                 }
@@ -622,7 +622,7 @@ Radiant Layout Engine Integration Testing
 Usage: node test_layout_auto.js [options]
 
 Options:
-  --category, -c <name>      Test specific category (basic|intermediate|advanced)
+  --category, -c <name>      Test specific category (basic|intermediate|medium|advanced)
   --tolerance, -t <pixels>   Layout difference tolerance in pixels (default: 2.0)
   --generate-references, -g  Generate browser references if missing
   --verbose, -v              Show detailed failure information
