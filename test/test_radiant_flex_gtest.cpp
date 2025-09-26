@@ -5,7 +5,7 @@
 #include "../radiant/layout.hpp"
 #include "../radiant/view.hpp"
 #include "../radiant/flex.hpp"
-#include "../radiant/flex_layout_new.hpp"
+#include "../radiant/layout_flex.hpp"
 
 // Forward declarations for helper functions (removed extern "C" to match header declarations)
 float clamp_value(float value, float min_val, float max_val);

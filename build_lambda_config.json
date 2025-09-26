@@ -258,7 +258,7 @@
                 "radiant/layout.cpp",
                 "radiant/layout_block.cpp",
                 "radiant/layout_text.cpp",
-                "radiant/flex_layout_new.cpp",
+                "radiant/layout_flex.cpp",
                 "radiant/layout_flex_content.cpp",
                 "radiant/layout_nested.cpp",
                 "radiant/view_pool_new.cpp",
@@ -1204,7 +1204,7 @@
                         "source": "test/test_radiant_flex_gtest.cpp",
                         "name": "📦 Radiant Flex Layout Tests (GTest)",
                         "additional_sources": [
-                            "radiant/flex_layout_new.cpp",
+                            "radiant/layout_flex.cpp",
                             "radiant/layout_test_support.cpp"
                         ],
                         "dependencies": [
@@ -1231,7 +1231,7 @@
                         "source": "test/test_radiant_flex_algorithm_gtest.cpp",
                         "name": "⚙️ Radiant Flex Algorithm Tests (GTest)",
                         "additional_sources": [
-                            "radiant/flex_layout_new.cpp",
+                            "radiant/layout_flex.cpp",
                             "radiant/layout_test_support.cpp"
                         ],
                         "dependencies": [
@@ -1257,7 +1257,7 @@
                         "source": "test/test_radiant_flex_integration_gtest.cpp",
                         "name": "🔗 Radiant Flex Integration Tests (GTest)",
                         "additional_sources": [
-                            "radiant/flex_layout_new.cpp",
+                            "radiant/layout_flex.cpp",
                             "radiant/layout_test_support.cpp"
                         ],
                         "dependencies": [
@@ -1288,7 +1288,7 @@
                             "test/layout/tools/html_css_parser.cpp",
                             "test/layout/tools/css_radiant_mapper.cpp",
                             "test/layout/tools/viewblock_builder.cpp",
-                            "radiant/flex_layout_new.cpp",
+                            "radiant/layout_flex.cpp",
                             "radiant/layout_test_support.cpp"
                         ],
                         "dependencies": [
