@@ -9,17 +9,7 @@
 #include "../radiant/flex_layout_new.hpp"
 
 // Forward declare helper functions from new implementation
-extern "C" {
-    float clamp_value(float value, float min_val, float max_val);
-    int resolve_percentage(int value, bool is_percent, int container_size);
-    void apply_constraints(ViewBlock* item, int container_width, int container_height);
-    int find_max_baseline(FlexLineInfo* line);
-    bool is_valid_flex_item(ViewBlock* item);
-    void init_flex_container(ViewBlock* container);
-    void cleanup_flex_container(ViewBlock* container);
-    int collect_flex_items(ViewBlock* container, ViewBlock*** items);
-    void sort_flex_items_by_order(ViewBlock** items, int count);
-}
+// These functions are already declared in flex_layout_new.hpp
 
 // Test fixture for new flex layout features
 class FlexNewFeaturesTest : public ::testing::Test {
@@ -60,15 +50,18 @@ protected:
         item->height = height;
         item->parent = parent;
         
-        // Add to parent's children using ViewGroup hierarchy
-        if (!parent->child) {
-            parent->child = item;
+        // Initialize position and visibility for proper filtering
+        item->position = POS_STATIC;  // Default position
+        item->visibility = VIS_VISIBLE;  // Default visibility
+        
+        // Add to parent's children using ViewBlock hierarchy
+        if (!parent->first_child) {
+            parent->first_child = item;
+            parent->last_child = item;
         } else {
-            View* last_child = parent->child;
-            while (last_child->next) {
-                last_child = last_child->next;
-            }
-            last_child->next = item;
+            parent->last_child->next_sibling = item;
+            item->prev_sibling = parent->last_child;
+            parent->last_child = item;
         }
         
         return item;
