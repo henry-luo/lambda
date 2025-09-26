@@ -263,8 +263,16 @@ class LayoutTester {
             
             // Compare layouts
             const comparison = this.compareLayouts(radiantData, browserData);
-            const passed = comparison.differences.length === 0 || 
-                          comparison.maxDifference <= this.tolerance;
+            
+            // CRITICAL FIX: A test should fail if too few elements are matched
+            // Even if layout differences are within tolerance, structural mismatches indicate fundamental issues
+            const matchRate = comparison.totalElements > 0 ? 
+                (comparison.matchedElements / comparison.totalElements) : 0;
+            const minMatchRate = 0.5; // Require at least 50% of elements to match
+            
+            const passed = (comparison.differences.length === 0 || 
+                          comparison.maxDifference <= this.tolerance) &&
+                          matchRate >= minMatchRate;
             
             const status = passed ? '✅ PASS' : '❌ FAIL';
             console.log(`    ${status} (${comparison.summary})`);

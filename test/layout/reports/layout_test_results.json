@@ -1,19 +1,19 @@
 {
-  "timestamp": "2025-09-26T10:11:50.348Z",
+  "timestamp": "2025-09-26T10:32:01.785Z",
   "radiant_exe": "/Users/henryluo/Projects/lambda/radiant.exe",
   "tolerance": 2,
   "total_tests": 12,
-  "passed_tests": 2,
-  "failed_tests": 10,
-  "pass_rate": 16.666666666666664,
+  "passed_tests": 0,
+  "failed_tests": 12,
+  "pass_rate": 0,
   "categories": [
     {
       "category": "basic",
       "results": [
         {
           "testName": "block_001_margin_padding",
-          "passed": true,
-          "executionTime": 0.29,
+          "passed": false,
+          "executionTime": 0.297,
           "matchedElements": 0,
           "totalElements": 7,
           "maxDifference": 0,
@@ -167,10 +167,10 @@
         {
           "testName": "flex_001_basic_layout",
           "passed": false,
-          "executionTime": 0.158,
+          "executionTime": 0.16,
           "matchedElements": 0,
           "totalElements": 12,
-          "maxDifference": 4,
+          "maxDifference": 280,
           "differences": [
             {
               "type": "missing_in_radiant",
@@ -250,24 +250,24 @@
               "radiant": {
                 "x": 0,
                 "y": 0,
-                "width": 404,
-                "height": 304
+                "width": 120,
+                "height": 120
               },
               "differences": [
                 {
                   "property": "width",
-                  "radiant": 404,
+                  "radiant": 120,
                   "browser": 400,
-                  "difference": 4
+                  "difference": 280
                 },
                 {
                   "property": "height",
-                  "radiant": 304,
+                  "radiant": 120,
                   "browser": 300,
-                  "difference": 4
+                  "difference": 180
                 }
               ],
-              "maxDifference": 4
+              "maxDifference": 280
             },
             {
               "type": "missing_in_radiant",
@@ -337,6 +337,39 @@
             },
             {
               "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 38,
+                "y": 10,
+                "width": 43,
+                "height": 18
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 120,
+                "y": 0,
+                "width": 120,
+                "height": 120
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 240,
+                "y": 0,
+                "width": 120,
+                "height": 120
+              }
+            },
+            {
+              "type": "extra_in_radiant",
               "selector": "#null > #null > undefined",
               "browser": null,
               "radiant": {
@@ -351,8 +384,8 @@
         },
         {
           "testName": "flex_001_row_space_between",
-          "passed": true,
-          "executionTime": 0.152,
+          "passed": false,
+          "executionTime": 0.159,
           "matchedElements": 0,
           "totalElements": 8,
           "maxDifference": 0,
@@ -458,13 +491,35 @@
             },
             {
               "type": "extra_in_radiant",
-              "selector": "#null > #null > div",
+              "selector": "#null > #null > div > div",
               "browser": null,
               "radiant": {
                 "x": 0,
                 "y": 0,
-                "width": 600,
-                "height": 100
+                "width": 100,
+                "height": 60
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 100,
+                "y": 0,
+                "width": 100,
+                "height": 60
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 200,
+                "y": 0,
+                "width": 100,
+                "height": 60
               }
             }
           ],
@@ -473,10 +528,10 @@
         {
           "testName": "flex_002_wrap",
           "passed": false,
-          "executionTime": 0.149,
+          "executionTime": 0.153,
           "matchedElements": 0,
           "totalElements": 12,
-          "maxDifference": 4,
+          "maxDifference": 200,
           "differences": [
             {
               "type": "missing_in_radiant",
@@ -556,24 +611,24 @@
               "radiant": {
                 "x": 0,
                 "y": 0,
-                "width": 404,
-                "height": 304
+                "width": 220,
+                "height": 100
               },
               "differences": [
                 {
                   "property": "width",
-                  "radiant": 404,
+                  "radiant": 220,
                   "browser": 400,
-                  "difference": 4
+                  "difference": 180
                 },
                 {
                   "property": "height",
-                  "radiant": 304,
+                  "radiant": 100,
                   "browser": 300,
-                  "difference": 4
+                  "difference": 200
                 }
               ],
-              "maxDifference": 4
+              "maxDifference": 200
             },
             {
               "type": "missing_in_radiant",
@@ -643,6 +698,39 @@
             },
             {
               "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 88,
+                "y": 10,
+                "width": 43,
+                "height": 18
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 100,
+                "width": 220,
+                "height": 100
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 200,
+                "width": 220,
+                "height": 100
+              }
+            },
+            {
+              "type": "extra_in_radiant",
               "selector": "#null > #null > undefined",
               "browser": null,
               "radiant": {
@@ -658,7 +746,7 @@
         {
           "testName": "flex_003_align_items",
           "passed": false,
-          "executionTime": 0.148,
+          "executionTime": 0.157,
           "matchedElements": 0,
           "totalElements": 11,
           "maxDifference": 4,
@@ -817,6 +905,39 @@
             },
             {
               "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 25,
+                "width": 170,
+                "height": 120
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 63,
+                "y": 10,
+                "width": 43,
+                "height": 18
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 170,
+                "y": 0,
+                "width": 170,
+                "height": 170
+              }
+            },
+            {
+              "type": "extra_in_radiant",
               "selector": "#null > #null > undefined",
               "browser": null,
               "radiant": {
@@ -832,10 +953,10 @@
         {
           "testName": "flex_004_column_direction",
           "passed": false,
-          "executionTime": 0.149,
+          "executionTime": 0.159,
           "matchedElements": 0,
           "totalElements": 11,
-          "maxDifference": 4,
+          "maxDifference": 180,
           "differences": [
             {
               "type": "missing_in_radiant",
@@ -915,24 +1036,24 @@
               "radiant": {
                 "x": 0,
                 "y": 0,
-                "width": 404,
-                "height": 304
+                "width": 220,
+                "height": 120
               },
               "differences": [
                 {
                   "property": "width",
-                  "radiant": 404,
+                  "radiant": 220,
                   "browser": 400,
-                  "difference": 4
+                  "difference": 180
                 },
                 {
                   "property": "height",
-                  "radiant": 304,
+                  "radiant": 120,
                   "browser": 300,
-                  "difference": 4
+                  "difference": 180
                 }
               ],
-              "maxDifference": 4
+              "maxDifference": 180
             },
             {
               "type": "missing_in_radiant",
@@ -991,6 +1112,28 @@
             },
             {
               "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 88,
+                "y": 10,
+                "width": 43,
+                "height": 18
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 120,
+                "width": 220,
+                "height": 120
+              }
+            },
+            {
+              "type": "extra_in_radiant",
               "selector": "#null > #null > undefined",
               "browser": null,
               "radiant": {
@@ -1006,10 +1149,10 @@
         {
           "testName": "flex_005_flex_grow",
           "passed": false,
-          "executionTime": 0.143,
+          "executionTime": 0.156,
           "matchedElements": 0,
           "totalElements": 11,
-          "maxDifference": 4,
+          "maxDifference": 267,
           "differences": [
             {
               "type": "missing_in_radiant",
@@ -1089,24 +1232,24 @@
               "radiant": {
                 "x": 0,
                 "y": 0,
-                "width": 404,
-                "height": 304
+                "width": 133,
+                "height": 120
               },
               "differences": [
                 {
                   "property": "width",
-                  "radiant": 404,
+                  "radiant": 133,
                   "browser": 400,
-                  "difference": 4
+                  "difference": 267
                 },
                 {
                   "property": "height",
-                  "radiant": 304,
+                  "radiant": 120,
                   "browser": 300,
-                  "difference": 4
+                  "difference": 180
                 }
               ],
-              "maxDifference": 4
+              "maxDifference": 267
             },
             {
               "type": "missing_in_radiant",
@@ -1165,6 +1308,28 @@
             },
             {
               "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 178,
+                "y": 10,
+                "width": 43,
+                "height": 18
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 133,
+                "y": 0,
+                "width": 267,
+                "height": 120
+              }
+            },
+            {
+              "type": "extra_in_radiant",
               "selector": "#null > #null > undefined",
               "browser": null,
               "radiant": {
@@ -1180,10 +1345,10 @@
         {
           "testName": "flex_006_justify_content",
           "passed": false,
-          "executionTime": 0.148,
+          "executionTime": 0.157,
           "matchedElements": 0,
           "totalElements": 11,
-          "maxDifference": 4,
+          "maxDifference": 260,
           "differences": [
             {
               "type": "missing_in_radiant",
@@ -1263,24 +1428,24 @@
               "radiant": {
                 "x": 0,
                 "y": 0,
-                "width": 404,
-                "height": 304
+                "width": 140,
+                "height": 120
               },
               "differences": [
                 {
                   "property": "width",
-                  "radiant": 404,
+                  "radiant": 140,
                   "browser": 400,
-                  "difference": 4
+                  "difference": 260
                 },
                 {
                   "property": "height",
-                  "radiant": 304,
+                  "radiant": 120,
                   "browser": 300,
-                  "difference": 4
+                  "difference": 180
                 }
               ],
-              "maxDifference": 4
+              "maxDifference": 260
             },
             {
               "type": "missing_in_radiant",
@@ -1339,6 +1504,28 @@
             },
             {
               "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 48,
+                "y": 10,
+                "width": 43,
+                "height": 18
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 140,
+                "y": 0,
+                "width": 140,
+                "height": 120
+              }
+            },
+            {
+              "type": "extra_in_radiant",
               "selector": "#null > #null > undefined",
               "browser": null,
               "radiant": {
@@ -1354,10 +1541,10 @@
         {
           "testName": "flex_007_row_reverse",
           "passed": false,
-          "executionTime": 0.15,
+          "executionTime": 0.158,
           "matchedElements": 0,
           "totalElements": 11,
-          "maxDifference": 4,
+          "maxDifference": 230,
           "differences": [
             {
               "type": "missing_in_radiant",
@@ -1437,24 +1624,24 @@
               "radiant": {
                 "x": 0,
                 "y": 0,
-                "width": 404,
-                "height": 304
+                "width": 170,
+                "height": 120
               },
               "differences": [
                 {
                   "property": "width",
-                  "radiant": 404,
+                  "radiant": 170,
                   "browser": 400,
-                  "difference": 4
+                  "difference": 230
                 },
                 {
                   "property": "height",
-                  "radiant": 304,
+                  "radiant": 120,
                   "browser": 300,
-                  "difference": 4
+                  "difference": 180
                 }
               ],
-              "maxDifference": 4
+              "maxDifference": 230
             },
             {
               "type": "missing_in_radiant",
@@ -1513,6 +1700,28 @@
             },
             {
               "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 63,
+                "y": 10,
+                "width": 43,
+                "height": 18
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 170,
+                "y": 0,
+                "width": 170,
+                "height": 120
+              }
+            },
+            {
+              "type": "extra_in_radiant",
               "selector": "#null > #null > undefined",
               "browser": null,
               "radiant": {
@@ -1528,10 +1737,10 @@
         {
           "testName": "flex_008_flex_basis",
           "passed": false,
-          "executionTime": 0.152,
+          "executionTime": 0.159,
           "matchedElements": 0,
           "totalElements": 11,
-          "maxDifference": 4,
+          "maxDifference": 250,
           "differences": [
             {
               "type": "missing_in_radiant",
@@ -1611,24 +1820,24 @@
               "radiant": {
                 "x": 0,
                 "y": 0,
-                "width": 404,
-                "height": 304
+                "width": 150,
+                "height": 120
               },
               "differences": [
                 {
                   "property": "width",
-                  "radiant": 404,
+                  "radiant": 150,
                   "browser": 400,
-                  "difference": 4
+                  "difference": 250
                 },
                 {
                   "property": "height",
-                  "radiant": 304,
+                  "radiant": 120,
                   "browser": 300,
-                  "difference": 4
+                  "difference": 180
                 }
               ],
-              "maxDifference": 4
+              "maxDifference": 250
             },
             {
               "type": "missing_in_radiant",
@@ -1687,6 +1896,28 @@
             },
             {
               "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 178,
+                "y": 10,
+                "width": 43,
+                "height": 18
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 150,
+                "y": 0,
+                "width": 200,
+                "height": 120
+              }
+            },
+            {
+              "type": "extra_in_radiant",
               "selector": "#null > #null > undefined",
               "browser": null,
               "radiant": {
@@ -1702,10 +1933,10 @@
         {
           "testName": "flex_009_auto_margins",
           "passed": false,
-          "executionTime": 0.149,
+          "executionTime": 0.16,
           "matchedElements": 0,
           "totalElements": 10,
-          "maxDifference": 4,
+          "maxDifference": 280,
           "differences": [
             {
               "type": "missing_in_radiant",
@@ -1785,24 +2016,24 @@
               "radiant": {
                 "x": 0,
                 "y": 0,
-                "width": 404,
-                "height": 304
+                "width": 120,
+                "height": 120
               },
               "differences": [
                 {
                   "property": "width",
-                  "radiant": 404,
+                  "radiant": 120,
                   "browser": 400,
-                  "difference": 4
+                  "difference": 280
                 },
                 {
                   "property": "height",
-                  "radiant": 304,
+                  "radiant": 120,
                   "browser": 300,
-                  "difference": 4
+                  "difference": 180
                 }
               ],
-              "maxDifference": 4
+              "maxDifference": 280
             },
             {
               "type": "missing_in_radiant",
@@ -1850,6 +2081,17 @@
             },
             {
               "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 38,
+                "y": 10,
+                "width": 43,
+                "height": 18
+              }
+            },
+            {
+              "type": "extra_in_radiant",
               "selector": "#null > #null > undefined",
               "browser": null,
               "radiant": {
@@ -1865,7 +2107,7 @@
         {
           "testName": "flex_010_wrap_reverse",
           "passed": false,
-          "executionTime": 0.151,
+          "executionTime": 0.153,
           "matchedElements": 0,
           "totalElements": 12,
           "maxDifference": 4,
@@ -2035,6 +2277,50 @@
             },
             {
               "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 180,
+                "width": 220,
+                "height": 120
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 88,
+                "y": 10,
+                "width": 43,
+                "height": 18
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 60,
+                "width": 220,
+                "height": 120
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": -60,
+                "width": 220,
+                "height": 120
+              }
+            },
+            {
+              "type": "extra_in_radiant",
               "selector": "#null > #null > undefined",
               "browser": null,
               "radiant": {
@@ -2050,9 +2336,9 @@
       ],
       "summary": {
         "total": 12,
-        "passed": 2,
-        "failed": 10,
-        "passRate": 16.666666666666664
+        "passed": 0,
+        "failed": 12,
+        "passRate": 0
       }
     },
     {
