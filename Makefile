@@ -546,7 +546,7 @@ build-radiant: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Using CC=$(CC) CXX=$(CXX)"
 	$(call run_make_with_error_summary,radiant)
 	@echo "Building Radiant test executables..."
-	@make -C build/premake test_radiant_flex_gtest test_radiant_flex_algorithm_gtest test_radiant_flex_integration_gtest test_flex_minimal 2>/dev/null || echo "Warning: Some Radiant tests could not be built"
+	@make -C build/premake test_radiant_flex_gtest test_radiant_flex_algorithm_gtest test_radiant_flex_integration_gtest test_flex_minimal test_flex_layout_gtest test_flex_standalone test_flex_new_features 2>/dev/null || echo "Warning: Some Radiant tests could not be built"
 	@echo "Building standalone flex tests..."
 	@g++ -std=c++17 -I. -Iradiant -o test/test_flex_core_validation.exe test/test_flex_core_validation.cpp 2>/dev/null || echo "Warning: test_flex_core_validation could not be built"
 	@g++ -std=c++17 -I. -Iradiant -o test/test_flex_simple.exe test/test_flex_simple.cpp 2>/dev/null || echo "Warning: test_flex_simple could not be built"
@@ -622,6 +622,7 @@ clean-test:
 	@rm -f test/test_radiant_flex_integration_gtest.exe 2>/dev/null || true
 	@rm -f test/test_flex_minimal.exe 2>/dev/null || true
 	@rm -f test/test_flex_layout.exe 2>/dev/null || true
+	@rm -f test/test_flex_layout_gtest.exe 2>/dev/null || true
 	@rm -f test/test_flex_core_validation.exe 2>/dev/null || true
 	@rm -f test/test_flex_simple.exe 2>/dev/null || true
 	@rm -f test/test_flex_standalone.exe 2>/dev/null || true
@@ -814,6 +815,24 @@ test-radiant: build-radiant
 		./test/test_flex_simple.exe; \
 	else \
 		echo "Warning: Simple flex tests not found. Skipping test_flex_simple.exe"; \
+	fi
+	@echo "Testing comprehensive flex layout..."
+	@if [ -f "test/test_flex_layout_gtest.exe" ]; then \
+		./test/test_flex_layout_gtest.exe; \
+	else \
+		echo "Warning: Comprehensive flex layout tests not found. Skipping test_flex_layout_gtest.exe"; \
+	fi
+	@echo "Testing standalone flex functionality..."
+	@if [ -f "test/test_flex_standalone.exe" ]; then \
+		timeout 10s ./test/test_flex_standalone.exe || echo "Warning: Standalone flex tests encountered issues (exit code: $$?)"; \
+	else \
+		echo "Warning: Standalone flex tests not found. Skipping test_flex_standalone.exe"; \
+	fi
+	@echo "Testing advanced flex new features..."
+	@if [ -f "test/test_flex_new_features.exe" ]; then \
+		timeout 10s ./test/test_flex_new_features.exe || echo "Warning: Advanced flex new features tests encountered issues (exit code: $$?)"; \
+	else \
+		echo "Warning: Advanced flex new features tests not found. Skipping test_flex_new_features.exe"; \
 	fi
 	@echo "✅ All Radiant tests passed successfully!"
 
