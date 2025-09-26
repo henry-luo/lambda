@@ -82,7 +82,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     lexbor_avl_node_t *node, void *ctx);
 DisplayValue resolve_display(lxb_html_element_t* elmt);
-JustifyContent resolve_justify_content(PropValue value);
+int resolve_justify_content(PropValue value); // Returns Lexbor constant directly
 Color color_name_to_rgb(PropValue color_name);
 
 void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container);

@@ -9,8 +9,8 @@ extern "C" {
 
 // Forward declarations for static helper functions
 static int convert_wrap_to_lexbor(int wrap);
-static int convert_justify_to_lexbor(int justify);
 static int convert_align_to_lexbor(int align);
+// NOTE: convert_justify_to_lexbor removed - justify values now stored as Lexbor constants directly
 
 // Initialize flex container layout state
 void init_flex_container(ViewBlock* container) {
@@ -30,6 +30,10 @@ void init_flex_container(ViewBlock* container) {
     flex->justify = LXB_CSS_VALUE_FLEX_START;
     flex->align_items = LXB_CSS_VALUE_FLEX_START;
     flex->align_content = LXB_CSS_VALUE_FLEX_START;
+    
+    // DEBUG: Verify default direction value
+    printf("DEBUG: init_flex_container - default direction=%d (should be %d)\n", 
+           flex->direction, LXB_CSS_VALUE_ROW);
     flex->row_gap = 0;
     flex->column_gap = 0;
     flex->writing_mode = WM_HORIZONTAL_TB;
@@ -94,7 +98,12 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
         
         // DEBUG: Calculated content dimensions
         
-        if (is_main_axis_horizontal(flex_layout)) {
+        // DEBUG: Check axis orientation
+        bool is_horizontal = is_main_axis_horizontal(flex_layout);
+        printf("DEBUG: direction=%d, is_horizontal=%s, content_width=%d, content_height=%d\n", 
+               flex_layout->direction, is_horizontal ? "true" : "false", content_width, content_height);
+        
+        if (is_horizontal) {
             if (flex_layout->main_axis_size == 0) flex_layout->main_axis_size = content_width;
             if (flex_layout->cross_axis_size == 0) flex_layout->cross_axis_size = content_height;
         } else {
@@ -371,16 +380,8 @@ int find_max_baseline(FlexLineInfo* line) {
     return found ? max_baseline : 0;
 }
 
-// Helper function to convert old enum constants to Lexbor constants
-static int convert_direction_to_lexbor(int direction) {
-    switch (direction) {
-        case 0: return LXB_CSS_VALUE_ROW;           // DIR_ROW
-        case 1: return LXB_CSS_VALUE_ROW_REVERSE;   // DIR_ROW_REVERSE  
-        case 2: return LXB_CSS_VALUE_COLUMN;        // DIR_COLUMN
-        case 3: return LXB_CSS_VALUE_COLUMN_REVERSE; // DIR_COLUMN_REVERSE
-        default: return direction; // Already Lexbor constant
-    }
-}
+// REMOVED: convert_direction_to_lexbor function - no longer needed
+// flex-direction values are now stored as Lexbor constants directly from CSS parsing
 
 static int convert_wrap_to_lexbor(int wrap) {
     switch (wrap) {
@@ -391,17 +392,8 @@ static int convert_wrap_to_lexbor(int wrap) {
     }
 }
 
-static int convert_justify_to_lexbor(int justify) {
-    switch (justify) {
-        case 0: return LXB_CSS_VALUE_FLEX_START;    // JUSTIFY_START
-        case 1: return LXB_CSS_VALUE_FLEX_END;      // JUSTIFY_END
-        case 2: return LXB_CSS_VALUE_CENTER;        // JUSTIFY_CENTER
-        case 3: return LXB_CSS_VALUE_SPACE_BETWEEN; // JUSTIFY_SPACE_BETWEEN
-        case 4: return LXB_CSS_VALUE_SPACE_AROUND;  // JUSTIFY_SPACE_AROUND
-        case 5: return LXB_CSS_VALUE_SPACE_EVENLY;  // JUSTIFY_SPACE_EVENLY
-        default: return justify; // Already Lexbor constant
-    }
-}
+// REMOVED: convert_justify_to_lexbor function - no longer needed
+// justify-content values are now stored as Lexbor constants directly from CSS parsing
 
 static int convert_align_to_lexbor(int align) {
     switch (align) {
@@ -417,7 +409,8 @@ static int convert_align_to_lexbor(int align) {
 
 // Check if main axis is horizontal
 bool is_main_axis_horizontal(FlexContainerLayout* flex_layout) {
-    int direction = convert_direction_to_lexbor(flex_layout->direction);
+    // CRITICAL FIX: Use direction value directly - it's stored as Lexbor constant
+    int direction = flex_layout->direction;
     
     // Consider writing mode in axis determination
     if (flex_layout->writing_mode == WM_VERTICAL_RL || 
@@ -676,7 +669,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         auto_margin_size = (float)(container_size - total_size_with_gaps) / auto_margin_count;
     } else {
         // Apply justify-content if no auto margins
-        // *** FIX: Don't convert - value is already in Lexbor format ***
+        // CRITICAL FIX: Use justify value directly - it's now stored as Lexbor constant
         int justify = flex_layout->justify;
         switch (justify) {
             case LXB_CSS_VALUE_FLEX_START:
