@@ -1123,51 +1123,28 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!block) { break; }
         const lxb_css_property_flex_direction_t *flex_direction = declr->u.flex_direction;
         alloc_flex_container_prop(lycon, block); 
-        // CRITICAL FIX: Store Lexbor constants directly instead of old enum values
-        block->embed->flex_container->direction = flex_direction->type;
+        // CRITICAL FIX: Now that enums align with Lexbor constants, we can use them directly
+        block->embed->flex_container->direction = (FlexDirection)flex_direction->type;
         break;
     }
     case LXB_CSS_PROPERTY_FLEX_WRAP: {
         if (!block) { break; }
         const lxb_css_property_flex_wrap_t *flex_wrap = declr->u.flex_wrap;
         alloc_flex_container_prop(lycon, block);
-        switch (flex_wrap->type) {
-            case LXB_CSS_VALUE_NOWRAP:
-                block->embed->flex_container->wrap = WRAP_NOWRAP; break;
-            case LXB_CSS_VALUE_WRAP:
-                block->embed->flex_container->wrap = WRAP_WRAP; break;
-            case LXB_CSS_VALUE_WRAP_REVERSE:
-                block->embed->flex_container->wrap = WRAP_WRAP_REVERSE; break;
-        }
+        // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
+        block->embed->flex_container->wrap = (FlexWrap)flex_wrap->type;
         break;
     }
     case LXB_CSS_PROPERTY_FLEX_FLOW: {
         if (!block) { break; }
         const lxb_css_property_flex_flow_t *flex_flow = declr->u.flex_flow;
         alloc_flex_container_prop(lycon, block);
-        // handle direction
+        // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
         if (flex_flow->type_direction != LXB_CSS_VALUE__UNDEF) {
-            switch (flex_flow->type_direction) {
-                case LXB_CSS_VALUE_ROW:
-                    block->embed->flex_container->direction = DIR_ROW; break;
-                case LXB_CSS_VALUE_ROW_REVERSE:
-                    block->embed->flex_container->direction = DIR_ROW_REVERSE; break;
-                case LXB_CSS_VALUE_COLUMN:
-                    block->embed->flex_container->direction = DIR_COLUMN; break;
-                case LXB_CSS_VALUE_COLUMN_REVERSE:
-                    block->embed->flex_container->direction = DIR_COLUMN_REVERSE; break;
-            }
+            block->embed->flex_container->direction = (FlexDirection)flex_flow->type_direction;
         }
-        // handle wrap
         if (flex_flow->wrap != LXB_CSS_VALUE__UNDEF) {
-            switch (flex_flow->wrap) {
-                case LXB_CSS_VALUE_NOWRAP:
-                    block->embed->flex_container->wrap = WRAP_NOWRAP; break;
-                case LXB_CSS_VALUE_WRAP:
-                    block->embed->flex_container->wrap = WRAP_WRAP; break;
-                case LXB_CSS_VALUE_WRAP_REVERSE:
-                    block->embed->flex_container->wrap = WRAP_WRAP_REVERSE; break;
-            }
+            block->embed->flex_container->wrap = (FlexWrap)flex_flow->wrap;
         }
         break;
     }   
@@ -1175,26 +1152,30 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!block) { break; }
         const lxb_css_property_justify_content_t *justify_content = declr->u.justify_content;
         alloc_flex_container_prop(lycon, block);
-        block->embed->flex_container->justify = resolve_justify_content(justify_content->type);
+        // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
+        block->embed->flex_container->justify = (JustifyContent)justify_content->type;
         break;
     }
     case LXB_CSS_PROPERTY_ALIGN_ITEMS: {
         if (!block) { break; }
         const lxb_css_property_align_items_t *align_items = declr->u.align_items;
         alloc_flex_container_prop(lycon, block);
-        block->embed->flex_container->align_items = resolve_align_type(align_items->type);
+        // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
+        block->embed->flex_container->align_items = (AlignType)align_items->type;
         break;
     }
     case LXB_CSS_PROPERTY_ALIGN_CONTENT: {
         if (!block) { break; }
         const lxb_css_property_align_content_t *align_content = declr->u.align_content;
         alloc_flex_container_prop(lycon, block); 
-        block->embed->flex_container->align_content = resolve_align_type(align_content->type);
+        // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
+        block->embed->flex_container->align_content = (AlignType)align_content->type;
         break;
     }
     case LXB_CSS_PROPERTY_ALIGN_SELF: {
         const lxb_css_property_align_self_t *align_self = declr->u.align_self;
-        span->align_self = resolve_align_type(align_self->type);
+        // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
+        span->align_self = (AlignType)align_self->type;
         break;
     }
     case LXB_CSS_PROPERTY_ORDER: {
