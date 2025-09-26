@@ -287,8 +287,6 @@ project "radiant"
         "radiant/layout.cpp",
         "radiant/layout_block.cpp",
         "radiant/layout_text.cpp",
-        "radiant/layout_flex_nodes.cpp",
-        "radiant/layout_flex.cpp",
         "radiant/flex_layout_new.cpp",
         "radiant/layout_flex_content.cpp",
         "radiant/layout_nested.cpp",
