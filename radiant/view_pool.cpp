@@ -421,7 +421,68 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
     
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"tag\": ");
-    append_json_string(buf, block->node ? block->node->name() : "unknown");
+    
+    // CRITICAL FIX: Provide better element names for debugging
+    const char* tag_name = "unknown";
+    if (block->node) {
+        const char* node_name = block->node->name();
+        if (node_name) {
+            // Handle special cases for better debugging
+            if (strcmp(node_name, "#null") == 0) {
+                // Try to infer the element type from context
+                if (block->parent == nullptr) {
+                    tag_name = "html-root";
+                } else if (block->parent && block->parent->node == nullptr) {
+                    tag_name = "body";
+                } else {
+                    tag_name = "div";  // Most #null elements are divs
+                }
+            } else {
+                tag_name = node_name;
+            }
+        }
+    } else {
+        // No DOM node - try to infer from view type
+        switch (block->type) {
+            case RDT_VIEW_BLOCK:
+                tag_name = "div";
+                break;
+            case RDT_VIEW_INLINE_BLOCK:
+                tag_name = "span";
+                break;
+            case RDT_VIEW_LIST_ITEM:
+                tag_name = "li";
+                break;
+            default:
+                tag_name = "unknown";
+                break;
+        }
+    }
+    
+    append_json_string(buf, tag_name);
+    strbuf_append_str(buf, ",\n");
+    
+    // ENHANCEMENT: Add CSS class information if available
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"selector\": ");
+    
+    // Try to get CSS class information for better element identification
+    const char* css_class = "";
+    if (block->node) {
+        size_t class_len;
+        const lxb_char_t* class_attr = block->node->get_attribute("class", &class_len);
+        if (class_attr && class_len > 0) {
+            // Create selector like "div.container"
+            char* selector = (char*)malloc(strlen(tag_name) + class_len + 2);
+            sprintf(selector, "%s.%.*s", tag_name, (int)class_len, class_attr);
+            append_json_string(buf, selector);
+            free(selector);
+        } else {
+            append_json_string(buf, tag_name);
+        }
+    } else {
+        append_json_string(buf, tag_name);
+    }
     strbuf_append_str(buf, ",\n");
     
     // Layout properties
@@ -506,23 +567,38 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"type\": \"text\",\n");
     
+    // CRITICAL FIX: Add tag field for consistency with block elements
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"tag\": \"text\",\n");
+    
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"selector\": \"text\",\n");
+    
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"content\": ");
     
-    // Extract text content
+    // Extract text content with better error handling
     if (text->node) {
         unsigned char* text_data = text->node->text_data();
         if (text_data && text->length > 0) {
             char* content = (char*)malloc(text->length + 1);
             strncpy(content, (char*)(text_data + text->start_index), text->length);
             content[text->length] = '\0';
-            append_json_string(buf, content);
+            
+            // Clean up whitespace for better readability
+            char* cleaned = content;
+            while (*cleaned && (*cleaned == ' ' || *cleaned == '\n' || *cleaned == '\t')) cleaned++;
+            if (strlen(cleaned) > 0) {
+                append_json_string(buf, cleaned);
+            } else {
+                append_json_string(buf, "[whitespace]");
+            }
             free(content);
         } else {
-            append_json_string(buf, "");
+            append_json_string(buf, "[empty]");
         }
     } else {
-        append_json_string(buf, "");
+        append_json_string(buf, "[no-node]");
     }
     strbuf_append_str(buf, ",\n");
     
