@@ -834,10 +834,10 @@ test-radiant: build-radiant
 
 	@echo "🎨 Running Radiant Layout Engine Tests"
 	@echo "======================================"
-	@if [ -f "test/layout/tools/test_layout_auto.py" ]; then \
-		cd test/layout/tools && python3 test_layout_auto.py; \
+	@if [ -f "test/layout/tools/test_layout_auto.js" ]; then \
+		cd test/layout/tools && node test_layout_auto.js; \
 	else \
-		echo "❌ Error: Layout test script not found at test/layout/tools/test_layout_auto.py"; \
+		echo "❌ Error: Layout test script not found at test/layout/tools/test_layout_auto.js"; \
 		exit 1; \
 	fi
 
