@@ -39,17 +39,12 @@ protected:
         ViewBlock* container = alloc_view_block(lycon);
         container->width = width;
         container->height = height;
-        container->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-        container->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
+        // *** CRITICAL FIX: Set content dimensions ***
+        container->content_width = width;
+        container->content_height = height;
         
-        // Set default flex container properties
-        container->embed->flex_container->direction = LXB_CSS_VALUE_ROW;
-        container->embed->flex_container->wrap = LXB_CSS_VALUE_NOWRAP;
-        container->embed->flex_container->justify = LXB_CSS_VALUE_FLEX_START;
-        container->embed->flex_container->align_items = LXB_CSS_VALUE_FLEX_START;
-        container->embed->flex_container->align_content = LXB_CSS_VALUE_FLEX_START;
-        container->embed->flex_container->row_gap = 0;
-        container->embed->flex_container->column_gap = 0;
+        // *** CRITICAL FIX: Use proper initialization function ***
+        init_flex_container(container);
         
         return container;
     }
@@ -60,7 +55,10 @@ protected:
         ViewBlock* item = alloc_view_block(lycon);
         item->width = width;
         item->height = height;
-        item->parent = parent;
+        // *** CRITICAL FIX: Set content dimensions ***
+        item->content_width = width;
+        item->content_height = height;
+        item->parent = (ViewGroup*)parent;
         
         // Set flex item properties
         item->flex_grow = flex_grow;
@@ -147,30 +145,36 @@ TEST_F(FlexLayoutTest, FlexItemCreation) {
     EXPECT_EQ(item2->prev_sibling, item1);
 }
 
-// Test basic row layout (flex-direction: row)
+// Test basic row layout (flex-direction: row) - ENHANCED WITH ACTUAL LAYOUT
 TEST_F(FlexLayoutTest, BasicRowLayout) {
-    ViewBlock* container = createFlexContainer(800, 200);
-    ViewBlock* item1 = createFlexItem(container, 200, 100);
-    ViewBlock* item2 = createFlexItem(container, 200, 100);
-    ViewBlock* item3 = createFlexItem(container, 200, 100);
+    ViewBlock* container = createFlexContainer(400, 200);
+    container->embed->flex_container->column_gap = 10;
     
-    // Mock the layout function call
-    // In the real implementation, this would call the new integrated flex layout
-    // For now, we'll test the data structure setup
+    ViewBlock* item1 = createFlexItem(container, 100, 100);
+    ViewBlock* item2 = createFlexItem(container, 100, 100);
+    ViewBlock* item3 = createFlexItem(container, 100, 100);
     
-    // Verify container setup
-    EXPECT_EQ(container->width, 800);
+    // *** ENHANCED: RUN ACTUAL LAYOUT ALGORITHM ***
+    layout_flex_container_new(lycon, container);
+    
+    // *** ENHANCED: VALIDATE ACTUAL LAYOUT RESULTS ***
+    // Expected: Item1(0,0), Item2(110,0), Item3(220,0) with 10px gaps
+    EXPECT_EQ(item1->x, 0) << "Item 1 should be at x=0";
+    EXPECT_EQ(item1->y, 0) << "Item 1 should be at y=0";
+    EXPECT_EQ(item1->width, 100) << "Item 1 should maintain width=100";
+    
+    EXPECT_EQ(item2->x, 110) << "Item 2 should be at x=110 (100 + 10 gap)";
+    EXPECT_EQ(item2->y, 0) << "Item 2 should be at y=0";
+    EXPECT_EQ(item2->width, 100) << "Item 2 should maintain width=100";
+    
+    EXPECT_EQ(item3->x, 220) << "Item 3 should be at x=220 (110 + 100 + 10 gap)";
+    EXPECT_EQ(item3->y, 0) << "Item 3 should be at y=0";
+    EXPECT_EQ(item3->width, 100) << "Item 3 should maintain width=100";
+    
+    // Verify container setup (original tests)
+    EXPECT_EQ(container->width, 400);
     EXPECT_EQ(container->height, 200);
     EXPECT_EQ(container->embed->flex_container->direction, LXB_CSS_VALUE_ROW);
-    
-    // Count children
-    int child_count = 0;
-    ViewBlock* child = container->first_child;
-    while (child) {
-        child_count++;
-        child = child->next_sibling;
-    }
-    EXPECT_EQ(child_count, 3);
 }
 
 // Test column layout (flex-direction: column)
@@ -191,23 +195,33 @@ TEST_F(FlexLayoutTest, BasicColumnLayout) {
     EXPECT_EQ(item3->next_sibling, nullptr);
 }
 
-// Test flex-grow behavior
+// Test flex-grow behavior - ENHANCED WITH ACTUAL LAYOUT
 TEST_F(FlexLayoutTest, FlexGrowBehavior) {
-    ViewBlock* container = createFlexContainer(800, 200);
+    ViewBlock* container = createFlexContainer(400, 200);
+    container->embed->flex_container->column_gap = 10;
     
-    // Create items with different flex-grow values
-    ViewBlock* item1 = createFlexItem(container, 100, 100, 1.0f); // flex-grow: 1
-    ViewBlock* item2 = createFlexItem(container, 100, 100, 2.0f); // flex-grow: 2
-    ViewBlock* item3 = createFlexItem(container, 100, 100, 1.0f); // flex-grow: 1
+    // Create items with different flex-grow values (start with 0 width to test pure flex-grow)
+    ViewBlock* item1 = createFlexItem(container, 0, 100, 1.0f); // flex-grow: 1
+    ViewBlock* item2 = createFlexItem(container, 0, 100, 2.0f); // flex-grow: 2
     
-    // Verify flex-grow values are set correctly
+    // *** ENHANCED: RUN ACTUAL LAYOUT ALGORITHM ***
+    layout_flex_container_new(lycon, container);
+    
+    // *** ENHANCED: VALIDATE ACTUAL FLEX-GROW RESULTS ***
+    // Available space: 400 - 10 (gap) = 390px
+    // Total flex-grow: 1 + 2 = 3
+    // Item 1: 390 * (1/3) = 130px
+    // Item 2: 390 * (2/3) = 260px
+    EXPECT_NEAR(item1->width, 130, 2) << "Item 1 should get ~130px (1/3 of available space)";
+    EXPECT_NEAR(item2->width, 260, 2) << "Item 2 should get ~260px (2/3 of available space)";
+    
+    // Verify positions
+    EXPECT_EQ(item1->x, 0) << "Item 1 should start at x=0";
+    EXPECT_NEAR(item2->x, 140, 2) << "Item 2 should start at x=140 (130 + 10 gap)";
+    
+    // Verify original property tests still pass
     EXPECT_FLOAT_EQ(item1->flex_grow, 1.0f);
     EXPECT_FLOAT_EQ(item2->flex_grow, 2.0f);
-    EXPECT_FLOAT_EQ(item3->flex_grow, 1.0f);
-    
-    // Total flex-grow should be 4 (1 + 2 + 1)
-    float total_grow = item1->flex_grow + item2->flex_grow + item3->flex_grow;
-    EXPECT_FLOAT_EQ(total_grow, 4.0f);
 }
 
 // Test flex-shrink behavior
@@ -320,24 +334,32 @@ TEST_F(FlexLayoutTest, FlexWrapBehavior) {
     EXPECT_GT(total_width, container->width);
 }
 
-// Test gap properties
+// Test gap properties - ENHANCED WITH ACTUAL LAYOUT
 TEST_F(FlexLayoutTest, GapProperties) {
-    ViewBlock* container = createFlexContainer(800, 200);
+    ViewBlock* container = createFlexContainer(400, 200);
     
     // Set gap values
-    container->embed->flex_container->row_gap = 20;
     container->embed->flex_container->column_gap = 15;
-    
-    EXPECT_EQ(container->embed->flex_container->row_gap, 20);
-    EXPECT_EQ(container->embed->flex_container->column_gap, 15);
     
     // Create items to test gap calculation
     ViewBlock* item1 = createFlexItem(container, 100, 100);
     ViewBlock* item2 = createFlexItem(container, 100, 100);
     ViewBlock* item3 = createFlexItem(container, 100, 100);
     
-    // With 3 items, there should be 2 gaps between them
-    // Total gap space = 2 * column_gap = 2 * 15 = 30
+    // *** ENHANCED: RUN ACTUAL LAYOUT ALGORITHM ***
+    layout_flex_container_new(lycon, container);
+    
+    // *** ENHANCED: VALIDATE ACTUAL GAP POSITIONING ***
+    // Expected positions with 15px gaps:
+    // Item1: x=0, Item2: x=115 (100+15), Item3: x=230 (115+100+15)
+    EXPECT_EQ(item1->x, 0) << "Item 1 should be at x=0";
+    EXPECT_EQ(item2->x, 115) << "Item 2 should be at x=115 (100 + 15 gap)";
+    EXPECT_EQ(item3->x, 230) << "Item 3 should be at x=230 (115 + 100 + 15 gap)";
+    
+    // Verify gap property is set correctly (original test)
+    EXPECT_EQ(container->embed->flex_container->column_gap, 15);
+    
+    // Verify gap calculation (original test)
     int expected_gap_space = 2 * container->embed->flex_container->column_gap;
     EXPECT_EQ(expected_gap_space, 30);
 }
