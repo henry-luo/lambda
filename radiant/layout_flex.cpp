@@ -168,17 +168,24 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
     }
     
     // Phase 9: Handle wrap-reverse if needed
-    // CRITICAL FIX: Use wrap value directly - it's now stored as Lexbor constant
-    if (flex_layout->wrap == WRAP_WRAP_REVERSE && is_main_axis_horizontal(flex_layout)) {
+    // CRITICAL FIX: Handle wrap-reverse for both horizontal and vertical flex containers
+    if (flex_layout->wrap == WRAP_WRAP_REVERSE) {
         // Reverse the cross-axis positions for wrap-reverse
         int container_cross_size = flex_layout->cross_axis_size;
+        printf("DEBUG: wrap-reverse - container_cross_size: %d\n", container_cross_size);
+        
         for (int i = 0; i < line_count; i++) {
             FlexLineInfo* line = &flex_layout->lines[i];
             for (int j = 0; j < line->item_count; j++) {
                 ViewBlock* item = line->items[j];
                 int current_cross_pos = get_cross_axis_position(item, flex_layout);
                 int item_cross_size = get_cross_axis_size(item, flex_layout);
-                set_cross_axis_position(item, container_cross_size - current_cross_pos - item_cross_size, flex_layout);
+                int new_cross_pos = container_cross_size - current_cross_pos - item_cross_size;
+                
+                printf("DEBUG: wrap-reverse - item %d: %d -> %d (size: %d)\n", 
+                       j, current_cross_pos, new_cross_pos, item_cross_size);
+                
+                set_cross_axis_position(item, new_cross_pos, flex_layout);
             }
         }
     }
