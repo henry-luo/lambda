@@ -620,19 +620,6 @@ else
     fi
 fi
 
-# Build MIR for Mac
-echo "Setting up MIR..."
-if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
-    echo "MIR already available"
-else
-    if ! build_mir_for_mac; then
-        echo "Warning: MIR build failed"
-        exit 1
-    else
-        echo "MIR built successfully"
-    fi
-fi
-
 # Build ThorVG v1.0-pre1 for Mac
 echo "Setting up ThorVG ..."
 # Force rebuild to ensure we have the correct version (v1.0-pre1)
@@ -663,6 +650,45 @@ else
     fi
 fi
 
+# Build MIR for Mac (Lambda dependency)
+echo "Setting up MIR..."
+if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
+    echo "MIR already available"
+else
+    if ! build_mir_for_mac; then
+        echo "Warning: MIR build failed"
+        exit 1
+    else
+        echo "MIR built successfully"
+    fi
+fi
+
+# Build nghttp2 for Mac (Lambda dependency)
+echo "Setting up nghttp2..."
+if [ -f "mac-deps/nghttp2/lib/libnghttp2.a" ]; then
+    echo "nghttp2 already available"
+else
+    if ! build_nghttp2_for_mac; then
+        echo "Warning: nghttp2 build failed"
+        exit 1
+    else
+        echo "nghttp2 built successfully"
+    fi
+fi
+
+# Build libcurl with HTTP/2 support for Mac (Lambda dependency)
+echo "Setting up libcurl with HTTP/2 support..."
+if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
+    echo "libcurl with HTTP/2 already available"
+else
+    if ! build_curl_with_http2_for_mac; then
+        echo "Warning: libcurl with HTTP/2 build failed"
+        exit 1
+    else
+        echo "libcurl with HTTP/2 built successfully"
+    fi
+fi
+
 # Setup FreeType 2.13.3 for Mac (required by Radiant project)
 echo "Setting up FreeType 2.13.3..."
 if ! setup_freetype_2_13_3_for_mac; then
@@ -679,8 +705,6 @@ echo "Installing Homebrew dependencies..."
 HOMEBREW_DEPS=(
     "mpdecimal"  # For decimal arithmetic - referenced in build config
     "utf8proc"   # For Unicode processing - referenced in build config  
-    "libedit"    # For command line editing - cross-platform readline alternative
-    "criterion"  # For testing framework - referenced in build config
     "coreutils"  # For timeout command needed by test suite
     "openssl@3"  # For SSL/TLS support - required for libcurl
     "ginac"      # For mathematical expression equivalence testing
@@ -957,32 +981,6 @@ build_curl_with_http2_for_mac() {
     cd - > /dev/null
     return 1
 }
-
-# Build nghttp2 for Mac
-echo "Setting up nghttp2..."
-if [ -f "mac-deps/nghttp2/lib/libnghttp2.a" ]; then
-    echo "nghttp2 already available"
-else
-    if ! build_nghttp2_for_mac; then
-        echo "Warning: nghttp2 build failed"
-        exit 1
-    else
-        echo "nghttp2 built successfully"
-    fi
-fi
-
-# Build libcurl with HTTP/2 support for Mac
-echo "Setting up libcurl with HTTP/2 support..."
-if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
-    echo "libcurl with HTTP/2 already available"
-else
-    if ! build_curl_with_http2_for_mac; then
-        echo "Warning: libcurl with HTTP/2 build failed"
-        exit 1
-    else
-        echo "libcurl with HTTP/2 built successfully"
-    fi
-fi
 
 # Clean up intermediate files
 cleanup_intermediate_files
