@@ -592,30 +592,38 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound) {
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }       
-        int space_length = resolve_length_value(lycon, declr->type, (lxb_css_value_length_percentage_t *)space);
+        
+        // Check for auto margins (important for flexbox)
+        bool is_auto = (space->type == LXB_CSS_VALUE_AUTO);
+        int space_length = is_auto ? 0 : resolve_length_value(lycon, declr->type, (lxb_css_value_length_percentage_t *)space);
+        
         switch (declr->type) {
         case LXB_CSS_PROPERTY_MARGIN_LEFT:
             if (specificity > span->bound->margin.left_specificity) {
                 span->bound->margin.left = space_length;  
                 span->bound->margin.left_specificity = specificity;
+                span->margin_left_auto = is_auto;
             }
             break;
         case LXB_CSS_PROPERTY_MARGIN_RIGHT:
             if (specificity > span->bound->margin.right_specificity) {
                 span->bound->margin.right = space_length;  
                 span->bound->margin.right_specificity = specificity; 
+                span->margin_right_auto = is_auto;
             }
             break;
         case LXB_CSS_PROPERTY_MARGIN_TOP:
             if (specificity > span->bound->margin.top_specificity) {
                 span->bound->margin.top = space_length;  
                 span->bound->margin.top_specificity = specificity; 
+                span->margin_top_auto = is_auto;
             }
             break;
         case LXB_CSS_PROPERTY_MARGIN_BOTTOM:
             if (specificity > span->bound->margin.bottom_specificity) {
                 span->bound->margin.bottom = space_length;  
                 span->bound->margin.bottom_specificity = specificity; 
+                span->margin_bottom_auto = is_auto;
             }
             break;
         case LXB_CSS_PROPERTY_PADDING_LEFT: 
@@ -1240,26 +1248,44 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
         break;
     }
-    // Duplicate case statements removed - these properties are already handled above
-        
-    // case LXB_CSS_PROPERTY_GAP:
-    //     if (!block) { break; }
-    //     const lxb_css_property_gap_t *gap = declr->u.gap;
-    //     alloc_flex_container_prop(lycon, block);
-    //     // Set row gap
-    //     block->flex_container->row_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_GAP, &gap->row);
-        
-    //     // Set column gap (if specified, otherwise use row gap)
-    //     if (gap->column.type != LXB_CSS_VALUE__UNDEF) {
-    //         block->flex_container->column_gap = resolve_length_value(lycon, LXB_CSS_PROPERTY_GAP, &gap->column);
-    //     } else {
-    //         block->flex_container->column_gap = block->flex_container->row_gap;
-    //     }
-    //     break;
+    
+    // Enhanced flexbox properties for new implementation
+    // Note: aspect-ratio property not available in current lexbor version
+    // Will be handled through custom properties when needed
+    
+    // Enhanced flexbox properties are handled through existing cases above
+    // Additional properties like aspect-ratio will be handled as custom properties
 
     case LXB_CSS_PROPERTY__CUSTOM: { // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
-        log_warn("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
+        log_debug("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
+        
+        // Handle aspect-ratio as custom property until lexbor supports it
+        if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "aspect-ratio", 12) == 0) {
+            // Parse aspect-ratio value (simplified parsing)
+            // Format: "width / height" or just "ratio"
+            const char* value_str = (const char*)custom->value.data;
+            float ratio = 0.0f;
+            
+            // Simple parsing - look for number before slash or standalone number
+            char* endptr;
+            float width = strtof(value_str, &endptr);
+            if (endptr != value_str) {
+                if (*endptr == '/' && *(endptr + 1)) {
+                    float height = strtof(endptr + 1, NULL);
+                    if (height > 0) {
+                        ratio = width / height;
+                    }
+                } else {
+                    ratio = width; // Single number format
+                }
+            }
+            
+            if (ratio > 0) {
+                span->aspect_ratio = ratio;
+                log_debug("Set aspect-ratio: %f\n", ratio);
+            }
+        }
         break;
     }
     }

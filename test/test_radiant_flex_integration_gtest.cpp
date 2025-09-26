@@ -85,9 +85,24 @@ protected:
         // Parse gap properties
         size_t gap_pos = css_properties.find("gap: ");
         if (gap_pos != std::string::npos) {
-            int gap_value = std::stoi(css_properties.substr(gap_pos + 5));
-            container->embed->flex_container->row_gap = gap_value;
-            container->embed->flex_container->column_gap = gap_value;
+            std::string gap_str = css_properties.substr(gap_pos + 5);
+            size_t end_pos = gap_str.find_first_of("; ");
+            if (end_pos != std::string::npos) {
+                gap_str = gap_str.substr(0, end_pos);
+            }
+            // Remove 'px' suffix if present
+            if (gap_str.find("px") != std::string::npos) {
+                gap_str = gap_str.substr(0, gap_str.find("px"));
+            }
+            try {
+                int gap_value = std::stoi(gap_str);
+                container->embed->flex_container->row_gap = gap_value;
+                container->embed->flex_container->column_gap = gap_value;
+            } catch (const std::exception&) {
+                // Default gap value if parsing fails
+                container->embed->flex_container->row_gap = 0;
+                container->embed->flex_container->column_gap = 0;
+            }
         }
         
         return container;
@@ -106,38 +121,116 @@ protected:
         if (flex_pos != std::string::npos) {
             // Parse "flex: grow shrink basis" format
             std::string flex_value = css_properties.substr(flex_pos + 6);
+            // Find end of property (semicolon or end of string)
+            size_t end_pos = flex_value.find_first_of(";");
+            if (end_pos != std::string::npos) {
+                flex_value = flex_value.substr(0, end_pos);
+            }
+            
             size_t space1 = flex_value.find(' ');
             size_t space2 = flex_value.find(' ', space1 + 1);
             
-            if (space1 != std::string::npos) {
-                item->flex_grow = std::stof(flex_value.substr(0, space1));
-                if (space2 != std::string::npos) {
-                    item->flex_shrink = std::stof(flex_value.substr(space1 + 1, space2 - space1 - 1));
-                    std::string basis_str = flex_value.substr(space2 + 1);
-                    if (basis_str == "auto") {
-                        item->flex_basis = -1;
+            try {
+                if (space1 != std::string::npos) {
+                    std::string grow_str = flex_value.substr(0, space1);
+                    item->flex_grow = std::stof(grow_str);
+                    
+                    if (space2 != std::string::npos) {
+                        std::string shrink_str = flex_value.substr(space1 + 1, space2 - space1 - 1);
+                        item->flex_shrink = std::stof(shrink_str);
+                        
+                        std::string basis_str = flex_value.substr(space2 + 1);
+                        // Remove whitespace
+                        basis_str.erase(0, basis_str.find_first_not_of(" \t"));
+                        basis_str.erase(basis_str.find_last_not_of(" \t") + 1);
+                        
+                        if (basis_str == "auto") {
+                            item->flex_basis = -1;
+                        } else {
+                            // Remove 'px' suffix if present
+                            if (basis_str.find("px") != std::string::npos) {
+                                basis_str = basis_str.substr(0, basis_str.find("px"));
+                            }
+                            item->flex_basis = std::stoi(basis_str);
+                        }
                     } else {
-                        item->flex_basis = std::stoi(basis_str);
+                        // Only grow value provided
+                        item->flex_shrink = 1.0f;
+                        item->flex_basis = 0;
+                    }
+                } else {
+                    // Single value - could be grow or shorthand
+                    std::string single_val = flex_value;
+                    single_val.erase(0, single_val.find_first_not_of(" \t"));
+                    single_val.erase(single_val.find_last_not_of(" \t") + 1);
+                    
+                    if (single_val == "1") {
+                        item->flex_grow = 1.0f;
+                        item->flex_shrink = 1.0f;
+                        item->flex_basis = 0;
+                    } else {
+                        item->flex_grow = std::stof(single_val);
+                        item->flex_shrink = 1.0f;
+                        item->flex_basis = 0;
                     }
                 }
+            } catch (const std::exception&) {
+                // Default flex values if parsing fails
+                item->flex_grow = 0.0f;
+                item->flex_shrink = 1.0f;
+                item->flex_basis = -1; // auto
             }
         } else {
             // Parse individual properties
             if (css_properties.find("flex-grow: ") != std::string::npos) {
                 size_t grow_pos = css_properties.find("flex-grow: ") + 11;
-                item->flex_grow = std::stof(css_properties.substr(grow_pos));
+                std::string grow_str = css_properties.substr(grow_pos);
+                size_t end_pos = grow_str.find_first_of("; ");
+                if (end_pos != std::string::npos) {
+                    grow_str = grow_str.substr(0, end_pos);
+                }
+                try {
+                    item->flex_grow = std::stof(grow_str);
+                } catch (const std::exception&) {
+                    item->flex_grow = 0.0f;
+                }
             }
             if (css_properties.find("flex-shrink: ") != std::string::npos) {
                 size_t shrink_pos = css_properties.find("flex-shrink: ") + 13;
-                item->flex_shrink = std::stof(css_properties.substr(shrink_pos));
+                std::string shrink_str = css_properties.substr(shrink_pos);
+                size_t end_pos = shrink_str.find_first_of("; ");
+                if (end_pos != std::string::npos) {
+                    shrink_str = shrink_str.substr(0, end_pos);
+                }
+                try {
+                    item->flex_shrink = std::stof(shrink_str);
+                } catch (const std::exception&) {
+                    item->flex_shrink = 1.0f;
+                }
             }
             if (css_properties.find("flex-basis: ") != std::string::npos) {
                 size_t basis_pos = css_properties.find("flex-basis: ") + 12;
                 std::string basis_str = css_properties.substr(basis_pos);
+                size_t end_pos = basis_str.find_first_of("; ");
+                if (end_pos != std::string::npos) {
+                    basis_str = basis_str.substr(0, end_pos);
+                }
+                // Remove whitespace
+                basis_str.erase(0, basis_str.find_first_not_of(" \t"));
+                basis_str.erase(basis_str.find_last_not_of(" \t") + 1);
+                
                 if (basis_str.find("auto") != std::string::npos) {
                     item->flex_basis = -1;
                 } else {
-                    item->flex_basis = std::stoi(basis_str);
+                    // Remove 'px' suffix if present
+                    if (basis_str.find("px") != std::string::npos) {
+                        basis_str = basis_str.substr(0, basis_str.find("px"));
+                    }
+                    try {
+                        item->flex_basis = std::stoi(basis_str);
+                    } catch (const std::exception&) {
+                        item->flex_basis = -1; // auto
+                    }
                 }
             }
         }
@@ -419,7 +512,7 @@ TEST_F(FlexIntegrationTest, SidebarLayoutSystem) {
         "flex: 1; display: flex; flex-direction: column;", 950, 600);
     
     main_content->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-    main_content->embed->flex_container = (FlexContainerProp*)calloc(1, sizeof(FlexContainerProp));
+    main_content->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
     main_content->embed->flex_container->direction = DIR_COLUMN;
     main_content->embed->flex_container->justify = JUSTIFY_START;
     main_content->embed->flex_container->align_items = ALIGN_STRETCH;
@@ -450,7 +543,7 @@ TEST_F(FlexIntegrationTest, ComplexNestedLayout) {
         1200, 60);
     
     top_bar->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-    top_bar->embed->flex_container = (FlexContainerProp*)calloc(1, sizeof(FlexContainerProp));
+    top_bar->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
     top_bar->embed->flex_container->direction = DIR_ROW;
     top_bar->embed->flex_container->justify = JUSTIFY_SPACE_BETWEEN;
     top_bar->embed->flex_container->align_items = ALIGN_CENTER;
@@ -460,7 +553,7 @@ TEST_F(FlexIntegrationTest, ComplexNestedLayout) {
         "flex: 1; display: flex; flex-direction: row;", 1200, 740);
     
     main_area->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-    main_area->embed->flex_container = (FlexContainerProp*)calloc(1, sizeof(FlexContainerProp));
+    main_area->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
     main_area->embed->flex_container->direction = DIR_ROW;
     main_area->embed->flex_container->justify = JUSTIFY_START;
     main_area->embed->flex_container->align_items = ALIGN_STRETCH;
@@ -474,7 +567,7 @@ TEST_F(FlexIntegrationTest, ComplexNestedLayout) {
         "flex: 1; display: flex; flex-direction: column; gap: 20px;", 800, 740);
     
     content_grid->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-    content_grid->embed->flex_container = (FlexContainerProp*)calloc(1, sizeof(FlexContainerProp));
+    content_grid->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
     content_grid->embed->flex_container->direction = DIR_COLUMN;
     content_grid->embed->flex_container->justify = JUSTIFY_START;
     content_grid->embed->flex_container->align_items = ALIGN_STRETCH;

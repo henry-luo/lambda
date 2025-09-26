@@ -7,6 +7,11 @@ extern "C" {
 #include <math.h>
 }
 
+// Forward declarations for static helper functions
+static int convert_wrap_to_lexbor(int wrap);
+static int convert_justify_to_lexbor(int justify);
+static int convert_align_to_lexbor(int align);
+
 // Initialize flex container layout state
 void init_flex_container(ViewBlock* container) {
     if (!container || !container->embed) return;

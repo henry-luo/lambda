@@ -2,20 +2,17 @@
 #include <memory>
 #include <vector>
 
-// Include the radiant layout headers
 #include "../radiant/layout.hpp"
 #include "../radiant/view.hpp"
 #include "../radiant/flex.hpp"
 #include "../radiant/flex_layout_new.hpp"
 
-// Forward declare helper functions from new implementation
-extern "C" {
-    float clamp_value(float value, float min_val, float max_val);
-    int resolve_percentage(int value, bool is_percent, int container_size);
-    void apply_constraints(ViewBlock* item, int container_width, int container_height);
-    int find_max_baseline(FlexLineInfo* line);
-    bool is_valid_flex_item(ViewBlock* item);
-}
+// Forward declarations for helper functions (removed extern "C" to match header declarations)
+float clamp_value(float value, float min_val, float max_val);
+int resolve_percentage(int value, bool is_percent, int container_size);
+void apply_constraints(ViewBlock* item, int container_width, int container_height);
+int find_max_baseline(FlexLineInfo* line);
+bool is_valid_flex_item(ViewBlock* item);
 
 // Test fixture for flex layout tests
 class FlexLayoutTest : public ::testing::Test {

@@ -1,5 +1,7 @@
 #include "layout.hpp"
 #include "flex_layout_new.hpp"
+#include "layout_flex_content.hpp"
+#include "layout_nested.hpp"
 
 #include "../lib/log.h"
 
@@ -145,14 +147,16 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 if (!lycon->line.is_line_start) { line_break(lycon); }                
             }
             else if (display.inner == LXB_CSS_VALUE_FLEX) {
-                // Use new integrated flex layout system
-                ViewBlock* flex_container = (ViewBlock*)lycon->parent;
-                if (flex_container && flex_container->embed && flex_container->embed->flex_container) {
-                    layout_flex_container_new(lycon, flex_container);
-                } else {
-                    // Fallback to old system for compatibility
-                    layout_flex_nodes(lycon, (lxb_dom_node_t*)child);
+                // Initialize flex container if not already done
+                if (!block->embed) {
+                    block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
                 }
+                if (!block->embed->flex_container) {
+                    init_flex_container(block);
+                }
+                
+                // Use nested layout system for flex containers with content
+                layout_flex_container_with_nested_content(lycon, block);
             }
             else {
                 log_debug("unknown display type\n");
@@ -165,7 +169,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
 
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
-    log_debug("<<layout block %s\n", elmt->name());
+    log_debug("<<layout block %s (display.inner=%d)\n", elmt->name(), display.inner);
+    
+    // Check if this block is a flex item
+    ViewBlock* parent_block = (ViewBlock*)lycon->parent;
+    bool is_flex_item = (parent_block && parent_block->embed && 
+                        parent_block->embed->flex_container && 
+                        parent_block->display.inner == LXB_CSS_VALUE_FLEX);
+    
     if (display.outer != LXB_CSS_VALUE_INLINE_BLOCK) {
         if (!lycon->line.is_line_start) { line_break(lycon); }
     }
@@ -183,6 +194,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         (display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM : RDT_VIEW_BLOCK), 
         elmt);
     block->display = display;
+    
+    // Validate nested layout structure
+    if (!validate_nested_layout_structure(block)) {
+        log_warn("Invalid nested layout structure detected\n");
+        return;
+    }
+    
     // handle element default styles
     float em_size = 0;  size_t value_len;  const lxb_char_t *value;
     resolve_inline_default(lycon, (ViewSpan*)block);
@@ -412,6 +430,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // layout block content
     if (elmt_name != LXB_TAG_IMG) {
+        // Special handling for flex containers
+        if (display.inner == LXB_CSS_VALUE_FLEX) {
+            log_debug("Setting up flex container for %s\n", elmt->name());
+            // Flex container setup is handled in layout_block_content
+        }
         layout_block_content(lycon, block, display);
     }
 
