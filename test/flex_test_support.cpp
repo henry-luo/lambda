@@ -48,5 +48,25 @@ ViewBlock* alloc_view_block(LayoutContext* lycon) {
     block->align_self = ALIGN_AUTO;
     block->order = 0;
     
+    // Initialize new properties with defaults
+    block->aspect_ratio = 0.0f;
+    block->baseline_offset = 0;
+    block->margin_top_auto = false;
+    block->margin_right_auto = false;
+    block->margin_bottom_auto = false;
+    block->margin_left_auto = false;
+    block->width_is_percent = false;
+    block->height_is_percent = false;
+    block->min_width_is_percent = false;
+    block->max_width_is_percent = false;
+    block->min_height_is_percent = false;
+    block->max_height_is_percent = false;
+    block->min_width = 0;
+    block->max_width = 0;
+    block->min_height = 0;
+    block->max_height = 0;
+    block->position = POS_STATIC;
+    block->visibility = VIS_VISIBLE;
+    
     return block;
 }

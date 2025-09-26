@@ -4,6 +4,7 @@
 extern "C" {
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 }
 
 // Initialize flex container layout state
@@ -90,6 +91,22 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
         align_content(flex_layout);
     }
     
+    // Phase 9: Handle wrap-reverse if needed
+    int wrap = convert_wrap_to_lexbor(flex_layout->wrap);
+    if (wrap == LXB_CSS_VALUE_WRAP_REVERSE && is_main_axis_horizontal(flex_layout)) {
+        // Reverse the cross-axis positions for wrap-reverse
+        int container_cross_size = flex_layout->cross_axis_size;
+        for (int i = 0; i < line_count; i++) {
+            FlexLineInfo* line = &flex_layout->lines[i];
+            for (int j = 0; j < line->item_count; j++) {
+                ViewBlock* item = line->items[j];
+                int current_cross_pos = get_cross_axis_position(item, flex_layout);
+                int item_cross_size = get_cross_axis_size(item, flex_layout);
+                set_cross_axis_position(item, container_cross_size - current_cross_pos - item_cross_size, flex_layout);
+            }
+        }
+    }
+    
     flex_layout->needs_reflow = false;
 }
 
@@ -102,11 +119,15 @@ int collect_flex_items(ViewBlock* container, ViewBlock*** items) {
     
     int count = 0;
     
-    // Count children first - use ViewGroup hierarchy
+    // Count children first - use ViewGroup hierarchy, filter by position and visibility
     View* child = container->child;
     while (child) {
-        if (child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK) {
-            count++;
+        if ((child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK)) {
+            ViewBlock* block = (ViewBlock*)child;
+            // Filter out absolutely positioned and hidden items
+            if (block->position != POS_ABSOLUTE && block->visibility != VIS_HIDDEN) {
+                count++;
+            }
         }
         child = child->next;
     }
@@ -123,13 +144,23 @@ int collect_flex_items(ViewBlock* container, ViewBlock*** items) {
                                                flex->allocated_items * sizeof(ViewBlock*));
     }
     
-    // Collect items - use ViewGroup hierarchy
+    // Collect items - use ViewGroup hierarchy, apply filtering
     count = 0;
     child = container->child;
     while (child) {
-        if (child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK) {
-            flex->flex_items[count] = (ViewBlock*)child;
-            count++;
+        if ((child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK)) {
+            ViewBlock* block = (ViewBlock*)child;
+            // Filter out absolutely positioned and hidden items
+            if (block->position != POS_ABSOLUTE && block->visibility != VIS_HIDDEN) {
+                flex->flex_items[count] = block;
+                
+                // Apply constraints and resolve percentages
+                apply_constraints(block, 
+                    is_main_axis_horizontal(flex) ? flex->main_axis_size : flex->cross_axis_size,
+                    is_main_axis_horizontal(flex) ? flex->cross_axis_size : flex->main_axis_size);
+                
+                count++;
+            }
         }
         child = child->next;
     }
@@ -176,6 +207,85 @@ int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout) {
 bool is_valid_flex_item(ViewBlock* item) {
     if (!item) return false;
     return item->type == RDT_VIEW_BLOCK || item->type == RDT_VIEW_INLINE_BLOCK;
+}
+
+// Helper function for clamping values with min/max constraints
+float clamp_value(float value, float min_val, float max_val) {
+    if (max_val > 0) {
+        return fmin(fmax(value, min_val), max_val);
+    }
+    return fmax(value, min_val);
+}
+
+// Helper function to resolve percentage values
+int resolve_percentage(int value, bool is_percent, int container_size) {
+    if (is_percent) {
+        float percentage = (float)value / 100.0f;
+        return (int)(percentage * container_size);
+    }
+    return value;
+}
+
+// Apply constraints including aspect ratio and min/max values
+void apply_constraints(ViewBlock* item, int container_width, int container_height) {
+    if (!item) return;
+    
+    // Resolve percentage-based values
+    int actual_width = resolve_percentage(item->width, item->width_is_percent, container_width);
+    int actual_height = resolve_percentage(item->height, item->height_is_percent, container_height);
+    int min_width = resolve_percentage(item->min_width, item->min_width_is_percent, container_width);
+    int max_width = resolve_percentage(item->max_width, item->max_width_is_percent, container_width);
+    int min_height = resolve_percentage(item->min_height, item->min_height_is_percent, container_height);
+    int max_height = resolve_percentage(item->max_height, item->max_height_is_percent, container_height);
+    
+    // Apply aspect ratio if specified
+    if (item->aspect_ratio > 0) {
+        if (actual_width > 0 && actual_height == 0) {
+            actual_height = (int)(actual_width / item->aspect_ratio);
+        } else if (actual_height > 0 && actual_width == 0) {
+            actual_width = (int)(actual_height * item->aspect_ratio);
+        }
+    }
+    
+    // Apply min/max constraints
+    actual_width = (int)clamp_value(actual_width, min_width, max_width);
+    actual_height = (int)clamp_value(actual_height, min_height, max_height);
+    
+    // Reapply aspect ratio after clamping if needed
+    if (item->aspect_ratio > 0) {
+        if (actual_width > 0 && actual_height == 0) {
+            actual_height = (int)(actual_width / item->aspect_ratio);
+        } else if (actual_height > 0 && actual_width == 0) {
+            actual_width = (int)(actual_height * item->aspect_ratio);
+        }
+    }
+    
+    // Update item dimensions
+    item->width = actual_width;
+    item->height = actual_height;
+}
+
+// Find maximum baseline in a flex line for baseline alignment
+int find_max_baseline(FlexLineInfo* line) {
+    int max_baseline = 0;
+    bool found = false;
+    
+    for (int i = 0; i < line->item_count; i++) {
+        ViewBlock* item = line->items[i];
+        if (convert_align_to_lexbor(item->align_self) == LXB_CSS_VALUE_BASELINE) {
+            int baseline = item->baseline_offset;
+            if (baseline <= 0) {
+                // Default to 3/4 of height if no explicit baseline
+                baseline = (int)(item->height * 0.75);
+            }
+            if (baseline > max_baseline) {
+                max_baseline = baseline;
+            }
+            found = true;
+        }
+    }
+    
+    return found ? max_baseline : 0;
 }
 
 // Helper function to convert old enum constants to Lexbor constants
@@ -344,7 +454,22 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             if (item->flex_grow > 0) {
                 int grow_amount = (int)((item->flex_grow / line->total_flex_grow) * free_space);
                 int current_size = get_main_axis_size(item, flex_layout);
-                set_main_axis_size(item, current_size + grow_amount, flex_layout);
+                int new_size = current_size + grow_amount;
+                set_main_axis_size(item, new_size, flex_layout);
+                
+                // Adjust cross axis size based on aspect ratio
+                if (item->aspect_ratio > 0) {
+                    if (is_main_axis_horizontal(flex_layout)) {
+                        item->height = (int)(new_size / item->aspect_ratio);
+                    } else {
+                        item->width = (int)(new_size * item->aspect_ratio);
+                    }
+                }
+                
+                // Apply constraints after flex adjustment
+                apply_constraints(item, 
+                    is_main_axis_horizontal(flex_layout) ? flex_layout->main_axis_size : flex_layout->cross_axis_size,
+                    is_main_axis_horizontal(flex_layout) ? flex_layout->cross_axis_size : flex_layout->main_axis_size);
             }
         }
     } else if (free_space < 0 && line->total_flex_shrink > 0) {
@@ -367,6 +492,20 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
                     int new_size = current_size - shrink_amount;
                     if (new_size < 0) new_size = 0;  // Prevent negative sizes
                     set_main_axis_size(item, new_size, flex_layout);
+                    
+                    // Adjust cross axis size based on aspect ratio
+                    if (item->aspect_ratio > 0) {
+                        if (is_main_axis_horizontal(flex_layout)) {
+                            item->height = (int)(new_size / item->aspect_ratio);
+                        } else {
+                            item->width = (int)(new_size * item->aspect_ratio);
+                        }
+                    }
+                    
+                    // Apply constraints after flex adjustment
+                    apply_constraints(item, 
+                        is_main_axis_horizontal(flex_layout) ? flex_layout->main_axis_size : flex_layout->cross_axis_size,
+                        is_main_axis_horizontal(flex_layout) ? flex_layout->cross_axis_size : flex_layout->main_axis_size);
                 }
             }
         }
@@ -387,53 +526,89 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
     total_item_size += gap_space;
     
+    // Check for auto margins on main axis
+    int auto_margin_count = 0;
+    for (int i = 0; i < line->item_count; i++) {
+        ViewBlock* item = line->items[i];
+        if (is_main_axis_horizontal(flex_layout)) {
+            if (item->margin_left_auto) auto_margin_count++;
+            if (item->margin_right_auto) auto_margin_count++;
+        } else {
+            if (item->margin_top_auto) auto_margin_count++;
+            if (item->margin_bottom_auto) auto_margin_count++;
+        }
+    }
+    
     int current_pos = 0;
     int spacing = 0;
+    float auto_margin_size = 0;
     
-    int justify = convert_justify_to_lexbor(flex_layout->justify);
-    switch (justify) {
-        case LXB_CSS_VALUE_FLEX_START:
-            // Items are packed toward the start of the flex direction
-            current_pos = 0;
-            break;
-        case LXB_CSS_VALUE_FLEX_END:
-            // Items are packed toward the end of the flex direction
-            current_pos = container_size - total_item_size;
-            break;
-        case LXB_CSS_VALUE_CENTER:
-            // Items are centered in the line
-            current_pos = (container_size - total_item_size) / 2;
-            break;
-        case LXB_CSS_VALUE_SPACE_BETWEEN:
-            // Items are evenly distributed with first item at start, last at end
-            current_pos = 0;
-            if (line->item_count > 1) {
-                spacing = (container_size - total_item_size) / (line->item_count - 1);
-            }
-            break;
-        case LXB_CSS_VALUE_SPACE_AROUND:
-            // Items are evenly distributed with equal space around each item
-            if (line->item_count > 0) {
-                spacing = (container_size - total_item_size) / line->item_count;
-                current_pos = spacing / 2;
-            }
-            break;
-        case LXB_CSS_VALUE_SPACE_EVENLY:
-            // Items are evenly distributed with equal space between them
-            if (line->item_count > 0) {
-                spacing = (container_size - total_item_size) / (line->item_count + 1);
-                current_pos = spacing;
-            }
-            break;
-        default:
-            current_pos = 0;
-            break;
+    if (auto_margin_count > 0 && container_size > total_item_size) {
+        // Distribute free space among auto margins
+        auto_margin_size = (float)(container_size - total_item_size) / auto_margin_count;
+    } else {
+        // Apply justify-content if no auto margins
+        int justify = convert_justify_to_lexbor(flex_layout->justify);
+        switch (justify) {
+            case LXB_CSS_VALUE_FLEX_START:
+                current_pos = 0;
+                break;
+            case LXB_CSS_VALUE_FLEX_END:
+                current_pos = container_size - total_item_size;
+                break;
+            case LXB_CSS_VALUE_CENTER:
+                current_pos = (container_size - total_item_size) / 2;
+                break;
+            case LXB_CSS_VALUE_SPACE_BETWEEN:
+                current_pos = 0;
+                if (line->item_count > 1) {
+                    spacing = (container_size - total_item_size) / (line->item_count - 1);
+                }
+                break;
+            case LXB_CSS_VALUE_SPACE_AROUND:
+                if (line->item_count > 0) {
+                    spacing = (container_size - total_item_size) / line->item_count;
+                    current_pos = spacing / 2;
+                }
+                break;
+            case LXB_CSS_VALUE_SPACE_EVENLY:
+                if (line->item_count > 0) {
+                    spacing = (container_size - total_item_size) / (line->item_count + 1);
+                    current_pos = spacing;
+                }
+                break;
+            default:
+                current_pos = 0;
+                break;
+        }
     }
     
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
-        set_main_axis_position(item, current_pos, flex_layout);
-        current_pos += get_main_axis_size(item, flex_layout) + spacing;
+        
+        // Handle auto margins
+        if (auto_margin_count > 0) {
+            bool left_auto = is_main_axis_horizontal(flex_layout) ? 
+                           item->margin_left_auto : item->margin_top_auto;
+            bool right_auto = is_main_axis_horizontal(flex_layout) ? 
+                            item->margin_right_auto : item->margin_bottom_auto;
+            
+            if (left_auto && right_auto) {
+                // Center item with auto margins on both sides
+                int remaining_space = container_size - get_main_axis_size(item, flex_layout);
+                current_pos = remaining_space / 2;
+            } else {
+                if (left_auto) current_pos += (int)auto_margin_size;
+                
+                set_main_axis_position(item, current_pos, flex_layout);
+                current_pos += get_main_axis_size(item, flex_layout);
+                
+                if (right_auto) current_pos += (int)auto_margin_size;
+            }
+        } else {
+            set_main_axis_position(item, current_pos, flex_layout);
+            current_pos += get_main_axis_size(item, flex_layout) + spacing;
+        }
         
         // Add gap between items
         if (i < line->item_count - 1) {
@@ -447,6 +622,9 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     if (!flex_layout || !line || line->item_count == 0) return;
     
+    // Find maximum baseline for baseline alignment
+    int max_baseline = find_max_baseline(line);
+    
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
         int item_align = convert_align_to_lexbor(item->align_self);
@@ -458,34 +636,65 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
         int line_cross_size = line->cross_size;
         int cross_pos = 0;
         
-        switch (align_type) {
-            case LXB_CSS_VALUE_FLEX_START:
-                // Align to cross-start
+        // Check for auto margins in cross axis
+        bool top_auto = is_main_axis_horizontal(flex_layout) ? 
+                       item->margin_top_auto : item->margin_left_auto;
+        bool bottom_auto = is_main_axis_horizontal(flex_layout) ? 
+                          item->margin_bottom_auto : item->margin_right_auto;
+        
+        if (top_auto || bottom_auto) {
+            // Handle auto margins in cross axis
+            int container_cross_size = is_main_axis_horizontal(flex_layout) ? 
+                                     flex_layout->cross_axis_size : flex_layout->main_axis_size;
+            
+            if (top_auto && bottom_auto) {
+                // Center item with auto margins on both sides
+                cross_pos = (container_cross_size - item_cross_size) / 2;
+            } else if (top_auto) {
+                // Push item to bottom
+                cross_pos = container_cross_size - item_cross_size;
+            } else if (bottom_auto) {
+                // Keep item at top
                 cross_pos = 0;
-                break;
-            case LXB_CSS_VALUE_FLEX_END:
-                // Align to cross-end
-                cross_pos = line_cross_size - item_cross_size;
-                break;
-            case LXB_CSS_VALUE_CENTER:
-                // Center in cross axis
-                cross_pos = (line_cross_size - item_cross_size) / 2;
-                break;
-            case LXB_CSS_VALUE_STRETCH:
-                // Stretch to fill cross axis (if no explicit cross size)
-                cross_pos = 0;
-                if (item_cross_size < line_cross_size) {
-                    // TODO: Actually stretch the item
-                    item_cross_size = line_cross_size;
-                }
-                break;
-            case LXB_CSS_VALUE_BASELINE:
-                // Align baselines - TODO: implement proper baseline alignment
-                cross_pos = 0;
-                break;
-            default:
-                cross_pos = 0;
-                break;
+            }
+        } else {
+            // Regular alignment
+            switch (align_type) {
+                case LXB_CSS_VALUE_FLEX_START:
+                    cross_pos = 0;
+                    break;
+                case LXB_CSS_VALUE_FLEX_END:
+                    cross_pos = line_cross_size - item_cross_size;
+                    break;
+                case LXB_CSS_VALUE_CENTER:
+                    cross_pos = (line_cross_size - item_cross_size) / 2;
+                    break;
+                case LXB_CSS_VALUE_STRETCH:
+                    cross_pos = 0;
+                    if (item_cross_size < line_cross_size) {
+                        // Actually stretch the item
+                        set_cross_axis_size(item, line_cross_size, flex_layout);
+                        item_cross_size = line_cross_size;
+                    }
+                    break;
+                case LXB_CSS_VALUE_BASELINE:
+                    if (is_main_axis_horizontal(flex_layout)) {
+                        // Calculate baseline offset
+                        int baseline = item->baseline_offset;
+                        if (baseline <= 0) {
+                            baseline = (int)(item->height * 0.75);
+                        }
+                        // Position item so its baseline aligns with max baseline
+                        cross_pos = max_baseline - baseline;
+                    } else {
+                        // For column direction, baseline is equivalent to start
+                        cross_pos = 0;
+                    }
+                    break;
+                default:
+                    cross_pos = 0;
+                    break;
+            }
         }
         
         set_cross_axis_position(item, cross_pos, flex_layout);

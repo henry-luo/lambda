@@ -197,6 +197,32 @@ typedef struct ViewSpan : ViewGroup {
     int align_self;  // AlignType or LXB_CSS_VALUE_*
     int order;
     bool flex_basis_is_percent;
+    
+    // Additional flex item properties from old implementation
+    float aspect_ratio;
+    int baseline_offset;
+    
+    // Auto margin flags
+    bool margin_top_auto;
+    bool margin_right_auto;
+    bool margin_bottom_auto;
+    bool margin_left_auto;
+    
+    // Percentage flags for constraints
+    bool width_is_percent;
+    bool height_is_percent;
+    bool min_width_is_percent;
+    bool max_width_is_percent;
+    bool min_height_is_percent;
+    bool max_height_is_percent;
+    
+    // Min/max constraints
+    int min_width, max_width;
+    int min_height, max_height;
+    
+    // Position and visibility (from old FlexItem)
+    int position;  // PositionType
+    int visibility;  // Visibility
 } ViewSpan;
 
 typedef struct {
