@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Box Sizing Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            width: 400px;
+            height: 300px;
+            background-color: #f0f0f0;
+        }
+        .content-box {
+            width: 100px;
+            height: 100px;
+            background-color: #ccccff;
+            border: 2px solid #666666;
+            padding: 10px;
+            margin: 5px;
+            box-sizing: content-box;
+        }
+        .border-box {
+            width: 100px;
+            height: 100px;
+            background-color: #ffcccc;
+            border: 2px solid #666666;
+            padding: 10px;
+            margin: 5px;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="content-box">Content Box</div>
+        <div class="border-box">Border Box</div>
+    </div>
+    
+    <script id="test-metadata" style="display: none;">
+    {
+        "test_name": "box_004_box_sizing",
+        "description": "Test box-sizing: content-box vs border-box behavior",
+        "expected_elements": [
+            {"selector": ".content-box", "expected": "100x100 content + 10px padding + 2px border = 124x124 total"},
+            {"selector": ".border-box", "expected": "100x100 total including padding and border = 76x76 content"}
+        ]
+    }
+    </script>
+</body>
+</html>
