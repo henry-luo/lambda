@@ -155,8 +155,19 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                     init_flex_container(block);
                 }
                 
-                // Use nested layout system for flex containers with content
-                layout_flex_container_with_nested_content(lycon, block);
+                // CRITICAL FIX: Process DOM children into View objects first
+                // This is what was missing - flex containers need their DOM children
+                // converted to View objects before the flex algorithm can work
+                do {
+                    printf("Processing flex child %p\n", child);
+                    layout_flow_node(lycon, child);
+                    DomNode* next_child = child->next_sibling();
+                    printf("Got next flex sibling %p\n", next_child);
+                    child = next_child;
+                } while (child);
+                
+                // Now run the flex layout algorithm with the processed children
+                layout_flex_container_new(lycon, block);
             }
             else {
                 log_debug("unknown display type\n");

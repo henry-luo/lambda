@@ -63,27 +63,59 @@ void cleanup_flex_container(ViewBlock* container) {
 
 // Main flex layout algorithm entry point
 void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
+    printf("DEBUG: layout_flex_container_new called for container %p\n", container);
     if (!container || !container->embed || !container->embed->flex_container) {
+        printf("DEBUG: Early return - container=%p, embed=%p, flex_container=%p\n", 
+               container, container ? container->embed : NULL, 
+               (container && container->embed) ? container->embed->flex_container : NULL);
         return;
     }
     
     FlexContainerLayout* flex_layout = container->embed->flex_container;
     
     // Set main and cross axis sizes from container dimensions (only if not already set)
+    printf("DEBUG: Container dimensions - width=%d, height=%d, content_width=%d, content_height=%d\n", 
+           container->width, container->height, container->content_width, container->content_height);
     if (flex_layout->main_axis_size == 0 || flex_layout->cross_axis_size == 0) {
-        if (is_main_axis_horizontal(flex_layout)) {
-            if (flex_layout->main_axis_size == 0) flex_layout->main_axis_size = container->content_width;
-            if (flex_layout->cross_axis_size == 0) flex_layout->cross_axis_size = container->content_height;
-        } else {
-            if (flex_layout->main_axis_size == 0) flex_layout->main_axis_size = container->content_height;
-            if (flex_layout->cross_axis_size == 0) flex_layout->cross_axis_size = container->content_width;
+        // CRITICAL FIX: Use container width/height and calculate content dimensions
+        // The content dimensions should exclude borders and padding
+        int content_width = container->width;
+        int content_height = container->height;
+        
+        // Subtract borders if they exist
+        if (container->bound && container->bound->border) {
+            content_width -= (container->bound->border->width.left + container->bound->border->width.right);
+            content_height -= (container->bound->border->width.top + container->bound->border->width.bottom);
         }
+        
+        // Subtract padding if it exists
+        if (container->bound) {
+            content_width -= (container->bound->padding.left + container->bound->padding.right);
+            content_height -= (container->bound->padding.top + container->bound->padding.bottom);
+        }
+        
+        printf("DEBUG: Calculated content dimensions - content_width=%d, content_height=%d\n", 
+               content_width, content_height);
+        
+        if (is_main_axis_horizontal(flex_layout)) {
+            if (flex_layout->main_axis_size == 0) flex_layout->main_axis_size = content_width;
+            if (flex_layout->cross_axis_size == 0) flex_layout->cross_axis_size = content_height;
+        } else {
+            if (flex_layout->main_axis_size == 0) flex_layout->main_axis_size = content_height;
+            if (flex_layout->cross_axis_size == 0) flex_layout->cross_axis_size = content_width;
+        }
+        printf("DEBUG: Set axis sizes - main_axis_size=%d, cross_axis_size=%d\n", 
+               flex_layout->main_axis_size, flex_layout->cross_axis_size);
     }
     
     // Phase 1: Collect flex items
     ViewBlock** items;
     int item_count = collect_flex_items(container, &items);
-    if (item_count == 0) return;
+    printf("DEBUG: Collected %d flex items\n", item_count);
+    if (item_count == 0) {
+        printf("DEBUG: No flex items found, returning\n");
+        return;
+    }
     
     // Phase 2: Sort items by order property
     sort_flex_items_by_order(items, item_count);
@@ -92,8 +124,19 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
     int line_count = create_flex_lines(flex_layout, items, item_count);
     
     // Phase 4: Resolve flexible lengths for each line
+    printf("DEBUG: Phase 4 - Resolving flexible lengths for %d lines\n", line_count);
     for (int i = 0; i < line_count; i++) {
+        printf("DEBUG: Before resolve_flexible_lengths - line %d\n", i);
+        for (int j = 0; j < flex_layout->lines[i].item_count; j++) {
+            ViewBlock* item = flex_layout->lines[i].items[j];
+            printf("DEBUG: Item %d before resolve - width=%d, height=%d\n", j, item->width, item->height);
+        }
         resolve_flexible_lengths(flex_layout, &flex_layout->lines[i]);
+        printf("DEBUG: After resolve_flexible_lengths - line %d\n", i);
+        for (int j = 0; j < flex_layout->lines[i].item_count; j++) {
+            ViewBlock* item = flex_layout->lines[i].items[j];
+            printf("DEBUG: Item %d after resolve - width=%d, height=%d\n", j, item->width, item->height);
+        }
     }
     
     // Update content_width/content_height after flex calculations
@@ -110,7 +153,9 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
     calculate_line_cross_sizes(flex_layout);
     
     // Phase 6: Align items on main axis
+    printf("DEBUG: Aligning %d lines on main axis\n", line_count);
     for (int i = 0; i < line_count; i++) {
+        printf("DEBUG: Aligning line %d with %d items\n", i, flex_layout->lines[i].item_count);
         align_items_main_axis(flex_layout, &flex_layout->lines[i]);
     }
     
@@ -182,7 +227,20 @@ int collect_flex_items(ViewBlock* container, ViewBlock*** items) {
         if (child->position != POS_ABSOLUTE && child->visibility != VIS_HIDDEN) {
             flex->flex_items[count] = child;
             
-            // Note: Apply constraints later in the layout process to avoid interfering with flex basis
+            printf("DEBUG: Collected flex item %d - width=%d, height=%d, content_width=%d, content_height=%d\n", 
+                   count, child->width, child->height, child->content_width, child->content_height);
+            
+            // CRITICAL FIX: Ensure flex items have proper flex properties initialized
+            // If flex properties are not set, initialize them with defaults
+            if (child->flex_basis == 0 && child->flex_grow == 0 && child->flex_shrink == 0) {
+                // Item has default/uninitialized flex properties - set proper defaults
+                child->flex_basis = -1;  // auto - use intrinsic size
+                child->flex_grow = 0;    // don't grow by default
+                child->flex_shrink = 1;  // can shrink by default
+                child->order = 0;        // default order
+                printf("DEBUG: Initialized flex properties for item %d - flex_basis=%d, flex_grow=%d, flex_shrink=%d\n", 
+                       count, child->flex_basis, child->flex_grow, child->flex_shrink);
+            }
             
             count++;
         }
@@ -213,22 +271,33 @@ void sort_flex_items_by_order(ViewBlock** items, int count) {
 
 // Calculate flex basis for an item
 int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout) {
+    printf("DEBUG: calculate_flex_basis - flex_basis=%d, width=%d, height=%d, content_width=%d, content_height=%d\n", 
+           item->flex_basis, item->width, item->height, item->content_width, item->content_height);
+    
     if (item->flex_basis == -1) {
         // auto - use content size
         int basis = is_main_axis_horizontal(flex_layout) ? item->width : item->height;
+        printf("DEBUG: auto basis - using %s=%d\n", 
+               is_main_axis_horizontal(flex_layout) ? "width" : "height", basis);
         // *** DEBUG: Ensure we don't return 0 for auto basis ***
         if (basis <= 0) {
             // Fallback to content dimensions if width/height is 0
             basis = is_main_axis_horizontal(flex_layout) ? item->content_width : item->content_height;
+            printf("DEBUG: fallback to %s=%d\n", 
+                   is_main_axis_horizontal(flex_layout) ? "content_width" : "content_height", basis);
         }
+        printf("DEBUG: final auto basis=%d\n", basis);
         return basis;
     } else if (item->flex_basis_is_percent) {
         // percentage basis
         int container_size = is_main_axis_horizontal(flex_layout) ? 
                            flex_layout->main_axis_size : flex_layout->cross_axis_size;
-        return (container_size * item->flex_basis) / 100;
+        int basis = (container_size * item->flex_basis) / 100;
+        printf("DEBUG: percentage basis=%d\n", basis);
+        return basis;
     } else {
         // fixed length
+        printf("DEBUG: fixed basis=%d\n", item->flex_basis);
         return item->flex_basis;
     }
 }
@@ -581,6 +650,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     if (!flex_layout || !line || line->item_count == 0) return;
     
     int container_size = flex_layout->main_axis_size;
+    printf("DEBUG: align_items_main_axis - container_size=%d, item_count=%d\n", container_size, line->item_count);
     
     // *** FIX 1: Calculate total item size WITHOUT gaps (gaps handled separately) ***
     int total_item_size = 0;
@@ -679,8 +749,10 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
             }
         } else {
             // *** FIX 5: Set position, advance by item size, add spacing, then add gap ***
+            int item_size = get_main_axis_size(item, flex_layout);
+            printf("DEBUG: Item %d - setting position=%d, size=%d\n", i, current_pos, item_size);
             set_main_axis_position(item, current_pos, flex_layout);
-            current_pos += get_main_axis_size(item, flex_layout);
+            current_pos += item_size;
             
             // Add justify-content spacing (for space-between, space-around, etc.)
             if (spacing > 0) {
