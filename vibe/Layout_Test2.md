@@ -238,7 +238,7 @@ const char* get_view_type_name(RdtViewType type) {
 **Modify flex layout to include properties in view tree:**
 
 ```cpp
-// In flex_layout_new.cpp - add flex properties to ViewBlock
+// In layout_flex.cpp - add flex properties to ViewBlock
 void print_css_properties_json(ComputedStyle* style, StrBuf* buf, int indent) {
     if (!style) return;
     

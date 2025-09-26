@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This document outlines the comprehensive integration plan for the enhanced flexbox implementation (`flex_layout_new.cpp`) into the existing Radiant layout system. The integration will provide full CSS Flexbox Level 1 specification compliance while maintaining backward compatibility and supporting rich content within flex containers.
+This document outlines the comprehensive integration plan for the enhanced flexbox implementation (`layout_flex.cpp`) into the existing Radiant layout system. The integration will provide full CSS Flexbox Level 1 specification compliance while maintaining backward compatibility and supporting rich content within flex containers.
 
 ## Current Architecture Analysis
 
@@ -13,7 +13,7 @@ This document outlines the comprehensive integration plan for the enhanced flexb
 - **Layout Dispatcher**: `layout.cpp` - Routes layout calls based on display type
 
 ### New Flexbox Implementation
-- **Enhanced Algorithm**: `flex_layout_new.cpp` - Complete CSS Flexbox implementation
+- **Enhanced Algorithm**: `layout_flex.cpp` - Complete CSS Flexbox implementation
 - **Integrated Properties**: Extended `ViewSpan` with all flexbox properties
 - **Advanced Features**: Auto margins, aspect ratios, percentage values, baseline alignment
 
@@ -187,7 +187,7 @@ This new file will handle the layout of content within flex items, ensuring that
 
 ```cpp
 #include "layout.hpp"
-#include "flex_layout_new.hpp"
+#include "layout_flex.hpp"
 
 // Layout content within a flex item
 void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {

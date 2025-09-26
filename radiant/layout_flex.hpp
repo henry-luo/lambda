@@ -1,5 +1,5 @@
-#ifndef FLEX_LAYOUT_NEW_HPP
-#define FLEX_LAYOUT_NEW_HPP
+#ifndef LAYOUT_FLEX_HPP
+#define LAYOUT_FLEX_HPP
 
 #include "flex.hpp"
 #include "view.hpp"
@@ -61,4 +61,4 @@ bool is_valid_flex_item(ViewBlock* item);
 int calculate_gap_space(FlexContainerLayout* flex_layout, int item_count, bool is_main_axis);
 void apply_gaps(FlexContainerLayout* flex_layout, FlexLineInfo* line);
 
-#endif // RADIANT_FLEX_LAYOUT_NEW_HPP
+#endif // LAYOUT_FLEX_HPP

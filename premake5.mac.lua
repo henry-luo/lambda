@@ -287,7 +287,7 @@ project "radiant"
         "radiant/layout.cpp",
         "radiant/layout_block.cpp",
         "radiant/layout_text.cpp",
-        "radiant/flex_layout_new.cpp",
+        "radiant/layout_flex.cpp",
         "radiant/layout_flex_content.cpp",
         "radiant/layout_nested.cpp",
         "radiant/view_pool_new.cpp",
@@ -2760,7 +2760,7 @@ project "test_radiant_flex_gtest"
     
     files {
         "test/test_radiant_flex_gtest.cpp",
-        "radiant/flex_layout_new.cpp",
+        "radiant/layout_flex.cpp",
         "radiant/layout_test_support.cpp",
     }
     
@@ -2826,7 +2826,7 @@ project "test_radiant_flex_algorithm_gtest"
     
     files {
         "test/test_radiant_flex_algorithm_gtest.cpp",
-        "radiant/flex_layout_new.cpp",
+        "radiant/layout_flex.cpp",
         "radiant/layout_test_support.cpp",
     }
     
@@ -2892,7 +2892,7 @@ project "test_radiant_flex_integration_gtest"
     
     files {
         "test/test_radiant_flex_integration_gtest.cpp",
-        "radiant/flex_layout_new.cpp",
+        "radiant/layout_flex.cpp",
         "radiant/layout_test_support.cpp",
     }
     

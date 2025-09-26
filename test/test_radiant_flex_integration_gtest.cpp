@@ -7,7 +7,7 @@
 #include "../radiant/layout.hpp"
 #include "../radiant/view.hpp"
 #include "../radiant/flex.hpp"
-#include "../radiant/flex_layout_new.hpp"
+#include "../radiant/layout_flex.hpp"
 
 // Test fixture for flex layout integration tests with HTML/CSS
 class FlexIntegrationTest : public ::testing::Test {
