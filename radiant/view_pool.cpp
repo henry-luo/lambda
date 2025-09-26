@@ -391,13 +391,12 @@ void write_string_to_file(const char *filename, const char *text) {
 void print_view_tree(ViewGroup* view_root) {
     StrBuf* buf = strbuf_new_cap(1024);
     print_block((ViewBlock*)view_root, buf, 0);
-    printf("=================\nView tree:\n");
-    printf("%s", buf->str);
-    printf("=================\n");
+    log_debug("=================\nView tree:");
+    log_debug("%s", buf->str);
+    log_debug("=================\n");
     write_string_to_file("view_tree.txt", buf->str);
     strbuf_free(buf);
-    
-    // Also generate JSON output
+    // also generate JSON output
     print_view_tree_json(view_root);
 }
 
