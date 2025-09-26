@@ -2760,8 +2760,8 @@ project "test_radiant_flex_gtest"
     
     files {
         "test/test_radiant_flex_gtest.cpp",
-        "test/flex_test_support.cpp",
         "radiant/flex_layout_new.cpp",
+        "radiant/layout_test_support.cpp",
     }
     
     includedirs {
@@ -2796,8 +2796,10 @@ project "test_radiant_flex_gtest"
     }
     
     links {
+        "lambda-lib",
         "gtest",
         "gtest_main",
+        "lexbor_static",
     }
     
     linkoptions {
@@ -2824,8 +2826,8 @@ project "test_radiant_flex_algorithm_gtest"
     
     files {
         "test/test_radiant_flex_algorithm_gtest.cpp",
-        "test/flex_test_support.cpp",
         "radiant/flex_layout_new.cpp",
+        "radiant/layout_test_support.cpp",
     }
     
     includedirs {
@@ -2860,6 +2862,7 @@ project "test_radiant_flex_algorithm_gtest"
     }
     
     links {
+        "lambda-lib",
         "gtest",
         "gtest_main",
         "lexbor_static",
@@ -2889,8 +2892,8 @@ project "test_radiant_flex_integration_gtest"
     
     files {
         "test/test_radiant_flex_integration_gtest.cpp",
-        "test/flex_test_support.cpp",
         "radiant/flex_layout_new.cpp",
+        "radiant/layout_test_support.cpp",
     }
     
     includedirs {
@@ -2925,8 +2928,10 @@ project "test_radiant_flex_integration_gtest"
     }
     
     links {
+        "lambda-lib",
         "gtest",
         "gtest_main",
+        "lexbor_static",
     }
     
     linkoptions {
