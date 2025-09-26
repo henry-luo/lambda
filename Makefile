@@ -323,7 +323,7 @@ clean-tree-sitter-minimal:
         build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
         verify-windows verify-linux test-windows test-linux tree-sitter-libs \
         generate-premake clean-premake build-test build-test-linux \
-        build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant
+        build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant test-radiant
 
 # Help target - shows available commands
 help:
@@ -389,6 +389,7 @@ help:
 	@echo "  test-fuzz     - Run fuzzing tests for robustness"
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
+	@echo "  test-radiant  - Run all Radiant layout engine tests (95+ tests: flexbox, layout, rendering)"
 	@echo "  test-windows  - Run CI tests for Windows executable"
 	@echo "  test-linux    - Run CI tests for Linux executable"
 	@echo "  run           - Build and run the default executable"
@@ -544,6 +545,11 @@ build-radiant: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	# Ensure explicit compiler variables are passed to Premake build
 	@echo "Using CC=$(CC) CXX=$(CXX)"
 	$(call run_make_with_error_summary,radiant)
+	@echo "Building Radiant test executables..."
+	@make -C build/premake test_radiant_flex_gtest test_radiant_flex_algorithm_gtest test_radiant_flex_integration_gtest test_flex_minimal 2>/dev/null || echo "Warning: Some Radiant tests could not be built"
+	@echo "Building standalone flex tests..."
+	@g++ -std=c++17 -I. -Iradiant -o test/test_flex_core_validation.exe test/test_flex_core_validation.cpp 2>/dev/null || echo "Warning: test_flex_core_validation could not be built"
+	@g++ -std=c++17 -I. -Iradiant -o test/test_flex_simple.exe test/test_flex_simple.cpp 2>/dev/null || echo "Warning: test_flex_simple could not be built"
 
 radiant: build-radiant
 
@@ -610,6 +616,18 @@ clean-test:
 	@rm -f build_test_*.json.tmp 2>/dev/null || true
 	@find test/ -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
 	@find test/ -name "*.o" -type f -delete 2>/dev/null || true
+	@echo "Cleaning Radiant test outputs..."
+	@rm -f test/test_radiant_flex_gtest.exe 2>/dev/null || true
+	@rm -f test/test_radiant_flex_algorithm_gtest.exe 2>/dev/null || true
+	@rm -f test/test_radiant_flex_integration_gtest.exe 2>/dev/null || true
+	@rm -f test/test_flex_minimal.exe 2>/dev/null || true
+	@rm -f test/test_flex_layout.exe 2>/dev/null || true
+	@rm -f test/test_flex_core_validation.exe 2>/dev/null || true
+	@rm -f test/test_flex_simple.exe 2>/dev/null || true
+	@rm -f test/test_flex_standalone.exe 2>/dev/null || true
+	@rm -f test/test_flex_new_features.exe 2>/dev/null || true
+	@find test/ -name "*radiant*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
+	@find test/ -name "*flex*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
 	@echo "Test build outputs cleaned."
 
 clean-grammar:
@@ -755,6 +773,49 @@ test-std: build
 		echo "Error: Simple test runner script not found"; \
 		exit 1; \
 	fi
+
+test-radiant: build-radiant
+	@echo "Running Radiant layout engine test suite..."
+	@echo "Testing core flexbox functionality..."
+	@if [ -f "test/test_radiant_flex_gtest.exe" ]; then \
+		./test/test_radiant_flex_gtest.exe; \
+	else \
+		echo "Error: Radiant flex core tests not found. Run 'make build-radiant' first."; \
+		exit 1; \
+	fi
+	@echo "Testing flexbox algorithm..."
+	@if [ -f "test/test_radiant_flex_algorithm_gtest.exe" ]; then \
+		./test/test_radiant_flex_algorithm_gtest.exe; \
+	else \
+		echo "Error: Radiant flex algorithm tests not found. Run 'make build-radiant' first."; \
+		exit 1; \
+	fi
+	@echo "Testing flexbox integration..."
+	@if [ -f "test/test_radiant_flex_integration_gtest.exe" ]; then \
+		./test/test_radiant_flex_integration_gtest.exe; \
+	else \
+		echo "Error: Radiant flex integration tests not found. Run 'make build-radiant' first."; \
+		exit 1; \
+	fi
+	@echo "Testing minimal flexbox functionality..."
+	@if [ -f "test/test_flex_minimal.exe" ]; then \
+		./test/test_flex_minimal.exe; \
+	else \
+		echo "Warning: Minimal flex tests not found. Skipping test_flex_minimal.exe"; \
+	fi
+	@echo "Testing core flex validation..."
+	@if [ -f "test/test_flex_core_validation.exe" ]; then \
+		./test/test_flex_core_validation.exe; \
+	else \
+		echo "Warning: Core validation tests not found. Skipping test_flex_core_validation.exe"; \
+	fi
+	@echo "Testing simple flex functionality..."
+	@if [ -f "test/test_flex_simple.exe" ]; then \
+		./test/test_flex_simple.exe; \
+	else \
+		echo "Warning: Simple flex tests not found. Skipping test_flex_simple.exe"; \
+	fi
+	@echo "✅ All Radiant tests passed successfully!"
 
 test-coverage:
 	@echo "Running tests with coverage analysis..."

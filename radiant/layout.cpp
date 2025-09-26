@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "flex_layout_new.hpp"
 
 #include "../lib/log.h"
 void print_view_tree(ViewGroup* view_block);
@@ -253,6 +254,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         printf("Element: %s\n", node->name());
         lxb_html_element_t *elmt = node->as_element();
         DisplayValue display = resolve_display(elmt);
+        
+        // Check for flex container first
+        if (display.inner == LXB_CSS_VALUE_FLEX) {
+            // This element is a flex container - route to flex layout
+            layout_block(lycon, node, display); // Block layout will handle flex containers
+            return;
+        }
+        
         switch (display.outer) {
         case LXB_CSS_VALUE_BLOCK:  case LXB_CSS_VALUE_INLINE_BLOCK:
         case LXB_CSS_VALUE_LIST_ITEM:
