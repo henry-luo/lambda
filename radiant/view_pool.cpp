@@ -33,6 +33,22 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
     if (lycon->prev_view) { lycon->prev_view->next = view; }
     else { if (lycon->parent) lycon->parent->child = view; }
     if (!lycon->line.start_view) lycon->line.start_view = view;
+    
+    // CRITICAL FIX: Also maintain ViewBlock hierarchy for flex layout
+    if ((type == RDT_VIEW_BLOCK || type == RDT_VIEW_INLINE_BLOCK || type == RDT_VIEW_LIST_ITEM) && 
+        lycon->parent && (lycon->parent->type == RDT_VIEW_BLOCK || lycon->parent->type == RDT_VIEW_INLINE_BLOCK)) {
+        ViewBlock* block_child = (ViewBlock*)view;
+        ViewBlock* block_parent = (ViewBlock*)lycon->parent;
+        
+        // Link in ViewBlock hierarchy
+        if (block_parent->last_child) {
+            block_parent->last_child->next_sibling = block_child;
+            block_child->prev_sibling = block_parent->last_child;
+        } else {
+            block_parent->first_child = block_child;
+        }
+        block_parent->last_child = block_child;
+    }
     lycon->view = view;
     return view;
 }
