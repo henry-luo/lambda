@@ -459,11 +459,11 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
     if (block->node) {
         const char* node_name = block->node->name();
         if (node_name) {
-            // Handle special cases for better debugging
+            // Handle special cases for better browser compatibility
             if (strcmp(node_name, "#null") == 0) {
                 // Try to infer the element type from context
                 if (block->parent == nullptr) {
-                    tag_name = "html-root";
+                    tag_name = "html";  // Root element should be html, not html-root
                 } else if (block->parent && block->parent->node == nullptr) {
                     tag_name = "body";
                 } else {
@@ -517,15 +517,27 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
     }
     strbuf_append_str(buf, ",\n");
     
-    // Layout properties
+    // Layout properties - calculate absolute positions for browser compatibility
+    int abs_x = block->x;
+    int abs_y = block->y;
+    
+    // Calculate absolute position by traversing up the parent chain
+    ViewGroup* parent = block->parent;
+    while (parent && parent->type == RDT_VIEW_BLOCK) {
+        ViewBlock* parent_block = (ViewBlock*)parent;
+        abs_x += parent_block->x;
+        abs_y += parent_block->y;
+        parent = parent_block->parent;
+    }
+    
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"x\": %d,\n", block->x);
+    strbuf_append_format(buf, "\"x\": %d,\n", abs_x);
     
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"y\": %d,\n", block->y);
+    strbuf_append_format(buf, "\"y\": %d,\n", abs_y);
     
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"width\": %d,\n", block->width);
