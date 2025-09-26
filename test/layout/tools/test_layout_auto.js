@@ -99,14 +99,18 @@ class LayoutTester {
         
         const currentPath = path ? `${path} > ${node.tag}` : node.tag;
         
-        // FOCUS: Skip viewport-level elements to match browser filtering
-        const isViewportElement = (node.tag === 'html' && depth === 0) || 
-                                 (node.tag === 'div' && depth === 1 && node.layout.width >= 1200);
+        // FOCUS: Skip non-layout elements to match browser filtering
+        const isNonLayoutElement = node.tag === 'text' || node.tag === 'script';
         
-        if (!isViewportElement) {
+        if (!isNonLayoutElement) {
             // Map Radiant's element structure to browser equivalents
             let mappedTag = node.tag;
             let mappedSelector = node.selector || currentPath;
+            
+            // DEBUG: Log what elements we're including
+            if (this.verbose && (node.tag === 'html' || node.tag === 'body' || node.selector?.includes('container'))) {
+                console.log(`DEBUG: Including Radiant element: ${mappedSelector} (${mappedTag}) - ${node.layout.width}x${node.layout.height} at (${node.layout.x},${node.layout.y})`);
+            }
             
             result.push({
                 selector: mappedSelector,
@@ -144,22 +148,29 @@ class LayoutTester {
                 return;
             }
             
-            // FOCUS: Skip viewport-level elements (html, body) that may differ between engines
-            // These often have different sizing strategies (content-fit vs viewport-fit)
-            const isViewportElement = elem.tag === 'html' || 
-                                    (elem.tag === 'body' && elem.layout.width >= 1200);
+            // FOCUS: Skip only non-layout structural elements
+            // Keep html, body for proper element matching, but skip head, meta, etc.
+            const isNonLayoutStructural = elem.tag === 'head' || elem.tag === 'meta' || 
+                                        elem.tag === 'title' || elem.tag === 'style' || 
+                                        elem.tag === 'script';
             
-            if (isViewportElement) {
-                return; // Skip viewport-level elements
+            if (isNonLayoutStructural) {
+                return; // Skip non-layout structural elements
             }
             
-            // INCLUDE: Content containers, flex containers, flex items, etc.
-            const isContentElement = 
-                elem.selector?.includes('.') ||  // Has CSS class (likely content)
-                elem.layout.width < 1200 ||     // Smaller than viewport (likely content)
+            // INCLUDE: Layout-significant elements
+            const isLayoutElement = 
+                elem.tag === 'html' ||          // Root element
+                elem.tag === 'body' ||          // Body element  
+                elem.selector?.includes('.') || // Has CSS class (content)
+                elem.layout.width < 1200 ||     // Smaller than viewport (content)
                 (elem.css && elem.css.display === 'flex'); // Flex containers
             
-            if (isContentElement) {
+            if (isLayoutElement) {
+                // DEBUG: Log what browser elements we're including
+                if (this.verbose && (elem.tag === 'html' || elem.tag === 'body' || elem.selector?.includes('container'))) {
+                    console.log(`DEBUG: Including browser element: ${elem.selector} (${elem.tag}) - ${elem.layout.width}x${elem.layout.height} at (${elem.layout.x},${elem.layout.y})`);
+                }
                 contentElements[key] = elem;
             }
         });
