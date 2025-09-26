@@ -53,6 +53,11 @@ typedef struct {
     DomNode *elmt;  // current dom element, used before the view is created
     Document* doc;
     UiContext* ui_context;
+    
+    // Additional fields for test compatibility
+    int width, height;  // context dimensions
+    int dpi;           // dots per inch
+    VariableMemPool* pool;  // memory pool for view allocation
 } LayoutContext;
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
@@ -62,6 +67,11 @@ FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon);
 void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block);
 View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node);
 void free_view(ViewTree* tree, View* view);
+
+// Memory pool functions for test compatibility
+void init_view_pool(LayoutContext* lycon);
+void cleanup_view_pool(LayoutContext* lycon);
+ViewBlock* alloc_view_block(LayoutContext* lycon);
 
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);

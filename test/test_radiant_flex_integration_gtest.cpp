@@ -29,8 +29,7 @@ protected:
     DomNode* createHTMLDocument(const std::string& html_content) {
         // This would normally parse HTML, for testing we create structure manually
         DomNode* doc = (DomNode*)calloc(1, sizeof(DomNode));
-        doc->tag = strdup("html");
-        doc->node_type = NODE_ELEMENT;
+        // Note: DomNode structure is simplified for testing
         return doc;
     }
     
@@ -212,7 +211,7 @@ TEST_F(FlexIntegrationTest, GridLikeFlexLayout) {
         
         // Make it a flex container
         row_container->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-        row_container->embed->flex_container = (FlexContainerProp*)calloc(1, sizeof(FlexContainerProp));
+        row_container->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
         row_container->embed->flex_container->direction = DIR_ROW;
         row_container->embed->flex_container->justify = JUSTIFY_START;
         row_container->embed->flex_container->align_items = ALIGN_STRETCH;
@@ -295,7 +294,7 @@ TEST_F(FlexIntegrationTest, NavigationMenuLayout) {
     // Navigation items (centered, flexible)
     ViewBlock* nav_items = createFlexItemFromCSS(nav, "flex: 1; display: flex; justify-content: center;", 400, 40);
     nav_items->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-    nav_items->embed->flex_container = (FlexContainerProp*)calloc(1, sizeof(FlexContainerProp));
+    nav_items->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
     nav_items->embed->flex_container->direction = DIR_ROW;
     nav_items->embed->flex_container->justify = JUSTIFY_CENTER;
     nav_items->embed->flex_container->align_items = ALIGN_CENTER;
@@ -337,7 +336,7 @@ TEST_F(FlexIntegrationTest, CardLayoutSystem) {
         
         // Create card content structure
         card->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-        card->embed->flex_container = (FlexContainerProp*)calloc(1, sizeof(FlexContainerProp));
+        card->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
         card->embed->flex_container->direction = DIR_COLUMN;
         card->embed->flex_container->justify = JUSTIFY_START;
         card->embed->flex_container->align_items = ALIGN_STRETCH;
@@ -370,7 +369,7 @@ TEST_F(FlexIntegrationTest, FormLayoutSystem) {
             "flex: 0 0 auto; display: flex; align-items: center;", 800, 50);
         
         row->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-        row->embed->flex_container = (FlexContainerProp*)calloc(1, sizeof(FlexContainerProp));
+        row->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
         row->embed->flex_container->direction = DIR_ROW;
         row->embed->flex_container->justify = JUSTIFY_START;
         row->embed->flex_container->align_items = ALIGN_CENTER;
@@ -404,7 +403,7 @@ TEST_F(FlexIntegrationTest, SidebarLayoutSystem) {
         "flex: 0 0 250px; display: flex; flex-direction: column;", 250, 600);
     
     sidebar->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-    sidebar->embed->flex_container = (FlexContainerProp*)calloc(1, sizeof(FlexContainerProp));
+    sidebar->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
     sidebar->embed->flex_container->direction = DIR_COLUMN;
     sidebar->embed->flex_container->justify = JUSTIFY_START;
     sidebar->embed->flex_container->align_items = ALIGN_STRETCH;
@@ -491,7 +490,7 @@ TEST_F(FlexIntegrationTest, ComplexNestedLayout) {
             "flex: 1; display: flex; gap: 20px;", 800, 240);
         
         row->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-        row->embed->flex_container = (FlexContainerProp*)calloc(1, sizeof(FlexContainerProp));
+        row->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
         row->embed->flex_container->direction = DIR_ROW;
         row->embed->flex_container->justify = JUSTIFY_START;
         row->embed->flex_container->align_items = ALIGN_STRETCH;
@@ -539,7 +538,7 @@ TEST_F(FlexIntegrationTest, MemoryManagementTest) {
             "flex: 1; display: flex;", 1000, 160);
         
         level_container->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-        level_container->embed->flex_container = (FlexContainerProp*)calloc(1, sizeof(FlexContainerProp));
+        level_container->embed->flex_container = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
         level_container->embed->flex_container->direction = DIR_ROW;
         level_container->embed->flex_container->justify = JUSTIFY_SPACE_AROUND;
         level_container->embed->flex_container->align_items = ALIGN_CENTER;
