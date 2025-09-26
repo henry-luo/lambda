@@ -1,6 +1,7 @@
 #include "layout.hpp"
 
 #include "../lib/log.h"
+#include <string.h>
 AlignType resolve_align_type(PropValue value);
 
 int resolve_length_value(LayoutContext* lycon, uintptr_t property, 
@@ -1045,12 +1046,32 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_width_t *width = declr->u.width;
         lycon->block.given_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_WIDTH, width);
         printf("width property: %d\n", lycon->block.given_width);
+        
+        // Store the raw width value for box-sizing calculations
+        if (block) {
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            block->blk->given_width = lycon->block.given_width;
+        }
         break;
     }
     case LXB_CSS_PROPERTY_HEIGHT: {
         const lxb_css_property_height_t *height = declr->u.height;
         lycon->block.given_height = resolve_length_value(lycon, LXB_CSS_PROPERTY_HEIGHT, height);
         printf("height property: %d\n", lycon->block.given_height);
+        
+        // Store the raw height value for box-sizing calculations
+        if (block) {
+            if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+            block->blk->given_height = lycon->block.given_height;
+        }
+        break;
+    }
+    case LXB_CSS_PROPERTY_BOX_SIZING: {
+        if (!block) { break; }
+        const lxb_css_property_box_sizing_t *box_sizing = declr->u.box_sizing;
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
+        block->blk->box_sizing = box_sizing->type;
+        printf("box-sizing property: %d (border-box=%d)\n", box_sizing->type, LXB_CSS_VALUE_BORDER_BOX);
         break;
     }
     case LXB_CSS_PROPERTY_MIN_WIDTH: {
@@ -1286,7 +1307,35 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 log_debug("Set aspect-ratio: %f\n", ratio);
             }
         }
-        break;
+        
+        // Handle gap property as custom property until lexbor supports it
+        if (custom->name.length == 3 && strncmp((const char*)custom->name.data, "gap", 3) == 0) {
+            const char* value_str = (const char*)custom->value.data;
+            
+            // Parse gap value (e.g., "10px", "1em", "20")
+            char* endptr;
+            float gap_value = strtof(value_str, &endptr);
+            
+            if (endptr != value_str && gap_value >= 0) {
+                // Convert to pixels based on unit
+                int gap_px = 0;
+                if (custom->value.length >= 2 && strncmp((const char*)custom->value.data + custom->value.length - 2, "px", 2) == 0) {
+                    gap_px = (int)gap_value;
+                } else if (custom->value.length >= 2 && strncmp((const char*)custom->value.data + custom->value.length - 2, "em", 2) == 0) {
+                    gap_px = (int)(gap_value * lycon->font.current_font_size);
+                } else {
+                    gap_px = (int)gap_value; // Assume pixels if no unit
+                }
+                
+                // Set gap on flex container - create container if needed
+                if (block) {
+                    alloc_flex_container_prop(lycon, block);
+                    block->embed->flex_container->row_gap = gap_px;
+                    block->embed->flex_container->column_gap = gap_px;
+                    log_debug("Set gap: %dpx (from %s)\n", gap_px, value_str);
+                }
+            }
+        }
     }
     }
     

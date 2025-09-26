@@ -63,13 +63,14 @@ void cleanup_flex_container(ViewBlock* container) {
 
 // Main flex layout algorithm entry point
 void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
-    // DEBUG: layout_flex_container_new called
+    // DEBUG: FLEX LAYOUT START - Container dimensions calculated
     if (!container || !container->embed || !container->embed->flex_container) {
-        // DEBUG: Early return - missing container or flex properties
+        printf("DEBUG: Early return - missing container or flex properties\n");
         return;
     }
     
     FlexContainerLayout* flex_layout = container->embed->flex_container;
+    // DEBUG: Gap settings applied
     
     // Set main and cross axis sizes from container dimensions (only if not already set)
     // DEBUG: Container dimensions calculated
@@ -106,9 +107,25 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
     // Phase 1: Collect flex items
     ViewBlock** items;
     int item_count = collect_flex_items(container, &items);
-    // DEBUG: Collected flex items
+    // DEBUG: Flex items collected
+    
+    // Debug: Print initial item dimensions
+    for (int i = 0; i < item_count; i++) {
+        ViewBlock* item = items[i];
+        printf("DEBUG: Item %d initial: %dx%d at (%d,%d)\n", i, item->width, item->height, item->x, item->y);
+        if (item->blk) {
+            printf("DEBUG: Item %d box-sizing: %d, given: %dx%d\n", i, item->blk->box_sizing, 
+                   item->blk->given_width, item->blk->given_height);
+        }
+        if (item->bound) {
+            printf("DEBUG: Item %d padding: l=%d r=%d t=%d b=%d\n", i, 
+                   item->bound->padding.left, item->bound->padding.right,
+                   item->bound->padding.top, item->bound->padding.bottom);
+        }
+    }
+    
     if (item_count == 0) {
-        // DEBUG: No flex items found
+        printf("DEBUG: No flex items found\n");
         return;
     }
     
@@ -124,15 +141,9 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
         resolve_flexible_lengths(flex_layout, &flex_layout->lines[i]);
     }
     
-    // Update content_width/content_height after flex calculations
-    for (int i = 0; i < line_count; i++) {
-        FlexLineInfo* line = &flex_layout->lines[i];
-        for (int j = 0; j < line->item_count; j++) {
-            ViewBlock* item = line->items[j];
-            item->content_width = item->width;
-            item->content_height = item->height;
-        }
-    }
+    // REMOVED: Don't override content dimensions after flex calculations
+    // The flex algorithm should work with the proper content dimensions
+    // that were calculated during box-sizing in the block layout phase
     
     // Phase 5: Calculate cross sizes for lines
     calculate_line_cross_sizes(flex_layout);
@@ -168,6 +179,8 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
             }
         }
     }
+    
+    // DEBUG: Flex layout completed successfully
     
     flex_layout->needs_reflow = false;
 }
@@ -253,10 +266,13 @@ int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout) {
     if (item->flex_basis == -1) {
         // auto - use content size (CRITICAL FIX: use proper content dimensions)
         int basis = get_main_axis_size(item, flex_layout);
+        printf("DEBUG: calculate_flex_basis - item size: %dx%d, basis: %d\n", 
+               item->width, item->height, basis);
         // *** DEBUG: Ensure we don't return 0 for auto basis ***
         if (basis <= 0) {
             // Fallback to content dimensions if width/height is 0
             basis = is_main_axis_horizontal(flex_layout) ? item->content_width : item->content_height;
+            printf("DEBUG: calculate_flex_basis - fallback to content: %d\n", basis);
         }
         return basis;
     } else if (item->flex_basis_is_percent) {
@@ -509,9 +525,14 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
     int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
     total_basis_size += gap_space;
     
+    printf("DEBUG: resolve_flexible_lengths - container: %d, total_basis: %d, gap_space: %d\n", 
+           container_main_size, total_basis_size - gap_space, gap_space);
+    
     // Calculate free space
     int free_space = container_main_size - total_basis_size;
     line->free_space = free_space;
+    
+    printf("DEBUG: resolve_flexible_lengths - free_space: %d\n", free_space);
     
     // *** CRITICAL FIX: Even if free_space == 0, items should keep their basis sizes ***
     if (free_space == 0) {
@@ -623,8 +644,11 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     // *** FIX 1: Calculate total item size WITHOUT gaps (gaps handled separately) ***
     int total_item_size = 0;
     for (int i = 0; i < line->item_count; i++) {
-        total_item_size += get_main_axis_size(line->items[i], flex_layout);
+        int item_size = get_main_axis_size(line->items[i], flex_layout);
+        printf("DEBUG: align_items_main_axis - item %d size: %d\n", i, item_size);
+        total_item_size += item_size;
     }
+    printf("DEBUG: align_items_main_axis - total_item_size: %d\n", total_item_size);
     
     // Check for auto margins on main axis
     int auto_margin_count = 0;
@@ -898,27 +922,15 @@ void align_content(FlexContainerLayout* flex_layout) {
 // These functions properly handle content vs border-box dimensions like block layout
 
 int get_border_box_width(ViewBlock* item) {
-    if (!item->bound) {
-        return item->width;
-    }
+    // FIXED: Now that we have proper box-sizing implementation in layout_block.cpp,
+    // the item->width already represents the correct dimensions based on box-sizing property.
+    // No need to subtract padding again - that would cause double-subtraction!
     
-    // CRITICAL WORKAROUND for missing box-sizing: border-box implementation
-    // The test CSS specifies: width: 100px; padding: 10px; box-sizing: border-box;
-    // Expected: total width = 100px (border-box)
-    // Radiant current: total width = 120px (treating 100px as content + 20px padding)
+    // DEBUG: get_border_box_width - using item->width directly
     
-    int padding_and_border = item->bound->padding.left + item->bound->padding.right +
-        (item->bound->border ? item->bound->border->width.left + item->bound->border->width.right : 0);
-    
-    // HACK: For flex items with padding, assume box-sizing: border-box was intended
-    // Reverse the incorrect calculation: if current width is 120px with 20px padding,
-    // the intended border-box width was 100px
-    if (padding_and_border > 0) {
-        int intended_border_box_width = item->width - padding_and_border;  // 120 - 20 = 100
-        return max(intended_border_box_width, 0);
-    }
-    
-    // No padding/border: use width as-is
+    // For border-box items: item->width is already the border-box width (includes padding/border)
+    // For content-box items: item->width is the content width (excludes padding/border)
+    // The flex algorithm should work with these dimensions as-is
     return item->width;
 }
 
