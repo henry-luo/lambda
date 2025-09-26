@@ -1,0 +1,67 @@
+{
+    "name": "radiant-layout-tests",
+    "version": "1.0.0",
+    "description": "Automated layout testing framework for Radiant engine validation against browser references",
+    "main": "tools/extract_layout.js",
+    "scripts": {
+        "test": "./run_tests.sh",
+        "test:basic": "./run_tests.sh --category basic",
+        "test:intermediate": "./run_tests.sh --category intermediate",
+        "test:advanced": "./run_tests.sh --category advanced",
+        "generate": "cd tools && node generate_tests.js all",
+        "generate:basic": "cd tools && node generate_tests.js category basic",
+        "generate:intermediate": "cd tools && node generate_tests.js category intermediate",
+        "generate:advanced": "cd tools && node generate_tests.js category advanced",
+        "extract": "cd tools && node extract_layout.js all",
+        "extract:basic": "cd tools && node extract_layout.js category basic",
+        "extract:intermediate": "cd tools && node extract_layout.js category intermediate",
+        "extract:advanced": "cd tools && node extract_layout.js category advanced",
+        "validate": "./run_tests.sh --validate-only",
+        "clean": "rm -rf data/*/*.html reference/*/*.json reports/*.* tools/test_layout_auto tools/*.o",
+        "setup": "cd tools && npm install && make clean",
+        "build": "cd tools && make all",
+        "report": "cat reports/latest_summary.txt 2>/dev/null || echo 'No reports available. Run tests first.'",
+        "help": "./run_tests.sh --help"
+    },
+    "keywords": [
+        "layout",
+        "css",
+        "html",
+        "testing",
+        "automation",
+        "puppeteer",
+        "radiant",
+        "browser",
+        "validation"
+    ],
+    "author": "Radiant Layout Team",
+    "license": "MIT",
+    "engines": {
+        "node": ">=16.0.0",
+        "npm": ">=8.0.0"
+    },
+    "dependencies": {
+        "puppeteer": "^21.0.0"
+    },
+    "devDependencies": {},
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/your-org/radiant-layout-tests"
+    },
+    "bugs": {
+        "url": "https://github.com/your-org/radiant-layout-tests/issues"
+    },
+    "homepage": "https://github.com/your-org/radiant-layout-tests#readme",
+    "directories": {
+        "test": "data",
+        "doc": "reports"
+    },
+    "files": [
+        "tools/",
+        "data/",
+        "reference/",
+        "reports/",
+        "run_tests.sh",
+        "README.md"
+    ]
+}
