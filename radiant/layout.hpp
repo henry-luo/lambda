@@ -85,11 +85,8 @@ DisplayValue resolve_display(lxb_html_element_t* elmt);
 JustifyContent resolve_justify_content(PropValue value);
 Color color_name_to_rgb(PropValue color_name);
 
-void layout_flex_container(FlexContainer* container);
-void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
 void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container);
 void layout_html_root(LayoutContext* lycon, DomNode *elmt);
-void free_flex_container(FlexContainer* container);
 
 void line_init(LayoutContext* lycon);
 int calculate_vertical_align_offset(PropValue align, int item_height, int line_height, int baseline_pos, int item_baseline);

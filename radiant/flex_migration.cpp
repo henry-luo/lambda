@@ -158,10 +158,7 @@ void layout_flex_container_compat(LayoutContext* lycon, ViewBlock* container) {
     } else {
         log_debug("Using legacy flex layout implementation\n");
         
-        // Use old implementation (if still available)
-        // layout_flex_nodes(lycon, (lxb_dom_node_t*)container->child);
-        
-        // For now, fallback to new implementation with warning
+        // Fallback to new implementation with warning
         log_warn("Legacy flex layout not available, using new implementation\n");
         migrate_flex_container_properties(container);
         layout_flex_container_new(lycon, container);
