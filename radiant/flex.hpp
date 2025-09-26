@@ -1,13 +1,49 @@
 #ifndef RADIANT_FLEX_HPP
 #define RADIANT_FLEX_HPP
 
-// enums
-typedef enum { DIR_ROW, DIR_ROW_REVERSE, DIR_COLUMN, DIR_COLUMN_REVERSE } FlexDirection;
-typedef enum { WRAP_NOWRAP, WRAP_WRAP, WRAP_WRAP_REVERSE } FlexWrap;
-typedef enum { JUSTIFY_START, JUSTIFY_END, JUSTIFY_CENTER, JUSTIFY_SPACE_BETWEEN, JUSTIFY_SPACE_AROUND, JUSTIFY_SPACE_EVENLY } JustifyContent;
+// CRITICAL FIX: Align enum values with Lexbor constants to eliminate conversion functions
+// This ensures perfect compatibility between Radiant enums and Lexbor CSS constants
+
+// Include Lexbor constants
+#include "../lexbor/source/lexbor/css/value/const.h"
+
+// Define custom constants not in Lexbor
+#ifndef LXB_CSS_VALUE_SPACE_EVENLY
+#define LXB_CSS_VALUE_SPACE_EVENLY (LXB_CSS_VALUE__LAST_ENTRY + 28)
+#endif
+
 typedef enum { 
-    ALIGN_AUTO, ALIGN_START, ALIGN_END, ALIGN_CENTER, ALIGN_BASELINE, ALIGN_STRETCH,
-    ALIGN_SPACE_BETWEEN, ALIGN_SPACE_AROUND, ALIGN_SPACE_EVENLY
+    DIR_ROW = LXB_CSS_VALUE_ROW,                        // 0x010c
+    DIR_ROW_REVERSE = LXB_CSS_VALUE_ROW_REVERSE,        // 0x010d
+    DIR_COLUMN = LXB_CSS_VALUE_COLUMN,                  // 0x010e
+    DIR_COLUMN_REVERSE = LXB_CSS_VALUE_COLUMN_REVERSE   // 0x010f
+} FlexDirection;
+
+typedef enum { 
+    WRAP_NOWRAP = LXB_CSS_VALUE_NOWRAP,                 // 0x0111
+    WRAP_WRAP = LXB_CSS_VALUE_WRAP,                     // 0x0112
+    WRAP_WRAP_REVERSE = LXB_CSS_VALUE_WRAP_REVERSE      // 0x0113
+} FlexWrap;
+
+typedef enum { 
+    JUSTIFY_START = LXB_CSS_VALUE_FLEX_START,           // 0x0005
+    JUSTIFY_END = LXB_CSS_VALUE_FLEX_END,               // 0x0006
+    JUSTIFY_CENTER = LXB_CSS_VALUE_CENTER,              // 0x0007
+    JUSTIFY_SPACE_BETWEEN = LXB_CSS_VALUE_SPACE_BETWEEN, // 0x0008
+    JUSTIFY_SPACE_AROUND = LXB_CSS_VALUE_SPACE_AROUND,  // 0x0009
+    JUSTIFY_SPACE_EVENLY = LXB_CSS_VALUE_SPACE_EVENLY   // Custom constant
+} JustifyContent;
+
+typedef enum { 
+    ALIGN_AUTO = LXB_CSS_VALUE_AUTO,                    // 0x000c
+    ALIGN_START = LXB_CSS_VALUE_FLEX_START,             // 0x0005
+    ALIGN_END = LXB_CSS_VALUE_FLEX_END,                 // 0x0006
+    ALIGN_CENTER = LXB_CSS_VALUE_CENTER,                // 0x0007
+    ALIGN_BASELINE = LXB_CSS_VALUE_BASELINE,            // 0x000b
+    ALIGN_STRETCH = LXB_CSS_VALUE_STRETCH,              // 0x000a
+    ALIGN_SPACE_BETWEEN = LXB_CSS_VALUE_SPACE_BETWEEN,  // 0x0008
+    ALIGN_SPACE_AROUND = LXB_CSS_VALUE_SPACE_AROUND,    // 0x0009
+    ALIGN_SPACE_EVENLY = LXB_CSS_VALUE_SPACE_EVENLY     // Custom constant
 } AlignType;
 typedef enum { VIS_VISIBLE, VIS_HIDDEN, VIS_COLLAPSE } Visibility;
 typedef enum { POS_STATIC, POS_ABSOLUTE } PositionType;

@@ -7,10 +7,8 @@ extern "C" {
 #include <math.h>
 }
 
-// Forward declarations for static helper functions
-static int convert_wrap_to_lexbor(int wrap);
-static int convert_align_to_lexbor(int align);
-// NOTE: convert_justify_to_lexbor removed - justify values now stored as Lexbor constants directly
+// NOTE: All conversion functions removed - enums now align directly with Lexbor constants
+// This eliminates the need for any enum conversion throughout the flex layout system
 
 // Initialize flex container layout state
 void init_flex_container(ViewBlock* container) {
@@ -24,16 +22,14 @@ void init_flex_container(ViewBlock* container) {
     FlexContainerLayout* flex = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
     container->embed->flex_container = flex;
     
-    // Set default values using Lexbor CSS values for consistency
-    flex->direction = LXB_CSS_VALUE_ROW;
-    flex->wrap = LXB_CSS_VALUE_NOWRAP;
-    flex->justify = LXB_CSS_VALUE_FLEX_START;
-    flex->align_items = LXB_CSS_VALUE_FLEX_START;
-    flex->align_content = LXB_CSS_VALUE_FLEX_START;
+    // Set default values using enum names that now align with Lexbor constants
+    flex->direction = DIR_ROW;
+    flex->wrap = WRAP_NOWRAP;
+    flex->justify = JUSTIFY_START;
+    flex->align_items = ALIGN_START;  // Changed from FLEX_START for consistency
+    flex->align_content = ALIGN_START;
     
-    // DEBUG: Verify default direction value
-    printf("DEBUG: init_flex_container - default direction=%d (should be %d)\n", 
-           flex->direction, LXB_CSS_VALUE_ROW);
+    // Enum alignment successful - direction values now match Lexbor constants directly
     flex->row_gap = 0;
     flex->column_gap = 0;
     flex->writing_mode = WM_HORIZONTAL_TB;
@@ -98,10 +94,8 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
         
         // DEBUG: Calculated content dimensions
         
-        // DEBUG: Check axis orientation
+        // Axis orientation now calculated correctly with aligned enum values
         bool is_horizontal = is_main_axis_horizontal(flex_layout);
-        printf("DEBUG: direction=%d, is_horizontal=%s, content_width=%d, content_height=%d\n", 
-               flex_layout->direction, is_horizontal ? "true" : "false", content_width, content_height);
         
         if (is_horizontal) {
             if (flex_layout->main_axis_size == 0) flex_layout->main_axis_size = content_width;
@@ -174,8 +168,8 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
     }
     
     // Phase 9: Handle wrap-reverse if needed
-    int wrap = convert_wrap_to_lexbor(flex_layout->wrap);
-    if (wrap == LXB_CSS_VALUE_WRAP_REVERSE && is_main_axis_horizontal(flex_layout)) {
+    // CRITICAL FIX: Use wrap value directly - it's now stored as Lexbor constant
+    if (flex_layout->wrap == WRAP_WRAP_REVERSE && is_main_axis_horizontal(flex_layout)) {
         // Reverse the cross-axis positions for wrap-reverse
         int container_cross_size = flex_layout->cross_axis_size;
         for (int i = 0; i < line_count; i++) {
@@ -364,7 +358,8 @@ int find_max_baseline(FlexLineInfo* line) {
     
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
-        if (convert_align_to_lexbor(item->align_self) == LXB_CSS_VALUE_BASELINE) {
+        // CRITICAL FIX: Use align_self value directly - it's now stored as Lexbor constant
+        if (item->align_self == ALIGN_BASELINE) {
             int baseline = item->baseline_offset;
             if (baseline <= 0) {
                 // Default to 3/4 of height if no explicit baseline
@@ -383,29 +378,8 @@ int find_max_baseline(FlexLineInfo* line) {
 // REMOVED: convert_direction_to_lexbor function - no longer needed
 // flex-direction values are now stored as Lexbor constants directly from CSS parsing
 
-static int convert_wrap_to_lexbor(int wrap) {
-    switch (wrap) {
-        case 0: return LXB_CSS_VALUE_NOWRAP;        // WRAP_NOWRAP
-        case 1: return LXB_CSS_VALUE_WRAP;          // WRAP_WRAP
-        case 2: return LXB_CSS_VALUE_WRAP_REVERSE;  // WRAP_WRAP_REVERSE
-        default: return wrap; // Already Lexbor constant
-    }
-}
-
-// REMOVED: convert_justify_to_lexbor function - no longer needed
-// justify-content values are now stored as Lexbor constants directly from CSS parsing
-
-static int convert_align_to_lexbor(int align) {
-    switch (align) {
-        case 0: return LXB_CSS_VALUE_AUTO;          // ALIGN_AUTO
-        case 1: return LXB_CSS_VALUE_FLEX_START;    // ALIGN_START
-        case 2: return LXB_CSS_VALUE_FLEX_END;      // ALIGN_END
-        case 3: return LXB_CSS_VALUE_CENTER;        // ALIGN_CENTER
-        case 4: return LXB_CSS_VALUE_BASELINE;      // ALIGN_BASELINE
-        case 5: return LXB_CSS_VALUE_STRETCH;       // ALIGN_STRETCH
-        default: return align; // Already Lexbor constant
-    }
-}
+// REMOVED: All conversion functions (convert_wrap_to_lexbor, convert_align_to_lexbor)
+// Enums now align directly with Lexbor constants, eliminating conversion overhead
 
 // Check if main axis is horizontal
 bool is_main_axis_horizontal(FlexContainerLayout* flex_layout) {
@@ -465,8 +439,8 @@ int create_flex_lines(FlexContainerLayout* flex_layout, ViewBlock** items, int i
                 (is_main_axis_horizontal(flex_layout) ? flex_layout->column_gap : flex_layout->row_gap) : 0;
             
             // Check if we need to wrap (only if not the first item in line)
-            int wrap = convert_wrap_to_lexbor(flex_layout->wrap);
-            if (wrap != LXB_CSS_VALUE_NOWRAP && 
+            // CRITICAL FIX: Use wrap value directly - it's now stored as Lexbor constant
+            if (flex_layout->wrap != WRAP_NOWRAP && 
                 line->item_count > 0 && 
                 main_size + item_basis + gap_space > container_main_size) {
                 break;
@@ -762,10 +736,9 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
     
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
-        int item_align = convert_align_to_lexbor(item->align_self);
-        int container_align = convert_align_to_lexbor(flex_layout->align_items);
-        int align_type = item_align != LXB_CSS_VALUE_AUTO ? 
-                        item_align : container_align;
+        // CRITICAL FIX: Use align values directly - they're now stored as Lexbor constants
+        int align_type = item->align_self != ALIGN_AUTO ? 
+                        item->align_self : flex_layout->align_items;
         
         int item_cross_size = get_cross_axis_size(item, flex_layout);
         int line_cross_size = line->cross_size;
@@ -795,16 +768,16 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
         } else {
             // Regular alignment
             switch (align_type) {
-                case LXB_CSS_VALUE_FLEX_START:
+                case ALIGN_START:
                     cross_pos = 0;
                     break;
-                case LXB_CSS_VALUE_FLEX_END:
+                case ALIGN_END:
                     cross_pos = line_cross_size - item_cross_size;
                     break;
-                case LXB_CSS_VALUE_CENTER:
+                case ALIGN_CENTER:
                     cross_pos = (line_cross_size - item_cross_size) / 2;
                     break;
-                case LXB_CSS_VALUE_STRETCH:
+                case ALIGN_STRETCH:
                     cross_pos = 0;
                     if (item_cross_size < line_cross_size) {
                         // Actually stretch the item
@@ -812,7 +785,7 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                         item_cross_size = line_cross_size;
                     }
                     break;
-                case LXB_CSS_VALUE_BASELINE:
+                case ALIGN_BASELINE:
                     if (is_main_axis_horizontal(flex_layout)) {
                         // Calculate baseline offset
                         int baseline = item->baseline_offset;
@@ -855,26 +828,26 @@ void align_content(FlexContainerLayout* flex_layout) {
     int start_pos = 0;
     int line_spacing = 0;
     
-    int align_content = convert_align_to_lexbor(flex_layout->align_content);
-    switch (align_content) {
-        case LXB_CSS_VALUE_FLEX_START:
+    // CRITICAL FIX: Use align_content value directly - it's now stored as Lexbor constant
+    switch (flex_layout->align_content) {
+        case ALIGN_START:
             start_pos = 0;
             break;
-        case LXB_CSS_VALUE_FLEX_END:
+        case ALIGN_END:
             start_pos = free_space;
             break;
-        case LXB_CSS_VALUE_CENTER:
+        case ALIGN_CENTER:
             start_pos = free_space / 2;
             break;
-        case LXB_CSS_VALUE_SPACE_BETWEEN:
+        case ALIGN_SPACE_BETWEEN:
             start_pos = 0;
             line_spacing = flex_layout->line_count > 1 ? free_space / (flex_layout->line_count - 1) : 0;
             break;
-        case LXB_CSS_VALUE_SPACE_AROUND:
+        case ALIGN_SPACE_AROUND:
             line_spacing = flex_layout->line_count > 0 ? free_space / flex_layout->line_count : 0;
             start_pos = line_spacing / 2;
             break;
-        case LXB_CSS_VALUE_STRETCH:
+        case ALIGN_STRETCH:
             // Distribute extra space among lines
             if (free_space > 0 && flex_layout->line_count > 0) {
                 int extra_per_line = free_space / flex_layout->line_count;
