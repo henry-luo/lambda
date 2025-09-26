@@ -69,7 +69,7 @@ bool LayoutValidator::loadReferenceData(const std::string& jsonFile, std::map<st
     // Parse each element
     json_object_object_foreach(layoutData, selector, elementObj) {
         // Skip special objects
-        if (std::string(selector).starts_with("__")) {
+        if (std::string(selector).substr(0, 2) == "__") {
             continue;
         }
         
@@ -351,7 +351,7 @@ bool LayoutValidator::isWithinTolerance(double expected, double actual, double t
 
 double LayoutValidator::calculateTolerance(double value, double percentTolerance, double pixelTolerance) const {
     double percentTol = std::abs(value) * percentTolerance;
-    return std::max(percentTol, pixelTolerance);
+    return (percentTol > pixelTolerance) ? percentTol : pixelTolerance;
 }
 
 bool LayoutValidator::shouldIgnoreSelector(const std::string& selector) const {
@@ -484,11 +484,8 @@ ValidationResult TestRunner::runSingleTest(const TestCase& testCase) {
             }
         }
         
-        // TODO: Integration with Radiant layout engine
-        // std::map<std::string, ElementData> actualElements = runRadiantLayout(mutableTestCase);
-        
-        // For now, create dummy actual elements that match reference
-        std::map<std::string, ElementData> actualElements = mutableTestCase.referenceElements;
+        // Integration with Radiant layout engine
+        std::map<std::string, ElementData> actualElements = runRadiantLayout(mutableTestCase);
         
         result = validator_->validateTestCase(mutableTestCase, actualElements);
         
@@ -570,6 +567,42 @@ void TestRunner::printSummary(const TestSuiteResults& results) {
     std::cout << std::endl;
 }
 
+void TestRunner::generateJsonReport(const TestSuiteResults& results, const std::string& outputFile) {
+    // Simple JSON report generation
+    std::ofstream file(outputFile);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open output file: " << outputFile << std::endl;
+        return;
+    }
+    
+    file << "{\n";
+    file << "  \"summary\": {\n";
+    file << "    \"total\": " << results.totalTests << ",\n";
+    file << "    \"passed\": " << results.passedTests << ",\n";
+    file << "    \"failed\": " << results.failedTests << ",\n";
+    file << "    \"skipped\": " << results.skippedTests << ",\n";
+    file << "    \"errors\": " << results.errorTests << ",\n";
+    file << "    \"time\": " << results.totalTime << "\n";
+    file << "  },\n";
+    file << "  \"category\": \"" << results.category << "\",\n";
+    file << "  \"results\": [\n";
+    
+    for (size_t i = 0; i < results.results.size(); ++i) {
+        const auto& result = results.results[i];
+        file << "    {\n";
+        file << "      \"selector\": \"" << result.selector << "\",\n";
+        file << "      \"status\": \"" << (result.isPass() ? "pass" : (result.isFail() ? "fail" : (result.isSkip() ? "skip" : "error"))) << "\",\n";
+        file << "      \"message\": \"" << result.message << "\"\n";
+        file << "    }";
+        if (i < results.results.size() - 1) file << ",";
+        file << "\n";
+    }
+    
+    file << "  ]\n";
+    file << "}\n";
+    file.close();
+}
+
 std::string TestRunner::formatDuration(double seconds) const {
     if (seconds < 1.0) {
         return std::to_string(static_cast<int>(seconds * 1000)) + "ms";
@@ -628,7 +661,8 @@ std::vector<std::string> listFiles(const std::string& directory, const std::stri
     for (const auto& entry : std::filesystem::directory_iterator(directory)) {
         if (entry.is_regular_file()) {
             std::string filename = entry.path().string();
-            if (extension.empty() || filename.ends_with(extension)) {
+            if (extension.empty() || (filename.length() >= extension.length() && 
+                filename.substr(filename.length() - extension.length()) == extension)) {
                 files.push_back(filename);
             }
         }
@@ -668,5 +702,234 @@ double roundToDecimalPlaces(double value, int places) {
 }
 
 } // namespace Utils
+
+// TestRunner Radiant Integration Implementation
+std::map<std::string, ElementData> TestRunner::runRadiantLayout(const TestCase& testCase) {
+    std::map<std::string, ElementData> results;
+    
+    try {
+        if (verbose_) {
+            std::cout << "Running Radiant layout for test: " << testCase.name << std::endl;
+        }
+        
+        // 1. Parse HTML and CSS
+        HtmlCssParser parser;
+        auto rootElement = parser.parseHtml(testCase.htmlContent);
+        
+        if (rootElement.tag.empty()) {
+            if (verbose_) {
+                std::cerr << "Failed to parse HTML content" << std::endl;
+            }
+            return results;
+        }
+        
+        // Extract and apply CSS rules
+        auto cssRules = parser.extractCssRules(testCase.htmlContent);
+        parser.applyCssToElements(rootElement, cssRules);
+        
+        // 2. Create layout context (following proven pattern from test_radiant_flex_gtest.cpp)
+        LayoutContext* lycon = (LayoutContext*)calloc(1, sizeof(LayoutContext));
+        lycon->width = 1200;  // Browser viewport width
+        lycon->height = 800;  // Browser viewport height
+        lycon->dpi = 96;
+        
+        // Initialize memory pools (critical for proper operation)
+        init_view_pool(lycon);
+        
+        if (!lycon->pool) {
+            if (verbose_) {
+                std::cerr << "Failed to initialize memory pool" << std::endl;
+            }
+            free(lycon);
+            return results;
+        }
+        
+        // 3. Build ViewBlock tree
+        ViewBlockBuilder builder(lycon);
+        ViewBlock* rootBlock = builder.buildViewBlockTree(rootElement);
+        
+        if (!rootBlock) {
+            if (verbose_) {
+                std::cerr << "Failed to build ViewBlock tree" << std::endl;
+            }
+            cleanup_view_pool(lycon);
+            free(lycon);
+            return results;
+        }
+        
+        // 4. Run layout algorithm (core integration point)
+        if (rootBlock->embed && rootBlock->embed->flex_container) {
+            if (verbose_) {
+                std::cout << "Running flex layout algorithm..." << std::endl;
+            }
+            layout_flex_container_new(lycon, rootBlock);
+        } else {
+            if (verbose_) {
+                std::cout << "Running block layout algorithm..." << std::endl;
+            }
+            // For non-flex containers, we could run block layout here
+            // layout_block(lycon, rootBlock);
+        }
+        
+        // 5. Extract results
+        results = extractLayoutResults(rootBlock, rootElement);
+        
+        if (verbose_) {
+            std::cout << "Extracted " << results.size() << " elements from layout" << std::endl;
+        }
+        
+        // 6. Cleanup (critical to prevent memory leaks)
+        cleanup_view_pool(lycon);
+        free(lycon);
+        
+    } catch (const std::exception& e) {
+        if (verbose_) {
+            std::cerr << "Layout execution error: " << e.what() << std::endl;
+        }
+        // Return empty results on error
+        results.clear();
+    }
+    
+    return results;
+}
+
+std::map<std::string, ElementData> TestRunner::extractLayoutResults(
+    ViewBlock* rootBlock, 
+    const HtmlCssParser::ParsedElement& rootElement) {
+    
+    std::map<std::string, ElementData> results;
+    
+    if (!rootBlock) return results;
+    
+    // Traverse ViewBlock tree and extract layout data
+    extractElementData(rootBlock, rootElement, results, "");
+    
+    return results;
+}
+
+void TestRunner::extractElementData(
+    ViewBlock* block, 
+    const HtmlCssParser::ParsedElement& element,
+    std::map<std::string, ElementData>& results,
+    const std::string& selectorPrefix) {
+    
+    if (!block) return;
+    
+    // Create selector (e.g., ".container", ".item:nth-child(1)")
+    std::string selector = buildSelector(element, selectorPrefix);
+    
+    // Extract layout properties
+    ElementData data;
+    data.selector = selector;
+    data.tag = element.tag;
+    data.id = element.id;
+    data.classes = element.classes;
+    
+    // Core layout data extraction
+    data.layout.x = static_cast<double>(block->x);
+    data.layout.y = static_cast<double>(block->y);
+    data.layout.width = static_cast<double>(block->width);
+    data.layout.height = static_cast<double>(block->height);
+    data.layout.contentWidth = static_cast<double>(block->content_width);
+    data.layout.contentHeight = static_cast<double>(block->content_height);
+    
+    // Flex-specific properties
+    if (block->embed && block->embed->flex_container) {
+        data.layout.display = "flex";
+        data.layout.flexDirection = mapRadiantToCSS(block->embed->flex_container->direction);
+        data.layout.justifyContent = mapRadiantToCSS(block->embed->flex_container->justify);
+        data.layout.alignItems = mapRadiantToCSS(block->embed->flex_container->align_items);
+        data.layout.alignContent = mapRadiantToCSS(block->embed->flex_container->align_content);
+        
+        // Gap properties
+        if (block->embed->flex_container->column_gap > 0 || block->embed->flex_container->row_gap > 0) {
+            if (block->embed->flex_container->column_gap == block->embed->flex_container->row_gap) {
+                // Single gap value
+                data.layout.gap = block->embed->flex_container->column_gap;
+            } else {
+                // Different row/column gaps - use column gap for now
+                data.layout.gap = block->embed->flex_container->column_gap;
+            }
+        }
+    } else {
+        data.layout.display = "block";
+    }
+    
+    // Flex item properties
+    if (block->flex_grow > 0 || block->flex_shrink != 1.0f || block->flex_basis != -1) {
+        data.layout.flexGrow = static_cast<double>(block->flex_grow);
+        data.layout.flexShrink = static_cast<double>(block->flex_shrink);
+        data.layout.flexBasis = block->flex_basis == -1 ? "auto" : std::to_string(block->flex_basis) + "px";
+    }
+    
+    // Order property
+    if (block->order != 0) {
+        data.layout.order = block->order;
+    }
+    
+    results[selector] = data;
+    
+    // Recursively process children
+    ViewBlock* child = block->first_child;
+    size_t childIndex = 0;
+    while (child && childIndex < element.children.size()) {
+        extractElementData(child, element.children[childIndex], results, selector);
+        child = child->next_sibling;
+        childIndex++;
+    }
+}
+
+std::string TestRunner::buildSelector(const HtmlCssParser::ParsedElement& element, const std::string& prefix) {
+    std::string selector;
+    
+    // Build selector based on element properties
+    if (!element.id.empty()) {
+        selector = "#" + element.id;
+    } else if (!element.classes.empty()) {
+        selector = "." + element.classes[0];
+    } else {
+        selector = element.tag;
+    }
+    
+    // Add prefix if provided
+    if (!prefix.empty()) {
+        selector = prefix + " " + selector;
+    }
+    
+    return selector;
+}
+
+std::string TestRunner::mapRadiantToCSS(int radiantValue) {
+    // Map Radiant/Lexbor constants back to CSS values
+    switch (radiantValue) {
+        // Flex direction
+        case LXB_CSS_VALUE_ROW: return "row";
+        case LXB_CSS_VALUE_ROW_REVERSE: return "row-reverse";
+        case LXB_CSS_VALUE_COLUMN: return "column";
+        case LXB_CSS_VALUE_COLUMN_REVERSE: return "column-reverse";
+        
+        // Justify content
+        case LXB_CSS_VALUE_FLEX_START: return "flex-start";
+        case LXB_CSS_VALUE_FLEX_END: return "flex-end";
+        case LXB_CSS_VALUE_CENTER: return "center";
+        case LXB_CSS_VALUE_SPACE_BETWEEN: return "space-between";
+        case LXB_CSS_VALUE_SPACE_AROUND: return "space-around";
+        case LXB_CSS_VALUE_SPACE_EVENLY: return "space-evenly";
+        
+        // Align items/content
+        case LXB_CSS_VALUE_STRETCH: return "stretch";
+        case LXB_CSS_VALUE_BASELINE: return "baseline";
+        
+        // Wrap
+        case LXB_CSS_VALUE_NOWRAP: return "nowrap";
+        case LXB_CSS_VALUE_WRAP: return "wrap";
+        case LXB_CSS_VALUE_WRAP_REVERSE: return "wrap-reverse";
+        
+        // Auto
+        case LXB_CSS_VALUE_AUTO: return "auto";
+        
+        default: return "flex-start"; // Default fallback
+    }
+}
 
 } // namespace LayoutTest

@@ -22,13 +22,15 @@
 #include <json-c/json.h>
 
 // Radiant layout system headers
-// (These paths may need adjustment based on actual Radiant structure)
-#ifdef INCLUDE_RADIANT_HEADERS
-#include "../../radiant/layout/layout.hpp"
-#include "../../radiant/layout/layout_block.hpp"
-#include "../../radiant/layout/layout_flex.hpp"
-#include "../../radiant/dom/dom_element.hpp"
-#endif
+extern "C" {
+#include "../../radiant/layout.hpp"
+#include "../../radiant/view.hpp"
+}
+
+// Layout test framework components
+#include "html_css_parser.hpp"
+#include "css_radiant_mapper.hpp"
+#include "viewblock_builder.hpp"
 
 namespace LayoutTest {
 
@@ -72,6 +74,9 @@ struct LayoutProperties {
     double flexShrink = 1.0;
     std::string flexBasis = "auto";
     int order = 0;
+    
+    // Gap properties
+    double gap = 0.0;
     
     // Typography
     double fontSize = 16.0;
@@ -300,10 +305,21 @@ public:
     void printSummary(const TestSuiteResults& results);
     
     // Integration with Radiant engine
-    #ifdef INCLUDE_RADIANT_HEADERS
     std::map<std::string, ElementData> runRadiantLayout(const TestCase& testCase);
-    ElementData extractRadiantElementData(const RadiantLayout::Element* element);
-    #endif
+    
+    // Result extraction methods
+    std::map<std::string, ElementData> extractLayoutResults(
+        ViewBlock* rootBlock, 
+        const HtmlCssParser::ParsedElement& rootElement);
+    
+    void extractElementData(
+        ViewBlock* block, 
+        const HtmlCssParser::ParsedElement& element,
+        std::map<std::string, ElementData>& results,
+        const std::string& selectorPrefix);
+    
+    std::string buildSelector(const HtmlCssParser::ParsedElement& element, const std::string& prefix);
+    std::string mapRadiantToCSS(int radiantValue);
     
 private:
     std::string outputDirectory_ = "./reports";
