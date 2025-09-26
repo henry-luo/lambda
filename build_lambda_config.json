@@ -1279,6 +1279,39 @@
                         "defines": [
                             "FLEX_TEST_MODE"
                         ]
+                    },
+                    {
+                        "source": "test/layout/tools/test_layout_auto.cpp",
+                        "name": "🤖 Automated Layout Tests (GTest)",
+                        "additional_sources": [
+                            "test/layout/tools/layout_test_framework.cpp",
+                            "test/layout/tools/html_css_parser.cpp",
+                            "test/layout/tools/css_radiant_mapper.cpp",
+                            "test/layout/tools/viewblock_builder.cpp",
+                            "radiant/flex_layout_new.cpp",
+                            "radiant/layout_test_support.cpp"
+                        ],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "lexbor_static",
+                            "json-c"
+                        ],
+                        "binary": "test_layout_auto.exe",
+                        "includes": [
+                            "radiant",
+                            "lib/mem-pool/include",
+                            "lexbor/source",
+                            "/opt/homebrew/include",
+                            "/opt/homebrew/Cellar/fontconfig/2.17.1/include",
+                            "/opt/homebrew/Cellar/json-c/0.18/include"
+                        ],
+                        "defines": [
+                            "FLEX_TEST_MODE"
+                        ]
                     }
                 ],
                 "type": "radiant",

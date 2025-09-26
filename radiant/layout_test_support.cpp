@@ -9,7 +9,10 @@ void init_view_pool(LayoutContext* lycon) {
     if (!lycon) return;
     
     // Initialize memory pool for view allocation
-    pool_variable_init(&lycon->pool, 1024 * 1024, MEM_POOL_NO_BEST_FIT);
+    MemPoolError err = pool_variable_init(&lycon->pool, 1024 * 1024, MEM_POOL_NO_BEST_FIT);
+    if (err != MEM_POOL_ERR_OK) {
+        lycon->pool = nullptr;
+    }
 }
 
 void cleanup_view_pool(LayoutContext* lycon) {
