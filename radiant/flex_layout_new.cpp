@@ -14,7 +14,12 @@ static int convert_align_to_lexbor(int align);
 
 // Initialize flex container layout state
 void init_flex_container(ViewBlock* container) {
-    if (!container || !container->embed) return;
+    if (!container) return;
+    
+    // Create embed structure if it doesn't exist
+    if (!container->embed) {
+        container->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
+    }
     
     FlexContainerLayout* flex = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
     container->embed->flex_container = flex;
@@ -124,17 +129,14 @@ int collect_flex_items(ViewBlock* container, ViewBlock*** items) {
     
     int count = 0;
     
-    // Count children first - use ViewGroup hierarchy, filter by position and visibility
-    View* child = container->child;
+    // Count children first - use ViewBlock hierarchy for flex items
+    ViewBlock* child = container->first_child;
     while (child) {
-        if ((child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK)) {
-            ViewBlock* block = (ViewBlock*)child;
-            // Filter out absolutely positioned and hidden items
-            if (block->position != POS_ABSOLUTE && block->visibility != VIS_HIDDEN) {
-                count++;
-            }
+        // Filter out absolutely positioned and hidden items
+        if (child->position != POS_ABSOLUTE && child->visibility != VIS_HIDDEN) {
+            count++;
         }
-        child = child->next;
+        child = child->next_sibling;
     }
     
     if (count == 0) {
@@ -149,25 +151,22 @@ int collect_flex_items(ViewBlock* container, ViewBlock*** items) {
                                                flex->allocated_items * sizeof(ViewBlock*));
     }
     
-    // Collect items - use ViewGroup hierarchy, apply filtering
+    // Collect items - use ViewBlock hierarchy for flex items
     count = 0;
-    child = container->child;
+    child = container->first_child;
     while (child) {
-        if ((child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK)) {
-            ViewBlock* block = (ViewBlock*)child;
-            // Filter out absolutely positioned and hidden items
-            if (block->position != POS_ABSOLUTE && block->visibility != VIS_HIDDEN) {
-                flex->flex_items[count] = block;
-                
-                // Apply constraints and resolve percentages
-                apply_constraints(block, 
-                    is_main_axis_horizontal(flex) ? flex->main_axis_size : flex->cross_axis_size,
-                    is_main_axis_horizontal(flex) ? flex->cross_axis_size : flex->main_axis_size);
-                
-                count++;
-            }
+        // Filter out absolutely positioned and hidden items
+        if (child->position != POS_ABSOLUTE && child->visibility != VIS_HIDDEN) {
+            flex->flex_items[count] = child;
+            
+            // Apply constraints and resolve percentages
+            apply_constraints(child, 
+                is_main_axis_horizontal(flex) ? flex->main_axis_size : flex->cross_axis_size,
+                is_main_axis_horizontal(flex) ? flex->cross_axis_size : flex->main_axis_size);
+            
+            count++;
         }
-        child = child->next;
+        child = child->next_sibling;
     }
     
     flex->item_count = count;

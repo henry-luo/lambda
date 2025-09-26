@@ -42,7 +42,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         -h|--help)
             echo "Usage: $0 [--target=SUITE] [--raw] [--sequential] [--parallel]"
-            echo "  --target=SUITE   Run only tests from specified suite (library, input, mir, lambda, validator)"
+            echo "  --target=SUITE   Run only tests from specified suite (library, input, mir, lambda, validator, radiant)"
             echo "  --raw           Show raw test output without formatting"
             echo "  --sequential    Run tests sequentially (default: parallel)"
             echo "  --parallel      Run tests in parallel (default)"
@@ -158,6 +158,7 @@ get_suite_category_display_name() {
         "lambda") echo "🐑 Lambda Runtime Tests" ;;
         "lambda-std") echo "🧪 Lambda Standard Tests" ;;
         "validator") echo "🔍 Validator Tests" ;;
+        "radiant") echo "🎨 Radiant Layout Engine Tests" ;;
         "unknown") echo "🧪 Other Tests" ;;
         *) echo "🧪 $category Tests" ;;
     esac
@@ -214,6 +215,16 @@ get_c_test_display_name() {
         "test_variable_pool") echo "🏊 Variable Pool Tests" ;;
         "test_cmdedit") echo "⌨️ Command Line Editor Tests" ;;
         "lambda_test_runner") echo "🧪 Lambda Standard Tests" ;;
+        "test_radiant_flex_gtest") echo "🎨 Radiant Flex Layout Tests (GTest)" ;;
+        "test_radiant_flex_algorithm_gtest") echo "⚙️ Radiant Flex Algorithm Tests (GTest)" ;;
+        "test_radiant_flex_integration_gtest") echo "🔗 Radiant Flex Integration Tests (GTest)" ;;
+        "test_flex_minimal") echo "📦 Minimal Flex Layout Tests (GTest)" ;;
+        "test_flex_core_validation") echo "✅ Flex Core Validation Tests" ;;
+        "test_flex_simple") echo "🧪 Simple Flex Tests" ;;
+        "test_flex_layout_gtest") echo "📐 Comprehensive Flex Layout Tests (GTest)" ;;
+        "test_flex_layout") echo "📐 Comprehensive Flex Layout Tests (Criterion)" ;;
+        "test_flex_standalone") echo "🔧 Standalone Flex Layout Tests" ;;
+        "test_flex_new_features") echo "🚀 Advanced Flex New Features Tests (GTest)" ;;
         *) echo "🧪 $exe_name" ;;
     esac
 }
@@ -289,7 +300,7 @@ run_test_with_timeout() {
         fi
     else
         # Check if this is a GTest test by examining the executable name
-        if [[ "$base_name" =~ _gtest$ ]]; then
+        if [[ "$base_name" =~ _gtest$ ]] || [[ "$base_name" == "test_flex_minimal" ]] || [[ "$base_name" == "test_flex_new_features" ]]; then
             # GTest-based tests - use JSON output format
             if [ "$RAW_OUTPUT" = true ]; then
                 # Raw mode: show output directly and redirect JSON to file
@@ -299,6 +310,37 @@ run_test_with_timeout() {
                 # Normal mode: capture console output and redirect JSON to file
                 timeout "$TIMEOUT_DURATION" "./$test_exe" --gtest_output=json:"$json_file" >/dev/null 2>&1
                 local exit_code=$?
+            fi
+        elif [[ "$base_name" == "test_flex_standalone" ]]; then
+            # Custom standalone test - parse output manually
+            local temp_output="$TEST_OUTPUT_DIR/${base_name}_temp_output.log"
+            if [ "$RAW_OUTPUT" = true ]; then
+                timeout "$TIMEOUT_DURATION" "./$test_exe" | tee "$temp_output"
+                local exit_code=$?
+            else
+                timeout "$TIMEOUT_DURATION" "./$test_exe" > "$temp_output" 2>&1
+                local exit_code=$?
+            fi
+            
+            # Parse custom output format and create JSON
+            local passed_count=0
+            local failed_count=0
+            if [ -f "$temp_output" ]; then
+                passed_count=$(grep -c "PASS:" "$temp_output" 2>/dev/null || echo "0")
+                failed_count=$(grep -c "FAIL:" "$temp_output" 2>/dev/null || echo "0")
+                
+                # Ensure we have valid numbers (strip any whitespace)
+                passed_count=$(echo "$passed_count" | tr -d ' \n\r')
+                failed_count=$(echo "$failed_count" | tr -d ' \n\r')
+                
+                # Validate numbers
+                [[ "$passed_count" =~ ^[0-9]+$ ]] || passed_count=0
+                [[ "$failed_count" =~ ^[0-9]+$ ]] || failed_count=0
+                
+                local total_count=$((passed_count + failed_count))
+                
+                # Create a simple JSON file for consistency
+                echo "{\"tests\": $total_count, \"failures\": $failed_count, \"passed\": $passed_count}" > "$json_file"
             fi
         else
             # Standard Criterion-based tests
@@ -360,7 +402,14 @@ parse_json_results() {
         # GTest JSON format
         local total=$(jq -r '.tests // 0' "$json_file" 2>/dev/null || echo "0")
         local failed=$(jq -r '.failures // 0' "$json_file" 2>/dev/null || echo "0")
-        local passed=$((total - failed))
+        # Ensure we have valid numbers
+        if [[ "$total" =~ ^[0-9]+$ ]] && [[ "$failed" =~ ^[0-9]+$ ]]; then
+            local passed=$((total - failed))
+        else
+            local passed=0
+            local failed=1
+            local total=1
+        fi
     else
         # Standard Criterion JSON format
         local passed=$(jq -r '.passed // 0' "$json_file" 2>/dev/null || echo "0")
@@ -609,7 +658,7 @@ if [ -n "$TARGET_SUITE" ]; then
     
     if [ ${#test_executables[@]} -eq 0 ]; then
         echo "❌ No test executables found for target suite: $TARGET_SUITE"
-        echo "   Available suites: library, input, mir, lambda, lambda-std, validator"
+        echo "   Available suites: library, input, mir, lambda, lambda-std, validator, radiant"
         exit 1
     fi
 fi
@@ -917,7 +966,23 @@ echo "=============================================================="
 echo "📊 Test Results:"
 
 # Show tests in tree structure grouped by suite category
-for suite_cat in library input mir lambda lambda-std validator unknown; do
+# Dynamically get all suite categories that have tests, plus common ones
+all_suite_categories=(library input mir lambda lambda-std validator radiant unknown)
+# Add any additional categories found in the actual test results
+for suite in "${suite_categories[@]}"; do
+    found=false
+    for existing in "${all_suite_categories[@]}"; do
+        if [ "$existing" = "$suite" ]; then
+            found=true
+            break
+        fi
+    done
+    if [ "$found" = false ]; then
+        all_suite_categories+=("$suite")
+    fi
+done
+
+for suite_cat in "${all_suite_categories[@]}"; do
     suite_display=$(get_suite_category_display_name "$suite_cat")
     suite_has_tests=false
     suite_total=0
