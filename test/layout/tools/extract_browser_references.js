@@ -119,7 +119,8 @@ async function extractLayoutFromFile(htmlFilePath) {
         
         // Save to reference directory
         const baseName = path.basename(htmlFilePath, '.html');
-        const outputDir = path.join(path.dirname(htmlFilePath), '..', 'reference', 'basic');
+        const category = path.basename(path.dirname(htmlFilePath));
+        const outputDir = path.join(__dirname, '..', 'reference', category);
         const outputFile = path.join(outputDir, `${baseName}.json`);
         
         // Ensure output directory exists

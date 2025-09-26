@@ -1,6 +1,6 @@
 {
-  "test_file": "flex_001_basic_layout.html",
-  "extraction_date": "2025-09-26T10:11:12.223Z",
+  "test_file": "flex_002_wrap.html",
+  "extraction_date": "2025-09-26T10:11:14.838Z",
   "browser_info": {
     "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/140.0.0.0 Safari/537.36",
     "viewport": {
@@ -244,8 +244,8 @@
         "layout": {
           "x": 2,
           "y": 2,
-          "width": 100,
-          "height": 100
+          "width": 200,
+          "height": 80
         },
         "css": {
           "display": "block",
@@ -270,10 +270,10 @@
         "tag": "div",
         "selector": "div.item",
         "layout": {
-          "x": 112,
-          "y": 2,
-          "width": 100,
-          "height": 100
+          "x": 2,
+          "y": 104,
+          "width": 200,
+          "height": 80
         },
         "css": {
           "display": "block",
@@ -298,10 +298,10 @@
         "tag": "div",
         "selector": "div.item",
         "layout": {
-          "x": 222,
-          "y": 2,
-          "width": 100,
-          "height": 100
+          "x": 2,
+          "y": 206,
+          "width": 200,
+          "height": 80
         },
         "css": {
           "display": "block",

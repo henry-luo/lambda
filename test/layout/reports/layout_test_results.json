@@ -1,0 +1,2077 @@
+{
+  "timestamp": "2025-09-26T10:11:50.348Z",
+  "radiant_exe": "/Users/henryluo/Projects/lambda/radiant.exe",
+  "tolerance": 2,
+  "total_tests": 12,
+  "passed_tests": 2,
+  "failed_tests": 10,
+  "pass_rate": 16.666666666666664,
+  "categories": [
+    {
+      "category": "basic",
+      "results": [
+        {
+          "testName": "block_001_margin_padding",
+          "passed": true,
+          "executionTime": 0.29,
+          "matchedElements": 0,
+          "totalElements": 7,
+          "maxDifference": 0,
+          "differences": [
+            {
+              "type": "missing_in_radiant",
+              "selector": "html",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 260
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "head",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "style",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "body",
+              "browser": {
+                "x": 8,
+                "y": 10,
+                "width": 1184,
+                "height": 240
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.container",
+              "browser": {
+                "x": 18,
+                "y": 10,
+                "width": 440,
+                "height": 240
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.block",
+              "browser": {
+                "x": 38,
+                "y": 40,
+                "width": 230,
+                "height": 110
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.block",
+              "browser": {
+                "x": 38,
+                "y": 160,
+                "width": 230,
+                "height": 110
+              },
+              "radiant": null
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 1000,
+                "height": 700
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null",
+              "browser": null,
+              "radiant": {
+                "x": 8,
+                "y": 8,
+                "width": 984,
+                "height": 260
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div",
+              "browser": null,
+              "radiant": {
+                "x": 10,
+                "y": 10,
+                "width": 440,
+                "height": 240
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 20,
+                "y": 30,
+                "width": 230,
+                "height": 110
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 15,
+                "y": 15,
+                "width": 53,
+                "height": 18
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div > div",
+              "browser": null,
+              "radiant": {
+                "x": 20,
+                "y": 160,
+                "width": 230,
+                "height": 110
+              }
+            }
+          ],
+          "hasReference": true
+        },
+        {
+          "testName": "flex_001_basic_layout",
+          "passed": false,
+          "executionTime": 0.158,
+          "matchedElements": 0,
+          "totalElements": 12,
+          "maxDifference": 4,
+          "differences": [
+            {
+              "type": "missing_in_radiant",
+              "selector": "html",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "head",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "meta",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "title",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "style",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "body",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "layout_difference",
+              "selector": "div.container",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 300
+              },
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 404,
+                "height": 304
+              },
+              "differences": [
+                {
+                  "property": "width",
+                  "radiant": 404,
+                  "browser": 400,
+                  "difference": 4
+                },
+                {
+                  "property": "height",
+                  "radiant": 304,
+                  "browser": 300,
+                  "difference": 4
+                }
+              ],
+              "maxDifference": 4
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 2,
+                "y": 2,
+                "width": 100,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 112,
+                "y": 2,
+                "width": 100,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 222,
+                "y": 2,
+                "width": 100,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "#test-metadata",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 1000,
+                "height": 700
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null",
+              "browser": null,
+              "radiant": {
+                "x": 8,
+                "y": 8,
+                "width": 984,
+                "height": 323
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 304,
+                "width": 168,
+                "height": 18
+              }
+            }
+          ],
+          "hasReference": true
+        },
+        {
+          "testName": "flex_001_row_space_between",
+          "passed": true,
+          "executionTime": 0.152,
+          "matchedElements": 0,
+          "totalElements": 8,
+          "maxDifference": 0,
+          "differences": [
+            {
+              "type": "missing_in_radiant",
+              "selector": "html",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 116
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "head",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "style",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "body",
+              "browser": {
+                "x": 8,
+                "y": 8,
+                "width": 1184,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 8,
+                "y": 8,
+                "width": 100,
+                "height": 60
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 258,
+                "y": 8,
+                "width": 100,
+                "height": 60
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 508,
+                "y": 8,
+                "width": 100,
+                "height": 60
+              },
+              "radiant": null
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 1000,
+                "height": 700
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null",
+              "browser": null,
+              "radiant": {
+                "x": 8,
+                "y": 8,
+                "width": 984,
+                "height": 100
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > div",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 600,
+                "height": 100
+              }
+            }
+          ],
+          "hasReference": true
+        },
+        {
+          "testName": "flex_002_wrap",
+          "passed": false,
+          "executionTime": 0.149,
+          "matchedElements": 0,
+          "totalElements": 12,
+          "maxDifference": 4,
+          "differences": [
+            {
+              "type": "missing_in_radiant",
+              "selector": "html",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "head",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "meta",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "title",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "style",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "body",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "layout_difference",
+              "selector": "div.container",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 300
+              },
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 404,
+                "height": 304
+              },
+              "differences": [
+                {
+                  "property": "width",
+                  "radiant": 404,
+                  "browser": 400,
+                  "difference": 4
+                },
+                {
+                  "property": "height",
+                  "radiant": 304,
+                  "browser": 300,
+                  "difference": 4
+                }
+              ],
+              "maxDifference": 4
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 2,
+                "y": 2,
+                "width": 200,
+                "height": 80
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 2,
+                "y": 104,
+                "width": 200,
+                "height": 80
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 2,
+                "y": 206,
+                "width": 200,
+                "height": 80
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "#test-metadata",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 1000,
+                "height": 700
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null",
+              "browser": null,
+              "radiant": {
+                "x": 8,
+                "y": 8,
+                "width": 984,
+                "height": 323
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 304,
+                "width": 168,
+                "height": 18
+              }
+            }
+          ],
+          "hasReference": true
+        },
+        {
+          "testName": "flex_003_align_items",
+          "passed": false,
+          "executionTime": 0.148,
+          "matchedElements": 0,
+          "totalElements": 11,
+          "maxDifference": 4,
+          "differences": [
+            {
+              "type": "missing_in_radiant",
+              "selector": "html",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "head",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "meta",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "title",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "style",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "body",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "layout_difference",
+              "selector": "div.container",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 300
+              },
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 404,
+                "height": 304
+              },
+              "differences": [
+                {
+                  "property": "width",
+                  "radiant": 404,
+                  "browser": 400,
+                  "difference": 4
+                },
+                {
+                  "property": "height",
+                  "radiant": 304,
+                  "browser": 300,
+                  "difference": 4
+                }
+              ],
+              "maxDifference": 4
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 2,
+                "y": 100,
+                "width": 150,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 162,
+                "y": 75,
+                "width": 150,
+                "height": 150
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "#test-metadata",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 1000,
+                "height": 700
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null",
+              "browser": null,
+              "radiant": {
+                "x": 8,
+                "y": 8,
+                "width": 984,
+                "height": 323
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 304,
+                "width": 168,
+                "height": 18
+              }
+            }
+          ],
+          "hasReference": true
+        },
+        {
+          "testName": "flex_004_column_direction",
+          "passed": false,
+          "executionTime": 0.149,
+          "matchedElements": 0,
+          "totalElements": 11,
+          "maxDifference": 4,
+          "differences": [
+            {
+              "type": "missing_in_radiant",
+              "selector": "html",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "head",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "meta",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "title",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "style",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "body",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "layout_difference",
+              "selector": "div.container",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 300
+              },
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 404,
+                "height": 304
+              },
+              "differences": [
+                {
+                  "property": "width",
+                  "radiant": 404,
+                  "browser": 400,
+                  "difference": 4
+                },
+                {
+                  "property": "height",
+                  "radiant": 304,
+                  "browser": 300,
+                  "difference": 4
+                }
+              ],
+              "maxDifference": 4
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 2,
+                "y": 2,
+                "width": 200,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 2,
+                "y": 112,
+                "width": 200,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "#test-metadata",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 1000,
+                "height": 700
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null",
+              "browser": null,
+              "radiant": {
+                "x": 8,
+                "y": 8,
+                "width": 984,
+                "height": 323
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 304,
+                "width": 168,
+                "height": 18
+              }
+            }
+          ],
+          "hasReference": true
+        },
+        {
+          "testName": "flex_005_flex_grow",
+          "passed": false,
+          "executionTime": 0.143,
+          "matchedElements": 0,
+          "totalElements": 11,
+          "maxDifference": 4,
+          "differences": [
+            {
+              "type": "missing_in_radiant",
+              "selector": "html",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "head",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "meta",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "title",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "style",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "body",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "layout_difference",
+              "selector": "div.container",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 300
+              },
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 404,
+                "height": 304
+              },
+              "differences": [
+                {
+                  "property": "width",
+                  "radiant": 404,
+                  "browser": 400,
+                  "difference": 4
+                },
+                {
+                  "property": "height",
+                  "radiant": 304,
+                  "browser": 300,
+                  "difference": 4
+                }
+              ],
+              "maxDifference": 4
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 2,
+                "y": 2,
+                "width": 150.16,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 162.16,
+                "y": 2,
+                "width": 235.84,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "#test-metadata",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 1000,
+                "height": 700
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null",
+              "browser": null,
+              "radiant": {
+                "x": 8,
+                "y": 8,
+                "width": 984,
+                "height": 323
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 304,
+                "width": 168,
+                "height": 18
+              }
+            }
+          ],
+          "hasReference": true
+        },
+        {
+          "testName": "flex_006_justify_content",
+          "passed": false,
+          "executionTime": 0.148,
+          "matchedElements": 0,
+          "totalElements": 11,
+          "maxDifference": 4,
+          "differences": [
+            {
+              "type": "missing_in_radiant",
+              "selector": "html",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "head",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "meta",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "title",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "style",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "body",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "layout_difference",
+              "selector": "div.container",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 300
+              },
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 404,
+                "height": 304
+              },
+              "differences": [
+                {
+                  "property": "width",
+                  "radiant": 404,
+                  "browser": 400,
+                  "difference": 4
+                },
+                {
+                  "property": "height",
+                  "radiant": 304,
+                  "browser": 300,
+                  "difference": 4
+                }
+              ],
+              "maxDifference": 4
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 50.66,
+                "y": 2,
+                "width": 120,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 229.31,
+                "y": 2,
+                "width": 120,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "#test-metadata",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 1000,
+                "height": 700
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null",
+              "browser": null,
+              "radiant": {
+                "x": 8,
+                "y": 8,
+                "width": 984,
+                "height": 323
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 304,
+                "width": 168,
+                "height": 18
+              }
+            }
+          ],
+          "hasReference": true
+        },
+        {
+          "testName": "flex_007_row_reverse",
+          "passed": false,
+          "executionTime": 0.15,
+          "matchedElements": 0,
+          "totalElements": 11,
+          "maxDifference": 4,
+          "differences": [
+            {
+              "type": "missing_in_radiant",
+              "selector": "html",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "head",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "meta",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "title",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "style",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "body",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "layout_difference",
+              "selector": "div.container",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 300
+              },
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 404,
+                "height": 304
+              },
+              "differences": [
+                {
+                  "property": "width",
+                  "radiant": 404,
+                  "browser": 400,
+                  "difference": 4
+                },
+                {
+                  "property": "height",
+                  "radiant": 304,
+                  "browser": 300,
+                  "difference": 4
+                }
+              ],
+              "maxDifference": 4
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 248,
+                "y": 2,
+                "width": 150,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 88,
+                "y": 2,
+                "width": 150,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "#test-metadata",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 1000,
+                "height": 700
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null",
+              "browser": null,
+              "radiant": {
+                "x": 8,
+                "y": 8,
+                "width": 984,
+                "height": 323
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 304,
+                "width": 168,
+                "height": 18
+              }
+            }
+          ],
+          "hasReference": true
+        },
+        {
+          "testName": "flex_008_flex_basis",
+          "passed": false,
+          "executionTime": 0.152,
+          "matchedElements": 0,
+          "totalElements": 11,
+          "maxDifference": 4,
+          "differences": [
+            {
+              "type": "missing_in_radiant",
+              "selector": "html",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "head",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "meta",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "title",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "style",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "body",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "layout_difference",
+              "selector": "div.container",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 300
+              },
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 404,
+                "height": 304
+              },
+              "differences": [
+                {
+                  "property": "width",
+                  "radiant": 404,
+                  "browser": 400,
+                  "difference": 4
+                },
+                {
+                  "property": "height",
+                  "radiant": 304,
+                  "browser": 300,
+                  "difference": 4
+                }
+              ],
+              "maxDifference": 4
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 2,
+                "y": 2,
+                "width": 150,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 162,
+                "y": 2,
+                "width": 200,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "#test-metadata",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 1000,
+                "height": 700
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null",
+              "browser": null,
+              "radiant": {
+                "x": 8,
+                "y": 8,
+                "width": 984,
+                "height": 323
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 304,
+                "width": 168,
+                "height": 18
+              }
+            }
+          ],
+          "hasReference": true
+        },
+        {
+          "testName": "flex_009_auto_margins",
+          "passed": false,
+          "executionTime": 0.149,
+          "matchedElements": 0,
+          "totalElements": 10,
+          "maxDifference": 4,
+          "differences": [
+            {
+              "type": "missing_in_radiant",
+              "selector": "html",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "head",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "meta",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "title",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "style",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "body",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "layout_difference",
+              "selector": "div.container",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 300
+              },
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 404,
+                "height": 304
+              },
+              "differences": [
+                {
+                  "property": "width",
+                  "radiant": 404,
+                  "browser": 400,
+                  "difference": 4
+                },
+                {
+                  "property": "height",
+                  "radiant": 304,
+                  "browser": 300,
+                  "difference": 4
+                }
+              ],
+              "maxDifference": 4
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 150,
+                "y": 100,
+                "width": 100,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "#test-metadata",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 1000,
+                "height": 700
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null",
+              "browser": null,
+              "radiant": {
+                "x": 8,
+                "y": 8,
+                "width": 984,
+                "height": 323
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 304,
+                "width": 168,
+                "height": 18
+              }
+            }
+          ],
+          "hasReference": true
+        },
+        {
+          "testName": "flex_010_wrap_reverse",
+          "passed": false,
+          "executionTime": 0.151,
+          "matchedElements": 0,
+          "totalElements": 12,
+          "maxDifference": 4,
+          "differences": [
+            {
+              "type": "missing_in_radiant",
+              "selector": "html",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "head",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "meta",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "title",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "style",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "body",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 1200,
+                "height": 300
+              },
+              "radiant": null
+            },
+            {
+              "type": "layout_difference",
+              "selector": "div.container",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 400,
+                "height": 300
+              },
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 404,
+                "height": 304
+              },
+              "differences": [
+                {
+                  "property": "width",
+                  "radiant": 404,
+                  "browser": 400,
+                  "difference": 4
+                },
+                {
+                  "property": "height",
+                  "radiant": 304,
+                  "browser": 300,
+                  "difference": 4
+                }
+              ],
+              "maxDifference": 4
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 2,
+                "y": 198,
+                "width": 200,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 2,
+                "y": 88,
+                "width": 200,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "div.item",
+              "browser": {
+                "x": 2,
+                "y": -22,
+                "width": 200,
+                "height": 100
+              },
+              "radiant": null
+            },
+            {
+              "type": "missing_in_radiant",
+              "selector": "#test-metadata",
+              "browser": {
+                "x": 0,
+                "y": 0,
+                "width": 0,
+                "height": 0
+              },
+              "radiant": null
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 0,
+                "width": 1000,
+                "height": 700
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null",
+              "browser": null,
+              "radiant": {
+                "x": 8,
+                "y": 8,
+                "width": 984,
+                "height": 323
+              }
+            },
+            {
+              "type": "extra_in_radiant",
+              "selector": "#null > #null > undefined",
+              "browser": null,
+              "radiant": {
+                "x": 0,
+                "y": 304,
+                "width": 168,
+                "height": 18
+              }
+            }
+          ],
+          "hasReference": true
+        }
+      ],
+      "summary": {
+        "total": 12,
+        "passed": 2,
+        "failed": 10,
+        "passRate": 16.666666666666664
+      }
+    },
+    {
+      "category": "intermediate",
+      "results": [],
+      "summary": {
+        "total": 0,
+        "passed": 0,
+        "failed": 0
+      }
+    },
+    {
+      "category": "advanced",
+      "results": [],
+      "summary": {
+        "total": 0,
+        "passed": 0,
+        "failed": 0
+      }
+    }
+  ]
+}
