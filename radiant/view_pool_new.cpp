@@ -1,5 +1,5 @@
 #include "view.hpp"
-#include "flex_layout_new.hpp"
+#include "layout_flex.hpp"
 #include "layout.hpp"
 extern "C" {
 #include <stdlib.h>
