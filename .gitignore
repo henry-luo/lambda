@@ -41,6 +41,7 @@ lambda-parser/tree-sitter-lambda/src/grammar.json
 output.pgm
 output.png
 view_tree.txt
+view_tree.json
 log.txt
 _transpiled.c
 lambda.wasm
