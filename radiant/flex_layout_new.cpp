@@ -24,12 +24,12 @@ void init_flex_container(ViewBlock* container) {
     FlexContainerLayout* flex = (FlexContainerLayout*)calloc(1, sizeof(FlexContainerLayout));
     container->embed->flex_container = flex;
     
-    // Set default values using correct Lexbor CSS values
+    // Set default values using Lexbor CSS values for consistency
     flex->direction = LXB_CSS_VALUE_ROW;
     flex->wrap = LXB_CSS_VALUE_NOWRAP;
     flex->justify = LXB_CSS_VALUE_FLEX_START;
-    flex->align_items = LXB_CSS_VALUE_STRETCH;
-    flex->align_content = LXB_CSS_VALUE_STRETCH;
+    flex->align_items = LXB_CSS_VALUE_FLEX_START;
+    flex->align_content = LXB_CSS_VALUE_FLEX_START;
     flex->row_gap = 0;
     flex->column_gap = 0;
     flex->writing_mode = WM_HORIZONTAL_TB;
@@ -41,7 +41,7 @@ void init_flex_container(ViewBlock* container) {
     flex->allocated_lines = 4;
     flex->lines = (FlexLineInfo*)calloc(flex->allocated_lines, sizeof(FlexLineInfo));
     
-    flex->needs_reflow = true;
+    flex->needs_reflow = false;
 }
 
 // Cleanup flex container resources
@@ -67,6 +67,17 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
     
     FlexContainerLayout* flex_layout = container->embed->flex_container;
     
+    // Set main and cross axis sizes from container dimensions (only if not already set)
+    if (flex_layout->main_axis_size == 0 || flex_layout->cross_axis_size == 0) {
+        if (is_main_axis_horizontal(flex_layout)) {
+            if (flex_layout->main_axis_size == 0) flex_layout->main_axis_size = container->content_width;
+            if (flex_layout->cross_axis_size == 0) flex_layout->cross_axis_size = container->content_height;
+        } else {
+            if (flex_layout->main_axis_size == 0) flex_layout->main_axis_size = container->content_height;
+            if (flex_layout->cross_axis_size == 0) flex_layout->cross_axis_size = container->content_width;
+        }
+    }
+    
     // Phase 1: Collect flex items
     ViewBlock** items;
     int item_count = collect_flex_items(container, &items);
@@ -81,6 +92,16 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
     // Phase 4: Resolve flexible lengths for each line
     for (int i = 0; i < line_count; i++) {
         resolve_flexible_lengths(flex_layout, &flex_layout->lines[i]);
+    }
+    
+    // Update content_width/content_height after flex calculations
+    for (int i = 0; i < line_count; i++) {
+        FlexLineInfo* line = &flex_layout->lines[i];
+        for (int j = 0; j < line->item_count; j++) {
+            ViewBlock* item = line->items[j];
+            item->content_width = item->width;
+            item->content_height = item->height;
+        }
     }
     
     // Phase 5: Calculate cross sizes for lines
@@ -159,10 +180,7 @@ int collect_flex_items(ViewBlock* container, ViewBlock*** items) {
         if (child->position != POS_ABSOLUTE && child->visibility != VIS_HIDDEN) {
             flex->flex_items[count] = child;
             
-            // Apply constraints and resolve percentages
-            apply_constraints(child, 
-                is_main_axis_horizontal(flex) ? flex->main_axis_size : flex->cross_axis_size,
-                is_main_axis_horizontal(flex) ? flex->cross_axis_size : flex->main_axis_size);
+            // Note: Apply constraints later in the layout process to avoid interfering with flex basis
             
             count++;
         }
@@ -381,8 +399,7 @@ int create_flex_lines(FlexContainerLayout* flex_layout, ViewBlock** items, int i
         line->item_count = 0;
         
         int main_size = 0;
-        int container_main_size = is_main_axis_horizontal(flex_layout) ? 
-                                 flex_layout->main_axis_size : flex_layout->cross_axis_size;
+        int container_main_size = flex_layout->main_axis_size;
         
         // Add items to line until we need to wrap
         while (current_item < item_count) {
@@ -429,8 +446,7 @@ int create_flex_lines(FlexContainerLayout* flex_layout, ViewBlock** items, int i
 void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     if (!flex_layout || !line || line->item_count == 0) return;
     
-    int container_main_size = is_main_axis_horizontal(flex_layout) ? 
-                             flex_layout->main_axis_size : flex_layout->cross_axis_size;
+    int container_main_size = flex_layout->main_axis_size;
     
     // Calculate initial main sizes based on flex-basis
     int total_basis_size = 0;
@@ -452,11 +468,27 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
     if (free_space == 0) return;  // No space to distribute
     
     if (free_space > 0 && line->total_flex_grow > 0) {
+        // Find the last item with flex-grow > 0 to handle rounding
+        int last_growing_item = -1;
+        for (int i = 0; i < line->item_count; i++) {
+            if (line->items[i]->flex_grow > 0) {
+                last_growing_item = i;
+            }
+        }
+        
         // Distribute positive free space using flex-grow
+        int distributed_space = 0;
         for (int i = 0; i < line->item_count; i++) {
             ViewBlock* item = line->items[i];
             if (item->flex_grow > 0) {
-                int grow_amount = (int)((item->flex_grow / line->total_flex_grow) * free_space);
+                int grow_amount;
+                if (i == last_growing_item) {
+                    // Last growing item gets remaining space to avoid rounding errors
+                    grow_amount = free_space - distributed_space;
+                } else {
+                    grow_amount = (int)((item->flex_grow / line->total_flex_grow) * free_space);
+                    distributed_space += grow_amount;
+                }
                 int current_size = get_main_axis_size(item, flex_layout);
                 int new_size = current_size + grow_amount;
                 set_main_axis_size(item, new_size, flex_layout);
@@ -520,8 +552,7 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
 void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     if (!flex_layout || !line || line->item_count == 0) return;
     
-    int container_size = is_main_axis_horizontal(flex_layout) ? 
-                        flex_layout->main_axis_size : flex_layout->cross_axis_size;
+    int container_size = flex_layout->main_axis_size;
     int total_item_size = 0;
     for (int i = 0; i < line->item_count; i++) {
         total_item_size += get_main_axis_size(line->items[i], flex_layout);
