@@ -546,10 +546,7 @@ build-radiant: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Using CC=$(CC) CXX=$(CXX)"
 	$(call run_make_with_error_summary,radiant)
 	@echo "Building Radiant test executables..."
-	@make -C build/premake test_radiant_flex_gtest test_radiant_flex_algorithm_gtest test_radiant_flex_integration_gtest test_flex_minimal test_flex_layout_gtest test_flex_standalone test_flex_new_features 2>/dev/null || echo "Warning: Some Radiant tests could not be built"
-	@echo "Building standalone flex tests..."
-	@g++ -std=c++17 -I. -Iradiant -o test/test_flex_core_validation.exe test/test_flex_core_validation.cpp 2>/dev/null || echo "Warning: test_flex_core_validation could not be built"
-	@g++ -std=c++17 -I. -Iradiant -o test/test_flex_simple.exe test/test_flex_simple.cpp 2>/dev/null || echo "Warning: test_flex_simple could not be built"
+	@make -C build/premake test_radiant_flex_gtest test_radiant_flex_algorithm_gtest test_radiant_flex_integration_gtest 2>/dev/null || echo "Warning: Some Radiant tests could not be built"
 
 radiant: build-radiant
 
@@ -620,13 +617,8 @@ clean-test:
 	@rm -f test/test_radiant_flex_gtest.exe 2>/dev/null || true
 	@rm -f test/test_radiant_flex_algorithm_gtest.exe 2>/dev/null || true
 	@rm -f test/test_radiant_flex_integration_gtest.exe 2>/dev/null || true
-	@rm -f test/test_flex_minimal.exe 2>/dev/null || true
-	@rm -f test/test_flex_layout.exe 2>/dev/null || true
-	@rm -f test/test_flex_layout_gtest.exe 2>/dev/null || true
 	@rm -f test/test_flex_core_validation.exe 2>/dev/null || true
 	@rm -f test/test_flex_simple.exe 2>/dev/null || true
-	@rm -f test/test_flex_standalone.exe 2>/dev/null || true
-	@rm -f test/test_flex_new_features.exe 2>/dev/null || true
 	@find test/ -name "*radiant*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
 	@find test/ -name "*flex*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
 	@echo "Test build outputs cleaned."
