@@ -614,7 +614,8 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         auto_margin_size = (float)(container_size - total_size_with_gaps) / auto_margin_count;
     } else {
         // Apply justify-content if no auto margins
-        int justify = convert_justify_to_lexbor(flex_layout->justify);
+        // *** FIX: Don't convert - value is already in Lexbor format ***
+        int justify = flex_layout->justify;
         switch (justify) {
             case LXB_CSS_VALUE_FLEX_START:
                 current_pos = 0;
