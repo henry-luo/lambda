@@ -143,9 +143,12 @@ void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block) {
     }
     if (!block->embed->flex_container) {
         FlexContainerLayout* prop = (FlexContainerLayout*)alloc_prop(lycon, sizeof(FlexContainerLayout));
-        // set defaults
-        prop->direction = DIR_ROW;  prop->wrap = WRAP_NOWRAP;  prop->justify = JUSTIFY_START;
-        prop->align_items = ALIGN_STRETCH;  prop->align_content = ALIGN_START;
+        // CRITICAL FIX: Use Lexbor constants for defaults instead of old enums
+        prop->direction = LXB_CSS_VALUE_ROW;  
+        prop->wrap = LXB_CSS_VALUE_NOWRAP;  
+        prop->justify = LXB_CSS_VALUE_FLEX_START;
+        prop->align_items = LXB_CSS_VALUE_STRETCH;  
+        prop->align_content = LXB_CSS_VALUE_FLEX_START;
         prop->row_gap = 0;  prop->column_gap = 0;
         prop->needs_reflow = true;
         prop->main_axis_size = 0;
