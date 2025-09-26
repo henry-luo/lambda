@@ -53,8 +53,8 @@ protected:
         item->content_height = height;
         item->flex_grow = grow;
         item->flex_shrink = shrink;
-        item->flex_basis = (basis >= 0) ? basis : width;
-        item->align_self = ALIGN_START;
+        item->flex_basis = (basis >= 0) ? basis : -1;  // Use auto flex-basis by default
+        item->align_self = ALIGN_AUTO;  // Use auto to inherit container's align_items
         item->order = 0;
         
         return item;
