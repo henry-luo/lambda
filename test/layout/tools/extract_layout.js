@@ -13,7 +13,18 @@ class LayoutExtractor {
         console.log('Launching browser...');
         this.browser = await puppeteer.launch({
             headless: 'new',
-            args: ['--no-sandbox', '--disable-web-security', '--font-render-hinting=none']
+            args: [
+                '--no-sandbox',
+                '--disable-web-security',
+                '--font-render-hinting=none',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-features=VizDisplayCompositor',
+                '--disable-extensions',
+                '--no-first-run',
+                '--disable-default-apps'
+            ],
+            timeout: 30000
         });
         this.page = await this.browser.newPage();
         

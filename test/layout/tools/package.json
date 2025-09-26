@@ -8,10 +8,9 @@
     "validate": "node validate_all.js"
   },
   "dependencies": {
-    "puppeteer": "^21.0.0",
-    "glob": "^10.0.0"
+    "glob": "^10.0.0",
+    "puppeteer": "^24.22.3"
   },
-  "devDependencies": {},
   "author": "Lambda Project",
   "license": "MIT"
 }
