@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Nested List Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.5;
+            padding: 20px;
+            max-width: 700px;
+        }
+        
+        /* Nested list styles */
+        ul, ol {
+            margin-bottom: 16px;
+            padding-left: 24px;
+        }
+        
+        ul ul, ol ul, ul ol, ol ol {
+            margin-bottom: 0;
+            margin-top: 8px;
+        }
+        
+        li {
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+        
+        li:last-child {
+            margin-bottom: 0;
+        }
+        
+        h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            font-weight: bold;
+        }
+        
+        p {
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h3>Nested Lists</h3>
+    <p>This demonstrates nested list structures commonly found in documentation:</p>
+    
+    <ul>
+        <li>Main item one
+            <ul>
+                <li>Sub-item A</li>
+                <li>Sub-item B</li>
+            </ul>
+        </li>
+        <li>Main item two
+            <ol>
+                <li>Numbered sub-item 1</li>
+                <li>Numbered sub-item 2</li>
+            </ol>
+        </li>
+        <li>Main item three</li>
+    </ul>
+    
+    <p>Mixed nesting should maintain proper indentation and spacing.</p>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "list_002_nested_lists",
+        "category": "list",
+        "features": ["nested-lists", "mixed-list-types", "indentation-levels", "list-margins"],
+        "description": "Nested lists with mixed unordered and ordered types, testing indentation",
+        "markdown_equivalent": "### Nested Lists\n\n- Main item one\n  - Sub-item A\n  - Sub-item B\n- Main item two\n  1. Numbered sub-item 1\n  2. Numbered sub-item 2\n- Main item three",
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

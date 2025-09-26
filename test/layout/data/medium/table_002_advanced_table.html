@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Advanced Table Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 900px;
+        }
+        
+        /* Typography */
+        h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            font-weight: bold;
+        }
+        
+        p {
+            margin-bottom: 16px;
+        }
+        
+        /* Table styles */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+        }
+        
+        th, td {
+            border: 1px solid #d1d9e0;
+            padding: 10px 12px;
+            text-align: left;
+            vertical-align: top;
+        }
+        
+        th {
+            background-color: #f6f8fa;
+            font-weight: bold;
+        }
+        
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        
+        /* Column alignment */
+        .center { text-align: center; }
+        .right { text-align: right; }
+        
+        /* Code in tables */
+        code {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            background-color: #f3f4f6;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        
+        /* Status indicators */
+        .status-active { 
+            color: #059669; 
+            font-weight: bold; 
+        }
+        
+        .status-deprecated { 
+            color: #dc2626; 
+            font-weight: bold; 
+        }
+        
+        .status-beta { 
+            color: #d97706; 
+            font-weight: bold; 
+        }
+    </style>
+</head>
+<body>
+    <h3>API Endpoints Reference</h3>
+    <p>The following table lists all available API endpoints with their details:</p>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Method</th>
+                <th>Endpoint</th>
+                <th>Description</th>
+                <th class="center">Status</th>
+                <th class="right">Rate Limit</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>GET</code></td>
+                <td><code>/api/users</code></td>
+                <td>Retrieve a list of all users with optional filtering parameters</td>
+                <td class="center status-active">Active</td>
+                <td class="right">100/hour</td>
+            </tr>
+            <tr>
+                <td><code>POST</code></td>
+                <td><code>/api/users</code></td>
+                <td>Create a new user account with validation</td>
+                <td class="center status-active">Active</td>
+                <td class="right">10/hour</td>
+            </tr>
+            <tr>
+                <td><code>PUT</code></td>
+                <td><code>/api/users/{id}</code></td>
+                <td>Update an existing user's information completely</td>
+                <td class="center status-beta">Beta</td>
+                <td class="right">50/hour</td>
+            </tr>
+            <tr>
+                <td><code>PATCH</code></td>
+                <td><code>/api/users/{id}/profile</code></td>
+                <td>Partially update user profile data</td>
+                <td class="center status-deprecated">Deprecated</td>
+                <td class="right">25/hour</td>
+            </tr>
+            <tr>
+                <td><code>DELETE</code></td>
+                <td><code>/api/users/{id}</code></td>
+                <td>Permanently delete a user account and all associated data</td>
+                <td class="center status-active">Active</td>
+                <td class="right">5/hour</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <p>Rate limits are enforced per authenticated user. Status indicators show the current stability of each endpoint.</p>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_002_advanced_table",
+        "category": "table",
+        "features": ["complex-tables", "text-alignment", "code-in-cells", "colored-text", "multi-line-content", "alternating-rows"],
+        "description": "Advanced table with multiple column alignments, code formatting, status indicators, and detailed content",
+        "markdown_equivalent": "### API Endpoints Reference\n\n| Method | Endpoint | Description | Status | Rate Limit |\n|--------|----------|-------------|:------:|-----------:|\n| `GET` | `/api/users` | Retrieve a list of all users... | Active | 100/hour |\n| `POST` | `/api/users` | Create a new user account... | Active | 10/hour |",
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

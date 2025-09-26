@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Quote Block Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.5;
+            padding: 20px;
+            max-width: 700px;
+        }
+        
+        /* Blockquote styles */
+        blockquote {
+            margin: 16px 0;
+            padding: 16px 20px;
+            border-left: 4px solid #ddd;
+            background-color: #f9f9f9;
+            font-style: italic;
+            color: #666;
+        }
+        
+        blockquote p {
+            margin: 0;
+        }
+        
+        blockquote p:not(:last-child) {
+            margin-bottom: 8px;
+        }
+        
+        h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            font-weight: bold;
+        }
+        
+        p {
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h3>Quote Example</h3>
+    <p>Here is a regular paragraph before the quote.</p>
+    
+    <blockquote>
+        <p>This is a blockquote that should have proper indentation, border styling, and italic text.</p>
+        <p>It can contain multiple paragraphs with appropriate spacing.</p>
+    </blockquote>
+    
+    <p>And here is another paragraph after the quote block.</p>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "quote_001_basic_blockquote",
+        "category": "quote",
+        "features": ["blockquote", "border-left", "background", "italic", "padding", "margin"],
+        "description": "Basic blockquote with left border, background, and italic styling",
+        "markdown_equivalent": "### Quote Example\n\nHere is a regular paragraph before the quote.\n\n> This is a blockquote that should have proper indentation, border styling, and italic text.\n>\n> It can contain multiple paragraphs with appropriate spacing.\n\nAnd here is another paragraph after the quote block.",
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

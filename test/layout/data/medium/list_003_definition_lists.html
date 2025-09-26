@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Definition List Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 700px;
+        }
+        
+        /* Typography */
+        h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            font-weight: bold;
+        }
+        
+        p {
+            margin-bottom: 16px;
+        }
+        
+        /* Definition list styles */
+        dl {
+            margin: 16px 0;
+        }
+        
+        dt {
+            font-weight: bold;
+            margin-top: 16px;
+            margin-bottom: 4px;
+        }
+        
+        dt:first-child {
+            margin-top: 0;
+        }
+        
+        dd {
+            margin-left: 24px;
+            margin-bottom: 8px;
+            color: #555;
+        }
+        
+        /* Code in definitions */
+        code {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            background-color: #f3f4f6;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <h3>API Definitions</h3>
+    <p>The following definitions explain key terms used in the API:</p>
+    
+    <dl>
+        <dt>Authentication</dt>
+        <dd>The process of verifying user credentials before granting access to protected resources.</dd>
+        
+        <dt>Bearer Token</dt>
+        <dd>A security token included in the <code>Authorization</code> header of HTTP requests.</dd>
+        <dd>Format: <code>Authorization: Bearer &lt;token&gt;</code></dd>
+        
+        <dt>Rate Limiting</dt>
+        <dd>A mechanism that controls the number of requests a client can make within a specified time window.</dd>
+        
+        <dt>Webhook</dt>
+        <dd>An HTTP callback that delivers real-time data to other applications when specific events occur.</dd>
+        <dd>Commonly used for notifications and data synchronization.</dd>
+    </dl>
+    
+    <p>These definitions help establish a common vocabulary for API documentation.</p>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "list_003_definition_lists",
+        "category": "list",
+        "features": ["definition-lists", "dt-dd-elements", "term-description", "code-in-definitions", "multiple-descriptions"],
+        "description": "Definition lists with terms and descriptions, including code examples and multiple descriptions per term",
+        "markdown_equivalent": "### API Definitions\n\n**Authentication**\n: The process of verifying user credentials...\n\n**Bearer Token**\n: A security token included in the `Authorization` header...\n: Format: `Authorization: Bearer <token>`",
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

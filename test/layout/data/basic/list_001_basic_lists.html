@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Basic List Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.5;
+            padding: 20px;
+            max-width: 600px;
+        }
+        
+        /* List styles */
+        ul {
+            margin-bottom: 16px;
+            padding-left: 24px;
+        }
+        
+        ol {
+            margin-bottom: 16px;
+            padding-left: 24px;
+        }
+        
+        li {
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+        
+        h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h3>Unordered List</h3>
+    <ul>
+        <li>First item</li>
+        <li>Second item</li>
+        <li>Third item</li>
+    </ul>
+    
+    <h3>Ordered List</h3>
+    <ol>
+        <li>Step one</li>
+        <li>Step two</li>
+        <li>Step three</li>
+    </ol>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "list_001_basic_lists",
+        "category": "list",
+        "features": ["unordered-list", "ordered-list", "list-indentation", "list-margins"],
+        "description": "Basic unordered and ordered lists with proper indentation and spacing",
+        "markdown_equivalent": "### Unordered List\n\n- First item\n- Second item\n- Third item\n\n### Ordered List\n\n1. Step one\n2. Step two\n3. Step three",
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

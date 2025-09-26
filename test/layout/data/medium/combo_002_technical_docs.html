@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Technical Documentation Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 900px;
+        }
+        
+        /* Typography */
+        h1 { font-size: 32px; margin-bottom: 16px; font-weight: bold; }
+        h2 { font-size: 24px; margin-bottom: 12px; margin-top: 32px; font-weight: bold; }
+        h3 { font-size: 20px; margin-bottom: 12px; margin-top: 24px; font-weight: bold; }
+        
+        p { margin-bottom: 16px; }
+        
+        /* Lists */
+        ul, ol { margin-bottom: 16px; padding-left: 24px; }
+        li { margin-bottom: 6px; }
+        ul ul, ol ul { margin-top: 6px; margin-bottom: 0; }
+        
+        /* Code */
+        code {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            background-color: #f3f4f6;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        
+        pre {
+            background-color: #f6f8fa;
+            border: 1px solid #d1d9e0;
+            border-radius: 6px;
+            padding: 16px;
+            margin: 16px 0;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        /* Tables */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+        }
+        
+        th, td {
+            border: 1px solid #d1d9e0;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        
+        th {
+            background-color: #f6f8fa;
+            font-weight: bold;
+        }
+        
+        /* Quotes */
+        blockquote {
+            margin: 16px 0;
+            padding: 16px 20px;
+            border-left: 4px solid #fbbf24;
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+        
+        .warning {
+            border-left-color: #ef4444;
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        
+        /* Emphasis */
+        .emphasis { font-style: italic; }
+        .strong { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>API Documentation</h1>
+    <p>This document demonstrates a typical <span class="strong">technical documentation</span> layout with multiple content types.</p>
+    
+    <h2>Function Reference</h2>
+    
+    <h3><code>calculateSum(a, b)</code></h3>
+    <p>Calculates the sum of two numbers with <span class="emphasis">validation</span>.</p>
+    
+    <h4>Parameters</h4>
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>a</code></td>
+                <td>number</td>
+                <td>First operand</td>
+            </tr>
+            <tr>
+                <td><code>b</code></td>
+                <td>number</td>
+                <td>Second operand</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <h4>Example Usage</h4>
+    <pre><code>const result = calculateSum(5, 3);
+console.log(result); // Output: 8
+
+// Error handling
+try {
+    calculateSum("invalid", 5);
+} catch (error) {
+    console.error(error.message);
+}</code></pre>
+    
+    <blockquote class="warning">
+        <p><span class="strong">Warning:</span> This function throws an error if non-numeric values are provided.</p>
+    </blockquote>
+    
+    <h4>Return Value</h4>
+    <ul>
+        <li><span class="strong">Type:</span> <code>number</code></li>
+        <li><span class="strong">Description:</span> The sum of the two input parameters</li>
+        <li><span class="strong">Range:</span> Any valid JavaScript number
+            <ul>
+                <li>Supports both integers and floating-point numbers</li>
+                <li>Handles negative numbers correctly</li>
+            </ul>
+        </li>
+    </ul>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "combo_002_technical_docs",
+        "category": "combination", 
+        "features": ["headings", "code-functions", "parameter-tables", "code-blocks", "nested-lists", "warning-blocks", "inline-code", "emphasis"],
+        "description": "Technical documentation layout with function reference, parameter tables, code examples, and warnings",
+        "markdown_equivalent": "# API Documentation\n\n## Function Reference\n\n### `calculateSum(a, b)`\n\nCalculates the sum of two numbers with *validation*.\n\n#### Parameters\n\n| Name | Type | Description |\n|------|------|-------------|\n| `a` | number | First operand |\n| `b` | number | Second operand |\n\n#### Example Usage\n\n```javascript\nconst result = calculateSum(5, 3);\nconsole.log(result); // Output: 8\n```\n\n> **Warning:** This function throws an error if non-numeric values are provided.",
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

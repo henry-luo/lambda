@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Horizontal Rule Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.5;
+            padding: 20px;
+            max-width: 700px;
+        }
+        
+        /* Horizontal rule styles */
+        hr {
+            border: none;
+            height: 1px;
+            background-color: #d1d9e0;
+            margin: 24px 0;
+        }
+        
+        .thick-hr {
+            height: 2px;
+            background-color: #6b7280;
+        }
+        
+        h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            font-weight: bold;
+        }
+        
+        p {
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h3>Section One</h3>
+    <p>This is the first section with some content that should be separated from the next section.</p>
+    
+    <hr>
+    
+    <h3>Section Two</h3>
+    <p>This section is separated by a horizontal rule. The rule should have proper spacing above and below.</p>
+    
+    <hr class="thick-hr">
+    
+    <h3>Section Three</h3>
+    <p>This final section is separated by a thicker horizontal rule for variety.</p>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "hr_001_basic_rules",
+        "category": "separator",
+        "features": ["horizontal-rule", "section-separation", "border-none", "background-color", "margin"],
+        "description": "Basic horizontal rules for section separation with different thicknesses",
+        "markdown_equivalent": "### Section One\n\nThis is the first section...\n\n---\n\n### Section Two\n\nThis section is separated...\n\n---",
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

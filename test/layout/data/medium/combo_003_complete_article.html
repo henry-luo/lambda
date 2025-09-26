@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Complete Article Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        /* Typography hierarchy */
+        h1 { font-size: 36px; margin-bottom: 20px; font-weight: bold; color: #1a1a1a; }
+        h2 { font-size: 28px; margin: 32px 0 16px 0; font-weight: bold; color: #2a2a2a; }
+        h3 { font-size: 22px; margin: 24px 0 12px 0; font-weight: bold; color: #3a3a3a; }
+        h4 { font-size: 18px; margin: 20px 0 10px 0; font-weight: bold; color: #4a4a4a; }
+        
+        p { margin-bottom: 16px; }
+        
+        /* Author and meta info */
+        .article-meta {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        /* Lists */
+        ul, ol { margin: 16px 0; padding-left: 24px; }
+        li { margin-bottom: 8px; }
+        ul ul, ol ul { margin-top: 8px; margin-bottom: 0; }
+        
+        /* Code */
+        code {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            background-color: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+        }
+        
+        pre {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        /* Quotes */
+        blockquote {
+            margin: 20px 0;
+            padding: 16px 24px;
+            border-left: 4px solid #0066cc;
+            background-color: #f0f7ff;
+            font-style: italic;
+            color: #004499;
+        }
+        
+        /* Tables */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        th, td {
+            border: 1px solid #ddd;
+            padding: 12px 16px;
+            text-align: left;
+        }
+        
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        tr:nth-child(even) { background-color: #fafafa; }
+        
+        /* Images */
+        .image-placeholder {
+            width: 100%;
+            max-width: 600px;
+            height: 300px;
+            background-color: #e9ecef;
+            border: 2px dashed #adb5bd;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+            font-size: 16px;
+            margin: 24px auto;
+            border-radius: 8px;
+        }
+        
+        /* Separators */
+        hr {
+            border: none;
+            height: 2px;
+            background: linear-gradient(to right, transparent, #ddd, transparent);
+            margin: 32px 0;
+        }
+        
+        /* Text formatting */
+        .strong { font-weight: bold; }
+        .emphasis { font-style: italic; }
+        .highlight { background-color: #fff3cd; padding: 2px 4px; border-radius: 3px; }
+        
+        /* Links */
+        a { color: #0066cc; text-decoration: underline; }
+        a:hover { color: #004499; }
+        
+        /* Callout boxes */
+        .callout {
+            margin: 20px 0;
+            padding: 16px 20px;
+            border-radius: 8px;
+            border-left: 4px solid #28a745;
+            background-color: #d4edda;
+            color: #155724;
+        }
+        
+        .callout.warning {
+            border-left-color: #ffc107;
+            background-color: #fff3cd;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <article>
+        <h1>Building Modern Web Applications: A Comprehensive Guide</h1>
+        
+        <div class="article-meta">
+            <p>By <span class="strong">Jane Developer</span> • Published March 15, 2024 • 12 min read</p>
+        </div>
+        
+        <p>Modern web development has evolved significantly over the past decade. This comprehensive guide explores the <span class="strong">fundamental concepts</span> and <span class="emphasis">best practices</span> for building robust, scalable web applications.</p>
+        
+        <div class="image-placeholder">
+            [Hero Image: Modern Web Development Workflow - 600x300]
+        </div>
+        
+        <h2>Getting Started</h2>
+        
+        <p>Before diving into advanced topics, let's establish a solid foundation. The key components of modern web development include:</p>
+        
+        <ul>
+            <li><span class="strong">Frontend Technologies</span>
+                <ul>
+                    <li>HTML5 for semantic structure</li>
+                    <li>CSS3 for styling and layout</li>
+                    <li>JavaScript for interactivity</li>
+                </ul>
+            </li>
+            <li><span class="strong">Backend Technologies</span>
+                <ul>
+                    <li>Node.js or Python for server-side logic</li>
+                    <li>Databases (SQL or NoSQL)</li>
+                    <li>API design and implementation</li>
+                </ul>
+            </li>
+            <li><span class="strong">Development Tools</span>
+                <ul>
+                    <li>Version control with Git</li>
+                    <li>Build tools and bundlers</li>
+                    <li>Testing frameworks</li>
+                </ul>
+            </li>
+        </ul>
+        
+        <div class="callout">
+            <p><span class="strong">Pro Tip:</span> Start with the fundamentals before jumping into complex frameworks. A solid understanding of vanilla JavaScript will make learning React, Vue, or Angular much easier.</p>
+        </div>
+        
+        <h2>Architecture Patterns</h2>
+        
+        <p>Choosing the right architecture pattern is crucial for long-term maintainability. Here's a comparison of popular approaches:</p>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Pattern</th>
+                    <th>Best For</th>
+                    <th>Complexity</th>
+                    <th>Scalability</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>MVC</strong></td>
+                    <td>Traditional web apps</td>
+                    <td>Medium</td>
+                    <td>Good</td>
+                </tr>
+                <tr>
+                    <td><strong>Component-Based</strong></td>
+                    <td>Interactive UIs</td>
+                    <td>Medium</td>
+                    <td>Excellent</td>
+                </tr>
+                <tr>
+                    <td><strong>Microservices</strong></td>
+                    <td>Large-scale systems</td>
+                    <td>High</td>
+                    <td>Excellent</td>
+                </tr>
+                <tr>
+                    <td><strong>JAMstack</strong></td>
+                    <td>Static content</td>
+                    <td>Low</td>
+                    <td>Good</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <h3>Implementation Example</h3>
+        
+        <p>Here's a simple example of a <span class="highlight">React component</span> demonstrating modern JavaScript patterns:</p>
+        
+        <pre><code>import React, { useState, useEffect } from 'react';
+
+const UserProfile = ({ userId }) => {
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+    
+    useEffect(() => {
+        const fetchUser = async () => {
+            try {
+                const response = await fetch(`/api/users/${userId}`);
+                const userData = await response.json();
+                setUser(userData);
+            } catch (error) {
+                console.error('Failed to fetch user:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        
+        fetchUser();
+    }, [userId]);
+    
+    if (loading) return <div>Loading...</div>;
+    if (!user) return <div>User not found</div>;
+    
+    return (
+        <div className="user-profile">
+            <h2>{user.name}</h2>
+            <p>Email: {user.email}</p>
+            <p>Joined: {new Date(user.createdAt).toLocaleDateString()}</p>
+        </div>
+    );
+};
+
+export default UserProfile;</code></pre>
+        
+        <div class="callout warning">
+            <p><span class="strong">Important:</span> Always handle errors gracefully and provide meaningful feedback to users. The above example includes basic error handling, but production applications should implement more comprehensive error boundaries.</p>
+        </div>
+        
+        <hr>
+        
+        <h2>Performance Optimization</h2>
+        
+        <p>Performance is critical for user experience and SEO. Consider these optimization strategies:</p>
+        
+        <ol>
+            <li><span class="strong">Code Splitting:</span> Load only the JavaScript needed for the current page</li>
+            <li><span class="strong">Image Optimization:</span> Use modern formats like WebP and implement lazy loading</li>
+            <li><span class="strong">Caching Strategies:</span> Implement proper browser and server-side caching</li>
+            <li><span class="strong">Bundle Analysis:</span> Regularly analyze and optimize your bundle size</li>
+        </ol>
+        
+        <blockquote>
+            <p>"Premature optimization is the root of all evil, but when the time comes to optimize, having a solid foundation makes all the difference."</p>
+            <cite>— Adapted from Donald Knuth</cite>
+        </blockquote>
+        
+        <h3>Performance Metrics</h3>
+        
+        <p>Track these key metrics to measure your application's performance:</p>
+        
+        <ul>
+            <li><code>FCP</code> - First Contentful Paint</li>
+            <li><code>LCP</code> - Largest Contentful Paint</li>
+            <li><code>FID</code> - First Input Delay</li>
+            <li><code>CLS</code> - Cumulative Layout Shift</li>
+        </ul>
+        
+        <h2>Conclusion</h2>
+        
+        <p>Modern web development requires a balance of <span class="emphasis">technical knowledge</span>, <span class="strong">best practices</span>, and <span class="highlight">continuous learning</span>. By following the patterns and principles outlined in this guide, you'll be well-equipped to build robust, scalable web applications.</p>
+        
+        <p>For more detailed information, check out the <a href="#documentation">official documentation</a> and explore the <a href="#examples">code examples repository</a>.</p>
+    </article>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "combo_003_complete_article",
+        "category": "combination",
+        "features": ["article-structure", "typography-hierarchy", "nested-lists", "code-blocks", "tables", "blockquotes", "callouts", "images", "links", "emphasis", "separators"],
+        "description": "Complete article layout with full typography hierarchy, mixed content types, and professional styling",
+        "markdown_equivalent": "# Building Modern Web Applications\n\nBy **Jane Developer** • Published March 15, 2024\n\nModern web development has evolved significantly...\n\n## Getting Started\n\n- **Frontend Technologies**\n  - HTML5 for semantic structure\n  - CSS3 for styling\n\n```javascript\nconst component = () => {\n  return <div>Hello</div>;\n};\n```\n\n> \"Premature optimization is the root of all evil...\"\n\n| Pattern | Best For | Complexity |\n|---------|----------|------------|\n| MVC | Traditional | Medium |",
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

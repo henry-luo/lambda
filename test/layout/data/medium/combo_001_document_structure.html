@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Document Structure Combination</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 800px;
+        }
+        
+        /* Typography */
+        h1 {
+            font-size: 32px;
+            margin-bottom: 16px;
+            font-weight: bold;
+        }
+        
+        h2 {
+            font-size: 24px;
+            margin-bottom: 12px;
+            margin-top: 32px;
+            font-weight: bold;
+        }
+        
+        h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            margin-top: 24px;
+            font-weight: bold;
+        }
+        
+        p {
+            margin-bottom: 16px;
+        }
+        
+        /* Lists */
+        ul, ol {
+            margin-bottom: 16px;
+            padding-left: 24px;
+        }
+        
+        li {
+            margin-bottom: 8px;
+        }
+        
+        /* Code */
+        code {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            background-color: #f3f4f6;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        
+        pre {
+            background-color: #f6f8fa;
+            border: 1px solid #d1d9e0;
+            border-radius: 6px;
+            padding: 16px;
+            margin: 16px 0;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        /* Quotes */
+        blockquote {
+            margin: 16px 0;
+            padding: 16px 20px;
+            border-left: 4px solid #ddd;
+            background-color: #f9f9f9;
+            font-style: italic;
+            color: #666;
+        }
+        
+        /* Separators */
+        hr {
+            border: none;
+            height: 1px;
+            background-color: #d1d9e0;
+            margin: 24px 0;
+        }
+        
+        /* Emphasis */
+        .emphasis { font-style: italic; }
+        .strong { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Complete Document Example</h1>
+    <p>This document combines multiple <span class="strong">markdown elements</span> to test comprehensive layout rendering.</p>
+    
+    <h2>Code Examples</h2>
+    <p>Here's an inline <code>code example</code> followed by a code block:</p>
+    
+    <pre><code>function calculateSum(a, b) {
+    return a + b;
+}</code></pre>
+    
+    <h3>Key Features</h3>
+    <ul>
+        <li>Function definition with <span class="emphasis">proper syntax</span></li>
+        <li>Parameter handling</li>
+        <li>Return statements</li>
+    </ul>
+    
+    <hr>
+    
+    <h2>Important Notes</h2>
+    <blockquote>
+        <p>This is a <span class="strong">critical</span> quote that provides important context for the code examples above.</p>
+    </blockquote>
+    
+    <p>The combination of elements should maintain proper spacing and visual hierarchy throughout the document.</p>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "combo_001_document_structure",
+        "category": "combination",
+        "features": ["headings", "paragraphs", "code-blocks", "inline-code", "lists", "blockquote", "hr", "emphasis"],
+        "description": "Complete document structure combining headings, text, code, lists, quotes, and separators",
+        "markdown_equivalent": "# Complete Document Example\n\nThis document combines multiple **markdown elements**...\n\n## Code Examples\n\nHere's an inline `code example` followed by a code block:\n\n```javascript\nfunction calculateSum(a, b) {\n    return a + b;\n}\n```\n\n### Key Features\n\n- Function definition with *proper syntax*\n- Parameter handling\n- Return statements\n\n---\n\n## Important Notes\n\n> This is a **critical** quote...",
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>
