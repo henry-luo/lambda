@@ -1203,9 +1203,11 @@
                     {
                         "source": "test/test_radiant_flex_gtest.cpp",
                         "name": "📦 Radiant Flex Layout Tests (GTest)",
-                        "dependencies": [
-                            "radiant"
+                        "additional_sources": [
+                            "test/flex_test_support.cpp",
+                            "radiant/flex_layout_new.cpp"
                         ],
+                        "dependencies": [],
                         "libraries": [
                             "gtest",
                             "gtest_main"
@@ -1217,17 +1219,23 @@
                             "lexbor/source",
                             "/opt/homebrew/Cellar/fontconfig/2.17.1/include",
                             "/opt/homebrew/include"
+                        ],
+                        "defines": [
+                            "FLEX_TEST_MODE"
                         ]
                     },
                     {
                         "source": "test/test_radiant_flex_algorithm_gtest.cpp",
                         "name": "⚙️ Radiant Flex Algorithm Tests (GTest)",
-                        "dependencies": [
-                            "radiant"
+                        "additional_sources": [
+                            "test/flex_test_support.cpp",
+                            "radiant/flex_layout_new.cpp"
                         ],
+                        "dependencies": [],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "lexbor_static"
                         ],
                         "binary": "test_radiant_flex_algorithm_gtest.exe",
                         "includes": [
@@ -1243,9 +1251,11 @@
                     {
                         "source": "test/test_radiant_flex_integration_gtest.cpp",
                         "name": "🔗 Radiant Flex Integration Tests (GTest)",
-                        "dependencies": [
-                            "radiant"
+                        "additional_sources": [
+                            "test/flex_test_support.cpp",
+                            "radiant/flex_layout_new.cpp"
                         ],
+                        "dependencies": [],
                         "libraries": [
                             "gtest",
                             "gtest_main"
@@ -1257,6 +1267,9 @@
                             "lexbor/source",
                             "/opt/homebrew/Cellar/fontconfig/2.17.1/include",
                             "/opt/homebrew/include"
+                        ],
+                        "defines": [
+                            "FLEX_TEST_MODE"
                         ]
                     },
                     {

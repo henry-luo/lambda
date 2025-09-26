@@ -47,6 +47,7 @@ extern void align_content(FlexContainerLayout* flex_layout);
 extern bool is_main_axis_horizontal(FlexContainerLayout* flex_layout);
 extern int get_main_axis_size(struct ViewBlock* item, FlexContainerLayout* flex_layout);
 extern int get_cross_axis_size(struct ViewBlock* item, FlexContainerLayout* flex_layout);
+extern int get_cross_axis_position(struct ViewBlock* item, FlexContainerLayout* flex_layout);
 extern void set_main_axis_position(struct ViewBlock* item, int position, FlexContainerLayout* flex_layout);
 extern void set_cross_axis_position(struct ViewBlock* item, int position, FlexContainerLayout* flex_layout);
 extern void set_main_axis_size(struct ViewBlock* item, int size, FlexContainerLayout* flex_layout);

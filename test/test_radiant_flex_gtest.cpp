@@ -135,7 +135,7 @@ TEST_F(FlexLayoutTest, BasicRowLayout) {
     // Verify container setup
     EXPECT_EQ(container->width, 800);
     EXPECT_EQ(container->height, 200);
-    EXPECT_EQ(container->embed->flex_container->direction, DIR_ROW);
+    EXPECT_EQ(container->embed->flex_container->direction, LXB_CSS_VALUE_ROW);
     
     // Count children
     int child_count = 0;

@@ -236,10 +236,16 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
         if (block->scroller->overflow_x) {
-            strbuf_append_format(buf, "overflow-x:%s ", lxb_css_value_by_id(block->scroller->overflow_x)->name); // corrected variable name
+            const lxb_css_data_t* overflow_x_value = lxb_css_value_by_id(block->scroller->overflow_x);
+            if (overflow_x_value && overflow_x_value->name) {
+                strbuf_append_format(buf, "overflow-x:%s ", overflow_x_value->name);
+            }
         }
         if (block->scroller->overflow_y) {
-            strbuf_append_format(buf, "overflow-y:%s ", lxb_css_value_by_id(block->scroller->overflow_y)->name); // corrected variable name
+            const lxb_css_data_t* overflow_y_value = lxb_css_value_by_id(block->scroller->overflow_y);
+            if (overflow_y_value && overflow_y_value->name) {
+                strbuf_append_format(buf, "overflow-y:%s ", overflow_y_value->name);
+            }
         }        
         if (block->scroller->has_hz_overflow) {
             strbuf_append_str(buf, "hz-overflow:true ");

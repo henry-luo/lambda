@@ -178,18 +178,64 @@ bool is_valid_flex_item(ViewBlock* item) {
     return item->type == RDT_VIEW_BLOCK || item->type == RDT_VIEW_INLINE_BLOCK;
 }
 
+// Helper function to convert old enum constants to Lexbor constants
+static int convert_direction_to_lexbor(int direction) {
+    switch (direction) {
+        case 0: return LXB_CSS_VALUE_ROW;           // DIR_ROW
+        case 1: return LXB_CSS_VALUE_ROW_REVERSE;   // DIR_ROW_REVERSE  
+        case 2: return LXB_CSS_VALUE_COLUMN;        // DIR_COLUMN
+        case 3: return LXB_CSS_VALUE_COLUMN_REVERSE; // DIR_COLUMN_REVERSE
+        default: return direction; // Already Lexbor constant
+    }
+}
+
+static int convert_wrap_to_lexbor(int wrap) {
+    switch (wrap) {
+        case 0: return LXB_CSS_VALUE_NOWRAP;        // WRAP_NOWRAP
+        case 1: return LXB_CSS_VALUE_WRAP;          // WRAP_WRAP
+        case 2: return LXB_CSS_VALUE_WRAP_REVERSE;  // WRAP_WRAP_REVERSE
+        default: return wrap; // Already Lexbor constant
+    }
+}
+
+static int convert_justify_to_lexbor(int justify) {
+    switch (justify) {
+        case 0: return LXB_CSS_VALUE_FLEX_START;    // JUSTIFY_START
+        case 1: return LXB_CSS_VALUE_FLEX_END;      // JUSTIFY_END
+        case 2: return LXB_CSS_VALUE_CENTER;        // JUSTIFY_CENTER
+        case 3: return LXB_CSS_VALUE_SPACE_BETWEEN; // JUSTIFY_SPACE_BETWEEN
+        case 4: return LXB_CSS_VALUE_SPACE_AROUND;  // JUSTIFY_SPACE_AROUND
+        case 5: return LXB_CSS_VALUE_SPACE_EVENLY;  // JUSTIFY_SPACE_EVENLY
+        default: return justify; // Already Lexbor constant
+    }
+}
+
+static int convert_align_to_lexbor(int align) {
+    switch (align) {
+        case 0: return LXB_CSS_VALUE_AUTO;          // ALIGN_AUTO
+        case 1: return LXB_CSS_VALUE_FLEX_START;    // ALIGN_START
+        case 2: return LXB_CSS_VALUE_FLEX_END;      // ALIGN_END
+        case 3: return LXB_CSS_VALUE_CENTER;        // ALIGN_CENTER
+        case 4: return LXB_CSS_VALUE_BASELINE;      // ALIGN_BASELINE
+        case 5: return LXB_CSS_VALUE_STRETCH;       // ALIGN_STRETCH
+        default: return align; // Already Lexbor constant
+    }
+}
+
 // Check if main axis is horizontal
 bool is_main_axis_horizontal(FlexContainerLayout* flex_layout) {
+    int direction = convert_direction_to_lexbor(flex_layout->direction);
+    
     // Consider writing mode in axis determination
     if (flex_layout->writing_mode == WM_VERTICAL_RL || 
         flex_layout->writing_mode == WM_VERTICAL_LR) {
         // In vertical writing modes, row becomes vertical
-        return flex_layout->direction == LXB_CSS_VALUE_COLUMN ||
-               flex_layout->direction == LXB_CSS_VALUE_COLUMN_REVERSE;
+        return direction == LXB_CSS_VALUE_COLUMN ||
+               direction == LXB_CSS_VALUE_COLUMN_REVERSE;
     }
     
-    return flex_layout->direction == LXB_CSS_VALUE_ROW || 
-           flex_layout->direction == LXB_CSS_VALUE_ROW_REVERSE;
+    return direction == LXB_CSS_VALUE_ROW || 
+           direction == LXB_CSS_VALUE_ROW_REVERSE;
 }
 
 // Create flex lines based on wrapping
@@ -234,7 +280,8 @@ int create_flex_lines(FlexContainerLayout* flex_layout, ViewBlock** items, int i
                 (is_main_axis_horizontal(flex_layout) ? flex_layout->column_gap : flex_layout->row_gap) : 0;
             
             // Check if we need to wrap (only if not the first item in line)
-            if (flex_layout->wrap != LXB_CSS_VALUE_NOWRAP && 
+            int wrap = convert_wrap_to_lexbor(flex_layout->wrap);
+            if (wrap != LXB_CSS_VALUE_NOWRAP && 
                 line->item_count > 0 && 
                 main_size + item_basis + gap_space > container_main_size) {
                 break;
@@ -343,7 +390,8 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     int current_pos = 0;
     int spacing = 0;
     
-    switch (flex_layout->justify) {
+    int justify = convert_justify_to_lexbor(flex_layout->justify);
+    switch (justify) {
         case LXB_CSS_VALUE_FLEX_START:
             // Items are packed toward the start of the flex direction
             current_pos = 0;
@@ -401,8 +449,10 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
     
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
-        int align_type = item->align_self != LXB_CSS_VALUE_AUTO ? 
-                        item->align_self : flex_layout->align_items;
+        int item_align = convert_align_to_lexbor(item->align_self);
+        int container_align = convert_align_to_lexbor(flex_layout->align_items);
+        int align_type = item_align != LXB_CSS_VALUE_AUTO ? 
+                        item_align : container_align;
         
         int item_cross_size = get_cross_axis_size(item, flex_layout);
         int line_cross_size = line->cross_size;
@@ -440,6 +490,7 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
         
         set_cross_axis_position(item, cross_pos, flex_layout);
     }
+}
 
 // Align content (align-content for multiple lines)
 void align_content(FlexContainerLayout* flex_layout) {
@@ -460,7 +511,8 @@ void align_content(FlexContainerLayout* flex_layout) {
     int start_pos = 0;
     int line_spacing = 0;
     
-    switch (flex_layout->align_content) {
+    int align_content = convert_align_to_lexbor(flex_layout->align_content);
+    switch (align_content) {
         case LXB_CSS_VALUE_FLEX_START:
             start_pos = 0;
             break;

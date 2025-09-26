@@ -2760,64 +2760,8 @@ project "test_radiant_flex_gtest"
     
     files {
         "test/test_radiant_flex_gtest.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "lexbor/source",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "gtest",
-        "gtest_main",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libgtest.a",
-        "/opt/homebrew/lib/libgtest_main.a",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-std=c++17",
-    }
-    
-
-project "test_radiant_flex_algorithm_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_radiant_flex_algorithm_gtest.cpp",
+        "test/flex_test_support.cpp",
+        "radiant/flex_layout_new.cpp",
     }
     
     includedirs {
@@ -2871,7 +2815,7 @@ project "test_radiant_flex_algorithm_gtest"
     }
     
 
-project "test_radiant_flex_integration_gtest"
+project "test_radiant_flex_algorithm_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -2879,7 +2823,9 @@ project "test_radiant_flex_integration_gtest"
     targetextension ".exe"
     
     files {
-        "test/test_radiant_flex_integration_gtest.cpp",
+        "test/test_radiant_flex_algorithm_gtest.cpp",
+        "test/flex_test_support.cpp",
+        "radiant/flex_layout_new.cpp",
     }
     
     includedirs {
@@ -2900,6 +2846,75 @@ project "test_radiant_flex_integration_gtest"
         "/opt/homebrew/include",
         "/usr/local/include",
         "/opt/homebrew/include",
+    }
+    
+    defines {
+        "FLEX_TEST_MODE",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+        "lexbor_static",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-std=c++17",
+    }
+    
+
+project "test_radiant_flex_integration_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_radiant_flex_integration_gtest.cpp",
+        "test/flex_test_support.cpp",
+        "radiant/flex_layout_new.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include/openssl",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lexbor/source",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    defines {
+        "FLEX_TEST_MODE",
     }
     
     libdirs {

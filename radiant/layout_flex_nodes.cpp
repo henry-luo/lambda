@@ -107,11 +107,11 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
         (block->bound ? block->bound->padding.left + block->bound->padding.right : 0);
     flex_container.height = lycon->block.given_height >= 0 ? lycon->block.given_height :
         (block->bound ? block->bound->padding.top + block->bound->padding.bottom : 0);
-    flex_container.direction = block->embed->flex_container->direction;
-    flex_container.wrap = block->embed->flex_container->wrap;
-    flex_container.justify = block->embed->flex_container->justify;
-    flex_container.align_items = block->embed->flex_container->align_items;
-    flex_container.align_content = block->embed->flex_container->align_content;
+    flex_container.direction = (FlexDirection)block->embed->flex_container->direction;
+    flex_container.wrap = (FlexWrap)block->embed->flex_container->wrap;
+    flex_container.justify = (JustifyContent)block->embed->flex_container->justify;
+    flex_container.align_items = (AlignType)block->embed->flex_container->align_items;
+    flex_container.align_content = (AlignType)block->embed->flex_container->align_content;
     flex_container.row_gap = block->embed->flex_container->row_gap;
     
     // Allocate items array
@@ -162,7 +162,7 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child) {
                 item->flex_basis = child_block->flex_basis;
                 item->flex_grow = child_block->flex_grow;
                 item->flex_shrink = child_block->flex_shrink;
-                item->align_self = child_block->align_self;
+                item->align_self = (AlignType)child_block->align_self;
                 item->order = child_block->order;
                 item->is_flex_basis_percent = child_block->flex_basis_is_percent;
                 index++;

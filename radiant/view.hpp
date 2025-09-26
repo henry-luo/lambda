@@ -40,6 +40,10 @@ extern "C" {
 #define LXB_CSS_VALUE_LOWER_ALPHA       (LXB_CSS_VALUE__LAST_ENTRY + 26)
 #define LXB_CSS_VALUE_UPPER_ALPHA       (LXB_CSS_VALUE__LAST_ENTRY + 27)
 
+// Additional CSS constants for flex layout
+#define LXB_CSS_VALUE_SPACE_EVENLY      (LXB_CSS_VALUE__LAST_ENTRY + 28)
+#define LXB_CSS_VALUE_AUTO              (LXB_CSS_VALUE__LAST_ENTRY + 29)
+
 
 #define LENGTH_AUTO                 (INT_MAX - 1)
 
@@ -77,7 +81,11 @@ typedef struct ImageSurface {
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit    
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
+#ifndef FLEX_TEST_MODE
     Tvg_Paint* pic;       // ThorVG picture for SVG image
+#else
+    void* pic;            // Placeholder for test mode
+#endif
     int max_render_width;  // maximum width for rendering the image
     lxb_url_t* url;        // the resolved absolute URL of the image
 } ImageSurface;
@@ -186,7 +194,7 @@ typedef struct ViewSpan : ViewGroup {
     float flex_grow;
     float flex_shrink;
     int flex_basis;  // -1 for auto
-    AlignType align_self;
+    int align_self;  // AlignType or LXB_CSS_VALUE_*
     int order;
     bool flex_basis_is_percent;
 } ViewSpan;
@@ -215,12 +223,12 @@ typedef struct {
 
 // Integrated flex container layout state
 typedef struct {
-    // CSS properties
-    FlexDirection direction;
-    FlexWrap wrap;
-    JustifyContent justify;
-    AlignType align_items;
-    AlignType align_content;
+    // CSS properties (using int to allow both enum and Lexbor constants)
+    int direction;      // FlexDirection or LXB_CSS_VALUE_*
+    int wrap;           // FlexWrap or LXB_CSS_VALUE_*
+    int justify;        // JustifyContent or LXB_CSS_VALUE_*
+    int align_items;    // AlignType or LXB_CSS_VALUE_*
+    int align_content;  // AlignType or LXB_CSS_VALUE_*
     int row_gap;
     int column_gap;
     WritingMode writing_mode;
@@ -256,6 +264,12 @@ typedef struct ViewBlock : ViewSpan {
     ScrollProp* scroller;  // handles overflow
     // block content related properties for flexbox, image, iframe
     EmbedProp* embed;
+    
+    // Child navigation for flex layout tests
+    struct ViewBlock* first_child;
+    struct ViewBlock* last_child;
+    struct ViewBlock* next_sibling;
+    struct ViewBlock* prev_sibling;
 } ViewBlock;
 
 struct ViewTree {
@@ -284,7 +298,11 @@ typedef struct StateStore {
 // layout, rendering context structs
 typedef struct {
     FontProp style;  // current font style
+#ifndef FLEX_TEST_MODE
     FT_Face face;  // current font face
+#else
+    void* face;    // Placeholder for test mode
+#endif
     float space_width;  // width of a space character of the current font 
     int current_font_size;  // font size of current element
 } FontBox;
@@ -307,8 +325,13 @@ typedef struct {
     ImageSurface* surface;  // rendering surface of a window
 
     // font handling
+#ifndef FLEX_TEST_MODE
     FcConfig *font_config;
     FT_Library ft_library;
+#else
+    void* font_config;     // Placeholder for test mode
+    void* ft_library;      // Placeholder for test mode
+#endif
     struct hashmap* fontface_map;  // cache of font faces loaded
     FontProp default_font;  // default font style
     char** fallback_fonts;  // fallback fonts
@@ -321,8 +344,10 @@ typedef struct {
     MouseState mouse_state; // current mouse state
 } UiContext;
 
+#ifndef FLEX_TEST_MODE
 extern FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
 extern FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint);
+#endif
 extern void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop);
 
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
