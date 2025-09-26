@@ -116,6 +116,8 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
     prop->line_height = lycon->block.line_height;  // inherit from parent
     prop->text_align = lycon->block.text_align;  // inherit from parent
     prop->min_height = prop->min_width = prop->max_height = prop->max_width = -1;  // -1 for undefined
+    prop->box_sizing = LXB_CSS_VALUE_CONTENT_BOX;  // default to content-box
+    prop->given_width = prop->given_height = -1;  // -1 for not specified
     return prop;
 }
 
@@ -247,8 +249,35 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         strbuf_append_format(buf, "max-wd:%f ", block->blk->max_width);
         strbuf_append_format(buf, "min-hg:%f ", block->blk->min_height);
         strbuf_append_format(buf, "max-hg:%f ", block->blk->max_height);
+        
+        // Add box-sizing and given dimensions debugging
+        if (block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+            strbuf_append_str(buf, "box-sizing:border-box ");
+        } else {
+            strbuf_append_str(buf, "box-sizing:content-box ");
+        }
+        if (block->blk->given_width >= 0) {
+            strbuf_append_format(buf, "given-wd:%d ", block->blk->given_width);
+        }
+        if (block->blk->given_height >= 0) {
+            strbuf_append_format(buf, "given-hg:%d ", block->blk->given_height);
+        }
         strbuf_append_str(buf, "}\n");
     }
+    
+    // Add flex container debugging info
+    if (block->embed && block->embed->flex_container) {
+        strbuf_append_char_n(buf, ' ', indent);
+        strbuf_append_str(buf, "{flex-container: ");
+        strbuf_append_format(buf, "row-gap:%d column-gap:%d ", 
+                           block->embed->flex_container->row_gap,
+                           block->embed->flex_container->column_gap);
+        strbuf_append_format(buf, "main-axis:%d cross-axis:%d", 
+                           block->embed->flex_container->main_axis_size,
+                           block->embed->flex_container->cross_axis_size);
+        strbuf_append_str(buf, "}\n");
+    }
+    
     if (block->scroller) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
