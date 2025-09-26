@@ -368,7 +368,28 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // determine block width and height
     int content_width = 0;
-    if (lycon->block.given_width >= 0) { content_width = lycon->block.given_width; }
+    if (lycon->block.given_width >= 0) { 
+        content_width = lycon->block.given_width;
+        
+        // Apply box-sizing calculation
+        if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+            // For border-box, the given width includes padding and borders
+            // So we need to subtract them to get the content width
+            int padding_and_border = 0;
+            if (block->bound) {
+                padding_and_border += block->bound->padding.left + block->bound->padding.right;
+                if (block->bound->border) {
+                    padding_and_border += block->bound->border->width.left + block->bound->border->width.right;
+                }
+            }
+            content_width = max(content_width - padding_and_border, 0);
+            printf("box-sizing: border-box - given_width=%d, padding+border=%d, content_width=%d\n", 
+                   lycon->block.given_width, padding_and_border, content_width);
+        } else {
+            printf("box-sizing: content-box - given_width=%d, content_width=%d\n", 
+                   lycon->block.given_width, content_width);
+        }
+    }
     else {
         if (!block->bound) {
             content_width = pa_block.width;
@@ -381,7 +402,28 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
     int content_height = 0;
-    if (lycon->block.given_height >= 0) { content_height = lycon->block.given_height; }
+    if (lycon->block.given_height >= 0) { 
+        content_height = lycon->block.given_height;
+        
+        // Apply box-sizing calculation for height
+        if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+            // For border-box, the given height includes padding and borders
+            // So we need to subtract them to get the content height
+            int padding_and_border = 0;
+            if (block->bound) {
+                padding_and_border += block->bound->padding.top + block->bound->padding.bottom;
+                if (block->bound->border) {
+                    padding_and_border += block->bound->border->width.top + block->bound->border->width.bottom;
+                }
+            }
+            content_height = max(content_height - padding_and_border, 0);
+            printf("box-sizing: border-box - given_height=%d, padding+border=%d, content_height=%d\n", 
+                   lycon->block.given_height, padding_and_border, content_height);
+        } else {
+            printf("box-sizing: content-box - given_height=%d, content_height=%d\n", 
+                   lycon->block.given_height, content_height);
+        }
+    }
     else {
         if (!block->bound) {
             content_height = pa_block.height;

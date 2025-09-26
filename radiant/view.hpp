@@ -164,6 +164,8 @@ typedef struct {
     int min_width, max_width;  // non-negative
     int min_height, max_height;  // non-negative
     PropValue list_style_type;
+    PropValue box_sizing;  // LXB_CSS_VALUE_CONTENT_BOX or LXB_CSS_VALUE_BORDER_BOX
+    int given_width, given_height;  // CSS specified width/height values
 } BlockProp;
 
 typedef struct View View;
