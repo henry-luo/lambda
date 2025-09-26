@@ -192,13 +192,13 @@ class LayoutTester {
         // PRIMARY: Exact position + dimensions (most specific match)
         keys.push(`layout_${x}_${y}_${width}x${height}`);
         
-        // SECONDARY: Position only (for elements that might have different sizes)
-        keys.push(`position_${x}_${y}`);
-        
-        // TERTIARY: Dimensions only (for elements that might be positioned differently)
+        // SECONDARY: Dimensions only (for elements that might be positioned differently)
         keys.push(`size_${width}x${height}`);
         
-        // QUATERNARY: Common layout patterns
+        // TERTIARY: Position only (REMOVED - too loose, causes incorrect matches)
+        // keys.push(`position_${x}_${y}`);
+        
+        // QUATERNARY: Common layout patterns (prioritize these for matching)
         if (width === 600 && height === 100) {
             keys.push('flex_container_600x100');
         }
@@ -212,7 +212,17 @@ class LayoutTester {
             keys.push('box_100x100');
         }
         
-        // FALLBACK: Index-based matching for similar elements
+        // SELECTOR-BASED: Add selector-based keys for better matching
+        if (elem.selector) {
+            keys.push(`selector_${elem.selector}`);
+            keys.push(`selector_${elem.selector}_${width}x${height}`);
+        }
+        if (elem.tag) {
+            keys.push(`tag_${elem.tag}_${width}x${height}`);
+        }
+        
+        // FALLBACK: Index-based matching for similar elements (DEPRIORITIZED)
+        // Only use index matching as a last resort to avoid incorrect matches
         keys.push(`index_${index}`);
         
         // VIEWPORT: Special handling for viewport-sized elements
@@ -272,9 +282,12 @@ class LayoutTester {
             
             for (const key of keys) {
                 radiantElem = radiantMap.get(key);
-                if (radiantElem && !processedRadiantElements.has(radiantElem.selector || radiantElem.tag)) {
-                    processedRadiantElements.add(radiantElem.selector || radiantElem.tag);
-                    break;
+                if (radiantElem) {
+                    const elemId = radiantElem.selector || radiantElem.tag;
+                    if (!processedRadiantElements.has(elemId)) {
+                        processedRadiantElements.add(elemId);
+                        break;
+                    }
                 }
                 radiantElem = null; // Reset if already processed
             }
@@ -294,6 +307,11 @@ class LayoutTester {
             if (diffs.length > 0) {
                 const maxDiff = Math.max(...diffs.map(d => d.difference));
                 results.maxDifference = Math.max(results.maxDifference, maxDiff);
+                
+                // Log large differences for debugging
+                // if (maxDiff > 100) {
+                //     console.log(`DEBUG: Large difference for ${browserElem.selector}: ${maxDiff}px`);
+                // }
                 
                 if (maxDiff > this.tolerance) {
                     results.differences.push({
