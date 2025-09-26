@@ -266,18 +266,50 @@ void sort_flex_items_by_order(ViewBlock** items, int count) {
 
 // Calculate flex basis for an item
 int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout) {
+    printf("DEBUG: calculate_flex_basis - item->flex_basis: %d\n", item->flex_basis);
     if (item->flex_basis == -1) {
-        // auto - use content size (CRITICAL FIX: use proper content dimensions)
-        int basis = get_main_axis_size(item, flex_layout);
-        printf("DEBUG: calculate_flex_basis - item size: %dx%d, basis: %d\n", 
-               item->width, item->height, basis);
-        // *** DEBUG: Ensure we don't return 0 for auto basis ***
-        if (basis <= 0) {
-            // Fallback to content dimensions if width/height is 0
-            basis = is_main_axis_horizontal(flex_layout) ? item->content_width : item->content_height;
-            printf("DEBUG: calculate_flex_basis - fallback to content: %d\n", basis);
+        // auto - use explicit size if available, otherwise content size
+        printf("DEBUG: calculate_flex_basis - item size: %dx%d\n", 
+               item->width, item->height);
+        printf("DEBUG: calculate_flex_basis - content size: %dx%d\n", 
+               item->content_width, item->content_height);
+        
+        // *** CRITICAL FIX: For flex-basis auto, check for explicit main size first ***
+        bool has_explicit_main_size = false;
+        int explicit_size = 0;
+        
+        if (is_main_axis_horizontal(flex_layout)) {
+            // Check if item has explicit width (given_width > 0 indicates CSS width was set)
+            if (item->blk && item->blk->given_width > 0) {
+                has_explicit_main_size = true;
+                explicit_size = item->blk->given_width;
+                printf("DEBUG: calculate_flex_basis - using explicit width: %d\n", explicit_size);
+            }
+        } else {
+            // Check if item has explicit height
+            if (item->blk && item->blk->given_height > 0) {
+                has_explicit_main_size = true;
+                explicit_size = item->blk->given_height;
+                printf("DEBUG: calculate_flex_basis - using explicit height: %d\n", explicit_size);
+            }
         }
-        return basis;
+        
+        if (has_explicit_main_size) {
+            return explicit_size;
+        } else {
+            // No explicit size - use content size + padding
+            int content_size = is_main_axis_horizontal(flex_layout) ? item->content_width : item->content_height;
+            
+            // Add padding to content size for proper flex-basis calculation
+            if (is_main_axis_horizontal(flex_layout) && item->bound && item->bound->padding.left >= 0) {
+                content_size += item->bound->padding.left + item->bound->padding.right;
+            } else if (!is_main_axis_horizontal(flex_layout) && item->bound && item->bound->padding.top >= 0) {
+                content_size += item->bound->padding.top + item->bound->padding.bottom;
+            }
+            
+            printf("DEBUG: calculate_flex_basis - using content+padding size: %d\n", content_size);
+            return content_size;
+        }
     } else if (item->flex_basis_is_percent) {
         // percentage basis
         int container_size = is_main_axis_horizontal(flex_layout) ? 
@@ -482,7 +514,9 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
     int total_basis_size = 0;
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
+        printf("DEBUG: resolve_flexible_lengths - calling calculate_flex_basis for item %d\n", i);
         int basis = calculate_flex_basis(item, flex_layout);
+        printf("DEBUG: resolve_flexible_lengths - item %d basis: %d\n", i, basis);
         
         set_main_axis_size(item, basis, flex_layout);
         total_basis_size += basis;

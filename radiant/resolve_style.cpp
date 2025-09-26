@@ -1218,6 +1218,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_FLEX_GROW: {
         const lxb_css_property_flex_grow_t *flex_grow = declr->u.flex_grow;
         span->flex_grow = flex_grow->number.num;
+        
+        // CRITICAL FIX: If flex-basis is not explicitly set, default to auto (-1)
+        // This matches CSS Flexbox specification where flex-basis defaults to auto
+        if (span->flex_basis == 0 && !span->flex_basis_is_percent) {
+            span->flex_basis = -1; // auto
+        }
         break;
     }
     case LXB_CSS_PROPERTY_FLEX_SHRINK: {
