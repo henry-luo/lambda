@@ -1123,16 +1123,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!block) { break; }
         const lxb_css_property_flex_direction_t *flex_direction = declr->u.flex_direction;
         alloc_flex_container_prop(lycon, block); 
-        switch (flex_direction->type) {
-            case LXB_CSS_VALUE_ROW:
-                block->embed->flex_container->direction = DIR_ROW; break;
-            case LXB_CSS_VALUE_ROW_REVERSE:
-                block->embed->flex_container->direction = DIR_ROW_REVERSE; break;
-            case LXB_CSS_VALUE_COLUMN:
-                block->embed->flex_container->direction = DIR_COLUMN; break;
-            case LXB_CSS_VALUE_COLUMN_REVERSE:
-                block->embed->flex_container->direction = DIR_COLUMN_REVERSE; break;
-        }
+        // CRITICAL FIX: Store Lexbor constants directly instead of old enum values
+        block->embed->flex_container->direction = flex_direction->type;
         break;
     }
     case LXB_CSS_PROPERTY_FLEX_WRAP: {
@@ -1367,23 +1359,25 @@ AlignType resolve_align_type(PropValue value) {
     }
 }
 
-JustifyContent resolve_justify_content(PropValue value) {
+int resolve_justify_content(PropValue value) {
+    // CRITICAL FIX: Return Lexbor constants directly instead of old enum values
+    // This eliminates the enum conversion mismatch that was breaking justify-content
     switch (value) {
         case LXB_CSS_VALUE_FLEX_START:
         case LXB_CSS_VALUE_START:
-            return JUSTIFY_START;
+            return LXB_CSS_VALUE_FLEX_START;
         case LXB_CSS_VALUE_FLEX_END:
         case LXB_CSS_VALUE_END:
-            return JUSTIFY_END;
+            return LXB_CSS_VALUE_FLEX_END;
         case LXB_CSS_VALUE_CENTER:
-            return JUSTIFY_CENTER;
+            return LXB_CSS_VALUE_CENTER;
         case LXB_CSS_VALUE_SPACE_BETWEEN:
-            return JUSTIFY_SPACE_BETWEEN;
+            return LXB_CSS_VALUE_SPACE_BETWEEN;
         case LXB_CSS_VALUE_SPACE_AROUND:
-            return JUSTIFY_SPACE_AROUND;
-        // case LXB_CSS_VALUE_SPACE_EVENLY:
-        //     return JUSTIFY_SPACE_EVENLY;
+            return LXB_CSS_VALUE_SPACE_AROUND;
+        case LXB_CSS_VALUE_SPACE_EVENLY:
+            return LXB_CSS_VALUE_SPACE_EVENLY;
         default:
-            return JUSTIFY_START;
+            return LXB_CSS_VALUE_FLEX_START;
     }
 }
