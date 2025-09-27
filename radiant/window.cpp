@@ -17,7 +17,7 @@ Document* load_html_doc(lxb_url_t *base, char* doc_filename);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
 
-int ui_context_init(UiContext* uicon);
+int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 
@@ -266,16 +266,8 @@ int run_layout_test(const char* html_file) {
     // Initialize without GUI
     log_init_wrapper();
     
-    // Initialize UI context without creating window
-    memset(&ui_context, 0, sizeof(UiContext));
-    
-    // Set consistent test viewport
-    ui_context.window_width = 1200;
-    ui_context.window_height = 800;
-    ui_context.pixel_ratio = 1.0;
-    
-    // Initialize UI context properly
-    if (ui_context_init(&ui_context) != 0) {
+    // Initialize UI context properly in headless mode
+    if (ui_context_init(&ui_context, true) != 0) {
         fprintf(stderr, "Error: Failed to initialize UI context\n");
         return 1;
     }
@@ -343,7 +335,7 @@ int main(int argc, char* argv[]) {
     
     // Original GUI mode
     log_init_wrapper();
-    ui_context_init(&ui_context);
+    ui_context_init(&ui_context, false);
     GLFWwindow* window = ui_context.window;
     if (!window) {
         ui_context_cleanup(&ui_context);
