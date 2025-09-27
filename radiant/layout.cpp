@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "layout_flex.hpp"
+#include "layout_table.hpp"
 
 #include "../lib/log.h"
 void view_pool_init(ViewTree* tree);
@@ -260,6 +261,11 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         if (display.inner == LXB_CSS_VALUE_FLEX) {
             // This element is a flex container - route to flex layout
             layout_block(lycon, node, display); // Block layout will handle flex containers
+            return;
+        }
+        // Check for table formatting context root (Phase 1)
+        if (display.inner == LXB_CSS_VALUE_TABLE) {
+            layout_table_box(lycon, node, display);
             return;
         }
         

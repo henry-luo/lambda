@@ -106,6 +106,11 @@ typedef enum {
     RDT_VIEW_BLOCK,
     RDT_VIEW_LIST_ITEM,
     RDT_VIEW_SCROLL_PANE,
+    // Table-related view types (Phase 1 scaffolding)
+    RDT_VIEW_TABLE,
+    RDT_VIEW_TABLE_ROW_GROUP,
+    RDT_VIEW_TABLE_ROW,
+    RDT_VIEW_TABLE_CELL,
 } ViewType;
 
 typedef struct {
@@ -299,6 +304,24 @@ typedef struct ViewBlock : ViewSpan {
     struct ViewBlock* next_sibling;
     struct ViewBlock* prev_sibling;
 } ViewBlock;
+
+// Table-specific lightweight subclasses (no additional fields yet)
+// These keep table concerns out of the base ViewBlock while preserving layout/render compatibility.
+typedef struct ViewTable : ViewBlock {
+    // Table-specific state will be held externally (e.g., TableModel) and referenced by ViewTable later.
+} ViewTable;
+
+typedef struct ViewTableRowGroup : ViewBlock {
+    // Minimal metadata may be added later (e.g., group kind: thead/tbody/tfoot)
+} ViewTableRowGroup;
+
+typedef struct ViewTableRow : ViewBlock {
+    // Minimal metadata may be added later (e.g., computed baseline)
+} ViewTableRow;
+
+typedef struct ViewTableCell : ViewBlock {
+    // Minimal metadata may be added later (e.g., row/col indices, spans)
+} ViewTableCell;
 
 struct ViewTree {
     VariableMemPool *pool;
