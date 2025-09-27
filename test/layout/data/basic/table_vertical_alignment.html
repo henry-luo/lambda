@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Table Vertical Alignment Test</title>
+  <style>
+    body { margin: 16px; font-family: Arial, sans-serif; }
+    table { border-collapse: separate; border-spacing: 0; }
+    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; height: 60px; }
+    thead th { background: #f0f0f0; }
+    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }
+    .top { vertical-align: top; }
+    .middle { vertical-align: middle; }
+    .bottom { vertical-align: bottom; }
+    .baseline { vertical-align: baseline; }
+  </style>
+</head>
+<body>
+  <table>
+    <caption>Vertical Alignment Test (60px cell height)</caption>
+    <thead>
+      <tr>
+        <th>Alignment</th>
+        <th>Content</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="top">Top</td>
+        <td class="top">This content should be aligned to the top of the cell</td>
+        <td class="top">Default alignment</td>
+      </tr>
+      <tr>
+        <td class="middle">Middle</td>
+        <td class="middle">This content should be centered vertically in the cell</td>
+        <td class="middle">Centered alignment</td>
+      </tr>
+      <tr>
+        <td class="bottom">Bottom</td>
+        <td class="bottom">This content should be aligned to the bottom of the cell</td>
+        <td class="bottom">Bottom alignment</td>
+      </tr>
+      <tr>
+        <td class="baseline">Baseline</td>
+        <td class="baseline">This content should align to text baseline</td>
+        <td class="baseline">Baseline alignment</td>
+      </tr>
+      <tr>
+        <td rowspan="2" class="middle">Multi-row<br/>Middle</td>
+        <td class="top">Top in multi-row context</td>
+        <td class="bottom">Bottom in multi-row context</td>
+      </tr>
+      <tr>
+        <td class="middle">Middle in multi-row context</td>
+        <td class="baseline">Baseline in multi-row context</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>

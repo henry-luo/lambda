@@ -1,0 +1,131 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Table Caption Variations Test</title>
+  <style>
+    body { margin: 16px; font-family: Arial, sans-serif; }
+    table { 
+      border-collapse: separate; 
+      border-spacing: 0; 
+      margin-bottom: 40px;
+    }
+    th, td { 
+      padding: 8px 12px; 
+      border: 1px solid #666; 
+      background: #fff; 
+    }
+    thead th { background: #f0f0f0; }
+    
+    caption { 
+      font-weight: bold; 
+      margin-bottom: 8px; 
+      padding: 8px;
+      background: #e6f3ff;
+      border: 1px solid #ccc;
+    }
+    
+    .caption-top { caption-side: top; }
+    .caption-bottom { caption-side: bottom; }
+    
+    .styled-caption {
+      font-size: 1.2em;
+      color: #333;
+      text-align: left;
+      background: linear-gradient(to right, #f0f8ff, #e6f3ff);
+    }
+  </style>
+</head>
+<body>
+  <table class="caption-top">
+    <caption class="caption-top">Caption at Top (Default Position)</caption>
+    <thead>
+      <tr>
+        <th>Product</th>
+        <th>Price</th>
+        <th>Stock</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Widget A</td>
+        <td>$19.99</td>
+        <td>50</td>
+      </tr>
+      <tr>
+        <td>Widget B</td>
+        <td>$24.99</td>
+        <td>30</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table class="caption-bottom">
+    <caption class="caption-bottom">Caption at Bottom (Alternative Position)</caption>
+    <thead>
+      <tr>
+        <th>Service</th>
+        <th>Duration</th>
+        <th>Cost</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Consultation</td>
+        <td>1 hour</td>
+        <td>$100</td>
+      </tr>
+      <tr>
+        <td>Implementation</td>
+        <td>4 hours</td>
+        <td>$400</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table>
+    <caption class="styled-caption">Styled Caption with Enhanced Formatting</caption>
+    <thead>
+      <tr>
+        <th>Quarter</th>
+        <th>Revenue</th>
+        <th>Growth</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Q1 2024</td>
+        <td>$125,000</td>
+        <td>+15%</td>
+      </tr>
+      <tr>
+        <td>Q2 2024</td>
+        <td>$140,000</td>
+        <td>+12%</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Quantity</th>
+        <th>Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>No Caption Table</td>
+        <td>1</td>
+        <td>$50</td>
+      </tr>
+      <tr>
+        <td>Another Item</td>
+        <td>2</td>
+        <td>$100</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>

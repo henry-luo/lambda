@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Table Nested Content Test</title>
+  <style>
+    body { margin: 16px; font-family: Arial, sans-serif; }
+    table { border-collapse: separate; border-spacing: 0; }
+    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; }
+    thead th { background: #f0f0f0; }
+    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }
+    
+    .nested-table { margin: 0; font-size: 0.9em; }
+    .nested-table th, .nested-table td { 
+      padding: 4px 6px; 
+      border: 1px solid #999; 
+      background: #f9f9f9; 
+    }
+    
+    ul, ol { margin: 0; padding-left: 20px; }
+    .image-placeholder { 
+      width: 60px; 
+      height: 40px; 
+      background: #ddd; 
+      border: 1px solid #999; 
+      display: inline-block; 
+      text-align: center; 
+      line-height: 40px; 
+      font-size: 12px; 
+    }
+  </style>
+</head>
+<body>
+  <table>
+    <caption>Table with Nested Content Types</caption>
+    <thead>
+      <tr>
+        <th>Content Type</th>
+        <th>Example</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Nested Table</td>
+        <td>
+          <table class="nested-table">
+            <tr>
+              <th>A</th>
+              <th>B</th>
+            </tr>
+            <tr>
+              <td>1</td>
+              <td>2</td>
+            </tr>
+            <tr>
+              <td>3</td>
+              <td>4</td>
+            </tr>
+          </table>
+        </td>
+        <td>Tables can contain other tables for complex data structures</td>
+      </tr>
+      <tr>
+        <td>Unordered List</td>
+        <td>
+          <ul>
+            <li>First item</li>
+            <li>Second item with longer text</li>
+            <li>Third item</li>
+          </ul>
+        </td>
+        <td>Lists help organize related information within cells</td>
+      </tr>
+      <tr>
+        <td>Ordered List</td>
+        <td>
+          <ol>
+            <li>Step one</li>
+            <li>Step two</li>
+            <li>Step three</li>
+          </ol>
+        </td>
+        <td>Numbered lists for sequential information</td>
+      </tr>
+      <tr>
+        <td>Mixed Content</td>
+        <td>
+          <div class="image-placeholder">IMG</div>
+          <p><strong>Product Name:</strong> Widget Pro</p>
+          <p><em>Price:</em> $29.99</p>
+        </td>
+        <td>Cells can contain multiple content types including images, text formatting, and block elements</td>
+      </tr>
+      <tr>
+        <td rowspan="2">Multi-row with Lists</td>
+        <td>
+          <ul>
+            <li>Feature A</li>
+            <li>Feature B</li>
+          </ul>
+        </td>
+        <td>First row of spanned cell</td>
+      </tr>
+      <tr>
+        <td>
+          <ol>
+            <li>Benefit 1</li>
+            <li>Benefit 2</li>
+          </ol>
+        </td>
+        <td>Second row of spanned cell</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>
