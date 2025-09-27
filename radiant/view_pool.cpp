@@ -9,6 +9,8 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
     ViewTree* tree = lycon->doc->view_tree;
     switch (type) {
         case RDT_VIEW_BLOCK:  case RDT_VIEW_INLINE_BLOCK:  case RDT_VIEW_LIST_ITEM:
+        case RDT_VIEW_TABLE: case RDT_VIEW_TABLE_ROW_GROUP:
+        case RDT_VIEW_TABLE_ROW: case RDT_VIEW_TABLE_CELL:
             err = pool_variable_alloc(tree->pool, sizeof(ViewBlock), (void **)&view);
             memset(view, 0, sizeof(ViewBlock));
             break;
@@ -35,8 +37,12 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
     if (!lycon->line.start_view) lycon->line.start_view = view;
     
     // CRITICAL FIX: Also maintain ViewBlock hierarchy for flex layout
-    if ((type == RDT_VIEW_BLOCK || type == RDT_VIEW_INLINE_BLOCK || type == RDT_VIEW_LIST_ITEM) && 
-        lycon->parent && (lycon->parent->type == RDT_VIEW_BLOCK || lycon->parent->type == RDT_VIEW_INLINE_BLOCK)) {
+    if ((type == RDT_VIEW_BLOCK || type == RDT_VIEW_INLINE_BLOCK || type == RDT_VIEW_LIST_ITEM ||
+         type == RDT_VIEW_TABLE || type == RDT_VIEW_TABLE_ROW_GROUP ||
+         type == RDT_VIEW_TABLE_ROW || type == RDT_VIEW_TABLE_CELL) && 
+        lycon->parent && (lycon->parent->type == RDT_VIEW_BLOCK || lycon->parent->type == RDT_VIEW_INLINE_BLOCK ||
+                          lycon->parent->type == RDT_VIEW_TABLE || lycon->parent->type == RDT_VIEW_TABLE_ROW_GROUP ||
+                          lycon->parent->type == RDT_VIEW_TABLE_ROW || lycon->parent->type == RDT_VIEW_TABLE_CELL)) {
         ViewBlock* block_child = (ViewBlock*)view;
         ViewBlock* block_parent = (ViewBlock*)lycon->parent;
         
@@ -83,7 +89,9 @@ void free_view(ViewTree* tree, View* view) {
             pool_variable_free(tree->pool, span->bound);
         }
         if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK || 
-            view->type == RDT_VIEW_LIST_ITEM) {
+            view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_TABLE ||
+            view->type == RDT_VIEW_TABLE_ROW_GROUP || view->type == RDT_VIEW_TABLE_ROW ||
+            view->type == RDT_VIEW_TABLE_CELL) {
             ViewBlock* block = (ViewBlock*)view;
             if (block->blk) {
                 printf("free block prop\n");
