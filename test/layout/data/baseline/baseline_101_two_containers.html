@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Two Block Containers</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .container1 {
+            width: 200px;
+            height: 100px;
+            background-color: #ff0000;
+        }
+        .container2 {
+            width: 150px;
+            height: 80px;
+            background-color: #00ff00;
+        }
+    </style>
+</head>
+<body>
+    <div class="container1"></div>
+    <div class="container2"></div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_101_two_containers",
+        "category": "baseline",
+        "features": ["block-flow", "width", "height", "background-color"],
+        "description": "Two block containers with different sizes and colors",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#block-formatting"],
+        "complexity": "basic",
+        "expected_behavior": "Red 200x100px box above green 150x80px box"
+    }
+    </script>
+</body>
+</html>

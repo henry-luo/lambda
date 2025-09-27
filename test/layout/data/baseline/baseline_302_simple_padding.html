@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Simple Padding</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .outer-box {
+            width: 200px;
+            height: 150px;
+            background-color: #ddddff;
+            padding-top: 20px;
+            padding-left: 30px;
+        }
+        .inner-box {
+            width: 80px;
+            height: 50px;
+            background-color: #333333;
+        }
+    </style>
+</head>
+<body>
+    <div class="outer-box">
+        <div class="inner-box"></div>
+    </div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_302_simple_padding",
+        "category": "baseline",
+        "features": ["padding-top", "padding-left"],
+        "description": "Container with top and left padding containing inner box",
+        "spec_references": ["https://www.w3.org/TR/CSS22/box.html#padding-properties"],
+        "complexity": "basic",
+        "expected_behavior": "Dark box positioned with 20px top padding and 30px left padding from container edge"
+    }
+    </script>
+</body>
+</html>

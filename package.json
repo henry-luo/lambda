@@ -36,8 +36,9 @@
     "test/lambda-wasm-demo.html",
     "README-WASM-JS.md"
   ],
-  "dependencies": {},
-  "devDependencies": {},
+  "dependencies": {
+    "puppeteer": "^24.22.3"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/henry-luo/lambda"

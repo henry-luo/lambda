@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Basic Border</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .box {
+            width: 100px;
+            height: 100px;
+            background-color: #f0f0f0;
+            border: 5px solid #000000;
+        }
+    </style>
+</head>
+<body>
+    <div class="box"></div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_011_basic_border",
+        "category": "baseline",
+        "features": ["border", "border-width", "border-style", "border-color"],
+        "description": "Div with solid black border",
+        "spec_references": ["https://www.w3.org/TR/CSS22/box.html#border-properties"],
+        "complexity": "basic",
+        "expected_behavior": "Light gray 100x100px box with 5px solid black border"
+    }
+    </script>
+</body>
+</html>

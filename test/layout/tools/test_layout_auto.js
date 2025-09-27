@@ -703,7 +703,7 @@ class LayoutTester {
         await this.ensureDirectories();
         
         // Search for the test file in all categories
-        const categories = ['basic', 'intermediate', 'medium', 'advanced'];
+        const categories = ['basic', 'intermediate', 'medium', 'advanced', 'baseline'];
         let foundFile = null;
         let foundCategory = null;
         
@@ -771,7 +771,7 @@ class LayoutTester {
         
         await this.ensureDirectories();
         
-        const categories = ['basic', 'intermediate', 'medium', 'advanced'];
+        const categories = ['basic', 'intermediate', 'medium', 'advanced', 'baseline'];
         const allResults = [];
         let totalTests = 0;
         let totalPassed = 0;
@@ -841,7 +841,7 @@ async function main() {
             case '--category':
             case '-c':
                 category = args[++i];
-                if (!['basic', 'intermediate', 'medium', 'advanced'].includes(category)) {
+                if (!['basic', 'intermediate', 'medium', 'advanced', 'baseline'].includes(category)) {
                     console.error(`❌ Invalid category: ${category}`);
                     process.exit(1);
                 }
@@ -882,7 +882,7 @@ This tool compares Radiant's layout output against browser references, including
 - CSS property application accuracy
 
 Options:
-  --category, -c <name>      Test specific category (basic|intermediate|medium|advanced)
+  --category, -c <name>      Test specific category (basic|intermediate|medium|advanced|baseline)
   --test, -t <name>          Test specific test file (e.g., table_simple)
   --tolerance <pixels>       Layout difference tolerance in pixels (default: 2.0)
   --generate-references, -g  Generate browser references if missing

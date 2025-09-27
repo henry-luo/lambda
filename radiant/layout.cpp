@@ -22,7 +22,16 @@ bool is_only_whitespace(const char* str) {
     return true;
 }
 
-
+// Chrome-style line height calculation
+// Uses: max(fontSize + 3, ceil(fontSize * 1.2)) * pixelRatio
+// This matches Chrome browser's "normal" line-height behavior more accurately
+int calculate_chrome_line_height(int font_size, float pixel_ratio) {
+    int base_font_size = (int)(font_size / pixel_ratio);
+    int min_line_height = base_font_size + 3;
+    int proportional_height = (int)ceil(base_font_size * 1.2);
+    int chrome_height = (min_line_height > proportional_height) ? min_line_height : proportional_height;
+    return (int)round(chrome_height * pixel_ratio);
+}
 
 // DomNode style resolution function
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
@@ -399,7 +408,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     // This matches browser behavior where HTML element fits content, not viewport
     lycon->block.height = 0;  // Will be calculated based on content
     lycon->block.advance_y = 0;
-    lycon->block.line_height = round(1.2 * lycon->ui_context->default_font.font_size * lycon->ui_context->pixel_ratio);  
+    lycon->block.line_height = calculate_chrome_line_height(lycon->ui_context->default_font.font_size, lycon->ui_context->pixel_ratio);
     lycon->block.text_align = LXB_CSS_VALUE_LEFT;
     lycon->line.left = 0;  lycon->line.right = lycon->block.width;
     lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;

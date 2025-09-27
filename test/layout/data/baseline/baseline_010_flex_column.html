@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Flex Column</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .container {
+            display: flex;
+            flex-direction: column;
+            width: 120px;
+            height: 200px;
+            background-color: #e0e0e0;
+        }
+        .item {
+            width: 60px;
+            height: 40px;
+            background-color: #8080ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item"></div>
+        <div class="item"></div>
+    </div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_010_flex_column",
+        "category": "baseline",
+        "features": ["display-flex", "flex-direction-column"],
+        "description": "Flexbox container with column direction",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#flex-direction-property"],
+        "complexity": "basic",
+        "expected_behavior": "Two light blue 60x40px boxes stacked vertically in gray container"
+    }
+    </script>
+</body>
+</html>

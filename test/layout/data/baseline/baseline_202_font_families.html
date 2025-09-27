@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Font Families</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-size: 16px; }
+        .arial-text {
+            font-family: Arial, sans-serif;
+        }
+        .helvetica-text {
+            font-family: Helvetica, Arial, sans-serif;
+        }
+        .serif-text {
+            font-family: Times, serif;
+        }
+    </style>
+</head>
+<body>
+    <p class="arial-text">Arial font text</p>
+    <p class="helvetica-text">Helvetica font text</p>
+    <p class="serif-text">Times font text</p>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_202_font_families",
+        "category": "baseline",
+        "features": ["font-family", "text-content"],
+        "description": "Text content with different font families",
+        "spec_references": ["https://www.w3.org/TR/CSS22/fonts.html#propdef-font-family"],
+        "complexity": "basic",
+        "expected_behavior": "Three paragraphs with Arial, Helvetica, and Times fonts"
+    }
+    </script>
+</body>
+</html>

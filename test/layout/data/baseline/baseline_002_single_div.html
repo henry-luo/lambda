@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Single Div</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .box {
+            width: 100px;
+            height: 100px;
+            background-color: #ff0000;
+        }
+    </style>
+</head>
+<body>
+    <div class="box"></div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_002_single_div",
+        "category": "baseline",
+        "features": ["block-element", "width", "height", "background-color"],
+        "description": "Single div with fixed dimensions and background color",
+        "spec_references": ["https://www.w3.org/TR/CSS22/box.html"],
+        "complexity": "trivial",
+        "expected_behavior": "Red 100x100px box at top-left of body"
+    }
+    </script>
+</body>
+</html>

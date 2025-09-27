@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Nested Containers</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .outer-container {
+            width: 300px;
+            height: 200px;
+            background-color: #dddddd;
+        }
+        .inner-container {
+            width: 200px;
+            height: 120px;
+            background-color: #888888;
+        }
+        .inner-box {
+            width: 100px;
+            height: 60px;
+            background-color: #333333;
+        }
+    </style>
+</head>
+<body>
+    <div class="outer-container">
+        <div class="inner-container">
+            <div class="inner-box"></div>
+        </div>
+    </div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_104_nested_containers",
+        "category": "baseline",
+        "features": ["nested-elements", "containment", "block-flow"],
+        "description": "Three-level nested containers without padding/margins",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#block-formatting"],
+        "complexity": "basic",
+        "expected_behavior": "Dark gray box inside medium gray container inside light gray outer container"
+    }
+    </script>
+</body>
+</html>
