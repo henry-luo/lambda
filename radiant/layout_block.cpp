@@ -216,14 +216,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     float em_size = 0;  size_t value_len;  const lxb_char_t *value;
     resolve_inline_default(lycon, (ViewSpan*)block);
     switch (elmt_name) {
-    case LXB_TAG_BODY:
+    case LXB_TAG_BODY: {
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        // CRITICAL FIX: Don't apply default body margin - let CSS handle it completely
-        // The CSS reset "* { margin: 0; }" should be the source of truth
-        // If no CSS is specified, the margin will remain 0 (which is correct for modern web)
+        // CRITICAL FIX: Apply browser default body margin (8px CSS) unless CSS overrides it
+        // This matches Chrome/Firefox default behavior - must apply pixel ratio for physical pixels
+        int body_margin_physical = (int)(8.0 * lycon->ui_context->pixel_ratio);
         block->bound->margin.top = block->bound->margin.bottom = 
-            block->bound->margin.left = block->bound->margin.right = 0; 
+            block->bound->margin.left = block->bound->margin.right = body_margin_physical; 
          break;
+    }
     case LXB_TAG_H1:
         em_size = 2;  // 2em
         goto HEADING_PROP;
