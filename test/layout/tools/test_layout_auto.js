@@ -24,8 +24,8 @@ class LayoutTester {
         this.referenceDir = path.join(this.testDir, 'reference');
         this.projectRoot = path.join(__dirname, '..', '..', '..');
         
-        // CRITICAL FIX: Output results to ./test_output directory
-        this.reportsDir = path.join(this.projectRoot, 'test_output');
+        // Output results to /tmp directory for easier access
+        this.reportsDir = '/tmp';
     }
     
     async ensureDirectories() {
@@ -899,7 +899,7 @@ Examples:
 
 Generated files:
   ../reference/<category>/<test>.json         # Browser reference data (with text nodes)
-  ../../../test_output/layout_test_results.json  # Test results report
+  /tmp/layout_test_results.json               # Test results report
 `);
         process.exit(0);
     }
