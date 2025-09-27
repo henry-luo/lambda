@@ -290,6 +290,7 @@ project "radiant"
         "radiant/layout_flex.cpp",
         "radiant/layout_flex_content.cpp",
         "radiant/layout_nested.cpp",
+        "radiant/layout_table.cpp",
         "radiant/view_pool_new.cpp",
         "radiant/resolve_style.cpp",
         "radiant/scroller.cpp",

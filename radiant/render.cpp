@@ -523,7 +523,9 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
 
 void render_children(RenderContext* rdcon, View* view) {
     do {
-        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK) {
+        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
+            view->type == RDT_VIEW_TABLE || view->type == RDT_VIEW_TABLE_ROW_GROUP ||
+            view->type == RDT_VIEW_TABLE_ROW || view->type == RDT_VIEW_TABLE_CELL) {
             ViewBlock* block = (ViewBlock*)view;
             if (block->embed) {
                 if (block->embed->img) {
