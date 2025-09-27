@@ -2,7 +2,6 @@
 #include "layout_flex.hpp"
 
 #include "../lib/log.h"
-void print_view_tree(ViewGroup* view_block);
 void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
 // Function declaration moved to layout.hpp
@@ -476,5 +475,5 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     layout_cleanup(&lycon);
 
     if (doc->view_tree && doc->view_tree->root) 
-        print_view_tree((ViewGroup*)doc->view_tree->root);
+        print_view_tree((ViewGroup*)doc->view_tree->root, uicon->pixel_ratio);
 }

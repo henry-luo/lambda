@@ -388,7 +388,7 @@ void write_string_to_file(const char *filename, const char *text) {
     fclose(file); // Close file
 }
 
-void print_view_tree(ViewGroup* view_root) {
+void print_view_tree(ViewGroup* view_root, float pixel_ratio) {
     StrBuf* buf = strbuf_new_cap(1024);
     print_block((ViewBlock*)view_root, buf, 0);
     log_debug("=================\nView tree:");
@@ -397,7 +397,7 @@ void print_view_tree(ViewGroup* view_root) {
     write_string_to_file("view_tree.txt", buf->str);
     strbuf_free(buf);
     // also generate JSON output
-    print_view_tree_json(view_root);
+    print_view_tree_json(view_root, pixel_ratio);
 }
 
 // Helper function to get view type name for JSON
@@ -434,7 +434,7 @@ void append_json_string(StrBuf* buf, const char* str) {
 }
 
 // Recursive JSON generation for view blocks
-void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
+void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_ratio) {
     if (!block) {
         strbuf_append_str(buf, "null");
         return;
@@ -543,20 +543,26 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
         parent = parent_block->parent;
     }
     
+    // CRITICAL FIX: Convert physical pixels to CSS pixels for test validation
+    int css_x = (int)round(abs_x / pixel_ratio);
+    int css_y = (int)round(abs_y / pixel_ratio);
+    int css_width = (int)round(block->width / pixel_ratio);
+    int css_height = (int)round(block->height / pixel_ratio);
+    
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"x\": %d,\n", abs_x);
+    strbuf_append_format(buf, "\"x\": %d,\n", css_x);
     
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"y\": %d,\n", abs_y);
+    strbuf_append_format(buf, "\"y\": %d,\n", css_y);
     
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"width\": %d,\n", block->width);
+    strbuf_append_format(buf, "\"width\": %d,\n", css_width);
     
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"height\": %d\n", block->height);
+    strbuf_append_format(buf, "\"height\": %d\n", css_height);
     
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
@@ -592,9 +598,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
         
         if (child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK ||
             child->type == RDT_VIEW_LIST_ITEM) {
-            print_block_json((ViewBlock*)child, buf, indent + 4);
+            print_block_json((ViewBlock*)child, buf, indent + 4, pixel_ratio);
         } else if (child->type == RDT_VIEW_TEXT) {
-            print_text_json((ViewText*)child, buf, indent + 4);
+            print_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
         } else {
             // Handle other view types
             strbuf_append_char_n(buf, ' ', indent + 4);
@@ -619,7 +625,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
 }
 
 // JSON generation for text nodes
-void print_text_json(ViewText* text, StrBuf* buf, int indent) {
+void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "{\n");
     
@@ -664,17 +670,23 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"x\": %d,\n", text->x);
+    // Convert text dimensions to CSS pixels
+    int css_x = (int)round(text->x / pixel_ratio);
+    int css_y = (int)round(text->y / pixel_ratio);
+    int css_width = (int)round(text->width / pixel_ratio);
+    int css_height = (int)round(text->height / pixel_ratio);
     
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"y\": %d,\n", text->y);
+    strbuf_append_format(buf, "\"x\": %d,\n", css_x);
     
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"width\": %d,\n", text->width);
+    strbuf_append_format(buf, "\"y\": %d,\n", css_y);
     
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"height\": %d\n", text->height);
+    strbuf_append_format(buf, "\"width\": %d,\n", css_width);
+    
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"height\": %d\n", css_height);
     
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}\n");
@@ -684,7 +696,7 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent) {
 }
 
 // Main JSON generation function
-void print_view_tree_json(ViewGroup* view_root) {
+void print_view_tree_json(ViewGroup* view_root, float pixel_ratio) {
     StrBuf* json_buf = strbuf_new_cap(2048);
     
     strbuf_append_str(json_buf, "{\n");
@@ -701,12 +713,13 @@ void print_view_tree_json(ViewGroup* view_root) {
     strbuf_append_str(json_buf, "\",\n");
     
     strbuf_append_str(json_buf, "    \"radiant_version\": \"1.0\",\n");
+    strbuf_append_format(json_buf, "    \"pixel_ratio\": %.2f,\n", pixel_ratio);
     strbuf_append_str(json_buf, "    \"viewport\": { \"width\": 1200, \"height\": 800 }\n");
     strbuf_append_str(json_buf, "  },\n");
     
     strbuf_append_str(json_buf, "  \"layout_tree\": ");
     if (view_root) {
-        print_block_json((ViewBlock*)view_root, json_buf, 2);
+        print_block_json((ViewBlock*)view_root, json_buf, 2, pixel_ratio);
     } else {
         strbuf_append_str(json_buf, "null");
     }
