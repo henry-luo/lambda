@@ -22,25 +22,25 @@ WINDOW_EXE = window.exe
 
 # Typesetting system sources
 TYPESET_SOURCES = \
-    $(TYPESET_DIR)/typeset.c \
-    $(TYPESET_DIR)/view/view_tree.c \
-    $(TYPESET_DIR)/document/document.c \
-    $(TYPESET_DIR)/document/page.c \
-    $(TYPESET_DIR)/style/font.c \
-    $(TYPESET_DIR)/style/style.c \
-    $(TYPESET_DIR)/layout/layout.c \
-    $(TYPESET_DIR)/math/math_layout.c \
-    $(TYPESET_DIR)/math/math_metrics.c \
-    $(TYPESET_DIR)/output/renderer.c \
-    $(TYPESET_DIR)/output/html_renderer.c \
-    $(TYPESET_DIR)/output/svg_renderer.c \
-    $(TYPESET_DIR)/output/pdf_renderer.c \
-    $(TYPESET_DIR)/output/tex_renderer.c \
-    $(TYPESET_DIR)/output/png_renderer.c \
-    $(TYPESET_DIR)/serialization/lambda_serializer.c \
-    $(TYPESET_DIR)/serialization/markdown_serializer.c \
-    $(TYPESET_DIR)/integration/lambda_bridge.c \
-    $(TYPESET_DIR)/integration/stylesheet.c
+	$(TYPESET_DIR)/typeset.c \
+	$(TYPESET_DIR)/view/view_tree.c \
+	$(TYPESET_DIR)/document/document.c \
+	$(TYPESET_DIR)/document/page.c \
+	$(TYPESET_DIR)/style/font.c \
+	$(TYPESET_DIR)/style/style.c \
+	$(TYPESET_DIR)/layout/layout.c \
+	$(TYPESET_DIR)/math/math_layout.c \
+	$(TYPESET_DIR)/math/math_metrics.c \
+	$(TYPESET_DIR)/output/renderer.c \
+	$(TYPESET_DIR)/output/html_renderer.c \
+	$(TYPESET_DIR)/output/svg_renderer.c \
+	$(TYPESET_DIR)/output/pdf_renderer.c \
+	$(TYPESET_DIR)/output/tex_renderer.c \
+	$(TYPESET_DIR)/output/png_renderer.c \
+	$(TYPESET_DIR)/serialization/lambda_serializer.c \
+	$(TYPESET_DIR)/serialization/markdown_serializer.c \
+	$(TYPESET_DIR)/integration/lambda_bridge.c \
+	$(TYPESET_DIR)/integration/stylesheet.c
 
 # Unicode support is always enabled (utf8proc-based)
 # No longer using conditional compilation flags
@@ -63,22 +63,22 @@ LINK_JOBS := 1
 
 # Enable ccache for faster builds if available
 ifneq ($(shell which ccache 2>/dev/null),)
-    CC := ccache $(CC)
-    CXX := ccache $(CXX)
-    export CCACHE_DIR := $(shell pwd)/build/.ccache
-    export CCACHE_MAXSIZE := 500M
-    export CCACHE_COMPRESS := 1
+	CC := ccache $(CC)
+	CXX := ccache $(CXX)
+	export CCACHE_DIR := $(shell pwd)/build/.ccache
+	export CCACHE_MAXSIZE := 500M
+	export CCACHE_COMPRESS := 1
 endif
 
 # Detect Python executable
 # On MSYS2/Windows, prefer MINGW64 over CLANG64 for Universal CRT avoidance
 # Force explicit paths for MSYS environment compatibility
 ifeq ($(shell test -f /mingw64/bin/python3 && echo yes),yes)
-    PYTHON := /mingw64/bin/python3
+	PYTHON := /mingw64/bin/python3
 else ifeq ($(shell test -f /clang64/bin/python3 && echo yes),yes)
-    PYTHON := /clang64/bin/python3
+	PYTHON := /clang64/bin/python3
 else
-    PYTHON := python3
+	PYTHON := python3
 endif
 
 # Detect Premake5 executable
@@ -95,20 +95,20 @@ IS_MSYS2 := $(shell [ -n "$(MSYSTEM_DETECTED)" ] && echo "yes" || echo "no")
 # On MSYS2/Windows, prefer MINGW64 GCC over CLANG64 to avoid Universal CRT
 # Force explicit paths for MSYS environment compatibility
 ifeq ($(shell test -f /mingw64/bin/gcc && echo yes),yes)
-    CC := /mingw64/bin/gcc
-    CXX := /mingw64/bin/g++
-    AR := /mingw64/bin/ar
-    RANLIB := /mingw64/bin/ranlib
+	CC := /mingw64/bin/gcc
+	CXX := /mingw64/bin/g++
+	AR := /mingw64/bin/ar
+	RANLIB := /mingw64/bin/ranlib
 else ifeq ($(shell test -f /clang64/bin/clang && echo yes),yes)
-    CC := /clang64/bin/clang
-    CXX := /clang64/bin/clang++
-    AR := /clang64/bin/ar
-    RANLIB := /clang64/bin/ranlib
+	CC := /clang64/bin/clang
+	CXX := /clang64/bin/clang++
+	AR := /clang64/bin/ar
+	RANLIB := /clang64/bin/ranlib
 else
-    CC := gcc
-    CXX := g++
-    AR := ar
-    RANLIB := ranlib
+	CC := gcc
+	CXX := g++
+	AR := ar
+	RANLIB := ranlib
 endif
 
 # Tree-sitter grammar dependencies
@@ -318,13 +318,13 @@ clean-tree-sitter-minimal:
 
 # Phony targets (don't correspond to actual files)
 .PHONY: all build build-ascii clean clean-test clean-grammar clean-radiant generate-grammar debug release rebuild test test-input run help install uninstall \
-        lambda radiant window format lint check docs intellisense analyze-size \
-        build-windows build-linux build-debug build-release clean-all distclean \
-        build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
-        verify-windows verify-linux test-windows test-linux tree-sitter-libs \
-        generate-premake clean-premake build-test build-test-linux \
-        ***REMOVED***
-        build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant test-radiant
+	    lambda radiant window format lint check docs intellisense analyze-size \
+	    build-windows build-linux build-debug build-release clean-all distclean \
+	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
+	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
+	    generate-premake clean-premake build-test build-test-linux \
+	    ***REMOVED***
+	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant test-radiant
 
 # Help target - shows available commands
 help:
@@ -1415,6 +1415,33 @@ build-test: build-lambda-input
 	$(MAKE) generate-premake
 	cd build/premake && premake5 gmake --file=../../premake5.lua && $(MAKE) config=debug_native -j$(JOBS)
 
+# Capture browser layout references using Puppeteer
+# Usage:
+#   make capture-browser-layout                # captures all categories (basic, intermediate, advanced) if present
+#   make capture-browser-layout CATEGORY=basic # captures only basic category
+#   make capture-browser-layout FILE=path/to/test.html  # captures a single file
+capture-browser-layout:
+	@echo "🧭 Capturing browser layout references..."
+	@if [ -d "test/layout/tools" ]; then \
+	    cd test/layout/tools && \
+	    if [ ! -d node_modules ]; then \
+	        echo "📦 Installing test tools dependencies..."; \
+	        npm install; \
+	    fi; \
+	    if [ -n "$(FILE)" ]; then \
+	        echo "📄 Single file: $(FILE)"; \
+	        node extract_browser_references.js $(FILE); \
+	    elif [ -n "$(CATEGORY)" ]; then \
+	        echo "📂 Category: $(CATEGORY)"; \
+	        node extract_browser_references.js --category $(CATEGORY); \
+	    else \
+	        echo "📚 All categories (basic, intermediate, advanced)"; \
+	        node extract_browser_references.js; \
+	    fi; \
+	else \
+	    echo "❌ Error: Tools directory not found at test/layout/tools"; \
+	    exit 1; \
+	fi
 
 # Include KLEE analysis targets
 
