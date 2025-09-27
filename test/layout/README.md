@@ -420,15 +420,3 @@ npm run report              # Check current status
 
 ## 📄 License
 
-MIT License - see LICENSE file for details.
-
-## 📞 Support
-
-For issues, questions, or contributions:
-- **Issues**: GitHub Issues tracker
-- **Discussions**: GitHub Discussions  
-- **Documentation**: See `/doc` directory for detailed specifications
-
----
-
-*This testing framework ensures Radiant's layout engine maintains compatibility with web standards through comprehensive automated validation against browser reference implementations.*

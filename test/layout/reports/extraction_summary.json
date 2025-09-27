@@ -1,0 +1,198 @@
+{
+  "extraction_date": "2025-09-27T09:25:00.998Z",
+  "total_files": 27,
+  "successful": 27,
+  "failed": 0,
+  "success_rate": 100,
+  "results": [
+    {
+      "category": "basic",
+      "file": "block_001_margin_padding.html",
+      "success": true,
+      "element_count": 7,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "box_001_basic_div.html",
+      "success": true,
+      "element_count": 10,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "box_002_margin_padding.html",
+      "success": true,
+      "element_count": 10,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "box_003_border.html",
+      "success": true,
+      "element_count": 10,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "box_004_box_sizing.html",
+      "success": true,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "box_005_block_flow.html",
+      "success": true,
+      "element_count": 12,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "code_001_basic_blocks.html",
+      "success": true,
+      "element_count": 14,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "flex_001_basic_layout.html",
+      "success": true,
+      "element_count": 12,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "flex_001_row_space_between.html",
+      "success": true,
+      "element_count": 8,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "flex_002_wrap.html",
+      "success": true,
+      "element_count": 12,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "flex_003_align_items.html",
+      "success": true,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "flex_004_column_direction.html",
+      "success": true,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "flex_005_flex_grow.html",
+      "success": true,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "flex_006_justify_content.html",
+      "success": true,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "flex_007_row_reverse.html",
+      "success": true,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "flex_008_flex_basis.html",
+      "success": true,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "flex_009_auto_margins.html",
+      "success": true,
+      "element_count": 10,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "flex_010_wrap_reverse.html",
+      "success": true,
+      "element_count": 12,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "hr_001_basic_rules.html",
+      "success": true,
+      "element_count": 16,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "image_001_basic_layout.html",
+      "success": true,
+      "element_count": 14,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "list_001_basic_lists.html",
+      "success": true,
+      "element_count": 18,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "quote_001_basic_blockquote.html",
+      "success": true,
+      "element_count": 14,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "table_001_basic_table.html",
+      "success": true,
+      "element_count": 29,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "table_borders.html",
+      "success": true,
+      "element_count": 27,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "table_rowspan_colspan.html",
+      "success": true,
+      "element_count": 26,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "table_simple.html",
+      "success": true,
+      "element_count": 26,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "text_001_basic_typography.html",
+      "success": true,
+      "element_count": 14,
+      "error": null
+    }
+  ]
+}

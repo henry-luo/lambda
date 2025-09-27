@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Table Borders</title>
+  <style>
+    body { margin: 16px; font-family: Arial, sans-serif; }
+    table { border-collapse: separate; border-spacing: 0; }
+    th, td { padding: 8px 12px; border: 2px solid #666; background: #fff; }
+    thead th { background: #eee; border-bottom-color: #333; }
+    tfoot td { background: #fafafa; border-top-color: #333; }
+  </style>
+</head>
+<body>
+  <table>
+    <caption>Header/Body/Footer Borders</caption>
+    <thead>
+      <tr><th>H1</th><th>H2</th><th>H3</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Cell 1</td><td style="border-left-color:#c00; border-right-color:#0c0;">Red L / Green R</td><td>Cell 3</td></tr>
+      <tr><td style="border-top-color:#00c;">Blue Top</td><td>Cell 5</td><td style="border-bottom-color:#c0c;">Magenta Bottom</td></tr>
+    </tbody>
+    <tfoot>
+      <tr><td>F1</td><td>F2</td><td>F3</td></tr>
+    </tfoot>
+  </table>
+</body>
+</html>
