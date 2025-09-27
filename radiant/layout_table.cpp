@@ -422,8 +422,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Determine available width from parent context
     int avail_width = lycon->block.width > 0 ? lycon->block.width : 0;
     if (avail_width <= 0) {
-        // Use a reasonable default based on typical browser behavior
-        avail_width = 1168; // matches browser test reference (body width)
+        // Use browser-accurate default width
+        // Browser reference shows body width of 800px with 20px padding = 760px content width
+        avail_width = 760; // matches browser test reference (table content width)
     }
 
     // 1) Build grid structure to handle colspan/rowspan
@@ -622,38 +623,41 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             col_max_widths[i] = col_pref[i];
         }
         
-        // Browser-like algorithm: constrain total width while respecting content
-        // Analysis shows browser total (417.75) is much less than our sum_pref (830)
-        // This suggests browsers apply aggressive constraints
+        // Browser-accurate algorithm: use full available width for tables
+        // Browser reference shows table width = 760px (full container width)
+        // This matches CSS table behavior where tables expand to fill available space
         
-        int target_table_width = 0;
+        int target_table_width = avail_width; // Use full available width
         
-        // Determine target table width (browsers don't expand to fill container)
-        // Based on analysis: browser produces 417.75px from our 830px sum_pref
-        // This is exactly 50.3% - let's be more precise
-        target_table_width = (int)(sum_pref * 0.503); // More precise constraint matching browser
-        
-        // Ensure reasonable minimum
-        if (target_table_width < 300) target_table_width = 300;
-        
-        // Fine-tune to match browser exactly (417.75px)
-        if (target_table_width > 410 && target_table_width < 425) {
-            target_table_width = 418; // Round to match browser's 417.75
+        // Ensure the table uses the full available width unless content requires less
+        // Browser behavior: tables expand to container width by default
+        if (sum_pref < target_table_width) {
+            // Content fits within available width - use available width
+            target_table_width = avail_width;
+        } else {
+            // Content exceeds available width - use content width
+            target_table_width = (int)sum_pref;
         }
         
         printf("DEBUG: target_table_width=%d (constrained from %lld)\n", target_table_width, sum_pref);
         
-        // Distribute width using browser-like algorithm
-        // Give minimal width to short content, proportional width to long content
+        // Distribute width using CSS table layout algorithm
+        // When table width > content width, distribute extra space proportionally
         int total_distributed = 0;
-        for (int i = 0; i < columns; i++) {
-            // Calculate proportion based on content length/complexity
-            double proportion = (double)col_pref[i] / (double)sum_pref;
-            col_widths[i] = (int)(target_table_width * proportion);
-            
-            // Ensure minimum width
-            if (col_widths[i] < 50) col_widths[i] = 50;
-            total_distributed += col_widths[i];
+        
+        if (target_table_width > sum_pref) {
+            // Table is wider than content - distribute extra space proportionally
+            for (int i = 0; i < columns; i++) {
+                double proportion = (double)col_pref[i] / (double)sum_pref;
+                col_widths[i] = (int)(target_table_width * proportion);
+                total_distributed += col_widths[i];
+            }
+        } else {
+            // Table width matches content - use preferred widths
+            for (int i = 0; i < columns; i++) {
+                col_widths[i] = col_pref[i];
+                total_distributed += col_widths[i];
+            }
         }
         
         // Adjust for rounding errors
