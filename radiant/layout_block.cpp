@@ -217,13 +217,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     resolve_inline_default(lycon, (ViewSpan*)block);
     switch (elmt_name) {
     case LXB_TAG_BODY: {
-        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        // CRITICAL FIX: Apply browser default body margin (8px CSS) unless CSS overrides it
-        // This matches Chrome/Firefox default behavior - must apply pixel ratio for physical pixels
-        int body_margin_physical = (int)(8.0 * lycon->ui_context->pixel_ratio);
-        block->bound->margin.top = block->bound->margin.bottom = 
-            block->bound->margin.left = block->bound->margin.right = body_margin_physical; 
-         break;
+        // Default body margin will be applied after CSS resolution
+        // to respect CSS resets and specificity cascading
+        break;
     }
     case LXB_TAG_H1:
         em_size = 2;  // 2em
@@ -302,14 +298,39 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
     
-    // CRITICAL FIX: After CSS resolution, check if body margin was reset to 0
+    // CRITICAL FIX: After CSS resolution, handle body margin properly
     // This handles CSS resets like "* { margin: 0; }" properly
-    if (elmt_name == LXB_TAG_BODY && block->bound) {
-        // If all margins are 0, this indicates a CSS reset was applied
-        if (block->bound->margin.top == 0 && block->bound->margin.right == 0 && 
-            block->bound->margin.bottom == 0 && block->bound->margin.left == 0) {
-            // CSS reset detected - keep margins at 0
-            printf("DEBUG: CSS margin reset detected for body element\n");
+    if (elmt_name == LXB_TAG_BODY) {
+        int body_margin_physical = (int)(8.0 * lycon->ui_context->pixel_ratio);
+        
+        if (!block->bound) {
+            // No CSS margin properties - apply default body margin
+            block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            block->bound->margin.top = block->bound->margin.bottom = 
+                block->bound->margin.left = block->bound->margin.right = body_margin_physical;
+            printf("DEBUG: Applied default body margin (no CSS): %d\n", body_margin_physical);
+        } else {
+            // CSS margin properties exist - check if it's a reset (all margins are 0)
+            if (block->bound->margin.top == 0 && block->bound->margin.bottom == 0 &&
+                block->bound->margin.left == 0 && block->bound->margin.right == 0) {
+                // CSS reset detected - keep margins at 0
+                printf("DEBUG: CSS margin reset detected - keeping margins at 0\n");
+            } else {
+                // CSS has some non-zero margins - check for unset margins and apply defaults
+                if (block->bound->margin.top_specificity == 0) {
+                    block->bound->margin.top = body_margin_physical;
+                }
+                if (block->bound->margin.bottom_specificity == 0) {
+                    block->bound->margin.bottom = body_margin_physical;
+                }
+                if (block->bound->margin.left_specificity == 0) {
+                    block->bound->margin.left = body_margin_physical;
+                }
+                if (block->bound->margin.right_specificity == 0) {
+                    block->bound->margin.right = body_margin_physical;
+                }
+                printf("DEBUG: Applied partial default body margins\n");
+            }
         }
     }
  

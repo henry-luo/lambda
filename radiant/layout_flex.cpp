@@ -70,6 +70,9 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
     }
     
     FlexContainerLayout* flex_layout = container->embed->flex_container;
+    
+    printf("DEBUG: FLEX START - container: %dx%d at (%d,%d)\n", 
+           container->width, container->height, container->x, container->y);
     // DEBUG: Gap settings applied
     
     // Set main and cross axis sizes from container dimensions (only if not already set)
@@ -92,7 +95,8 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
             content_height -= (container->bound->padding.top + container->bound->padding.bottom);
         }
         
-        // DEBUG: Calculated content dimensions
+        printf("DEBUG: FLEX CONTENT - content: %dx%d, container: %dx%d\n", 
+               content_width, content_height, container->width, container->height);
         
         // Axis orientation now calculated correctly with aligned enum values
         bool is_horizontal = is_main_axis_horizontal(flex_layout);
@@ -104,6 +108,9 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
             if (flex_layout->main_axis_size == 0) flex_layout->main_axis_size = content_height;
             if (flex_layout->cross_axis_size == 0) flex_layout->cross_axis_size = content_width;
         }
+        
+        printf("DEBUG: FLEX AXES - main: %d, cross: %d, horizontal: %d\n", 
+               flex_layout->main_axis_size, flex_layout->cross_axis_size, is_horizontal);
         // DEBUG: Set axis sizes
     }
     
@@ -171,7 +178,7 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
     // CRITICAL FIX: Handle wrap-reverse for both horizontal and vertical flex containers
     if (flex_layout->wrap == WRAP_WRAP_REVERSE) {
         // Reverse the cross-axis positions for wrap-reverse
-        int container_cross_size = flex_layout->cross_axis_size;
+        int container_cross_size = is_main_axis_horizontal(flex_layout) ? flex_layout->cross_axis_size : flex_layout->main_axis_size;
         printf("DEBUG: wrap-reverse - container_cross_size: %d\n", container_cross_size);
         
         for (int i = 0; i < line_count; i++) {
@@ -190,7 +197,13 @@ void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
         }
     }
     
-    // DEBUG: Flex layout completed successfully
+    // DEBUG: Final item positions after all flex layout
+    printf("DEBUG: FINAL FLEX POSITIONS:\n");
+    for (int i = 0; i < item_count; i++) {
+        ViewBlock* item = items[i];
+        printf("DEBUG: FINAL_ITEM %d - pos: (%d,%d), size: %dx%d\n", 
+               i, item->x, item->y, item->width, item->height);
+    }
     
     flex_layout->needs_reflow = false;
 }
@@ -477,6 +490,9 @@ int create_flex_lines(FlexContainerLayout* flex_layout, ViewBlock** items, int i
             int gap_space = line->item_count > 0 ? 
                 (is_main_axis_horizontal(flex_layout) ? flex_layout->column_gap : flex_layout->row_gap) : 0;
             
+            printf("DEBUG: LINE %d - item %d: basis=%d, gap=%d, line_size=%d, container=%d\n", 
+                   flex_layout->line_count, current_item, item_basis, gap_space, main_size, container_main_size);
+            
             // Check if we need to wrap (only if not the first item in line)
             // CRITICAL FIX: Use wrap value directly - it's now stored as Lexbor constant
             // Check if we need to wrap (only if not the first item in line)
@@ -484,6 +500,8 @@ int create_flex_lines(FlexContainerLayout* flex_layout, ViewBlock** items, int i
             if (flex_layout->wrap != WRAP_NOWRAP && 
                 line->item_count > 0 && 
                 main_size + item_basis + gap_space > container_main_size) {
+                printf("DEBUG: WRAP - item %d needs new line (would be %d > %d)\n", 
+                       current_item, main_size + item_basis + gap_space, container_main_size);
                 break;
             }
             
@@ -495,6 +513,9 @@ int create_flex_lines(FlexContainerLayout* flex_layout, ViewBlock** items, int i
         
         line->main_size = main_size;
         line->free_space = container_main_size - main_size;
+        
+        printf("DEBUG: LINE %d COMPLETE - items: %d, main_size: %d, free_space: %d\n", 
+               flex_layout->line_count, line->item_count, main_size, line->free_space);
         
         // Calculate total flex grow/shrink for this line
         line->total_flex_grow = 0;
@@ -737,6 +758,9 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
             bool right_auto = is_main_axis_horizontal(flex_layout) ? 
                             item->margin_right_auto : item->margin_bottom_auto;
             
+            printf("DEBUG: MAIN_ALIGN_ITEM %d - auto margins: left=%d, right=%d\n", 
+                   i, left_auto, right_auto);
+            
             if (left_auto && right_auto) {
                 // Center item with auto margins on both sides
                 int remaining_space = container_size - get_main_axis_size(item, flex_layout);
@@ -744,6 +768,7 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
             } else {
                 if (left_auto) current_pos += (int)auto_margin_size;
                 
+                printf("DEBUG: MAIN_ALIGN_ITEM %d - positioning at: %d\n", i, current_pos);
                 set_main_axis_position(item, current_pos, flex_layout);
                 current_pos += get_main_axis_size(item, flex_layout);
                 
@@ -774,6 +799,9 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     if (!flex_layout || !line || line->item_count == 0) return;
     
+    printf("DEBUG: ALIGN_CROSS_AXIS - line_cross_size: %d, align_items: %d\n", 
+           line->cross_size, flex_layout->align_items);
+    
     // Find maximum baseline for baseline alignment
     int max_baseline = find_max_baseline(line);
     
@@ -785,6 +813,9 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
         
         int item_cross_size = get_cross_axis_size(item, flex_layout);
         int line_cross_size = line->cross_size;
+        int old_pos = get_cross_axis_position(item, flex_layout);
+        printf("DEBUG: CROSS_ALIGN_ITEM %d - cross_size: %d, old_pos: %d, line_cross_size: %d\n", 
+               i, item_cross_size, old_pos, line_cross_size);
         int cross_pos = 0;
         
         // Check for auto margins in cross axis
@@ -907,14 +938,23 @@ void align_content(FlexContainerLayout* flex_layout) {
     
     // Position lines
     int current_pos = start_pos;
+    printf("DEBUG: ALIGN_CONTENT - lines: %d, start_pos: %d, free_space: %d\n", 
+           flex_layout->line_count, start_pos, free_space);
+    
     for (int i = 0; i < flex_layout->line_count; i++) {
         FlexLineInfo* line = &flex_layout->lines[i];
+        
+        printf("DEBUG: POSITION_LINE %d - cross_pos: %d, cross_size: %d\n", 
+               i, current_pos, line->cross_size);
         
         // Move all items in this line to the new cross position
         for (int j = 0; j < line->item_count; j++) {
             ViewBlock* item = line->items[j];
             int current_cross_pos = get_cross_axis_position(item, flex_layout);
-            set_cross_axis_position(item, current_pos + current_cross_pos, flex_layout);
+            int new_cross_pos = current_pos + current_cross_pos;
+            printf("DEBUG: ITEM %d in line %d - old_cross: %d -> new_cross: %d\n", 
+                   j, i, current_cross_pos, new_cross_pos);
+            set_cross_axis_position(item, new_cross_pos, flex_layout);
         }
         
         current_pos += line->cross_size + line_spacing;
@@ -1003,7 +1043,24 @@ int get_cross_axis_size(ViewBlock* item, FlexContainerLayout* flex_layout) {
 }
 
 int get_cross_axis_position(ViewBlock* item, FlexContainerLayout* flex_layout) {
-    return is_main_axis_horizontal(flex_layout) ? item->y : item->x;
+    // CRITICAL FIX: Return position relative to container content area, not absolute position
+    ViewBlock* container = (ViewBlock*)item->parent;
+    int border_offset = 0;
+    
+    if (container && container->bound && container->bound->border) {
+        if (is_main_axis_horizontal(flex_layout)) {
+            border_offset = container->bound->border->width.top;
+        } else {
+            border_offset = container->bound->border->width.left;
+        }
+    }
+    
+    // Return position relative to content area (subtract border offset)
+    if (is_main_axis_horizontal(flex_layout)) {
+        return item->y - border_offset;
+    } else {
+        return item->x - border_offset;
+    }
 }
 
 void set_main_axis_position(ViewBlock* item, int position, FlexContainerLayout* flex_layout) {
