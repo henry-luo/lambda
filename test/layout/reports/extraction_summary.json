@@ -1,5 +1,5 @@
 {
-  "extraction_date": "2025-09-27T11:54:58.867Z",
+  "extraction_date": "2025-09-27T12:50:05.123Z",
   "total_files": 37,
   "successful": 37,
   "failed": 0,
@@ -9,147 +9,147 @@
       "category": "basic",
       "file": "block_001_margin_padding.html",
       "success": true,
-      "element_count": 7,
+      "element_count": 8,
       "error": null
     },
     {
       "category": "basic",
       "file": "box_001_basic_div.html",
       "success": true,
-      "element_count": 10,
+      "element_count": 12,
       "error": null
     },
     {
       "category": "basic",
       "file": "box_002_margin_padding.html",
       "success": true,
-      "element_count": 10,
+      "element_count": 12,
       "error": null
     },
     {
       "category": "basic",
       "file": "box_003_border.html",
       "success": true,
-      "element_count": 10,
+      "element_count": 12,
       "error": null
     },
     {
       "category": "basic",
       "file": "box_004_box_sizing.html",
       "success": true,
-      "element_count": 11,
+      "element_count": 13,
       "error": null
     },
     {
       "category": "basic",
       "file": "box_005_block_flow.html",
       "success": true,
-      "element_count": 12,
+      "element_count": 14,
       "error": null
     },
     {
       "category": "basic",
       "file": "code_001_basic_blocks.html",
       "success": true,
-      "element_count": 14,
+      "element_count": 15,
       "error": null
     },
     {
       "category": "basic",
       "file": "flex_001_basic_layout.html",
       "success": true,
-      "element_count": 12,
+      "element_count": 14,
       "error": null
     },
     {
       "category": "basic",
       "file": "flex_001_row_space_between.html",
       "success": true,
-      "element_count": 8,
+      "element_count": 9,
       "error": null
     },
     {
       "category": "basic",
       "file": "flex_002_wrap.html",
       "success": true,
-      "element_count": 12,
+      "element_count": 14,
       "error": null
     },
     {
       "category": "basic",
       "file": "flex_003_align_items.html",
       "success": true,
-      "element_count": 11,
+      "element_count": 13,
       "error": null
     },
     {
       "category": "basic",
       "file": "flex_004_column_direction.html",
       "success": true,
-      "element_count": 11,
+      "element_count": 13,
       "error": null
     },
     {
       "category": "basic",
       "file": "flex_005_flex_grow.html",
       "success": true,
-      "element_count": 11,
+      "element_count": 13,
       "error": null
     },
     {
       "category": "basic",
       "file": "flex_006_justify_content.html",
       "success": true,
-      "element_count": 11,
+      "element_count": 13,
       "error": null
     },
     {
       "category": "basic",
       "file": "flex_007_row_reverse.html",
       "success": true,
-      "element_count": 11,
+      "element_count": 13,
       "error": null
     },
     {
       "category": "basic",
       "file": "flex_008_flex_basis.html",
       "success": true,
-      "element_count": 11,
+      "element_count": 13,
       "error": null
     },
     {
       "category": "basic",
       "file": "flex_009_auto_margins.html",
       "success": true,
-      "element_count": 10,
+      "element_count": 12,
       "error": null
     },
     {
       "category": "basic",
       "file": "flex_010_wrap_reverse.html",
       "success": true,
-      "element_count": 12,
+      "element_count": 14,
       "error": null
     },
     {
       "category": "basic",
       "file": "hr_001_basic_rules.html",
       "success": true,
-      "element_count": 16,
+      "element_count": 18,
       "error": null
     },
     {
       "category": "basic",
       "file": "image_001_basic_layout.html",
       "success": true,
-      "element_count": 14,
+      "element_count": 16,
       "error": null
     },
     {
       "category": "basic",
       "file": "list_001_basic_lists.html",
       "success": true,
-      "element_count": 18,
+      "element_count": 17,
       "error": null
     },
     {
@@ -163,105 +163,105 @@
       "category": "basic",
       "file": "table_001_basic_table.html",
       "success": true,
-      "element_count": 29,
+      "element_count": 25,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_border_collapse.html",
       "success": true,
-      "element_count": 38,
+      "element_count": 21,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_borders.html",
       "success": true,
-      "element_count": 27,
+      "element_count": 21,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_caption_variations.html",
       "success": true,
-      "element_count": 69,
+      "element_count": 25,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_colspan_test.html",
       "success": true,
-      "element_count": 26,
+      "element_count": 22,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_complex_spans.html",
       "success": true,
-      "element_count": 34,
+      "element_count": 26,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_edge_cases.html",
       "success": true,
-      "element_count": 91,
+      "element_count": 34,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_nested_content.html",
       "success": true,
-      "element_count": 67,
+      "element_count": 35,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_rowspan_colspan.html",
       "success": true,
-      "element_count": 26,
+      "element_count": 22,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_rowspan_test.html",
       "success": true,
-      "element_count": 31,
+      "element_count": 23,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_simple.html",
       "success": true,
-      "element_count": 26,
+      "element_count": 21,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_test_suite.html",
       "success": true,
-      "element_count": 122,
+      "element_count": 40,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_vertical_alignment.html",
       "success": true,
-      "element_count": 38,
+      "element_count": 34,
       "error": null
     },
     {
       "category": "basic",
       "file": "table_width_algorithms.html",
       "success": true,
-      "element_count": 54,
+      "element_count": 22,
       "error": null
     },
     {
       "category": "basic",
       "file": "text_001_basic_typography.html",
       "success": true,
-      "element_count": 14,
+      "element_count": 16,
       "error": null
     }
   ]

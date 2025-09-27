@@ -21,13 +21,34 @@ async function extractLayoutFromFile(htmlFilePath) {
             args: [
                 '--no-sandbox',
                 '--disable-web-security',
+                '--font-render-hinting=none',
                 '--disable-dev-shm-usage',
-                '--disable-gpu'
-            ]
+                '--disable-gpu',
+                '--disable-features=VizDisplayCompositor',
+                '--disable-extensions',
+                '--no-first-run',
+                '--disable-default-apps'
+            ],
+            timeout: 30000
         });
         
         const page = await browser.newPage();
-        await page.setViewport({ width: 1200, height: 800 });
+        
+        // Set consistent viewport and disable animations (from extract_layout.js)
+        await page.setViewport({ width: 1200, height: 800, deviceScaleFactor: 1 });
+        await page.evaluateOnNewDocument(() => {
+            // Disable animations for consistent layout
+            const style = document.createElement('style');
+            style.textContent = `
+                *, *::before, *::after {
+                    animation-duration: 0s !important;
+                    animation-delay: 0s !important;
+                    transition-duration: 0s !important;
+                    transition-delay: 0s !important;
+                }
+            `;
+            document.head.appendChild(style);
+        });
         console.log('✅ Browser ready');
         
         // Load HTML file
@@ -43,6 +64,89 @@ async function extractLayoutFromFile(htmlFilePath) {
         // Extract layout data
         console.log('📊 Extracting layout data...');
         const layoutData = await page.evaluate(() => {
+            // Helper to extract text node positions
+            const extractTextNodePositions = (element) => {
+                const textNodes = [];
+                
+                // Walk through all child nodes to find text nodes
+                const walker = document.createTreeWalker(
+                    element,
+                    NodeFilter.SHOW_TEXT,
+                    {
+                        acceptNode: function(node) {
+                            // Only include text nodes with non-whitespace content
+                            if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+                                return NodeFilter.FILTER_ACCEPT;
+                            }
+                            return NodeFilter.FILTER_REJECT;
+                        }
+                    }
+                );
+                
+                let textNode;
+                while (textNode = walker.nextNode()) {
+                    try {
+                        // Create range for this text node
+                        const range = document.createRange();
+                        range.selectNodeContents(textNode);
+                        const rects = range.getClientRects(); // one per line fragment
+                        
+                        // Convert ClientRects to plain objects and round coordinates
+                        const rectArray = Array.from(rects).map(rect => ({
+                            x: Math.round(rect.left * 100) / 100,
+                            y: Math.round(rect.top * 100) / 100,
+                            width: Math.round(rect.width * 100) / 100,
+                            height: Math.round(rect.height * 100) / 100,
+                            right: Math.round(rect.right * 100) / 100,
+                            bottom: Math.round(rect.bottom * 100) / 100
+                        }));
+                        
+                        // Only add if we have valid rects
+                        if (rectArray.length > 0) {
+                            textNodes.push({
+                                text: textNode.textContent,
+                                parentElement: textNode.parentElement?.tagName.toLowerCase() || null,
+                                rects: rectArray,
+                                length: textNode.textContent.length,
+                                // Additional metadata
+                                isWhitespaceOnly: !textNode.textContent.trim(),
+                                startOffset: 0, // Could be enhanced to track actual offset in parent
+                                endOffset: textNode.textContent.length
+                            });
+                        }
+                        
+                        range.detach(); // Clean up range
+                    } catch (error) {
+                        // Skip text nodes that can't be measured (e.g., in hidden elements)
+                        console.warn('Could not extract position for text node:', textNode.textContent, error);
+                    }
+                }
+                
+                return textNodes;
+            };
+            
+            // Helper to generate enhanced CSS selector (from extract_layout.js)
+            const generateSelector = (element) => {
+                if (element.id) return `#${element.id}`;
+                
+                let selector = element.tagName.toLowerCase();
+                if (element.className) {
+                    selector += '.' + element.className.split(' ').filter(c => c.trim()).join('.');
+                }
+                
+                // Add index if there are siblings with same tag
+                const parent = element.parentElement;
+                if (parent) {
+                    const siblings = Array.from(parent.children).filter(s => s.tagName === element.tagName);
+                    if (siblings.length > 1) {
+                        const index = siblings.indexOf(element);
+                        selector += `:nth-of-type(${index + 1})`;
+                    }
+                }
+                
+                return selector;
+            };
+            
             const elements = document.querySelectorAll('*');
             const results = {};
             
@@ -50,54 +154,122 @@ async function extractLayoutFromFile(htmlFilePath) {
                 const rect = element.getBoundingClientRect();
                 const computed = window.getComputedStyle(element);
                 
-                // Generate simple selector
-                let selector = element.tagName.toLowerCase();
-                if (element.id) {
-                    selector = `#${element.id}`;
-                } else if (element.className) {
-                    const classes = element.className.split(' ').filter(c => c.trim());
-                    if (classes.length > 0) {
-                        selector += '.' + classes.join('.');
-                    }
-                }
+                // Generate enhanced selector (from extract_layout.js)
+                const selector = generateSelector(element);
                 
-                // Add index to make unique
-                const key = `${selector}_${index}`;
+                // Use selector as key, but fall back to indexed key if needed
+                const key = selector || `${element.tagName.toLowerCase()}_${index}`;
                 
                 results[key] = {
+                    selector: key,
                     tag: element.tagName.toLowerCase(),
-                    selector: selector,
+                    id: element.id || null,
+                    classes: element.className ? element.className.split(' ').filter(c => c.trim()) : [],
+                    // Layout properties (enhanced from extract_layout.js)
                     layout: {
                         x: Math.round(rect.left * 100) / 100,
                         y: Math.round(rect.top * 100) / 100,
                         width: Math.round(rect.width * 100) / 100,
-                        height: Math.round(rect.height * 100) / 100
+                        height: Math.round(rect.height * 100) / 100,
+                        
+                        // Content box dimensions
+                        contentWidth: element.clientWidth,
+                        contentHeight: element.clientHeight,
+                        
+                        // Scroll dimensions
+                        scrollWidth: element.scrollWidth,
+                        scrollHeight: element.scrollHeight
                     },
-                    css: {
+                    
+                    // Comprehensive CSS properties (enhanced from extract_layout.js)
+                    computed: {
                         display: computed.display,
                         position: computed.position,
-                        flexDirection: computed.flexDirection,
-                        justifyContent: computed.justifyContent,
-                        alignItems: computed.alignItems,
-                        flexGrow: parseFloat(computed.flexGrow) || 0,
-                        flexShrink: parseFloat(computed.flexShrink) || 1,
-                        flexBasis: computed.flexBasis,
+                        
+                        // Box model
                         marginTop: parseFloat(computed.marginTop) || 0,
                         marginRight: parseFloat(computed.marginRight) || 0,
                         marginBottom: parseFloat(computed.marginBottom) || 0,
                         marginLeft: parseFloat(computed.marginLeft) || 0,
+                        
                         paddingTop: parseFloat(computed.paddingTop) || 0,
                         paddingRight: parseFloat(computed.paddingRight) || 0,
                         paddingBottom: parseFloat(computed.paddingBottom) || 0,
-                        paddingLeft: parseFloat(computed.paddingLeft) || 0
-                    }
+                        paddingLeft: parseFloat(computed.paddingLeft) || 0,
+                        
+                        borderTopWidth: parseFloat(computed.borderTopWidth) || 0,
+                        borderRightWidth: parseFloat(computed.borderRightWidth) || 0,
+                        borderBottomWidth: parseFloat(computed.borderBottomWidth) || 0,
+                        borderLeftWidth: parseFloat(computed.borderLeftWidth) || 0,
+                        
+                        // Flexbox properties
+                        flexDirection: computed.flexDirection,
+                        flexWrap: computed.flexWrap,
+                        justifyContent: computed.justifyContent,
+                        alignItems: computed.alignItems,
+                        alignContent: computed.alignContent,
+                        flexGrow: parseFloat(computed.flexGrow) || 0,
+                        flexShrink: parseFloat(computed.flexShrink) || 1,
+                        flexBasis: computed.flexBasis,
+                        alignSelf: computed.alignSelf,
+                        order: parseInt(computed.order) || 0,
+                        gap: computed.gap,
+                        
+                        // Typography
+                        fontSize: parseFloat(computed.fontSize) || 16,
+                        lineHeight: computed.lineHeight,
+                        fontFamily: computed.fontFamily,
+                        fontWeight: computed.fontWeight,
+                        textAlign: computed.textAlign,
+                        verticalAlign: computed.verticalAlign,
+                        
+                        // Positioning
+                        top: computed.top,
+                        right: computed.right,
+                        bottom: computed.bottom,
+                        left: computed.left,
+                        zIndex: computed.zIndex,
+                        
+                        // Overflow
+                        overflow: computed.overflow,
+                        overflowX: computed.overflowX,
+                        overflowY: computed.overflowY
+                    },
+                    // Text content information
+                    textContent: element.textContent?.trim() || null,
+                    hasTextNodes: Array.from(element.childNodes).some(n => n.nodeType === 3 && n.textContent.trim()),
+                    
+                    // Text node positions using Range.getClientRects()
+                    textNodes: extractTextNodePositions(element),
+                    
+                    // Hierarchy information (from extract_layout.js)
+                    childCount: element.children.length,
+                    depth: (selector.match(/>/g) || []).length
                 };
             });
+            
+            // Add viewport information (enhanced from extract_layout.js)
+            results['__viewport__'] = {
+                width: window.innerWidth,
+                height: window.innerHeight,
+                devicePixelRatio: window.devicePixelRatio
+            };
+            
+            // Add test metadata if available (from extract_layout.js)
+            const metadataElement = document.getElementById('test-metadata');
+            if (metadataElement) {
+                try {
+                    results['__metadata__'] = JSON.parse(metadataElement.textContent);
+                } catch (e) {
+                    results['__metadata__'] = { error: 'Failed to parse metadata' };
+                }
+            }
             
             return {
                 viewport: {
                     width: window.innerWidth,
-                    height: window.innerHeight
+                    height: window.innerHeight,
+                    devicePixelRatio: window.devicePixelRatio
                 },
                 elements: results
             };
@@ -106,14 +278,20 @@ async function extractLayoutFromFile(htmlFilePath) {
         console.log('✅ Layout data extracted');
         console.log(`📈 Found ${Object.keys(layoutData.elements).length} elements`);
         
-        // Create reference JSON
+        // Count text nodes for reporting
+        const totalTextNodes = Object.values(layoutData.elements)
+            .reduce((sum, elem) => sum + (elem.textNodes ? elem.textNodes.length : 0), 0);
+        console.log(`📝 Extracted ${totalTextNodes} text nodes with position data`);
+        
+        // Create enhanced reference JSON (from extract_layout.js)
         const reference = {
             test_file: path.basename(htmlFilePath),
+            extraction_date: new Date().toISOString(),
             browser_info: {
                 userAgent: await page.evaluate(() => navigator.userAgent),
-                viewport: { width: 1200, height: 800 }
+                viewport: await page.viewport()
             },
-            layout_data: layoutData
+            layout_data: layoutData.elements  // Use elements from the enhanced structure
         };
         
         // Save to reference directory
@@ -198,11 +376,11 @@ async function extractAllTestFiles(category = null) {
             results.push({
                 ...fileInfo,
                 success: true,
-                elementCount: Object.keys(result.layout_data.elements).length,
+                elementCount: Object.keys(result.layout_data).length,
                 result: result
             });
             successCount++;
-            console.log(`✅ Success: ${Object.keys(result.layout_data.elements).length} elements extracted`);
+            console.log(`✅ Success: ${Object.keys(result.layout_data).length} elements extracted`);
         } catch (error) {
             results.push({
                 ...fileInfo,
@@ -309,11 +487,23 @@ Generated files:
     
     try {
         if (singleFile) {
-            // Single file mode
-            await fs.access(singleFile);
-            const result = await extractLayoutFromFile(singleFile);
+            // Single file mode - resolve path correctly
+            let resolvedPath = singleFile;
+            
+            // If path starts with 'test/', it's relative to project root, so adjust for current directory
+            if (singleFile.startsWith('test/')) {
+                resolvedPath = path.join(__dirname, '..', '..', '..', singleFile);
+            }
+            // If path starts with '../', it's already relative to tools directory
+            else if (!path.isAbsolute(singleFile)) {
+                resolvedPath = path.resolve(singleFile);
+            }
+            
+            console.log(`📍 Resolved path: ${resolvedPath}`);
+            await fs.access(resolvedPath);
+            const result = await extractLayoutFromFile(resolvedPath);
             console.log(`\n🎉 Extraction completed successfully!`);
-            console.log(`✅ Reference JSON created with ${Object.keys(result.layout_data.elements).length} elements`);
+            console.log(`✅ Reference JSON created with ${Object.keys(result.layout_data).length} elements`);
         } else {
             // Batch mode
             await extractAllTestFiles(category);

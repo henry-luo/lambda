@@ -1,970 +1,3284 @@
 {
   "test_file": "table_complex_spans.html",
+  "extraction_date": "2025-09-27T12:49:52.353Z",
   "browser_info": {
     "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/140.0.0.0 Safari/537.36",
     "viewport": {
       "width": 1200,
-      "height": 800
+      "height": 800,
+      "deviceScaleFactor": 1
     }
   },
   "layout_data": {
-    "viewport": {
-      "width": 1200,
-      "height": 800
+    "html": {
+      "selector": "html",
+      "tag": "html",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 1200,
+        "height": 310,
+        "contentWidth": 1200,
+        "contentHeight": 800,
+        "scrollWidth": 1200,
+        "scrollHeight": 800
+      },
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Table Complex Spans Test\n  \n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; text-align: center; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    .highlight { background: #ffffcc !important; }\n  \n\n\n  \n    Complex Colspan and Rowspan Combinations\n    \n      \n        Q1 2024 Sales Report\n      \n      \n        Region\n        Jan\n        Feb\n        Mar\n      \n    \n    \n      \n        North America\n        $10,000\n        $12,000\n        $15,000\n      \n      \n        Total: $37,000\n      \n      \n        Europe\n        $8,000\n        $9,500\n        $11,000\n      \n      \n        Total: $28,500\n      \n      \n        Grand Total\n        $65,500",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Complex Colspan and Rowspan Combinations",
+          "parentElement": "caption",
+          "rects": [
+            {
+              "x": 28.09,
+              "y": 16,
+              "width": 354.7,
+              "height": 17,
+              "right": 382.8,
+              "bottom": 33
+            }
+          ],
+          "length": 40,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 40
+        },
+        {
+          "text": "Q1 2024 Sales Report",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 123.63,
+              "y": 51,
+              "width": 163.64,
+              "height": 17,
+              "right": 287.27,
+              "bottom": 68
+            }
+          ],
+          "length": 20,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 20
+        },
+        {
+          "text": "Region",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 52.58,
+              "y": 87,
+              "width": 54.22,
+              "height": 17,
+              "right": 106.8,
+              "bottom": 104
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "Jan",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 171.5,
+              "y": 87,
+              "width": 27.58,
+              "height": 17,
+              "right": 199.08,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "Feb",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 254.91,
+              "y": 87,
+              "width": 28.45,
+              "height": 17,
+              "right": 283.36,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "Mar",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 338.75,
+              "y": 87,
+              "width": 28.45,
+              "height": 17,
+              "right": 367.2,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "North America",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 141,
+              "width": 101.38,
+              "height": 17,
+              "right": 130.38,
+              "bottom": 158
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        },
+        {
+          "text": "$10,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 156.38,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 214.22,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "$12,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 240.22,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 298.06,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "$15,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 324.06,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 381.91,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Total: $37,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 218.88,
+              "y": 159,
+              "width": 100.53,
+              "height": 17,
+              "right": 319.41,
+              "bottom": 176
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        },
+        {
+          "text": "Europe",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 53.89,
+              "y": 213,
+              "width": 51.59,
+              "height": 17,
+              "right": 105.48,
+              "bottom": 230
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$8,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 160.83,
+              "y": 195,
+              "width": 48.94,
+              "height": 17,
+              "right": 209.77,
+              "bottom": 212
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$9,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 244.67,
+              "y": 195,
+              "width": 48.94,
+              "height": 17,
+              "right": 293.61,
+              "bottom": 212
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$11,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 324.66,
+              "y": 195,
+              "width": 56.66,
+              "height": 17,
+              "right": 381.31,
+              "bottom": 212
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Total: $28,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 218.88,
+              "y": 231,
+              "width": 100.53,
+              "height": 17,
+              "right": 319.41,
+              "bottom": 248
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        },
+        {
+          "text": "Grand Total",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 80.39,
+              "y": 267,
+              "width": 82.42,
+              "height": 17,
+              "right": 162.81,
+              "bottom": 284
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": "$65,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 282.14,
+              "y": 267,
+              "width": 57.84,
+              "height": 17,
+              "right": 339.98,
+              "bottom": 284
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        }
+      ],
+      "childCount": 2,
+      "depth": 0
     },
-    "elements": {
-      "html_0": {
-        "tag": "html",
-        "selector": "html",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 1200,
-          "height": 310
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+    "head": {
+      "selector": "head",
+      "tag": "head",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
       },
-      "head_1": {
-        "tag": "head",
-        "selector": "head",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "meta_2": {
-        "tag": "meta",
-        "selector": "meta",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "textContent": "Table Complex Spans Test\n  \n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; text-align: center; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    .highlight { background: #ffffcc !important; }",
+      "hasTextNodes": false,
+      "textNodes": [],
+      "childCount": 3,
+      "depth": 0
+    },
+    "meta": {
+      "selector": "meta",
+      "tag": "meta",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
       },
-      "title_3": {
-        "tag": "title",
-        "selector": "title",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "style_4": {
-        "tag": "style",
-        "selector": "style",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "textContent": null,
+      "hasTextNodes": false,
+      "textNodes": [],
+      "childCount": 0,
+      "depth": 0
+    },
+    "title": {
+      "selector": "title",
+      "tag": "title",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
       },
-      "body_5": {
-        "tag": "body",
-        "selector": "body",
-        "layout": {
-          "x": 16,
-          "y": 16,
-          "width": 1168,
-          "height": 278
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 16,
-          "marginRight": 16,
-          "marginBottom": 16,
-          "marginLeft": 16,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "table_6": {
-        "tag": "table",
-        "selector": "table",
-        "layout": {
-          "x": 16,
-          "y": 16,
-          "width": 378.91,
-          "height": 278
-        },
-        "css": {
-          "display": "table",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "textContent": "Table Complex Spans Test",
+      "hasTextNodes": true,
+      "textNodes": [],
+      "childCount": 0,
+      "depth": 0
+    },
+    "style": {
+      "selector": "style",
+      "tag": "style",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
       },
-      "caption_7": {
-        "tag": "caption",
-        "selector": "caption",
-        "layout": {
-          "x": 16,
-          "y": 16,
-          "width": 378.91,
-          "height": 18
-        },
-        "css": {
-          "display": "table-caption",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 8,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "thead_8": {
-        "tag": "thead",
-        "selector": "thead",
-        "layout": {
-          "x": 16,
-          "y": 42,
-          "width": 378.91,
-          "height": 72
-        },
-        "css": {
-          "display": "table-header-group",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "textContent": "body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; text-align: center; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    .highlight { background: #ffffcc !important; }",
+      "hasTextNodes": true,
+      "textNodes": [],
+      "childCount": 0,
+      "depth": 0
+    },
+    "body": {
+      "selector": "body",
+      "tag": "body",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 16,
+        "width": 1168,
+        "height": 278,
+        "contentWidth": 1168,
+        "contentHeight": 278,
+        "scrollWidth": 1168,
+        "scrollHeight": 278
       },
-      "tr_9": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 42,
-          "width": 378.91,
-          "height": 36
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 16,
+        "marginRight": 16,
+        "marginBottom": 16,
+        "marginLeft": 16,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "th_10": {
-        "tag": "th",
-        "selector": "th",
-        "layout": {
-          "x": 16,
-          "y": 42,
-          "width": 378.91,
-          "height": 36
+      "textContent": "Complex Colspan and Rowspan Combinations\n    \n      \n        Q1 2024 Sales Report\n      \n      \n        Region\n        Jan\n        Feb\n        Mar\n      \n    \n    \n      \n        North America\n        $10,000\n        $12,000\n        $15,000\n      \n      \n        Total: $37,000\n      \n      \n        Europe\n        $8,000\n        $9,500\n        $11,000\n      \n      \n        Total: $28,500\n      \n      \n        Grand Total\n        $65,500",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Complex Colspan and Rowspan Combinations",
+          "parentElement": "caption",
+          "rects": [
+            {
+              "x": 28.09,
+              "y": 16,
+              "width": 354.7,
+              "height": 17,
+              "right": 382.8,
+              "bottom": 33
+            }
+          ],
+          "length": 40,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 40
         },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
+        {
+          "text": "Q1 2024 Sales Report",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 123.63,
+              "y": 51,
+              "width": 163.64,
+              "height": 17,
+              "right": 287.27,
+              "bottom": 68
+            }
+          ],
+          "length": 20,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 20
+        },
+        {
+          "text": "Region",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 52.58,
+              "y": 87,
+              "width": 54.22,
+              "height": 17,
+              "right": 106.8,
+              "bottom": 104
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "Jan",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 171.5,
+              "y": 87,
+              "width": 27.58,
+              "height": 17,
+              "right": 199.08,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "Feb",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 254.91,
+              "y": 87,
+              "width": 28.45,
+              "height": 17,
+              "right": 283.36,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "Mar",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 338.75,
+              "y": 87,
+              "width": 28.45,
+              "height": 17,
+              "right": 367.2,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "North America",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 141,
+              "width": 101.38,
+              "height": 17,
+              "right": 130.38,
+              "bottom": 158
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        },
+        {
+          "text": "$10,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 156.38,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 214.22,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "$12,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 240.22,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 298.06,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "$15,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 324.06,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 381.91,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Total: $37,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 218.88,
+              "y": 159,
+              "width": 100.53,
+              "height": 17,
+              "right": 319.41,
+              "bottom": 176
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        },
+        {
+          "text": "Europe",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 53.89,
+              "y": 213,
+              "width": 51.59,
+              "height": 17,
+              "right": 105.48,
+              "bottom": 230
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$8,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 160.83,
+              "y": 195,
+              "width": 48.94,
+              "height": 17,
+              "right": 209.77,
+              "bottom": 212
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$9,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 244.67,
+              "y": 195,
+              "width": 48.94,
+              "height": 17,
+              "right": 293.61,
+              "bottom": 212
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$11,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 324.66,
+              "y": 195,
+              "width": 56.66,
+              "height": 17,
+              "right": 381.31,
+              "bottom": 212
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Total: $28,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 218.88,
+              "y": 231,
+              "width": 100.53,
+              "height": 17,
+              "right": 319.41,
+              "bottom": 248
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        },
+        {
+          "text": "Grand Total",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 80.39,
+              "y": 267,
+              "width": 82.42,
+              "height": 17,
+              "right": 162.81,
+              "bottom": 284
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": "$65,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 282.14,
+              "y": 267,
+              "width": 57.84,
+              "height": 17,
+              "right": 339.98,
+              "bottom": 284
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
         }
+      ],
+      "childCount": 1,
+      "depth": 0
+    },
+    "table": {
+      "selector": "table",
+      "tag": "table",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 16,
+        "width": 378.91,
+        "height": 278,
+        "contentWidth": 379,
+        "contentHeight": 278,
+        "scrollWidth": 379,
+        "scrollHeight": 278
       },
-      "tr_11": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 78,
-          "width": 378.91,
-          "height": 36
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "table",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "th_12": {
-        "tag": "th",
-        "selector": "th",
-        "layout": {
-          "x": 16,
-          "y": 78,
-          "width": 127.38,
-          "height": 36
+      "textContent": "Complex Colspan and Rowspan Combinations\n    \n      \n        Q1 2024 Sales Report\n      \n      \n        Region\n        Jan\n        Feb\n        Mar\n      \n    \n    \n      \n        North America\n        $10,000\n        $12,000\n        $15,000\n      \n      \n        Total: $37,000\n      \n      \n        Europe\n        $8,000\n        $9,500\n        $11,000\n      \n      \n        Total: $28,500\n      \n      \n        Grand Total\n        $65,500",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Complex Colspan and Rowspan Combinations",
+          "parentElement": "caption",
+          "rects": [
+            {
+              "x": 28.09,
+              "y": 16,
+              "width": 354.7,
+              "height": 17,
+              "right": 382.8,
+              "bottom": 33
+            }
+          ],
+          "length": 40,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 40
         },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
+        {
+          "text": "Q1 2024 Sales Report",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 123.63,
+              "y": 51,
+              "width": 163.64,
+              "height": 17,
+              "right": 287.27,
+              "bottom": 68
+            }
+          ],
+          "length": 20,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 20
+        },
+        {
+          "text": "Region",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 52.58,
+              "y": 87,
+              "width": 54.22,
+              "height": 17,
+              "right": 106.8,
+              "bottom": 104
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "Jan",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 171.5,
+              "y": 87,
+              "width": 27.58,
+              "height": 17,
+              "right": 199.08,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "Feb",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 254.91,
+              "y": 87,
+              "width": 28.45,
+              "height": 17,
+              "right": 283.36,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "Mar",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 338.75,
+              "y": 87,
+              "width": 28.45,
+              "height": 17,
+              "right": 367.2,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "North America",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 141,
+              "width": 101.38,
+              "height": 17,
+              "right": 130.38,
+              "bottom": 158
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        },
+        {
+          "text": "$10,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 156.38,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 214.22,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "$12,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 240.22,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 298.06,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "$15,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 324.06,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 381.91,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Total: $37,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 218.88,
+              "y": 159,
+              "width": 100.53,
+              "height": 17,
+              "right": 319.41,
+              "bottom": 176
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        },
+        {
+          "text": "Europe",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 53.89,
+              "y": 213,
+              "width": 51.59,
+              "height": 17,
+              "right": 105.48,
+              "bottom": 230
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$8,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 160.83,
+              "y": 195,
+              "width": 48.94,
+              "height": 17,
+              "right": 209.77,
+              "bottom": 212
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$9,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 244.67,
+              "y": 195,
+              "width": 48.94,
+              "height": 17,
+              "right": 293.61,
+              "bottom": 212
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$11,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 324.66,
+              "y": 195,
+              "width": 56.66,
+              "height": 17,
+              "right": 381.31,
+              "bottom": 212
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Total: $28,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 218.88,
+              "y": 231,
+              "width": 100.53,
+              "height": 17,
+              "right": 319.41,
+              "bottom": 248
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        },
+        {
+          "text": "Grand Total",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 80.39,
+              "y": 267,
+              "width": 82.42,
+              "height": 17,
+              "right": 162.81,
+              "bottom": 284
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": "$65,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 282.14,
+              "y": 267,
+              "width": 57.84,
+              "height": 17,
+              "right": 339.98,
+              "bottom": 284
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
         }
+      ],
+      "childCount": 3,
+      "depth": 0
+    },
+    "caption": {
+      "selector": "caption",
+      "tag": "caption",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 16,
+        "width": 378.91,
+        "height": 18,
+        "contentWidth": 379,
+        "contentHeight": 18,
+        "scrollWidth": 379,
+        "scrollHeight": 18
       },
-      "th_13": {
-        "tag": "th",
-        "selector": "th",
-        "layout": {
-          "x": 143.38,
-          "y": 78,
-          "width": 83.84,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
+      "computed": {
+        "display": "table-caption",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 8,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "-webkit-center",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "th_14": {
-        "tag": "th",
-        "selector": "th",
-        "layout": {
-          "x": 227.22,
-          "y": 78,
-          "width": 83.84,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
+      "textContent": "Complex Colspan and Rowspan Combinations",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Complex Colspan and Rowspan Combinations",
+          "parentElement": "caption",
+          "rects": [
+            {
+              "x": 28.09,
+              "y": 16,
+              "width": 354.7,
+              "height": 17,
+              "right": 382.8,
+              "bottom": 33
+            }
+          ],
+          "length": 40,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 40
         }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "thead": {
+      "selector": "thead",
+      "tag": "thead",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 42,
+        "width": 378.91,
+        "height": 72,
+        "contentWidth": 379,
+        "contentHeight": 72,
+        "scrollWidth": 379,
+        "scrollHeight": 72
       },
-      "th_15": {
-        "tag": "th",
-        "selector": "th",
-        "layout": {
-          "x": 311.06,
-          "y": 78,
-          "width": 83.84,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
+      "computed": {
+        "display": "table-header-group",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "tbody_16": {
-        "tag": "tbody",
-        "selector": "tbody",
-        "layout": {
-          "x": 16,
-          "y": 114,
-          "width": 378.91,
-          "height": 180
+      "textContent": "Q1 2024 Sales Report\n      \n      \n        Region\n        Jan\n        Feb\n        Mar",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Q1 2024 Sales Report",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 123.63,
+              "y": 51,
+              "width": 163.64,
+              "height": 17,
+              "right": 287.27,
+              "bottom": 68
+            }
+          ],
+          "length": 20,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 20
         },
-        "css": {
-          "display": "table-row-group",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
+        {
+          "text": "Region",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 52.58,
+              "y": 87,
+              "width": 54.22,
+              "height": 17,
+              "right": 106.8,
+              "bottom": 104
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "Jan",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 171.5,
+              "y": 87,
+              "width": 27.58,
+              "height": 17,
+              "right": 199.08,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "Feb",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 254.91,
+              "y": 87,
+              "width": 28.45,
+              "height": 17,
+              "right": 283.36,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "Mar",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 338.75,
+              "y": 87,
+              "width": 28.45,
+              "height": 17,
+              "right": 367.2,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
         }
+      ],
+      "childCount": 2,
+      "depth": 0
+    },
+    "tr:nth-of-type(1)": {
+      "selector": "tr:nth-of-type(1)",
+      "tag": "tr",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 114,
+        "width": 378.91,
+        "height": 36,
+        "contentWidth": 379,
+        "contentHeight": 36,
+        "scrollWidth": 379,
+        "scrollHeight": 72
       },
-      "tr_17": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 114,
-          "width": 378.91,
-          "height": 36
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "table-row",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "td.highlight_18": {
-        "tag": "td",
-        "selector": "td.highlight",
-        "layout": {
-          "x": 16,
-          "y": 114,
-          "width": 127.38,
-          "height": 72
+      "textContent": "North America\n        $10,000\n        $12,000\n        $15,000",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "North America",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 141,
+              "width": 101.38,
+              "height": 17,
+              "right": 130.38,
+              "bottom": 158
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
         },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
+        {
+          "text": "$10,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 156.38,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 214.22,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "$12,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 240.22,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 298.06,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "$15,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 324.06,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 381.91,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
         }
+      ],
+      "childCount": 4,
+      "depth": 0
+    },
+    "th": {
+      "selector": "th",
+      "tag": "th",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 42,
+        "width": 378.91,
+        "height": 36,
+        "contentWidth": 377,
+        "contentHeight": 34,
+        "scrollWidth": 377,
+        "scrollHeight": 34
       },
-      "td_19": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 143.38,
-          "y": 114,
-          "width": 83.84,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "td_20": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 227.22,
-          "y": 114,
-          "width": 83.84,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
+      "textContent": "Q1 2024 Sales Report",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Q1 2024 Sales Report",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 123.63,
+              "y": 51,
+              "width": 163.64,
+              "height": 17,
+              "right": 287.27,
+              "bottom": 68
+            }
+          ],
+          "length": 20,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 20
         }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "tr:nth-of-type(2)": {
+      "selector": "tr:nth-of-type(2)",
+      "tag": "tr",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 150,
+        "width": 378.91,
+        "height": 36,
+        "contentWidth": 379,
+        "contentHeight": 36,
+        "scrollWidth": 379,
+        "scrollHeight": 36
       },
-      "td_21": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 311.06,
-          "y": 114,
-          "width": 83.84,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
+      "computed": {
+        "display": "table-row",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "tr_22": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 150,
-          "width": 378.91,
-          "height": 36
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
+      "textContent": "Total: $37,000",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Total: $37,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 218.88,
+              "y": 159,
+              "width": 100.53,
+              "height": 17,
+              "right": 319.41,
+              "bottom": 176
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
         }
+      ],
+      "childCount": 1,
+      "depth": 0
+    },
+    "th:nth-of-type(1)": {
+      "selector": "th:nth-of-type(1)",
+      "tag": "th",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 78,
+        "width": 127.38,
+        "height": 36,
+        "contentWidth": 125,
+        "contentHeight": 34,
+        "scrollWidth": 125,
+        "scrollHeight": 34
       },
-      "td_23": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 143.38,
-          "y": 150,
-          "width": 251.53,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "tr_24": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 186,
-          "width": 378.91,
-          "height": 36
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
+      "textContent": "Region",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Region",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 52.58,
+              "y": 87,
+              "width": 54.22,
+              "height": 17,
+              "right": 106.8,
+              "bottom": 104
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
         }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "th:nth-of-type(2)": {
+      "selector": "th:nth-of-type(2)",
+      "tag": "th",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 143.38,
+        "y": 78,
+        "width": 83.84,
+        "height": 36,
+        "contentWidth": 82,
+        "contentHeight": 34,
+        "scrollWidth": 82,
+        "scrollHeight": 34
       },
-      "td.highlight_25": {
-        "tag": "td",
-        "selector": "td.highlight",
-        "layout": {
-          "x": 16,
-          "y": 186,
-          "width": 127.38,
-          "height": 72
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "td_26": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 143.38,
-          "y": 186,
-          "width": 83.84,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
+      "textContent": "Jan",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Jan",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 171.5,
+              "y": 87,
+              "width": 27.58,
+              "height": 17,
+              "right": 199.08,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
         }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "th:nth-of-type(3)": {
+      "selector": "th:nth-of-type(3)",
+      "tag": "th",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 227.22,
+        "y": 78,
+        "width": 83.84,
+        "height": 36,
+        "contentWidth": 82,
+        "contentHeight": 34,
+        "scrollWidth": 82,
+        "scrollHeight": 34
       },
-      "td_27": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 227.22,
-          "y": 186,
-          "width": 83.84,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "td_28": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 311.06,
-          "y": 186,
-          "width": 83.84,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
+      "textContent": "Feb",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Feb",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 254.91,
+              "y": 87,
+              "width": 28.45,
+              "height": 17,
+              "right": 283.36,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
         }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "th:nth-of-type(4)": {
+      "selector": "th:nth-of-type(4)",
+      "tag": "th",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 311.06,
+        "y": 78,
+        "width": 83.84,
+        "height": 36,
+        "contentWidth": 82,
+        "contentHeight": 34,
+        "scrollWidth": 82,
+        "scrollHeight": 34
       },
-      "tr_29": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 222,
-          "width": 378.91,
-          "height": 36
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "td_30": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 143.38,
-          "y": 222,
-          "width": 251.53,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
+      "textContent": "Mar",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Mar",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 338.75,
+              "y": 87,
+              "width": 28.45,
+              "height": 17,
+              "right": 367.2,
+              "bottom": 104
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
         }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "tbody": {
+      "selector": "tbody",
+      "tag": "tbody",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 114,
+        "width": 378.91,
+        "height": 180,
+        "contentWidth": 379,
+        "contentHeight": 180,
+        "scrollWidth": 379,
+        "scrollHeight": 180
       },
-      "tr_31": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 258,
-          "width": 378.91,
-          "height": 36
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "table-row-group",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "td.highlight_32": {
-        "tag": "td",
-        "selector": "td.highlight",
-        "layout": {
-          "x": 16,
-          "y": 258,
-          "width": 211.22,
-          "height": 36
+      "textContent": "North America\n        $10,000\n        $12,000\n        $15,000\n      \n      \n        Total: $37,000\n      \n      \n        Europe\n        $8,000\n        $9,500\n        $11,000\n      \n      \n        Total: $28,500\n      \n      \n        Grand Total\n        $65,500",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "North America",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 141,
+              "width": 101.38,
+              "height": 17,
+              "right": 130.38,
+              "bottom": 158
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
         },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
+        {
+          "text": "$10,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 156.38,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 214.22,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "$12,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 240.22,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 298.06,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "$15,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 324.06,
+              "y": 123,
+              "width": 57.84,
+              "height": 17,
+              "right": 381.91,
+              "bottom": 140
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Total: $37,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 218.88,
+              "y": 159,
+              "width": 100.53,
+              "height": 17,
+              "right": 319.41,
+              "bottom": 176
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        },
+        {
+          "text": "Europe",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 53.89,
+              "y": 213,
+              "width": 51.59,
+              "height": 17,
+              "right": 105.48,
+              "bottom": 230
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$8,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 160.83,
+              "y": 195,
+              "width": 48.94,
+              "height": 17,
+              "right": 209.77,
+              "bottom": 212
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$9,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 244.67,
+              "y": 195,
+              "width": 48.94,
+              "height": 17,
+              "right": 293.61,
+              "bottom": 212
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$11,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 324.66,
+              "y": 195,
+              "width": 56.66,
+              "height": 17,
+              "right": 381.31,
+              "bottom": 212
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Total: $28,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 218.88,
+              "y": 231,
+              "width": 100.53,
+              "height": 17,
+              "right": 319.41,
+              "bottom": 248
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        },
+        {
+          "text": "Grand Total",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 80.39,
+              "y": 267,
+              "width": 82.42,
+              "height": 17,
+              "right": 162.81,
+              "bottom": 284
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": "$65,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 282.14,
+              "y": 267,
+              "width": 57.84,
+              "height": 17,
+              "right": 339.98,
+              "bottom": 284
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
         }
+      ],
+      "childCount": 5,
+      "depth": 0
+    },
+    "td.highlight:nth-of-type(1)": {
+      "selector": "td.highlight:nth-of-type(1)",
+      "tag": "td",
+      "id": null,
+      "classes": [
+        "highlight"
+      ],
+      "layout": {
+        "x": 16,
+        "y": 258,
+        "width": 211.22,
+        "height": 36,
+        "contentWidth": 209,
+        "contentHeight": 34,
+        "scrollWidth": 209,
+        "scrollHeight": 34
       },
-      "td_33": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 227.22,
-          "y": 258,
-          "width": 167.69,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Grand Total",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Grand Total",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 80.39,
+              "y": 267,
+              "width": 82.42,
+              "height": 17,
+              "right": 162.81,
+              "bottom": 284
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
         }
-      }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "td:nth-of-type(2)": {
+      "selector": "td:nth-of-type(2)",
+      "tag": "td",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 227.22,
+        "y": 258,
+        "width": 167.69,
+        "height": 36,
+        "contentWidth": 166,
+        "contentHeight": 34,
+        "scrollWidth": 166,
+        "scrollHeight": 34
+      },
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "$65,500",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "$65,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 282.14,
+              "y": 267,
+              "width": 57.84,
+              "height": 17,
+              "right": 339.98,
+              "bottom": 284
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "td:nth-of-type(3)": {
+      "selector": "td:nth-of-type(3)",
+      "tag": "td",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 227.22,
+        "y": 186,
+        "width": 83.84,
+        "height": 36,
+        "contentWidth": 82,
+        "contentHeight": 34,
+        "scrollWidth": 82,
+        "scrollHeight": 34
+      },
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "$9,500",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "$9,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 244.67,
+              "y": 195,
+              "width": 48.94,
+              "height": 17,
+              "right": 293.61,
+              "bottom": 212
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "td:nth-of-type(4)": {
+      "selector": "td:nth-of-type(4)",
+      "tag": "td",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 311.06,
+        "y": 186,
+        "width": 83.84,
+        "height": 36,
+        "contentWidth": 82,
+        "contentHeight": 34,
+        "scrollWidth": 82,
+        "scrollHeight": 34
+      },
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "$11,000",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "$11,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 324.66,
+              "y": 195,
+              "width": 56.66,
+              "height": 17,
+              "right": 381.31,
+              "bottom": 212
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "td": {
+      "selector": "td",
+      "tag": "td",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 143.38,
+        "y": 222,
+        "width": 251.53,
+        "height": 36,
+        "contentWidth": 250,
+        "contentHeight": 34,
+        "scrollWidth": 250,
+        "scrollHeight": 34
+      },
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Total: $28,500",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Total: $28,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 218.88,
+              "y": 231,
+              "width": 100.53,
+              "height": 17,
+              "right": 319.41,
+              "bottom": 248
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "tr:nth-of-type(3)": {
+      "selector": "tr:nth-of-type(3)",
+      "tag": "tr",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 186,
+        "width": 378.91,
+        "height": 36,
+        "contentWidth": 379,
+        "contentHeight": 36,
+        "scrollWidth": 379,
+        "scrollHeight": 72
+      },
+      "computed": {
+        "display": "table-row",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Europe\n        $8,000\n        $9,500\n        $11,000",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Europe",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 53.89,
+              "y": 213,
+              "width": 51.59,
+              "height": 17,
+              "right": 105.48,
+              "bottom": 230
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$8,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 160.83,
+              "y": 195,
+              "width": 48.94,
+              "height": 17,
+              "right": 209.77,
+              "bottom": 212
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$9,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 244.67,
+              "y": 195,
+              "width": 48.94,
+              "height": 17,
+              "right": 293.61,
+              "bottom": 212
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": "$11,000",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 324.66,
+              "y": 195,
+              "width": 56.66,
+              "height": 17,
+              "right": 381.31,
+              "bottom": 212
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        }
+      ],
+      "childCount": 4,
+      "depth": 0
+    },
+    "tr:nth-of-type(4)": {
+      "selector": "tr:nth-of-type(4)",
+      "tag": "tr",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 222,
+        "width": 378.91,
+        "height": 36,
+        "contentWidth": 379,
+        "contentHeight": 36,
+        "scrollWidth": 379,
+        "scrollHeight": 36
+      },
+      "computed": {
+        "display": "table-row",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Total: $28,500",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Total: $28,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 218.88,
+              "y": 231,
+              "width": 100.53,
+              "height": 17,
+              "right": 319.41,
+              "bottom": 248
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        }
+      ],
+      "childCount": 1,
+      "depth": 0
+    },
+    "tr:nth-of-type(5)": {
+      "selector": "tr:nth-of-type(5)",
+      "tag": "tr",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 258,
+        "width": 378.91,
+        "height": 36,
+        "contentWidth": 379,
+        "contentHeight": 36,
+        "scrollWidth": 379,
+        "scrollHeight": 36
+      },
+      "computed": {
+        "display": "table-row",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Grand Total\n        $65,500",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Grand Total",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 80.39,
+              "y": 267,
+              "width": 82.42,
+              "height": 17,
+              "right": 162.81,
+              "bottom": 284
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": "$65,500",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 282.14,
+              "y": 267,
+              "width": 57.84,
+              "height": 17,
+              "right": 339.98,
+              "bottom": 284
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        }
+      ],
+      "childCount": 2,
+      "depth": 0
+    },
+    "__viewport__": {
+      "width": 1200,
+      "height": 800,
+      "devicePixelRatio": 1
     }
   }
 }

@@ -1,1894 +1,5293 @@
 {
   "test_file": "table_nested_content.html",
+  "extraction_date": "2025-09-27T12:49:55.239Z",
   "browser_info": {
     "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/140.0.0.0 Safari/537.36",
     "viewport": {
       "width": 1200,
-      "height": 800
+      "height": 800,
+      "deviceScaleFactor": 1
     }
   },
   "layout_data": {
-    "viewport": {
-      "width": 1200,
-      "height": 800
+    "html": {
+      "selector": "html",
+      "tag": "html",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 1200,
+        "height": 586,
+        "contentWidth": 1200,
+        "contentHeight": 800,
+        "scrollWidth": 1200,
+        "scrollHeight": 800
+      },
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Table Nested Content Test\n  \n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    \n    .nested-table { margin: 0; font-size: 0.9em; }\n    .nested-table th, .nested-table td { \n      padding: 4px 6px; \n      border: 1px solid #999; \n      background: #f9f9f9; \n    }\n    \n    ul, ol { margin: 0; padding-left: 20px; }\n    .image-placeholder { \n      width: 60px; \n      height: 40px; \n      background: #ddd; \n      border: 1px solid #999; \n      display: inline-block; \n      text-align: center; \n      line-height: 40px; \n      font-size: 12px; \n    }\n  \n\n\n  \n    Table with Nested Content Types\n    \n      \n        Content Type\n        Example\n        Description\n      \n    \n    \n      \n        Nested Table\n        \n          \n            \n              A\n              B\n            \n            \n              1\n              2\n            \n            \n              3\n              4\n            \n          \n        \n        Tables can contain other tables for complex data structures\n      \n      \n        Unordered List\n        \n          \n            First item\n            Second item with longer text\n            Third item\n          \n        \n        Lists help organize related information within cells\n      \n      \n        Ordered List\n        \n          \n            Step one\n            Step two\n            Step three\n          \n        \n        Numbered lists for sequential information\n      \n      \n        Mixed Content\n        \n          IMG\n          Product Name: Widget Pro\n          Price: $29.99\n        \n        Cells can contain multiple content types including images, text formatting, and block elements\n      \n      \n        Multi-row with Lists\n        \n          \n            Feature A\n            Feature B\n          \n        \n        First row of spanned cell\n      \n      \n        \n          \n            Benefit 1\n            Benefit 2\n          \n        \n        Second row of spanned cell",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Table with Nested Content Types",
+          "parentElement": "caption",
+          "rects": [
+            {
+              "x": 439.3,
+              "y": 16,
+              "width": 249.22,
+              "height": 17,
+              "right": 688.52,
+              "bottom": 33
+            }
+          ],
+          "length": 31,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 31
+        },
+        {
+          "text": "Content Type",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 46.05,
+              "y": 51,
+              "width": 101.03,
+              "height": 17,
+              "right": 147.08,
+              "bottom": 68
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "Example",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 267.73,
+              "y": 51,
+              "width": 65.81,
+              "height": 17,
+              "right": 333.55,
+              "bottom": 68
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Description",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 723.97,
+              "y": 51,
+              "width": 88.02,
+              "height": 17,
+              "right": 811.98,
+              "bottom": 68
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": "Nested Table",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 117,
+              "width": 93.11,
+              "height": 17,
+              "right": 122.11,
+              "bottom": 134
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "A",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 207.55,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "B",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 231.95,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "1",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 118,
+              "width": 8.02,
+              "height": 16,
+              "right": 205.16,
+              "bottom": 134
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "2",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 118,
+              "width": 8.02,
+              "height": 16,
+              "right": 229.56,
+              "bottom": 134
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "3",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 144,
+              "width": 8.02,
+              "height": 16,
+              "right": 205.16,
+              "bottom": 160
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "4",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 144,
+              "width": 8.02,
+              "height": 16,
+              "right": 229.56,
+              "bottom": 160
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "Tables can contain other tables for complex data structures",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 117,
+              "width": 418,
+              "height": 17,
+              "right": 855.14,
+              "bottom": 134
+            }
+          ],
+          "length": 59,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 59
+        },
+        {
+          "text": "Unordered List",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 201,
+              "width": 104.95,
+              "height": 17,
+              "right": 133.95,
+              "bottom": 218
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        },
+        {
+          "text": "First item",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 183,
+              "width": 65.78,
+              "height": 17,
+              "right": 275.92,
+              "bottom": 200
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        },
+        {
+          "text": "Second item with longer text",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 201,
+              "width": 201,
+              "height": 17,
+              "right": 411.14,
+              "bottom": 218
+            }
+          ],
+          "length": 28,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 28
+        },
+        {
+          "text": "Third item",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 219,
+              "width": 71.13,
+              "height": 17,
+              "right": 281.27,
+              "bottom": 236
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        },
+        {
+          "text": "Lists help organize related information within cells",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 201,
+              "width": 352.19,
+              "height": 17,
+              "right": 789.33,
+              "bottom": 218
+            }
+          ],
+          "length": 52,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 52
+        },
+        {
+          "text": "Ordered List",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 273,
+              "width": 88.05,
+              "height": 17,
+              "right": 117.05,
+              "bottom": 290
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "Step one",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 255,
+              "width": 64.06,
+              "height": 17,
+              "right": 274.2,
+              "bottom": 272
+            }
+          ],
+          "length": 8,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 8
+        },
+        {
+          "text": "Step two",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 273,
+              "width": 62.27,
+              "height": 17,
+              "right": 272.41,
+              "bottom": 290
+            }
+          ],
+          "length": 8,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 8
+        },
+        {
+          "text": "Step three",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 291,
+              "width": 73.83,
+              "height": 17,
+              "right": 283.97,
+              "bottom": 308
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        },
+        {
+          "text": "Numbered lists for sequential information",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 273,
+              "width": 290.81,
+              "height": 17,
+              "right": 727.95,
+              "bottom": 290
+            }
+          ],
+          "length": 41,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 41
+        },
+        {
+          "text": "Mixed Content",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 381,
+              "width": 103.17,
+              "height": 17,
+              "right": 132.17,
+              "bottom": 398
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        },
+        {
+          "text": "IMG",
+          "parentElement": "div",
+          "rects": [
+            {
+              "x": 209.8,
+              "y": 341,
+              "width": 22.67,
+              "height": 14,
+              "right": 232.47,
+              "bottom": 355
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "Product Name:",
+          "parentElement": "strong",
+          "rects": [
+            {
+              "x": 190.14,
+              "y": 385,
+              "width": 113.8,
+              "height": 17,
+              "right": 303.94,
+              "bottom": 402
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        },
+        {
+          "text": " Widget Pro",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 303.94,
+              "y": 385,
+              "width": 83.59,
+              "height": 17,
+              "right": 387.53,
+              "bottom": 402
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": "Price:",
+          "parentElement": "em",
+          "rects": [
+            {
+              "x": 190.14,
+              "y": 419,
+              "width": 40.91,
+              "height": 17,
+              "right": 231.05,
+              "bottom": 436
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": " $29.99",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 231.05,
+              "y": 419,
+              "width": 53.39,
+              "height": 17,
+              "right": 284.44,
+              "bottom": 436
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Cells can contain multiple content types including images, text formatting, and block elements",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 381,
+              "width": 661.69,
+              "height": 17,
+              "right": 1098.83,
+              "bottom": 398
+            }
+          ],
+          "length": 94,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 94
+        },
+        {
+          "text": "Multi-row with Lists",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 507,
+              "width": 135.14,
+              "height": 17,
+              "right": 164.14,
+              "bottom": 524
+            }
+          ],
+          "length": 20,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 20
+        },
+        {
+          "text": "Feature A",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 471,
+              "width": 69.38,
+              "height": 17,
+              "right": 279.52,
+              "bottom": 488
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Feature B",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 489,
+              "width": 70.27,
+              "height": 17,
+              "right": 280.41,
+              "bottom": 506
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "First row of spanned cell",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 480,
+              "width": 173.41,
+              "height": 17,
+              "right": 610.55,
+              "bottom": 497
+            }
+          ],
+          "length": 25,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 25
+        },
+        {
+          "text": "Benefit 1",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 525,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 542
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Benefit 2",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 543,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 560
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Second row of spanned cell",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 534,
+              "width": 196.58,
+              "height": 17,
+              "right": 633.72,
+              "bottom": 551
+            }
+          ],
+          "length": 26,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 26
+        }
+      ],
+      "childCount": 2,
+      "depth": 0
     },
-    "elements": {
-      "html_0": {
-        "tag": "html",
-        "selector": "html",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 1200,
-          "height": 586
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "head_1": {
-        "tag": "head",
-        "selector": "head",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "meta_2": {
-        "tag": "meta",
-        "selector": "meta",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "title_3": {
-        "tag": "title",
-        "selector": "title",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "style_4": {
-        "tag": "style",
-        "selector": "style",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "body_5": {
-        "tag": "body",
-        "selector": "body",
-        "layout": {
-          "x": 16,
-          "y": 16,
-          "width": 1168,
-          "height": 554
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 16,
-          "marginRight": 16,
-          "marginBottom": 16,
-          "marginLeft": 16,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "table_6": {
-        "tag": "table",
-        "selector": "table",
-        "layout": {
-          "x": 16,
-          "y": 16,
-          "width": 1095.83,
-          "height": 554
-        },
-        "css": {
-          "display": "table",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "caption_7": {
-        "tag": "caption",
-        "selector": "caption",
-        "layout": {
-          "x": 16,
-          "y": 16,
-          "width": 1095.83,
-          "height": 18
-        },
-        "css": {
-          "display": "table-caption",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 8,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "thead_8": {
-        "tag": "thead",
-        "selector": "thead",
-        "layout": {
-          "x": 16,
-          "y": 42,
-          "width": 1095.83,
-          "height": 36
-        },
-        "css": {
-          "display": "table-header-group",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "tr_9": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 42,
-          "width": 1095.83,
-          "height": 36
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "th_10": {
-        "tag": "th",
-        "selector": "th",
-        "layout": {
-          "x": 16,
-          "y": 42,
-          "width": 161.14,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "th_11": {
-        "tag": "th",
-        "selector": "th",
-        "layout": {
-          "x": 177.14,
-          "y": 42,
-          "width": 247,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "th_12": {
-        "tag": "th",
-        "selector": "th",
-        "layout": {
-          "x": 424.14,
-          "y": 42,
-          "width": 687.69,
-          "height": 36
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "tbody_13": {
-        "tag": "tbody",
-        "selector": "tbody",
-        "layout": {
-          "x": 16,
-          "y": 78,
-          "width": 1095.83,
-          "height": 492
-        },
-        "css": {
-          "display": "table-row-group",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "tr_14": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 78,
-          "width": 1095.83,
-          "height": 96
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_15": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 16,
-          "y": 78,
-          "width": 161.14,
-          "height": 96
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "td_16": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 177.14,
-          "y": 78,
-          "width": 247,
-          "height": 96
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "table.nested-table_17": {
-        "tag": "table",
-        "selector": "table.nested-table",
-        "layout": {
-          "x": 190.14,
-          "y": 87,
-          "width": 48.81,
-          "height": 78
-        },
-        "css": {
-          "display": "table",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "tbody_18": {
-        "tag": "tbody",
-        "selector": "tbody",
-        "layout": {
-          "x": 190.14,
-          "y": 87,
-          "width": 48.81,
-          "height": 78
-        },
-        "css": {
-          "display": "table-row-group",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "tr_19": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 190.14,
-          "y": 87,
-          "width": 48.81,
-          "height": 26
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "th_20": {
-        "tag": "th",
-        "selector": "th",
-        "layout": {
-          "x": 190.14,
-          "y": 87,
-          "width": 24.41,
-          "height": 26
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 4,
-          "paddingRight": 6,
-          "paddingBottom": 4,
-          "paddingLeft": 6
-        }
-      },
-      "th_21": {
-        "tag": "th",
-        "selector": "th",
-        "layout": {
-          "x": 214.55,
-          "y": 87,
-          "width": 24.41,
-          "height": 26
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 4,
-          "paddingRight": 6,
-          "paddingBottom": 4,
-          "paddingLeft": 6
-        }
-      },
-      "tr_22": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 190.14,
-          "y": 113,
-          "width": 48.81,
-          "height": 26
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_23": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 190.14,
-          "y": 113,
-          "width": 24.41,
-          "height": 26
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 4,
-          "paddingRight": 6,
-          "paddingBottom": 4,
-          "paddingLeft": 6
-        }
-      },
-      "td_24": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 214.55,
-          "y": 113,
-          "width": 24.41,
-          "height": 26
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 4,
-          "paddingRight": 6,
-          "paddingBottom": 4,
-          "paddingLeft": 6
-        }
-      },
-      "tr_25": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 190.14,
-          "y": 139,
-          "width": 48.81,
-          "height": 26
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_26": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 190.14,
-          "y": 139,
-          "width": 24.41,
-          "height": 26
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 4,
-          "paddingRight": 6,
-          "paddingBottom": 4,
-          "paddingLeft": 6
-        }
-      },
-      "td_27": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 214.55,
-          "y": 139,
-          "width": 24.41,
-          "height": 26
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 4,
-          "paddingRight": 6,
-          "paddingBottom": 4,
-          "paddingLeft": 6
-        }
-      },
-      "td_28": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 424.14,
-          "y": 78,
-          "width": 687.69,
-          "height": 96
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "tr_29": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 174,
-          "width": 1095.83,
-          "height": 72
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_30": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 16,
-          "y": 174,
-          "width": 161.14,
-          "height": 72
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "td_31": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 177.14,
-          "y": 174,
-          "width": 247,
-          "height": 72
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "ul_32": {
-        "tag": "ul",
-        "selector": "ul",
-        "layout": {
-          "x": 190.14,
-          "y": 183,
-          "width": 221,
-          "height": 54
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 20
-        }
-      },
-      "li_33": {
-        "tag": "li",
-        "selector": "li",
-        "layout": {
-          "x": 210.14,
-          "y": 183,
-          "width": 201,
-          "height": 18
-        },
-        "css": {
-          "display": "list-item",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "li_34": {
-        "tag": "li",
-        "selector": "li",
-        "layout": {
-          "x": 210.14,
-          "y": 201,
-          "width": 201,
-          "height": 18
-        },
-        "css": {
-          "display": "list-item",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "li_35": {
-        "tag": "li",
-        "selector": "li",
-        "layout": {
-          "x": 210.14,
-          "y": 219,
-          "width": 201,
-          "height": 18
-        },
-        "css": {
-          "display": "list-item",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_36": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 424.14,
-          "y": 174,
-          "width": 687.69,
-          "height": 72
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "tr_37": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 246,
-          "width": 1095.83,
-          "height": 72
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_38": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 16,
-          "y": 246,
-          "width": 161.14,
-          "height": 72
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "td_39": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 177.14,
-          "y": 246,
-          "width": 247,
-          "height": 72
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "ol_40": {
-        "tag": "ol",
-        "selector": "ol",
-        "layout": {
-          "x": 190.14,
-          "y": 255,
-          "width": 221,
-          "height": 54
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 20
-        }
-      },
-      "li_41": {
-        "tag": "li",
-        "selector": "li",
-        "layout": {
-          "x": 210.14,
-          "y": 255,
-          "width": 201,
-          "height": 18
-        },
-        "css": {
-          "display": "list-item",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "li_42": {
-        "tag": "li",
-        "selector": "li",
-        "layout": {
-          "x": 210.14,
-          "y": 273,
-          "width": 201,
-          "height": 18
-        },
-        "css": {
-          "display": "list-item",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "li_43": {
-        "tag": "li",
-        "selector": "li",
-        "layout": {
-          "x": 210.14,
-          "y": 291,
-          "width": 201,
-          "height": 18
-        },
-        "css": {
-          "display": "list-item",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_44": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 424.14,
-          "y": 246,
-          "width": 687.69,
-          "height": 72
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "tr_45": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 318,
-          "width": 1095.83,
-          "height": 144
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_46": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 16,
-          "y": 318,
-          "width": 161.14,
-          "height": 144
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "td_47": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 177.14,
-          "y": 318,
-          "width": 247,
-          "height": 144
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "div.image-placeholder_48": {
-        "tag": "div",
-        "selector": "div.image-placeholder",
-        "layout": {
-          "x": 190.14,
-          "y": 327,
-          "width": 62,
-          "height": 42
-        },
-        "css": {
-          "display": "inline-block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "p_49": {
-        "tag": "p",
-        "selector": "p",
-        "layout": {
-          "x": 190.14,
-          "y": 385,
-          "width": 221,
-          "height": 18
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 16,
-          "marginRight": 0,
-          "marginBottom": 16,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "strong_50": {
-        "tag": "strong",
-        "selector": "strong",
-        "layout": {
-          "x": 190.14,
-          "y": 385,
-          "width": 113.8,
-          "height": 17
-        },
-        "css": {
-          "display": "inline",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "p_51": {
-        "tag": "p",
-        "selector": "p",
-        "layout": {
-          "x": 190.14,
-          "y": 419,
-          "width": 221,
-          "height": 18
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 16,
-          "marginRight": 0,
-          "marginBottom": 16,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "em_52": {
-        "tag": "em",
-        "selector": "em",
-        "layout": {
-          "x": 190.14,
-          "y": 419,
-          "width": 40.91,
-          "height": 17
-        },
-        "css": {
-          "display": "inline",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_53": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 424.14,
-          "y": 318,
-          "width": 687.69,
-          "height": 144
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "tr_54": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 462,
-          "width": 1095.83,
-          "height": 54
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_55": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 16,
-          "y": 462,
-          "width": 161.14,
-          "height": 108
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "td_56": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 177.14,
-          "y": 462,
-          "width": 247,
-          "height": 54
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "ul_57": {
-        "tag": "ul",
-        "selector": "ul",
-        "layout": {
-          "x": 190.14,
-          "y": 471,
-          "width": 221,
-          "height": 36
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 20
-        }
-      },
-      "li_58": {
-        "tag": "li",
-        "selector": "li",
-        "layout": {
-          "x": 210.14,
-          "y": 471,
-          "width": 201,
-          "height": 18
-        },
-        "css": {
-          "display": "list-item",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "li_59": {
-        "tag": "li",
-        "selector": "li",
-        "layout": {
-          "x": 210.14,
-          "y": 489,
-          "width": 201,
-          "height": 18
-        },
-        "css": {
-          "display": "list-item",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_60": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 424.14,
-          "y": 462,
-          "width": 687.69,
-          "height": 54
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "tr_61": {
-        "tag": "tr",
-        "selector": "tr",
-        "layout": {
-          "x": 16,
-          "y": 516,
-          "width": 1095.83,
-          "height": 54
-        },
-        "css": {
-          "display": "table-row",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_62": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 177.14,
-          "y": 516,
-          "width": 247,
-          "height": 54
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      },
-      "ol_63": {
-        "tag": "ol",
-        "selector": "ol",
-        "layout": {
-          "x": 190.14,
-          "y": 525,
-          "width": 221,
-          "height": 36
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 20
-        }
-      },
-      "li_64": {
-        "tag": "li",
-        "selector": "li",
-        "layout": {
-          "x": 210.14,
-          "y": 525,
-          "width": 201,
-          "height": 18
-        },
-        "css": {
-          "display": "list-item",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "li_65": {
-        "tag": "li",
-        "selector": "li",
-        "layout": {
-          "x": 210.14,
-          "y": 543,
-          "width": 201,
-          "height": 18
-        },
-        "css": {
-          "display": "list-item",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
-      },
-      "td_66": {
-        "tag": "td",
-        "selector": "td",
-        "layout": {
-          "x": 424.14,
-          "y": 516,
-          "width": 687.69,
-          "height": 54
-        },
-        "css": {
-          "display": "table-cell",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 8,
-          "paddingRight": 12,
-          "paddingBottom": 8,
-          "paddingLeft": 12
-        }
-      }
+    "head": {
+      "selector": "head",
+      "tag": "head",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
+      },
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Table Nested Content Test\n  \n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    \n    .nested-table { margin: 0; font-size: 0.9em; }\n    .nested-table th, .nested-table td { \n      padding: 4px 6px; \n      border: 1px solid #999; \n      background: #f9f9f9; \n    }\n    \n    ul, ol { margin: 0; padding-left: 20px; }\n    .image-placeholder { \n      width: 60px; \n      height: 40px; \n      background: #ddd; \n      border: 1px solid #999; \n      display: inline-block; \n      text-align: center; \n      line-height: 40px; \n      font-size: 12px; \n    }",
+      "hasTextNodes": false,
+      "textNodes": [],
+      "childCount": 3,
+      "depth": 0
+    },
+    "meta": {
+      "selector": "meta",
+      "tag": "meta",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
+      },
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": null,
+      "hasTextNodes": false,
+      "textNodes": [],
+      "childCount": 0,
+      "depth": 0
+    },
+    "title": {
+      "selector": "title",
+      "tag": "title",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
+      },
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Table Nested Content Test",
+      "hasTextNodes": true,
+      "textNodes": [],
+      "childCount": 0,
+      "depth": 0
+    },
+    "style": {
+      "selector": "style",
+      "tag": "style",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
+      },
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    \n    .nested-table { margin: 0; font-size: 0.9em; }\n    .nested-table th, .nested-table td { \n      padding: 4px 6px; \n      border: 1px solid #999; \n      background: #f9f9f9; \n    }\n    \n    ul, ol { margin: 0; padding-left: 20px; }\n    .image-placeholder { \n      width: 60px; \n      height: 40px; \n      background: #ddd; \n      border: 1px solid #999; \n      display: inline-block; \n      text-align: center; \n      line-height: 40px; \n      font-size: 12px; \n    }",
+      "hasTextNodes": true,
+      "textNodes": [],
+      "childCount": 0,
+      "depth": 0
+    },
+    "body": {
+      "selector": "body",
+      "tag": "body",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 16,
+        "width": 1168,
+        "height": 554,
+        "contentWidth": 1168,
+        "contentHeight": 554,
+        "scrollWidth": 1168,
+        "scrollHeight": 554
+      },
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 16,
+        "marginRight": 16,
+        "marginBottom": 16,
+        "marginLeft": 16,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Table with Nested Content Types\n    \n      \n        Content Type\n        Example\n        Description\n      \n    \n    \n      \n        Nested Table\n        \n          \n            \n              A\n              B\n            \n            \n              1\n              2\n            \n            \n              3\n              4\n            \n          \n        \n        Tables can contain other tables for complex data structures\n      \n      \n        Unordered List\n        \n          \n            First item\n            Second item with longer text\n            Third item\n          \n        \n        Lists help organize related information within cells\n      \n      \n        Ordered List\n        \n          \n            Step one\n            Step two\n            Step three\n          \n        \n        Numbered lists for sequential information\n      \n      \n        Mixed Content\n        \n          IMG\n          Product Name: Widget Pro\n          Price: $29.99\n        \n        Cells can contain multiple content types including images, text formatting, and block elements\n      \n      \n        Multi-row with Lists\n        \n          \n            Feature A\n            Feature B\n          \n        \n        First row of spanned cell\n      \n      \n        \n          \n            Benefit 1\n            Benefit 2\n          \n        \n        Second row of spanned cell",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Table with Nested Content Types",
+          "parentElement": "caption",
+          "rects": [
+            {
+              "x": 439.3,
+              "y": 16,
+              "width": 249.22,
+              "height": 17,
+              "right": 688.52,
+              "bottom": 33
+            }
+          ],
+          "length": 31,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 31
+        },
+        {
+          "text": "Content Type",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 46.05,
+              "y": 51,
+              "width": 101.03,
+              "height": 17,
+              "right": 147.08,
+              "bottom": 68
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "Example",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 267.73,
+              "y": 51,
+              "width": 65.81,
+              "height": 17,
+              "right": 333.55,
+              "bottom": 68
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Description",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 723.97,
+              "y": 51,
+              "width": 88.02,
+              "height": 17,
+              "right": 811.98,
+              "bottom": 68
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": "Nested Table",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 117,
+              "width": 93.11,
+              "height": 17,
+              "right": 122.11,
+              "bottom": 134
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "A",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 207.55,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "B",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 231.95,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "1",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 118,
+              "width": 8.02,
+              "height": 16,
+              "right": 205.16,
+              "bottom": 134
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "2",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 118,
+              "width": 8.02,
+              "height": 16,
+              "right": 229.56,
+              "bottom": 134
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "3",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 144,
+              "width": 8.02,
+              "height": 16,
+              "right": 205.16,
+              "bottom": 160
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "4",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 144,
+              "width": 8.02,
+              "height": 16,
+              "right": 229.56,
+              "bottom": 160
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "Tables can contain other tables for complex data structures",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 117,
+              "width": 418,
+              "height": 17,
+              "right": 855.14,
+              "bottom": 134
+            }
+          ],
+          "length": 59,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 59
+        },
+        {
+          "text": "Unordered List",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 201,
+              "width": 104.95,
+              "height": 17,
+              "right": 133.95,
+              "bottom": 218
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        },
+        {
+          "text": "First item",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 183,
+              "width": 65.78,
+              "height": 17,
+              "right": 275.92,
+              "bottom": 200
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        },
+        {
+          "text": "Second item with longer text",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 201,
+              "width": 201,
+              "height": 17,
+              "right": 411.14,
+              "bottom": 218
+            }
+          ],
+          "length": 28,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 28
+        },
+        {
+          "text": "Third item",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 219,
+              "width": 71.13,
+              "height": 17,
+              "right": 281.27,
+              "bottom": 236
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        },
+        {
+          "text": "Lists help organize related information within cells",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 201,
+              "width": 352.19,
+              "height": 17,
+              "right": 789.33,
+              "bottom": 218
+            }
+          ],
+          "length": 52,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 52
+        },
+        {
+          "text": "Ordered List",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 273,
+              "width": 88.05,
+              "height": 17,
+              "right": 117.05,
+              "bottom": 290
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "Step one",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 255,
+              "width": 64.06,
+              "height": 17,
+              "right": 274.2,
+              "bottom": 272
+            }
+          ],
+          "length": 8,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 8
+        },
+        {
+          "text": "Step two",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 273,
+              "width": 62.27,
+              "height": 17,
+              "right": 272.41,
+              "bottom": 290
+            }
+          ],
+          "length": 8,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 8
+        },
+        {
+          "text": "Step three",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 291,
+              "width": 73.83,
+              "height": 17,
+              "right": 283.97,
+              "bottom": 308
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        },
+        {
+          "text": "Numbered lists for sequential information",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 273,
+              "width": 290.81,
+              "height": 17,
+              "right": 727.95,
+              "bottom": 290
+            }
+          ],
+          "length": 41,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 41
+        },
+        {
+          "text": "Mixed Content",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 381,
+              "width": 103.17,
+              "height": 17,
+              "right": 132.17,
+              "bottom": 398
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        },
+        {
+          "text": "IMG",
+          "parentElement": "div",
+          "rects": [
+            {
+              "x": 209.8,
+              "y": 341,
+              "width": 22.67,
+              "height": 14,
+              "right": 232.47,
+              "bottom": 355
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "Product Name:",
+          "parentElement": "strong",
+          "rects": [
+            {
+              "x": 190.14,
+              "y": 385,
+              "width": 113.8,
+              "height": 17,
+              "right": 303.94,
+              "bottom": 402
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        },
+        {
+          "text": " Widget Pro",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 303.94,
+              "y": 385,
+              "width": 83.59,
+              "height": 17,
+              "right": 387.53,
+              "bottom": 402
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": "Price:",
+          "parentElement": "em",
+          "rects": [
+            {
+              "x": 190.14,
+              "y": 419,
+              "width": 40.91,
+              "height": 17,
+              "right": 231.05,
+              "bottom": 436
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": " $29.99",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 231.05,
+              "y": 419,
+              "width": 53.39,
+              "height": 17,
+              "right": 284.44,
+              "bottom": 436
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Cells can contain multiple content types including images, text formatting, and block elements",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 381,
+              "width": 661.69,
+              "height": 17,
+              "right": 1098.83,
+              "bottom": 398
+            }
+          ],
+          "length": 94,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 94
+        },
+        {
+          "text": "Multi-row with Lists",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 507,
+              "width": 135.14,
+              "height": 17,
+              "right": 164.14,
+              "bottom": 524
+            }
+          ],
+          "length": 20,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 20
+        },
+        {
+          "text": "Feature A",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 471,
+              "width": 69.38,
+              "height": 17,
+              "right": 279.52,
+              "bottom": 488
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Feature B",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 489,
+              "width": 70.27,
+              "height": 17,
+              "right": 280.41,
+              "bottom": 506
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "First row of spanned cell",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 480,
+              "width": 173.41,
+              "height": 17,
+              "right": 610.55,
+              "bottom": 497
+            }
+          ],
+          "length": 25,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 25
+        },
+        {
+          "text": "Benefit 1",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 525,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 542
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Benefit 2",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 543,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 560
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Second row of spanned cell",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 534,
+              "width": 196.58,
+              "height": 17,
+              "right": 633.72,
+              "bottom": 551
+            }
+          ],
+          "length": 26,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 26
+        }
+      ],
+      "childCount": 1,
+      "depth": 0
+    },
+    "table": {
+      "selector": "table",
+      "tag": "table",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 16,
+        "width": 1095.83,
+        "height": 554,
+        "contentWidth": 1096,
+        "contentHeight": 554,
+        "scrollWidth": 1096,
+        "scrollHeight": 554
+      },
+      "computed": {
+        "display": "table",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Table with Nested Content Types\n    \n      \n        Content Type\n        Example\n        Description\n      \n    \n    \n      \n        Nested Table\n        \n          \n            \n              A\n              B\n            \n            \n              1\n              2\n            \n            \n              3\n              4\n            \n          \n        \n        Tables can contain other tables for complex data structures\n      \n      \n        Unordered List\n        \n          \n            First item\n            Second item with longer text\n            Third item\n          \n        \n        Lists help organize related information within cells\n      \n      \n        Ordered List\n        \n          \n            Step one\n            Step two\n            Step three\n          \n        \n        Numbered lists for sequential information\n      \n      \n        Mixed Content\n        \n          IMG\n          Product Name: Widget Pro\n          Price: $29.99\n        \n        Cells can contain multiple content types including images, text formatting, and block elements\n      \n      \n        Multi-row with Lists\n        \n          \n            Feature A\n            Feature B\n          \n        \n        First row of spanned cell\n      \n      \n        \n          \n            Benefit 1\n            Benefit 2\n          \n        \n        Second row of spanned cell",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Table with Nested Content Types",
+          "parentElement": "caption",
+          "rects": [
+            {
+              "x": 439.3,
+              "y": 16,
+              "width": 249.22,
+              "height": 17,
+              "right": 688.52,
+              "bottom": 33
+            }
+          ],
+          "length": 31,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 31
+        },
+        {
+          "text": "Content Type",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 46.05,
+              "y": 51,
+              "width": 101.03,
+              "height": 17,
+              "right": 147.08,
+              "bottom": 68
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "Example",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 267.73,
+              "y": 51,
+              "width": 65.81,
+              "height": 17,
+              "right": 333.55,
+              "bottom": 68
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Description",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 723.97,
+              "y": 51,
+              "width": 88.02,
+              "height": 17,
+              "right": 811.98,
+              "bottom": 68
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": "Nested Table",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 117,
+              "width": 93.11,
+              "height": 17,
+              "right": 122.11,
+              "bottom": 134
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "A",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 207.55,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "B",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 231.95,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "1",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 118,
+              "width": 8.02,
+              "height": 16,
+              "right": 205.16,
+              "bottom": 134
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "2",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 118,
+              "width": 8.02,
+              "height": 16,
+              "right": 229.56,
+              "bottom": 134
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "3",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 144,
+              "width": 8.02,
+              "height": 16,
+              "right": 205.16,
+              "bottom": 160
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "4",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 144,
+              "width": 8.02,
+              "height": 16,
+              "right": 229.56,
+              "bottom": 160
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "Tables can contain other tables for complex data structures",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 117,
+              "width": 418,
+              "height": 17,
+              "right": 855.14,
+              "bottom": 134
+            }
+          ],
+          "length": 59,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 59
+        },
+        {
+          "text": "Unordered List",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 201,
+              "width": 104.95,
+              "height": 17,
+              "right": 133.95,
+              "bottom": 218
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        },
+        {
+          "text": "First item",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 183,
+              "width": 65.78,
+              "height": 17,
+              "right": 275.92,
+              "bottom": 200
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        },
+        {
+          "text": "Second item with longer text",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 201,
+              "width": 201,
+              "height": 17,
+              "right": 411.14,
+              "bottom": 218
+            }
+          ],
+          "length": 28,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 28
+        },
+        {
+          "text": "Third item",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 219,
+              "width": 71.13,
+              "height": 17,
+              "right": 281.27,
+              "bottom": 236
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        },
+        {
+          "text": "Lists help organize related information within cells",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 201,
+              "width": 352.19,
+              "height": 17,
+              "right": 789.33,
+              "bottom": 218
+            }
+          ],
+          "length": 52,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 52
+        },
+        {
+          "text": "Ordered List",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 273,
+              "width": 88.05,
+              "height": 17,
+              "right": 117.05,
+              "bottom": 290
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "Step one",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 255,
+              "width": 64.06,
+              "height": 17,
+              "right": 274.2,
+              "bottom": 272
+            }
+          ],
+          "length": 8,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 8
+        },
+        {
+          "text": "Step two",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 273,
+              "width": 62.27,
+              "height": 17,
+              "right": 272.41,
+              "bottom": 290
+            }
+          ],
+          "length": 8,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 8
+        },
+        {
+          "text": "Step three",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 291,
+              "width": 73.83,
+              "height": 17,
+              "right": 283.97,
+              "bottom": 308
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        },
+        {
+          "text": "Numbered lists for sequential information",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 273,
+              "width": 290.81,
+              "height": 17,
+              "right": 727.95,
+              "bottom": 290
+            }
+          ],
+          "length": 41,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 41
+        },
+        {
+          "text": "Mixed Content",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 381,
+              "width": 103.17,
+              "height": 17,
+              "right": 132.17,
+              "bottom": 398
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        },
+        {
+          "text": "IMG",
+          "parentElement": "div",
+          "rects": [
+            {
+              "x": 209.8,
+              "y": 341,
+              "width": 22.67,
+              "height": 14,
+              "right": 232.47,
+              "bottom": 355
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "Product Name:",
+          "parentElement": "strong",
+          "rects": [
+            {
+              "x": 190.14,
+              "y": 385,
+              "width": 113.8,
+              "height": 17,
+              "right": 303.94,
+              "bottom": 402
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        },
+        {
+          "text": " Widget Pro",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 303.94,
+              "y": 385,
+              "width": 83.59,
+              "height": 17,
+              "right": 387.53,
+              "bottom": 402
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": "Price:",
+          "parentElement": "em",
+          "rects": [
+            {
+              "x": 190.14,
+              "y": 419,
+              "width": 40.91,
+              "height": 17,
+              "right": 231.05,
+              "bottom": 436
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": " $29.99",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 231.05,
+              "y": 419,
+              "width": 53.39,
+              "height": 17,
+              "right": 284.44,
+              "bottom": 436
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Cells can contain multiple content types including images, text formatting, and block elements",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 381,
+              "width": 661.69,
+              "height": 17,
+              "right": 1098.83,
+              "bottom": 398
+            }
+          ],
+          "length": 94,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 94
+        },
+        {
+          "text": "Multi-row with Lists",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 507,
+              "width": 135.14,
+              "height": 17,
+              "right": 164.14,
+              "bottom": 524
+            }
+          ],
+          "length": 20,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 20
+        },
+        {
+          "text": "Feature A",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 471,
+              "width": 69.38,
+              "height": 17,
+              "right": 279.52,
+              "bottom": 488
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Feature B",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 489,
+              "width": 70.27,
+              "height": 17,
+              "right": 280.41,
+              "bottom": 506
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "First row of spanned cell",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 480,
+              "width": 173.41,
+              "height": 17,
+              "right": 610.55,
+              "bottom": 497
+            }
+          ],
+          "length": 25,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 25
+        },
+        {
+          "text": "Benefit 1",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 525,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 542
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Benefit 2",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 543,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 560
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Second row of spanned cell",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 534,
+              "width": 196.58,
+              "height": 17,
+              "right": 633.72,
+              "bottom": 551
+            }
+          ],
+          "length": 26,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 26
+        }
+      ],
+      "childCount": 3,
+      "depth": 0
+    },
+    "caption": {
+      "selector": "caption",
+      "tag": "caption",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 16,
+        "width": 1095.83,
+        "height": 18,
+        "contentWidth": 1096,
+        "contentHeight": 18,
+        "scrollWidth": 1096,
+        "scrollHeight": 18
+      },
+      "computed": {
+        "display": "table-caption",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 8,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "-webkit-center",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Table with Nested Content Types",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Table with Nested Content Types",
+          "parentElement": "caption",
+          "rects": [
+            {
+              "x": 439.3,
+              "y": 16,
+              "width": 249.22,
+              "height": 17,
+              "right": 688.52,
+              "bottom": 33
+            }
+          ],
+          "length": 31,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 31
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "thead": {
+      "selector": "thead",
+      "tag": "thead",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 42,
+        "width": 1095.83,
+        "height": 36,
+        "contentWidth": 1096,
+        "contentHeight": 36,
+        "scrollWidth": 1096,
+        "scrollHeight": 36
+      },
+      "computed": {
+        "display": "table-header-group",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Content Type\n        Example\n        Description",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Content Type",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 46.05,
+              "y": 51,
+              "width": 101.03,
+              "height": 17,
+              "right": 147.08,
+              "bottom": 68
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "Example",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 267.73,
+              "y": 51,
+              "width": 65.81,
+              "height": 17,
+              "right": 333.55,
+              "bottom": 68
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Description",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 723.97,
+              "y": 51,
+              "width": 88.02,
+              "height": 17,
+              "right": 811.98,
+              "bottom": 68
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        }
+      ],
+      "childCount": 1,
+      "depth": 0
+    },
+    "tr": {
+      "selector": "tr",
+      "tag": "tr",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 42,
+        "width": 1095.83,
+        "height": 36,
+        "contentWidth": 1096,
+        "contentHeight": 36,
+        "scrollWidth": 1096,
+        "scrollHeight": 36
+      },
+      "computed": {
+        "display": "table-row",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Content Type\n        Example\n        Description",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Content Type",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 46.05,
+              "y": 51,
+              "width": 101.03,
+              "height": 17,
+              "right": 147.08,
+              "bottom": 68
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "Example",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 267.73,
+              "y": 51,
+              "width": 65.81,
+              "height": 17,
+              "right": 333.55,
+              "bottom": 68
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Description",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 723.97,
+              "y": 51,
+              "width": 88.02,
+              "height": 17,
+              "right": 811.98,
+              "bottom": 68
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        }
+      ],
+      "childCount": 3,
+      "depth": 0
+    },
+    "th:nth-of-type(1)": {
+      "selector": "th:nth-of-type(1)",
+      "tag": "th",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 190.14,
+        "y": 87,
+        "width": 24.41,
+        "height": 26,
+        "contentWidth": 22,
+        "contentHeight": 24,
+        "scrollWidth": 22,
+        "scrollHeight": 24
+      },
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 4,
+        "paddingRight": 6,
+        "paddingBottom": 4,
+        "paddingLeft": 6,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 14.4,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "A",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "A",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 207.55,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "th:nth-of-type(2)": {
+      "selector": "th:nth-of-type(2)",
+      "tag": "th",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 214.55,
+        "y": 87,
+        "width": 24.41,
+        "height": 26,
+        "contentWidth": 22,
+        "contentHeight": 24,
+        "scrollWidth": 22,
+        "scrollHeight": 24
+      },
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 4,
+        "paddingRight": 6,
+        "paddingBottom": 4,
+        "paddingLeft": 6,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 14.4,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "B",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "B",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 231.95,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "th:nth-of-type(3)": {
+      "selector": "th:nth-of-type(3)",
+      "tag": "th",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 424.14,
+        "y": 42,
+        "width": 687.69,
+        "height": 36,
+        "contentWidth": 686,
+        "contentHeight": 34,
+        "scrollWidth": 686,
+        "scrollHeight": 34
+      },
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "center",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Description",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Description",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 723.97,
+              "y": 51,
+              "width": 88.02,
+              "height": 17,
+              "right": 811.98,
+              "bottom": 68
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "tbody": {
+      "selector": "tbody",
+      "tag": "tbody",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 190.14,
+        "y": 87,
+        "width": 48.81,
+        "height": 78,
+        "contentWidth": 49,
+        "contentHeight": 78,
+        "scrollWidth": 49,
+        "scrollHeight": 78
+      },
+      "computed": {
+        "display": "table-row-group",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 14.4,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "A\n              B\n            \n            \n              1\n              2\n            \n            \n              3\n              4",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "A",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 207.55,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "B",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 231.95,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "1",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 118,
+              "width": 8.02,
+              "height": 16,
+              "right": 205.16,
+              "bottom": 134
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "2",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 118,
+              "width": 8.02,
+              "height": 16,
+              "right": 229.56,
+              "bottom": 134
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "3",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 144,
+              "width": 8.02,
+              "height": 16,
+              "right": 205.16,
+              "bottom": 160
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "4",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 144,
+              "width": 8.02,
+              "height": 16,
+              "right": 229.56,
+              "bottom": 160
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        }
+      ],
+      "childCount": 3,
+      "depth": 0
+    },
+    "tr:nth-of-type(1)": {
+      "selector": "tr:nth-of-type(1)",
+      "tag": "tr",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 190.14,
+        "y": 87,
+        "width": 48.81,
+        "height": 26,
+        "contentWidth": 49,
+        "contentHeight": 26,
+        "scrollWidth": 49,
+        "scrollHeight": 26
+      },
+      "computed": {
+        "display": "table-row",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 14.4,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "A\n              B",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "A",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 207.55,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "B",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 231.95,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        }
+      ],
+      "childCount": 2,
+      "depth": 0
+    },
+    "td:nth-of-type(1)": {
+      "selector": "td:nth-of-type(1)",
+      "tag": "td",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 177.14,
+        "y": 516,
+        "width": 247,
+        "height": 54,
+        "contentWidth": 245,
+        "contentHeight": 52,
+        "scrollWidth": 245,
+        "scrollHeight": 52
+      },
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Benefit 1\n            Benefit 2",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Benefit 1",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 525,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 542
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Benefit 2",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 543,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 560
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        }
+      ],
+      "childCount": 1,
+      "depth": 0
+    },
+    "td:nth-of-type(2)": {
+      "selector": "td:nth-of-type(2)",
+      "tag": "td",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 424.14,
+        "y": 516,
+        "width": 687.69,
+        "height": 54,
+        "contentWidth": 686,
+        "contentHeight": 52,
+        "scrollWidth": 686,
+        "scrollHeight": 52
+      },
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Second row of spanned cell",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Second row of spanned cell",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 534,
+              "width": 196.58,
+              "height": 17,
+              "right": 633.72,
+              "bottom": 551
+            }
+          ],
+          "length": 26,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 26
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "table.nested-table": {
+      "selector": "table.nested-table",
+      "tag": "table",
+      "id": null,
+      "classes": [
+        "nested-table"
+      ],
+      "layout": {
+        "x": 190.14,
+        "y": 87,
+        "width": 48.81,
+        "height": 78,
+        "contentWidth": 49,
+        "contentHeight": 78,
+        "scrollWidth": 49,
+        "scrollHeight": 78
+      },
+      "computed": {
+        "display": "table",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 14.4,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "A\n              B\n            \n            \n              1\n              2\n            \n            \n              3\n              4",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "A",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 207.55,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "B",
+          "parentElement": "th",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 92,
+              "width": 10.41,
+              "height": 16,
+              "right": 231.95,
+              "bottom": 108
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "1",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 118,
+              "width": 8.02,
+              "height": 16,
+              "right": 205.16,
+              "bottom": 134
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "2",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 118,
+              "width": 8.02,
+              "height": 16,
+              "right": 229.56,
+              "bottom": 134
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "3",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 197.14,
+              "y": 144,
+              "width": 8.02,
+              "height": 16,
+              "right": 205.16,
+              "bottom": 160
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "4",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 221.55,
+              "y": 144,
+              "width": 8.02,
+              "height": 16,
+              "right": 229.56,
+              "bottom": 160
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        }
+      ],
+      "childCount": 1,
+      "depth": 0
+    },
+    "tr:nth-of-type(2)": {
+      "selector": "tr:nth-of-type(2)",
+      "tag": "tr",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 174,
+        "width": 1095.83,
+        "height": 72,
+        "contentWidth": 1096,
+        "contentHeight": 72,
+        "scrollWidth": 1096,
+        "scrollHeight": 72
+      },
+      "computed": {
+        "display": "table-row",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Unordered List\n        \n          \n            First item\n            Second item with longer text\n            Third item\n          \n        \n        Lists help organize related information within cells",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Unordered List",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 201,
+              "width": 104.95,
+              "height": 17,
+              "right": 133.95,
+              "bottom": 218
+            }
+          ],
+          "length": 14,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 14
+        },
+        {
+          "text": "First item",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 183,
+              "width": 65.78,
+              "height": 17,
+              "right": 275.92,
+              "bottom": 200
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        },
+        {
+          "text": "Second item with longer text",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 201,
+              "width": 201,
+              "height": 17,
+              "right": 411.14,
+              "bottom": 218
+            }
+          ],
+          "length": 28,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 28
+        },
+        {
+          "text": "Third item",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 219,
+              "width": 71.13,
+              "height": 17,
+              "right": 281.27,
+              "bottom": 236
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        },
+        {
+          "text": "Lists help organize related information within cells",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 201,
+              "width": 352.19,
+              "height": 17,
+              "right": 789.33,
+              "bottom": 218
+            }
+          ],
+          "length": 52,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 52
+        }
+      ],
+      "childCount": 3,
+      "depth": 0
+    },
+    "tr:nth-of-type(3)": {
+      "selector": "tr:nth-of-type(3)",
+      "tag": "tr",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 246,
+        "width": 1095.83,
+        "height": 72,
+        "contentWidth": 1096,
+        "contentHeight": 72,
+        "scrollWidth": 1096,
+        "scrollHeight": 72
+      },
+      "computed": {
+        "display": "table-row",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Ordered List\n        \n          \n            Step one\n            Step two\n            Step three\n          \n        \n        Numbered lists for sequential information",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Ordered List",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 273,
+              "width": 88.05,
+              "height": 17,
+              "right": 117.05,
+              "bottom": 290
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "Step one",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 255,
+              "width": 64.06,
+              "height": 17,
+              "right": 274.2,
+              "bottom": 272
+            }
+          ],
+          "length": 8,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 8
+        },
+        {
+          "text": "Step two",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 273,
+              "width": 62.27,
+              "height": 17,
+              "right": 272.41,
+              "bottom": 290
+            }
+          ],
+          "length": 8,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 8
+        },
+        {
+          "text": "Step three",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 291,
+              "width": 73.83,
+              "height": 17,
+              "right": 283.97,
+              "bottom": 308
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        },
+        {
+          "text": "Numbered lists for sequential information",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 273,
+              "width": 290.81,
+              "height": 17,
+              "right": 727.95,
+              "bottom": 290
+            }
+          ],
+          "length": 41,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 41
+        }
+      ],
+      "childCount": 3,
+      "depth": 0
+    },
+    "td:nth-of-type(3)": {
+      "selector": "td:nth-of-type(3)",
+      "tag": "td",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 424.14,
+        "y": 462,
+        "width": 687.69,
+        "height": 54,
+        "contentWidth": 686,
+        "contentHeight": 52,
+        "scrollWidth": 686,
+        "scrollHeight": 52
+      },
+      "computed": {
+        "display": "table-cell",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 8,
+        "paddingRight": 12,
+        "paddingBottom": 8,
+        "paddingLeft": 12,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "First row of spanned cell",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "First row of spanned cell",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 480,
+              "width": 173.41,
+              "height": 17,
+              "right": 610.55,
+              "bottom": 497
+            }
+          ],
+          "length": 25,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 25
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "ul": {
+      "selector": "ul",
+      "tag": "ul",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 190.14,
+        "y": 471,
+        "width": 221,
+        "height": 36,
+        "contentWidth": 221,
+        "contentHeight": 36,
+        "scrollWidth": 221,
+        "scrollHeight": 36
+      },
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 20,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Feature A\n            Feature B",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Feature A",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 471,
+              "width": 69.38,
+              "height": 17,
+              "right": 279.52,
+              "bottom": 488
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Feature B",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 489,
+              "width": 70.27,
+              "height": 17,
+              "right": 280.41,
+              "bottom": 506
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        }
+      ],
+      "childCount": 2,
+      "depth": 0
+    },
+    "li:nth-of-type(1)": {
+      "selector": "li:nth-of-type(1)",
+      "tag": "li",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 210.14,
+        "y": 525,
+        "width": 201,
+        "height": 18,
+        "contentWidth": 201,
+        "contentHeight": 18,
+        "scrollWidth": 201,
+        "scrollHeight": 18
+      },
+      "computed": {
+        "display": "list-item",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "left",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Benefit 1",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Benefit 1",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 525,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 542
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "li:nth-of-type(2)": {
+      "selector": "li:nth-of-type(2)",
+      "tag": "li",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 210.14,
+        "y": 543,
+        "width": 201,
+        "height": 18,
+        "contentWidth": 201,
+        "contentHeight": 18,
+        "scrollWidth": 201,
+        "scrollHeight": 18
+      },
+      "computed": {
+        "display": "list-item",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "left",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Benefit 2",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Benefit 2",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 543,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 560
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "li:nth-of-type(3)": {
+      "selector": "li:nth-of-type(3)",
+      "tag": "li",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 210.14,
+        "y": 291,
+        "width": 201,
+        "height": 18,
+        "contentWidth": 201,
+        "contentHeight": 18,
+        "scrollWidth": 201,
+        "scrollHeight": 18
+      },
+      "computed": {
+        "display": "list-item",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "left",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Step three",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Step three",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 291,
+              "width": 73.83,
+              "height": 17,
+              "right": 283.97,
+              "bottom": 308
+            }
+          ],
+          "length": 10,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 10
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "ol": {
+      "selector": "ol",
+      "tag": "ol",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 190.14,
+        "y": 525,
+        "width": 221,
+        "height": 36,
+        "contentWidth": 221,
+        "contentHeight": 36,
+        "scrollWidth": 221,
+        "scrollHeight": 36
+      },
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 20,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Benefit 1\n            Benefit 2",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Benefit 1",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 525,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 542
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Benefit 2",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 543,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 560
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        }
+      ],
+      "childCount": 2,
+      "depth": 0
+    },
+    "tr:nth-of-type(4)": {
+      "selector": "tr:nth-of-type(4)",
+      "tag": "tr",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 318,
+        "width": 1095.83,
+        "height": 144,
+        "contentWidth": 1096,
+        "contentHeight": 144,
+        "scrollWidth": 1096,
+        "scrollHeight": 144
+      },
+      "computed": {
+        "display": "table-row",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Mixed Content\n        \n          IMG\n          Product Name: Widget Pro\n          Price: $29.99\n        \n        Cells can contain multiple content types including images, text formatting, and block elements",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Mixed Content",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 381,
+              "width": 103.17,
+              "height": 17,
+              "right": 132.17,
+              "bottom": 398
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        },
+        {
+          "text": "IMG",
+          "parentElement": "div",
+          "rects": [
+            {
+              "x": 209.8,
+              "y": 341,
+              "width": 22.67,
+              "height": 14,
+              "right": 232.47,
+              "bottom": 355
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        },
+        {
+          "text": "Product Name:",
+          "parentElement": "strong",
+          "rects": [
+            {
+              "x": 190.14,
+              "y": 385,
+              "width": 113.8,
+              "height": 17,
+              "right": 303.94,
+              "bottom": 402
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        },
+        {
+          "text": " Widget Pro",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 303.94,
+              "y": 385,
+              "width": 83.59,
+              "height": 17,
+              "right": 387.53,
+              "bottom": 402
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": "Price:",
+          "parentElement": "em",
+          "rects": [
+            {
+              "x": 190.14,
+              "y": 419,
+              "width": 40.91,
+              "height": 17,
+              "right": 231.05,
+              "bottom": 436
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": " $29.99",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 231.05,
+              "y": 419,
+              "width": 53.39,
+              "height": 17,
+              "right": 284.44,
+              "bottom": 436
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        },
+        {
+          "text": "Cells can contain multiple content types including images, text formatting, and block elements",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 381,
+              "width": 661.69,
+              "height": 17,
+              "right": 1098.83,
+              "bottom": 398
+            }
+          ],
+          "length": 94,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 94
+        }
+      ],
+      "childCount": 3,
+      "depth": 0
+    },
+    "div.image-placeholder": {
+      "selector": "div.image-placeholder",
+      "tag": "div",
+      "id": null,
+      "classes": [
+        "image-placeholder"
+      ],
+      "layout": {
+        "x": 190.14,
+        "y": 327,
+        "width": 62,
+        "height": 42,
+        "contentWidth": 60,
+        "contentHeight": 40,
+        "scrollWidth": 60,
+        "scrollHeight": 40
+      },
+      "computed": {
+        "display": "inline-block",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 1,
+        "borderRightWidth": 1,
+        "borderBottomWidth": 1,
+        "borderLeftWidth": 1,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 12,
+        "lineHeight": "40px",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "center",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "IMG",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "IMG",
+          "parentElement": "div",
+          "rects": [
+            {
+              "x": 209.8,
+              "y": 341,
+              "width": 22.67,
+              "height": 14,
+              "right": 232.47,
+              "bottom": 355
+            }
+          ],
+          "length": 3,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 3
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "p:nth-of-type(1)": {
+      "selector": "p:nth-of-type(1)",
+      "tag": "p",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 190.14,
+        "y": 385,
+        "width": 221,
+        "height": 18,
+        "contentWidth": 221,
+        "contentHeight": 18,
+        "scrollWidth": 221,
+        "scrollHeight": 18
+      },
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 16,
+        "marginRight": 0,
+        "marginBottom": 16,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Product Name: Widget Pro",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Product Name:",
+          "parentElement": "strong",
+          "rects": [
+            {
+              "x": 190.14,
+              "y": 385,
+              "width": 113.8,
+              "height": 17,
+              "right": 303.94,
+              "bottom": 402
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        },
+        {
+          "text": " Widget Pro",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 303.94,
+              "y": 385,
+              "width": 83.59,
+              "height": 17,
+              "right": 387.53,
+              "bottom": 402
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        }
+      ],
+      "childCount": 1,
+      "depth": 0
+    },
+    "strong": {
+      "selector": "strong",
+      "tag": "strong",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 190.14,
+        "y": 385,
+        "width": 113.8,
+        "height": 17,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
+      },
+      "computed": {
+        "display": "inline",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Product Name:",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Product Name:",
+          "parentElement": "strong",
+          "rects": [
+            {
+              "x": 190.14,
+              "y": 385,
+              "width": 113.8,
+              "height": 17,
+              "right": 303.94,
+              "bottom": 402
+            }
+          ],
+          "length": 13,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 13
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "p:nth-of-type(2)": {
+      "selector": "p:nth-of-type(2)",
+      "tag": "p",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 190.14,
+        "y": 419,
+        "width": 221,
+        "height": 18,
+        "contentWidth": 221,
+        "contentHeight": 18,
+        "scrollWidth": 221,
+        "scrollHeight": 18
+      },
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 16,
+        "marginRight": 0,
+        "marginBottom": 16,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Price: $29.99",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Price:",
+          "parentElement": "em",
+          "rects": [
+            {
+              "x": 190.14,
+              "y": 419,
+              "width": 40.91,
+              "height": 17,
+              "right": 231.05,
+              "bottom": 436
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        },
+        {
+          "text": " $29.99",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 231.05,
+              "y": 419,
+              "width": 53.39,
+              "height": 17,
+              "right": 284.44,
+              "bottom": 436
+            }
+          ],
+          "length": 7,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 7
+        }
+      ],
+      "childCount": 1,
+      "depth": 0
+    },
+    "em": {
+      "selector": "em",
+      "tag": "em",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 190.14,
+        "y": 419,
+        "width": 40.91,
+        "height": 17,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
+      },
+      "computed": {
+        "display": "inline",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Price:",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Price:",
+          "parentElement": "em",
+          "rects": [
+            {
+              "x": 190.14,
+              "y": 419,
+              "width": 40.91,
+              "height": 17,
+              "right": 231.05,
+              "bottom": 436
+            }
+          ],
+          "length": 6,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 6
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "tr:nth-of-type(5)": {
+      "selector": "tr:nth-of-type(5)",
+      "tag": "tr",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 462,
+        "width": 1095.83,
+        "height": 54,
+        "contentWidth": 1096,
+        "contentHeight": 54,
+        "scrollWidth": 1096,
+        "scrollHeight": 108
+      },
+      "computed": {
+        "display": "table-row",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Multi-row with Lists\n        \n          \n            Feature A\n            Feature B\n          \n        \n        First row of spanned cell",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Multi-row with Lists",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 29,
+              "y": 507,
+              "width": 135.14,
+              "height": 17,
+              "right": 164.14,
+              "bottom": 524
+            }
+          ],
+          "length": 20,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 20
+        },
+        {
+          "text": "Feature A",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 471,
+              "width": 69.38,
+              "height": 17,
+              "right": 279.52,
+              "bottom": 488
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Feature B",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 489,
+              "width": 70.27,
+              "height": 17,
+              "right": 280.41,
+              "bottom": 506
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "First row of spanned cell",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 480,
+              "width": 173.41,
+              "height": 17,
+              "right": 610.55,
+              "bottom": 497
+            }
+          ],
+          "length": 25,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 25
+        }
+      ],
+      "childCount": 3,
+      "depth": 0
+    },
+    "tr:nth-of-type(6)": {
+      "selector": "tr:nth-of-type(6)",
+      "tag": "tr",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 16,
+        "y": 516,
+        "width": 1095.83,
+        "height": 54,
+        "contentWidth": 1096,
+        "contentHeight": 54,
+        "scrollWidth": 1096,
+        "scrollHeight": 54
+      },
+      "computed": {
+        "display": "table-row",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "middle",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Benefit 1\n            Benefit 2\n          \n        \n        Second row of spanned cell",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Benefit 1",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 525,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 542
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Benefit 2",
+          "parentElement": "li",
+          "rects": [
+            {
+              "x": 210.14,
+              "y": 543,
+              "width": 63.16,
+              "height": 17,
+              "right": 273.3,
+              "bottom": 560
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": "Second row of spanned cell",
+          "parentElement": "td",
+          "rects": [
+            {
+              "x": 437.14,
+              "y": 534,
+              "width": 196.58,
+              "height": 17,
+              "right": 633.72,
+              "bottom": 551
+            }
+          ],
+          "length": 26,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 26
+        }
+      ],
+      "childCount": 2,
+      "depth": 0
+    },
+    "__viewport__": {
+      "width": 1200,
+      "height": 800,
+      "devicePixelRatio": 1
     }
   }
 }

@@ -2,9 +2,9 @@
   "name": "layout-test-tools",
   "version": "1.0.0",
   "description": "Automated layout testing tools for Radiant engine",
-  "main": "extract_layout.js",
+  "main": "extract_browser_references.js",
   "scripts": {
-    "extract": "node extract_layout.js",
+    "extract": "node extract_browser_references.js",
     "validate": "node validate_all.js"
   },
   "dependencies": {
