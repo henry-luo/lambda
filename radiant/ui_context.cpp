@@ -24,7 +24,7 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
     }         
 }
 
-int ui_context_init(UiContext* uicon) {
+int ui_context_init(UiContext* uicon, bool headless) {
     memset(uicon, 0, sizeof(UiContext));
     // inital window width and height - match browser test viewport
     int window_width = 1200, window_height = 800;
@@ -43,26 +43,36 @@ int ui_context_init(UiContext* uicon) {
         return EXIT_FAILURE;
     }
 
-    if (!glfwInit()) {
-        fprintf(stderr, "Error: Could not initialize GLFW.\n");
-        return EXIT_FAILURE;
-    }
+    if (headless) {
+        // Headless mode: no window creation
+        printf("Running in headless mode (no window)\n");
+        uicon->window = NULL;
+        uicon->pixel_ratio = 1.0;  // Default pixel ratio for headless
+        uicon->window_width = window_width;
+        uicon->window_height = window_height;
+    } else {
+        // GUI mode: create window
+        if (!glfwInit()) {
+            fprintf(stderr, "Error: Could not initialize GLFW.\n");
+            return EXIT_FAILURE;
+        }
 
-    // create a window and its OpenGL context
-    uicon->window = glfwCreateWindow(window_width, window_height, "FreeType and GLFW Text Rendering", NULL, NULL);
-    if (!uicon->window) {
-        fprintf(stderr, "Error: Could not create GLFW window.\n");
-        return EXIT_FAILURE;
-    }
+        // create a window and its OpenGL context
+        uicon->window = glfwCreateWindow(window_width, window_height, "FreeType and GLFW Text Rendering", NULL, NULL);
+        if (!uicon->window) {
+            fprintf(stderr, "Error: Could not create GLFW window.\n");
+            return EXIT_FAILURE;
+        }
 
-    // get logical and actual pixel ratio
-    int pixel_w, pixel_h;
-    glfwGetFramebufferSize(uicon->window, &pixel_w, &pixel_h);
-    float scale_x = (float)pixel_w / window_width;
-    float scale_y = (float)pixel_h / window_height;
-    printf("Scale Factor: %.2f x %.2f\n", scale_x, scale_y);
-    uicon->pixel_ratio = scale_x;   
-    uicon->window_width = pixel_w;  uicon->window_height = pixel_h;
+        // get logical and actual pixel ratio
+        int pixel_w, pixel_h;
+        glfwGetFramebufferSize(uicon->window, &pixel_w, &pixel_h);
+        float scale_x = (float)pixel_w / window_width;
+        float scale_y = (float)pixel_h / window_height;
+        printf("Scale Factor: %.2f x %.2f\n", scale_x, scale_y);
+        uicon->pixel_ratio = scale_x;   
+        uicon->window_width = pixel_w;  uicon->window_height = pixel_h;
+    }
 
     // load default fonts
     uicon->default_font = (FontProp){"Arial", 16 * uicon->pixel_ratio, 
