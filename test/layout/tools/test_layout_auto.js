@@ -505,6 +505,66 @@ class LayoutTester {
         };
     }
     
+    async testSingleByName(testName) {
+        console.log(`🎯 Running Single Test: ${testName}`);
+        console.log('==========================================');
+        
+        await this.ensureDirectories();
+        
+        // Search for the test file in all categories
+        const categories = ['basic', 'intermediate', 'medium', 'advanced'];
+        let foundFile = null;
+        let foundCategory = null;
+        
+        for (const category of categories) {
+            const categoryDir = path.join(this.dataDir, category);
+            try {
+                const files = await fs.readdir(categoryDir);
+                const htmlFile = files.find(file => 
+                    file === `${testName}.html` || 
+                    path.basename(file, '.html') === testName
+                );
+                
+                if (htmlFile) {
+                    foundFile = path.join(categoryDir, htmlFile);
+                    foundCategory = category;
+                    break;
+                }
+            } catch (error) {
+                // Category directory doesn't exist, continue
+                continue;
+            }
+        }
+        
+        if (!foundFile) {
+            console.error(`❌ Test file '${testName}' not found in any category`);
+            console.log(`Available categories: ${categories.join(', ')}`);
+            process.exit(1);
+        }
+        
+        console.log(`📂 Found test in category: ${foundCategory}`);
+        
+        const result = await this.testSingleFile(foundFile, foundCategory);
+        
+        // Generate report for single test
+        const report = {
+            timestamp: new Date().toISOString(),
+            radiant_exe: this.radiantExe,
+            tolerance: this.tolerance,
+            total_tests: 1,
+            passed_tests: result.passed ? 1 : 0,
+            failed_tests: result.passed ? 0 : 1,
+            pass_rate: result.passed ? 100 : 0,
+            single_test: result
+        };
+        
+        const reportFile = path.join(this.reportsDir, `layout_test_${testName}.json`);
+        await fs.writeFile(reportFile, JSON.stringify(report, null, 2));
+        console.log(`\n💾 Test report saved to: ${reportFile}`);
+        
+        return result;
+    }
+    
     async testAll() {
         console.log('🎯 Radiant Layout Engine Integration Tests');
         console.log('==========================================');
@@ -577,6 +637,7 @@ async function main() {
     };
     
     let category = null;
+    let testName = null;
     let showHelp = false;
     
     for (let i = 0; i < args.length; i++) {
@@ -594,8 +655,11 @@ async function main() {
                     process.exit(1);
                 }
                 break;
-            case '--tolerance':
+            case '--test':
             case '-t':
+                testName = args[++i];
+                break;
+            case '--tolerance':
                 options.tolerance = parseFloat(args[++i]);
                 break;
             case '--generate-references':
@@ -623,7 +687,8 @@ Usage: node test_layout_auto.js [options]
 
 Options:
   --category, -c <name>      Test specific category (basic|intermediate|medium|advanced)
-  --tolerance, -t <pixels>   Layout difference tolerance in pixels (default: 2.0)
+  --test, -t <name>          Test specific test file (e.g., table_simple)
+  --tolerance <pixels>       Layout difference tolerance in pixels (default: 2.0)
   --generate-references, -g  Generate browser references if missing
   --verbose, -v              Show detailed failure information
   --radiant-exe <path>       Path to Radiant executable (default: ./radiant.exe)
@@ -632,8 +697,9 @@ Options:
 Examples:
   node test_layout_auto.js                    # Test all categories
   node test_layout_auto.js -c basic           # Test basic category only
+  node test_layout_auto.js -t table_simple    # Test specific test file
   node test_layout_auto.js -g -v              # Generate references and show details
-  node test_layout_auto.js -t 1.0             # Use 1px tolerance
+  node test_layout_auto.js --tolerance 1.0    # Use 1px tolerance
 
 Generated files:
   ../reference/<category>/<test>.json         # Browser reference data
@@ -645,7 +711,9 @@ Generated files:
     const tester = new LayoutTester(options);
     
     try {
-        if (category) {
+        if (testName) {
+            await tester.testSingleByName(testName);
+        } else if (category) {
             await tester.testCategory(category);
         } else {
             await tester.testAll();
