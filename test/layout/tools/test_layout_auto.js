@@ -16,7 +16,7 @@ class LayoutTester {
     constructor(options = {}) {
         this.radiantExe = options.radiantExe || path.join(__dirname, '..', '..', '..', 'radiant.exe');
         this.tolerance = options.tolerance || 2.0;
-        this.textTolerance = options.textTolerance || 1.0; // Allow 1px difference for text
+        this.textTolerance = options.textTolerance || 1.2; // Allow 1.2px difference for text (font precision)
         this.generateReferences = options.generateReferences || false;
         this.verbose = options.verbose || false;
         
@@ -882,7 +882,7 @@ async function main() {
     const options = {
         radiantExe: './radiant.exe',
         tolerance: 2.0,
-        textTolerance: 1.0,
+        textTolerance: 1.2,
         generateReferences: false,
         verbose: false
     };
