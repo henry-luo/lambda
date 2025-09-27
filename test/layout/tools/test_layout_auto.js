@@ -95,29 +95,41 @@ class LayoutTester {
     }
     
     flattenRadiantTree(node, result = [], path = '', depth = 0) {
-        if (!node || !node.layout) return result;
+        if (!node) return result;
         
         const currentPath = path ? `${path} > ${node.tag}` : node.tag;
         
-        // FOCUS: Skip non-layout elements to match browser filtering
-        const isNonLayoutElement = node.tag === 'text' || node.tag === 'script';
-        
-        if (!isNonLayoutElement) {
-            // Map Radiant's element structure to browser equivalents
-            let mappedTag = node.tag;
-            let mappedSelector = node.selector || currentPath;
-            
-            // DEBUG: Log what elements we're including
-            if (this.verbose && (node.tag === 'html' || node.tag === 'body' || node.selector?.includes('container'))) {
-                console.log(`DEBUG: Including Radiant element: ${mappedSelector} (${mappedTag}) - ${node.layout.width}x${node.layout.height} at (${node.layout.x},${node.layout.y})`);
-            }
-            
+        // Handle text nodes separately for text comparison
+        if (node.tag === 'text' && node.layout) {
             result.push({
-                selector: mappedSelector,
-                tag: mappedTag,
+                selector: currentPath,
+                tag: 'text',
                 layout: node.layout,
-                css_properties: node.css_properties || {}
+                text: node.text || '',
+                isTextNode: true
             });
+        } else if (node.layout) {
+            // FOCUS: Skip non-layout elements to match browser filtering  
+            const isNonLayoutElement = node.tag === 'script';
+            
+            if (!isNonLayoutElement) {
+                // Map Radiant's element structure to browser equivalents
+                let mappedTag = node.tag;
+                let mappedSelector = node.selector || currentPath;
+                
+                // DEBUG: Log what elements we're including
+                if (this.verbose && (node.tag === 'html' || node.tag === 'body' || node.selector?.includes('container'))) {
+                    console.log(`DEBUG: Including Radiant element: ${mappedSelector} (${mappedTag}) - ${node.layout.width}x${node.layout.height} at (${node.layout.x},${node.layout.y})`);
+                }
+                
+                result.push({
+                    selector: mappedSelector,
+                    tag: mappedTag,
+                    layout: node.layout,
+                    css_properties: node.css_properties || {},
+                    isTextNode: false
+                });
+            }
         }
         
         if (node.children && Array.isArray(node.children)) {
@@ -129,6 +141,40 @@ class LayoutTester {
         return result;
     }
     
+    /**
+     * Extract text nodes from browser elements with their position data
+     */
+    extractBrowserTextNodes(browserElements) {
+        const textNodes = [];
+        
+        Object.entries(browserElements).forEach(([key, elem]) => {
+            if (elem.textNodes && elem.textNodes.length > 0) {
+                elem.textNodes.forEach((textNode, index) => {
+                    if (textNode.rects && textNode.rects.length > 0) {
+                        // Each rect represents a line fragment
+                        textNode.rects.forEach((rect, rectIndex) => {
+                            textNodes.push({
+                                selector: `${elem.selector || key}_text_${index}_${rectIndex}`,
+                                tag: 'text',
+                                layout: {
+                                    x: rect.x,
+                                    y: rect.y,
+                                    width: rect.width,
+                                    height: rect.height
+                                },
+                                text: textNode.text,
+                                parentElement: textNode.parentElement,
+                                isTextNode: true
+                            });
+                        });
+                    }
+                });
+            }
+        });
+        
+        return textNodes;
+    }
+
     /**
      * Filter elements to focus on content-level layout accuracy
      * FOCUS: Skip viewport-level elements, focus on content containers and items
@@ -178,6 +224,84 @@ class LayoutTester {
         return contentElements;
     }
     
+    /**
+     * Compare text node positioning between Radiant and browser
+     */
+    compareTextNodes(radiantTextNodes, browserTextNodes) {
+        const results = {
+            totalTextNodes: Math.max(radiantTextNodes.length, browserTextNodes.length),
+            matchedTextNodes: 0,
+            textDifferences: [],
+            maxTextDifference: 0
+        };
+        
+        if (results.totalTextNodes === 0) {
+            return results; // No text to compare
+        }
+        
+        // Create lookup maps for text nodes
+        const browserTextMap = new Map();
+        browserTextNodes.forEach((textNode, index) => {
+            // Create keys based on text content and approximate position
+            const textKey = textNode.text?.trim().substring(0, 20); // First 20 chars
+            const posKey = `${Math.round(textNode.layout.x/10)*10}_${Math.round(textNode.layout.y/10)*10}`;
+            
+            if (textKey) {
+                browserTextMap.set(`text_${textKey}`, textNode);
+                browserTextMap.set(`pos_${posKey}_${textKey}`, textNode);
+                browserTextMap.set(`index_${index}`, textNode);
+            }
+        });
+        
+        // Compare each Radiant text node
+        radiantTextNodes.forEach((radiantText, index) => {
+            const textKey = radiantText.text?.trim().substring(0, 20);
+            const posKey = `${Math.round(radiantText.layout.x/10)*10}_${Math.round(radiantText.layout.y/10)*10}`;
+            
+            let browserText = null;
+            if (textKey) {
+                // Try exact text match first
+                browserText = browserTextMap.get(`text_${textKey}`) ||
+                            browserTextMap.get(`pos_${posKey}_${textKey}`) ||
+                            browserTextMap.get(`index_${index}`);
+            }
+            
+            if (!browserText) {
+                results.textDifferences.push({
+                    type: 'missing_in_browser',
+                    text: radiantText.text,
+                    radiant: radiantText.layout,
+                    browser: null
+                });
+                return;
+            }
+            
+            // Compare positions
+            const diffs = this.compareElementLayout(radiantText.layout, browserText.layout);
+            if (diffs.length > 0) {
+                const maxDiff = Math.max(...diffs.map(d => d.difference));
+                results.maxTextDifference = Math.max(results.maxTextDifference, maxDiff);
+                
+                if (maxDiff > this.tolerance) {
+                    results.textDifferences.push({
+                        type: 'text_position_difference',
+                        text: radiantText.text,
+                        radiant: radiantText.layout,
+                        browser: browserText.layout,
+                        differences: diffs,
+                        maxDifference: maxDiff
+                    });
+                } else {
+                    results.matchedTextNodes++;
+                }
+            } else {
+                results.matchedTextNodes++;
+            }
+        });
+        
+        return results;
+    }
+
     /**
      * Generate layout-focused keys for element matching
      * FOCUS: Position and dimensions matter more than element names
@@ -239,20 +363,32 @@ class LayoutTester {
             matchedElements: 0,
             differences: [],
             maxDifference: 0,
+            // Enhanced with text node results
+            totalTextNodes: 0,
+            matchedTextNodes: 0,
+            textDifferences: [],
+            maxTextDifference: 0,
             summary: ''
         };
         
-        // Flatten Radiant tree structure
+        // Flatten Radiant tree structure (includes both elements and text nodes)
         const radiantElements = this.flattenRadiantTree(radiantData.layout_tree);
-        const browserElements = browserData.layout_data.elements;
+        const browserElements = browserData.layout_data.elements || browserData.layout_data;
+        
+        // Separate elements and text nodes
+        const radiantLayoutElements = radiantElements.filter(elem => !elem.isTextNode);
+        const radiantTextNodes = radiantElements.filter(elem => elem.isTextNode);
+        
+        // Extract text nodes from browser data
+        const browserTextNodes = this.extractBrowserTextNodes(browserElements);
         
         // CRITICAL FIX: Filter out document structure elements that Radiant doesn't output
         // Focus on content elements that actually affect layout
         const contentElements = this.filterContentElements(browserElements);
         
-        // Create lookup maps with improved matching strategy
+        // Create lookup maps with improved matching strategy (layout elements only)
         const radiantMap = new Map();
-        radiantElements.forEach((elem, index) => {
+        radiantLayoutElements.forEach((elem, index) => {
             // Create multiple lookup keys for better matching
             const keys = this.generateElementKeys(elem, index);
             keys.forEach(key => radiantMap.set(key, elem));
@@ -264,7 +400,7 @@ class LayoutTester {
             keys.forEach(lookupKey => browserMap.set(lookupKey, elem));
         });
         
-        results.totalElements = Math.max(radiantElements.length, Object.keys(contentElements).length);
+        results.totalElements = Math.max(radiantLayoutElements.length, Object.keys(contentElements).length);
         
         // Compare elements - deduplicate browser elements first
         const processedBrowserElements = new Set();
@@ -331,7 +467,7 @@ class LayoutTester {
         });
         
         // Check for extra elements in Radiant
-        radiantElements.forEach(radiantElem => {
+        radiantLayoutElements.forEach(radiantElem => {
             const elemId = radiantElem.selector || radiantElem.tag;
             if (!processedRadiantElements.has(elemId)) {
                 results.differences.push({
@@ -343,15 +479,33 @@ class LayoutTester {
             }
         });
         
-        // Generate layout-focused summary
+        // Compare text nodes
+        const textComparison = this.compareTextNodes(radiantTextNodes, browserTextNodes);
+        results.totalTextNodes = textComparison.totalTextNodes;
+        results.matchedTextNodes = textComparison.matchedTextNodes;
+        results.textDifferences = textComparison.textDifferences;
+        results.maxTextDifference = textComparison.maxTextDifference;
+        
+        // Generate comprehensive summary including text nodes
         const passRate = results.totalElements > 0 ? 
             (results.matchedElements / results.totalElements * 100) : 0;
+        const textPassRate = results.totalTextNodes > 0 ? 
+            (results.matchedTextNodes / results.totalTextNodes * 100) : 100; // 100% if no text
         
         // Focus on layout accuracy rather than just element count
         const layoutAccuracy = results.maxDifference <= this.tolerance ? 'ACCURATE' : 'INACCURATE';
+        const textAccuracy = results.maxTextDifference <= this.tolerance ? 'ACCURATE' : 'INACCURATE';
         const maxDiffStr = results.maxDifference.toFixed(2);
+        const maxTextDiffStr = results.maxTextDifference.toFixed(2);
         
-        results.summary = `${results.matchedElements}/${results.totalElements} layout matches (${passRate.toFixed(1)}%) - Max diff: ${maxDiffStr}px (${layoutAccuracy})`;
+        // Enhanced summary with text information
+        let summary = `${results.matchedElements}/${results.totalElements} layout matches (${passRate.toFixed(1)}%) - Max diff: ${maxDiffStr}px (${layoutAccuracy})`;
+        
+        if (results.totalTextNodes > 0) {
+            summary += ` | Text: ${results.matchedTextNodes}/${results.totalTextNodes} matches (${textPassRate.toFixed(1)}%) - Max text diff: ${maxTextDiffStr}px (${textAccuracy})`;
+        }
+        
+        results.summary = summary;
         
         return results;
     }
@@ -425,17 +579,34 @@ class LayoutTester {
             const layoutAccurate = comparison.maxDifference <= this.tolerance;
             const hasLayoutMatches = comparison.matchedElements > 0;
             
-            // Pass if we have accurate layout positioning, even if element structure differs
-            const passed = layoutAccurate && hasLayoutMatches;
+            // Text accuracy check - only fail if there are text nodes and they're inaccurate
+            const textAccurate = comparison.totalTextNodes === 0 || 
+                               (comparison.maxTextDifference <= this.tolerance && comparison.matchedTextNodes > 0);
+            
+            // Pass if we have accurate layout positioning AND accurate text positioning (when text exists)
+            const passed = layoutAccurate && hasLayoutMatches && textAccurate;
             
             const status = passed ? '✅ PASS' : '❌ FAIL';
             console.log(`    ${status} (${comparison.summary})`);
             
             if (!passed && this.verbose) {
-                console.log(`    Max difference: ${comparison.maxDifference.toFixed(2)}px`);
-                comparison.differences.slice(0, 3).forEach(diff => {
+                console.log(`    Layout max difference: ${comparison.maxDifference.toFixed(2)}px`);
+                if (comparison.totalTextNodes > 0) {
+                    console.log(`    Text max difference: ${comparison.maxTextDifference.toFixed(2)}px`);
+                }
+                
+                // Show layout differences
+                comparison.differences.slice(0, 2).forEach(diff => {
                     console.log(`      • ${diff.selector}: ${diff.type}`);
                 });
+                
+                // Show text differences
+                if (comparison.textDifferences.length > 0) {
+                    comparison.textDifferences.slice(0, 2).forEach(diff => {
+                        const truncatedText = diff.text?.substring(0, 20) || 'unknown';
+                        console.log(`      • Text "${truncatedText}": ${diff.type}`);
+                    });
+                }
             }
             
             return {
@@ -446,6 +617,11 @@ class LayoutTester {
                 totalElements: comparison.totalElements,
                 maxDifference: comparison.maxDifference,
                 differences: comparison.differences,
+                // Text node results
+                matchedTextNodes: comparison.matchedTextNodes,
+                totalTextNodes: comparison.totalTextNodes,
+                maxTextDifference: comparison.maxTextDifference,
+                textDifferences: comparison.textDifferences,
                 hasReference: true
             };
             
@@ -681,9 +857,14 @@ async function main() {
     
     if (showHelp) {
         console.log(`
-Radiant Layout Engine Integration Testing
+Radiant Layout Engine Integration Testing with Text Node Verification
 
 Usage: node test_layout_auto.js [options]
+
+This tool compares Radiant's layout output against browser references, including:
+- Element positioning and dimensions
+- Text node positions and line fragments
+- CSS property application accuracy
 
 Options:
   --category, -c <name>      Test specific category (basic|intermediate|medium|advanced)
@@ -702,7 +883,7 @@ Examples:
   node test_layout_auto.js --tolerance 1.0    # Use 1px tolerance
 
 Generated files:
-  ../reference/<category>/<test>.json         # Browser reference data
+  ../reference/<category>/<test>.json         # Browser reference data (with text nodes)
   ../../../test_output/layout_test_results.json  # Test results report
 `);
         process.exit(0);
