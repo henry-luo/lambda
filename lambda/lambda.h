@@ -139,7 +139,15 @@ typedef struct String {
 // Array and List struct defintions needed for for-loop
 struct Container {
     TypeId type_id;
-    uint8_t flags;
+    union {
+        uint8_t flags;
+        struct {
+            uint8_t is_content:1;  // whether it is a content list, or value list
+            // uint8_t is_const:1;  // is a constant expr
+            // uint8_t is_pooled:1; // is allocated from a memory pool
+            uint8_t reserved:7;
+        };
+    };
     uint16_t ref_cnt;  // reference count
 };
 
