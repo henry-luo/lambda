@@ -293,7 +293,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->block.given_height = 200 * lycon->ui_context->pixel_ratio;        
         break;
     }
-    lycon->block.line_height = lycon->font.style.font_size * 1.2;  // default line height
+    lycon->block.line_height = calculate_chrome_line_height(lycon->font.style.font_size, lycon->ui_context->pixel_ratio);
 
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);

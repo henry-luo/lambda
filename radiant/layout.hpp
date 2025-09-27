@@ -95,6 +95,11 @@ void view_vertical_align(LayoutContext* lycon, View* view);
 // DomNode style resolution
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
+// Chrome-style line height calculation
+// Uses: max(fontSize + 3, ceil(fontSize * 1.2)) * pixelRatio
+// This matches Chrome browser's "normal" line-height behavior more accurately
+int calculate_chrome_line_height(int font_size, float pixel_ratio);
+
 // View tree printing functions
 void print_view_tree(ViewGroup* view_root, float pixel_ratio);
 void print_view_tree_json(ViewGroup* view_root, float pixel_ratio);
