@@ -326,7 +326,11 @@ void print_block(ViewBlock* block, StrBuf* buf, int indent) {
     strbuf_append_format(buf, "[view-%s:%s, x:%d, y:%d, wd:%d, hg:%d\n",
         block->type == RDT_VIEW_BLOCK ? "block" : 
         block->type == RDT_VIEW_INLINE_BLOCK ? "inline-block" : 
-        block->type == RDT_VIEW_LIST_ITEM ? "list-item" : "image",
+        block->type == RDT_VIEW_LIST_ITEM ? "list-item" : 
+        block->type == RDT_VIEW_TABLE ? "table" : 
+        block->type == RDT_VIEW_TABLE_ROW_GROUP ? "table-row-group" : 
+        block->type == RDT_VIEW_TABLE_ROW ? "table-row" : 
+        block->type == RDT_VIEW_TABLE_CELL ? "table-cell" : "image",
         block->node->name(),
         block->x, block->y, block->width, block->height);
     print_block_props(block, buf, indent + 2);
@@ -341,7 +345,9 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
     if (view) {
         do {
             if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
-                view->type == RDT_VIEW_LIST_ITEM) {
+                view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_TABLE ||
+                view->type == RDT_VIEW_TABLE_ROW_GROUP || view->type == RDT_VIEW_TABLE_ROW ||
+                view->type == RDT_VIEW_TABLE_CELL) {
                 print_block((ViewBlock*)view, buf, indent);
             }
             else if (view->type == RDT_VIEW_INLINE) {
@@ -414,6 +420,10 @@ const char* get_view_type_name_json(ViewType type) {
         case RDT_VIEW_BLOCK: return "block";
         case RDT_VIEW_INLINE_BLOCK: return "inline-block";
         case RDT_VIEW_LIST_ITEM: return "list-item";
+        case RDT_VIEW_TABLE: return "table";
+        case RDT_VIEW_TABLE_ROW_GROUP: return "table-row-group";
+        case RDT_VIEW_TABLE_ROW: return "table-row";
+        case RDT_VIEW_TABLE_CELL: return "table-cell";
         case RDT_VIEW_INLINE: return "inline";
         case RDT_VIEW_TEXT: return "text";
         default: return "unknown";
@@ -605,7 +615,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         first_child = false;
         
         if (child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK ||
-            child->type == RDT_VIEW_LIST_ITEM) {
+            child->type == RDT_VIEW_LIST_ITEM || child->type == RDT_VIEW_TABLE ||
+            child->type == RDT_VIEW_TABLE_ROW_GROUP || child->type == RDT_VIEW_TABLE_ROW ||
+            child->type == RDT_VIEW_TABLE_CELL) {
             print_block_json((ViewBlock*)child, buf, indent + 4, pixel_ratio);
         } else if (child->type == RDT_VIEW_TEXT) {
             print_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
