@@ -230,8 +230,41 @@ class LayoutTester {
      * Compare text node positioning between Radiant and browser
      */
     compareTextNodes(radiantTextNodes, browserTextNodes) {
+        // CRITICAL ENHANCEMENT: Handle Radiant's multiple text nodes vs Browser's single text node with multiple rects
+        
+        // Flatten browser text nodes with rects into individual positioned fragments
+        const browserTextFragments = [];
+        browserTextNodes.forEach(browserTextNode => {
+            if (browserTextNode.rects && browserTextNode.rects.length > 0) {
+                // Browser has multiple rects for wrapped text - create fragment for each rect
+                browserTextNode.rects.forEach((rect, rectIndex) => {
+                    browserTextFragments.push({
+                        text: browserTextNode.text, // Full text content
+                        layout: {
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height
+                        },
+                        rectIndex: rectIndex,
+                        totalRects: browserTextNode.rects.length,
+                        parentText: browserTextNode.text
+                    });
+                });
+            } else if (browserTextNode.layout) {
+                // Browser has single rect - treat as single fragment
+                browserTextFragments.push({
+                    text: browserTextNode.text,
+                    layout: browserTextNode.layout,
+                    rectIndex: 0,
+                    totalRects: 1,
+                    parentText: browserTextNode.text
+                });
+            }
+        });
+        
         const results = {
-            totalTextNodes: Math.max(radiantTextNodes.length, browserTextNodes.length),
+            totalTextNodes: Math.max(radiantTextNodes.length, browserTextFragments.length),
             matchedTextNodes: 0,
             textDifferences: [],
             maxTextDifference: 0
@@ -241,34 +274,53 @@ class LayoutTester {
             return results; // No text to compare
         }
         
-        // Create lookup maps for text nodes
-        const browserTextMap = new Map();
-        browserTextNodes.forEach((textNode, index) => {
-            // Create keys based on text content and approximate position
-            const textKey = textNode.text?.trim().substring(0, 20); // First 20 chars
-            const posKey = `${Math.round(textNode.layout.x/10)*10}_${Math.round(textNode.layout.y/10)*10}`;
+        // Create spatial lookup for browser text fragments
+        const browserFragmentMap = new Map();
+        browserTextFragments.forEach((fragment, index) => {
+            // Create spatial keys for position-based matching
+            const posKey = `${Math.round(fragment.layout.x/5)*5}_${Math.round(fragment.layout.y/5)*5}`;
+            const yKey = `y_${Math.round(fragment.layout.y/2)*2}`; // Group by Y position (line)
             
-            if (textKey) {
-                browserTextMap.set(`text_${textKey}`, textNode);
-                browserTextMap.set(`pos_${posKey}_${textKey}`, textNode);
-                browserTextMap.set(`index_${index}`, textNode);
-            }
+            if (!browserFragmentMap.has(posKey)) browserFragmentMap.set(posKey, []);
+            if (!browserFragmentMap.has(yKey)) browserFragmentMap.set(yKey, []);
+            
+            browserFragmentMap.get(posKey).push(fragment);
+            browserFragmentMap.get(yKey).push(fragment);
+            browserFragmentMap.set(`index_${index}`, fragment);
         });
         
-        // Compare each Radiant text node
+        // Compare each Radiant text node against browser fragments
         radiantTextNodes.forEach((radiantText, index) => {
-            const textKey = radiantText.text?.trim().substring(0, 20);
-            const posKey = `${Math.round(radiantText.layout.x/10)*10}_${Math.round(radiantText.layout.y/10)*10}`;
+            const posKey = `${Math.round(radiantText.layout.x/5)*5}_${Math.round(radiantText.layout.y/5)*5}`;
+            const yKey = `y_${Math.round(radiantText.layout.y/2)*2}`;
             
-            let browserText = null;
-            if (textKey) {
-                // Try exact text match first
-                browserText = browserTextMap.get(`text_${textKey}`) ||
-                            browserTextMap.get(`pos_${posKey}_${textKey}`) ||
-                            browserTextMap.get(`index_${index}`);
+            // Try to find matching browser fragment by position
+            let bestMatch = null;
+            let bestDistance = Infinity;
+            
+            // Check position-based matches first
+            const posMatches = browserFragmentMap.get(posKey) || [];
+            const yMatches = browserFragmentMap.get(yKey) || [];
+            const candidateFragments = [...new Set([...posMatches, ...yMatches])];
+            
+            // If no position matches, check all fragments
+            if (candidateFragments.length === 0) {
+                candidateFragments.push(...browserTextFragments);
             }
             
-            if (!browserText) {
+            candidateFragments.forEach(fragment => {
+                const distance = Math.sqrt(
+                    Math.pow(radiantText.layout.x - fragment.layout.x, 2) +
+                    Math.pow(radiantText.layout.y - fragment.layout.y, 2)
+                );
+                
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestMatch = fragment;
+                }
+            });
+            
+            if (!bestMatch) {
                 results.textDifferences.push({
                     type: 'missing_in_browser',
                     text: radiantText.text,
@@ -278,8 +330,8 @@ class LayoutTester {
                 return;
             }
             
-            // Compare positions
-            const diffs = this.compareElementLayout(radiantText.layout, browserText.layout);
+            // Compare positions using the best matching fragment
+            const diffs = this.compareElementLayout(radiantText.layout, bestMatch.layout);
             if (diffs.length > 0) {
                 const maxDiff = Math.max(...diffs.map(d => d.difference));
                 results.maxTextDifference = Math.max(results.maxTextDifference, maxDiff);
@@ -289,9 +341,15 @@ class LayoutTester {
                         type: 'text_position_difference',
                         text: radiantText.text,
                         radiant: radiantText.layout,
-                        browser: browserText.layout,
+                        browser: bestMatch.layout,
                         differences: diffs,
-                        maxDifference: maxDiff
+                        maxDifference: maxDiff,
+                        // Additional context for debugging
+                        browserFragment: {
+                            rectIndex: bestMatch.rectIndex,
+                            totalRects: bestMatch.totalRects,
+                            parentText: bestMatch.parentText
+                        }
                     });
                 } else {
                     results.matchedTextNodes++;
