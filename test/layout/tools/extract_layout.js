@@ -1,3 +1,14 @@
+/**
+ * Enhanced Browser Layout Extraction Tool
+ * 
+ * Extracts comprehensive layout information from HTML test files including:
+ * - Element positions, dimensions, and CSS properties
+ * - Text node positions using Range.getClientRects() for line fragments
+ * - Complete box model data (margins, padding, borders)
+ * - Flexbox and typography properties
+ * - Viewport and metadata information
+ */
+
 const puppeteer = require('puppeteer');
 const fs = require('fs').promises;
 const path = require('path');
@@ -51,7 +62,7 @@ class LayoutExtractor {
         
         // Wait for fonts and rendering to stabilize
         await this.page.evaluate(() => document.fonts.ready);
-        await this.page.waitForTimeout(100); // Small delay for stability
+        await new Promise(resolve => setTimeout(resolve, 100)); // Small delay for stability
         
         // Extract comprehensive layout data
         const layoutData = await this.page.evaluate(() => {
@@ -143,12 +154,76 @@ class LayoutExtractor {
                     textContent: element.textContent?.trim() || null,
                     hasTextNodes: Array.from(element.childNodes).some(n => n.nodeType === 3 && n.textContent.trim()),
                     
+                    // Text node positions
+                    textNodes: extractTextNodePositions(element),
+                    
                     // Hierarchy information
                     childCount: element.children.length,
                     depth: (path.match(/>/g) || []).length
                 };
                 
                 return data;
+            };
+            
+            // Helper to extract text node positions
+            const extractTextNodePositions = (element) => {
+                const textNodes = [];
+                
+                // Walk through all child nodes to find text nodes
+                const walker = document.createTreeWalker(
+                    element,
+                    NodeFilter.SHOW_TEXT,
+                    {
+                        acceptNode: function(node) {
+                            // Only include text nodes with non-whitespace content
+                            if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
+                                return NodeFilter.FILTER_ACCEPT;
+                            }
+                            return NodeFilter.FILTER_REJECT;
+                        }
+                    }
+                );
+                
+                let textNode;
+                while (textNode = walker.nextNode()) {
+                    try {
+                        // Create range for this text node
+                        const range = document.createRange();
+                        range.selectNodeContents(textNode);
+                        const rects = range.getClientRects(); // one per line fragment
+                        
+                        // Convert ClientRects to plain objects and round coordinates
+                        const rectArray = Array.from(rects).map(rect => ({
+                            x: Math.round(rect.left * 100) / 100,
+                            y: Math.round(rect.top * 100) / 100,
+                            width: Math.round(rect.width * 100) / 100,
+                            height: Math.round(rect.height * 100) / 100,
+                            right: Math.round(rect.right * 100) / 100,
+                            bottom: Math.round(rect.bottom * 100) / 100
+                        }));
+                        
+                        // Only add if we have valid rects
+                        if (rectArray.length > 0) {
+                            textNodes.push({
+                                text: textNode.textContent,
+                                parentElement: textNode.parentElement?.tagName.toLowerCase() || null,
+                                rects: rectArray,
+                                length: textNode.textContent.length,
+                                // Additional metadata
+                                isWhitespaceOnly: !textNode.textContent.trim(),
+                                startOffset: 0, // Could be enhanced to track actual offset in parent
+                                endOffset: textNode.textContent.length
+                            });
+                        }
+                        
+                        range.detach(); // Clean up range
+                    } catch (error) {
+                        // Skip text nodes that can't be measured (e.g., in hidden elements)
+                        console.warn('Could not extract position for text node:', textNode.textContent, error);
+                    }
+                }
+                
+                return textNodes;
             };
             
             // Helper to generate CSS selector
