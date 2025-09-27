@@ -21,6 +21,8 @@ bool is_only_whitespace(const char* str) {
     return true;
 }
 
+
+
 // DomNode style resolution function
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     log_debug("resolving style for node %p of type %d\n", node, node ? node->type : -1);
@@ -280,7 +282,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     else if (node->is_text()) {
         const unsigned char* str = node->text_data();
         printf(" Text: %s\n", str);
-        if (str && *str && !is_only_whitespace((const char*)str)) { // text is not empty
+        if (str && *str && !is_only_whitespace((const char*)str)) {
             layout_text(lycon, node);
         }
     }

@@ -20,6 +20,7 @@ extern "C" {
     int strncmp(const char *s1, const char *s2, size_t n);
     char *strncpy(char *dest, const char *src, size_t n);
     char *strdup(const char *s);
+    char *strstr(const char *target, const char *sourceß);
 #ifdef __cplusplus
 }
 #endif
@@ -93,7 +94,15 @@ typedef struct DomNode {
     }
     
     bool is_text() {
-        return (type == LEXBOR_NODE);
+        if (type != LEXBOR_NODE) return false;
+        
+        // Use Lexbor API to distinguish between text nodes and comment nodes
+        if (lxb_node && lxb_node->type == LXB_DOM_NODE_TYPE_TEXT) {
+            return true;
+        }
+        
+        // Filter out comments and other non-text node types
+        return false;
     }
     
     // Text node data access
