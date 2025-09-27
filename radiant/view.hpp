@@ -320,7 +320,19 @@ typedef struct ViewTableRow : ViewBlock {
 } ViewTableRow;
 
 typedef struct ViewTableCell : ViewBlock {
-    // Minimal metadata may be added later (e.g., row/col indices, spans)
+    // Cell spanning metadata
+    int col_span;  // Number of columns this cell spans (default: 1)
+    int row_span;  // Number of rows this cell spans (default: 1)
+    int col_index; // Starting column index (computed during layout)
+    int row_index; // Starting row index (computed during layout)
+    
+    // Vertical alignment
+    enum {
+        CELL_VALIGN_TOP = 0,
+        CELL_VALIGN_MIDDLE = 1,
+        CELL_VALIGN_BOTTOM = 2,
+        CELL_VALIGN_BASELINE = 3
+    } vertical_align;
 } ViewTableCell;
 
 struct ViewTree {
