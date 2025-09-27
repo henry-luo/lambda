@@ -564,12 +564,16 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->line.advance_x += block->bound->padding.left;
         lycon->block.advance_y += block->bound->padding.top;
         lycon->line.left = lycon->line.advance_x;
+        // CRITICAL FIX: Set line.right to content area (block width - right padding)
+        lycon->line.right = lycon->line.advance_x + content_width;
     } 
     else {
         block->width = content_width;  block->height = content_height;
         // no change to block->x, block->y, lycon->line.advance_x, lycon->block.advance_y
-    }  
-    lycon->line.right = lycon->block.width;  
+        lycon->line.right = lycon->block.width;
+    }
+    
+    
     log_debug("layout-block-sizes: x:%d, y:%d, wd:%d, hg:%d, line-hg:%d, given-w:%d, given-h:%d\n",
         block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
 
