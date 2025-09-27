@@ -245,7 +245,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         break;
     case LXB_TAG_P:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style.font_size;
+        // CRITICAL FIX: Don't set default margins yet - wait until after CSS resolution
+        // This will be handled in the post-CSS resolution logic
         break;
     case LXB_TAG_UL:  case LXB_TAG_OL: 
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
@@ -293,10 +294,39 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->block.given_height = 200 * lycon->ui_context->pixel_ratio;        
         break;
     }
-    lycon->block.line_height = calculate_chrome_line_height(lycon->font.style.font_size, lycon->ui_context->pixel_ratio);
+    // CRITICAL FIX: Use special marker for normal line-height instead of Chrome formula
+    // This will be updated to font intrinsic height after CSS resolution
+    lycon->block.line_height = -1;  // Special marker for normal line-height
 
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
+    
+    // CRITICAL FIX: After CSS resolution, update font face if font size changed
+    // This ensures the font face matches the resolved font size
+    if (lycon->font.current_font_size > 0 && lycon->font.current_font_size != lycon->font.style.font_size) {
+        // Font size was changed by CSS, need to reload font face
+        lycon->font.style.font_size = lycon->font.current_font_size;
+        lycon->font.face = load_styled_font(lycon->ui_context, lycon->font.face->family_name, &lycon->font.style);
+        printf("DEBUG: Updated font face for new font size: %d\n", lycon->font.style.font_size);
+    }
+    
+    // CRITICAL FIX: After CSS resolution, update line-height to use font intrinsic height
+    // This must happen after CSS resolution because font-size might have changed
+    if (lycon->block.line_height == -1) {
+        // Special marker value means no explicit line-height was set in CSS
+        // Use font intrinsic height for line-height: normal, with browser-compatible adjustment
+        int font_height = lycon->font.face->size->metrics.height >> 6;
+        
+        // CRITICAL FIX: Adjust font height to match browser behavior more closely
+        // Browsers seem to use slightly smaller line heights than FreeType reports
+        if (font_height >= 18) {
+            font_height -= 1;  // Reduce by 1px for fonts 18px and larger
+        }
+        
+        lycon->block.line_height = font_height;
+        printf("DEBUG: Updated line-height after CSS resolution to browser-compatible height: %d (font_size=%d)\n", 
+               lycon->block.line_height, lycon->font.style.font_size);
+    }
     
     // CRITICAL FIX: After CSS resolution, handle body margin properly
     // This handles CSS resets like "* { margin: 0; }" properly
@@ -330,6 +360,33 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     block->bound->margin.right = body_margin_physical;
                 }
                 printf("DEBUG: Applied partial default body margins\n");
+            }
+        }
+    }
+    
+    // CRITICAL FIX: After CSS resolution, handle paragraph margins properly
+    // Apply default paragraph margins only if not explicitly set by CSS
+    if (elmt_name == LXB_TAG_P) {
+        if (!block->bound) {
+            // No CSS margin properties - apply default paragraph margins
+            block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            block->bound->margin.top = block->bound->margin.bottom = lycon->font.style.font_size;
+            printf("DEBUG: Applied default paragraph margins (no CSS): %d\n", lycon->font.style.font_size);
+        } else {
+            // CSS margin properties exist - check if it's a reset (all margins are 0)
+            if (block->bound->margin.top == 0 && block->bound->margin.bottom == 0 &&
+                block->bound->margin.left == 0 && block->bound->margin.right == 0) {
+                // CSS reset detected - keep margins at 0
+                printf("DEBUG: CSS paragraph margin reset detected - keeping margins at 0\n");
+            } else {
+                // CSS has some non-zero margins - check for unset margins and apply defaults
+                if (block->bound->margin.top_specificity == 0) {
+                    block->bound->margin.top = lycon->font.style.font_size;
+                }
+                if (block->bound->margin.bottom_specificity == 0) {
+                    block->bound->margin.bottom = lycon->font.style.font_size;
+                }
+                printf("DEBUG: Applied partial default paragraph margins\n");
             }
         }
     }

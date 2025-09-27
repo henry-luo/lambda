@@ -539,6 +539,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             lycon->block.line_height = line_height->u.percentage.num * lycon->font.style.font_size;
             printf("property percentage: %lf\n", line_height->u.percentage.num);
             break;
+        case LXB_CSS_VALUE_NORMAL:
+            // CRITICAL FIX: For line-height: normal, use special marker
+            // This will be updated to actual font height after CSS resolution
+            lycon->block.line_height = -1;  // Special marker for normal line-height
+            printf("property normal line-height: using font intrinsic height\n");
+            break;
         }
         break;
     }
