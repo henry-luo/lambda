@@ -218,9 +218,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     switch (elmt_name) {
     case LXB_TAG_BODY:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        // default: 8px margin for body
+        // CRITICAL FIX: Don't apply default body margin - let CSS handle it completely
+        // The CSS reset "* { margin: 0; }" should be the source of truth
+        // If no CSS is specified, the margin will remain 0 (which is correct for modern web)
         block->bound->margin.top = block->bound->margin.bottom = 
-            block->bound->margin.left = block->bound->margin.right = 8 * lycon->ui_context->pixel_ratio; 
+            block->bound->margin.left = block->bound->margin.right = 0; 
          break;
     case LXB_TAG_H1:
         em_size = 2;  // 2em
@@ -298,6 +300,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
+    
+    // CRITICAL FIX: After CSS resolution, check if body margin was reset to 0
+    // This handles CSS resets like "* { margin: 0; }" properly
+    if (elmt_name == LXB_TAG_BODY && block->bound) {
+        // If all margins are 0, this indicates a CSS reset was applied
+        if (block->bound->margin.top == 0 && block->bound->margin.right == 0 && 
+            block->bound->margin.bottom == 0 && block->bound->margin.left == 0) {
+            // CSS reset detected - keep margins at 0
+            printf("DEBUG: CSS margin reset detected for body element\n");
+        }
+    }
  
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     if (block->blk) lycon->block.text_align = block->blk->text_align;

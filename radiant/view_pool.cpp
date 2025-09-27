@@ -570,6 +570,8 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent) {
     const char* display = "block";
     if (block->type == RDT_VIEW_INLINE_BLOCK) display = "inline-block";
     else if (block->type == RDT_VIEW_LIST_ITEM) display = "list-item";
+    // CRITICAL FIX: Check for flex container
+    else if (block->embed && block->embed->flex_container) display = "flex";
     append_json_string(buf, display);
     strbuf_append_str(buf, "\n");
     
