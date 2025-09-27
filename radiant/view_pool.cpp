@@ -529,20 +529,52 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"selector\": ");
     
-    // Try to get CSS class information for better element identification
-    const char* css_class = "";
+    // Generate enhanced CSS selector with nth-of-type support (matches browser behavior)
     if (block->node) {
         size_t class_len;
         const lxb_char_t* class_attr = block->node->get_attribute("class", &class_len);
+        
+        // Start with tag name and class
+        char base_selector[256];
         if (class_attr && class_len > 0) {
-            // Create selector like "div.container"
-            char* selector = (char*)malloc(strlen(tag_name) + class_len + 2);
-            sprintf(selector, "%s.%.*s", tag_name, (int)class_len, class_attr);
-            append_json_string(buf, selector);
-            free(selector);
+            snprintf(base_selector, sizeof(base_selector), "%s.%.*s", tag_name, (int)class_len, class_attr);
         } else {
-            append_json_string(buf, tag_name);
+            snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
         }
+        
+        // Add nth-of-type if there are multiple siblings with same tag
+        char final_selector[512];
+        DomNode* parent = block->node->parent;
+        if (parent) {
+            // Count siblings with same tag name
+            int sibling_count = 0;
+            int current_index = 0;
+            DomNode* sibling = parent->first_child();
+            
+            while (sibling) {
+                if (sibling->type == LEXBOR_ELEMENT) {
+                    const char* sibling_tag = sibling->name();
+                    if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
+                        sibling_count++;
+                        if (sibling == block->node) {
+                            current_index = sibling_count; // 1-based index
+                        }
+                    }
+                }
+                sibling = sibling->next_sibling();
+            }
+            
+            // Add nth-of-type if multiple siblings exist
+            if (sibling_count > 1 && current_index > 0) {
+                snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)", base_selector, current_index);
+            } else {
+                snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
+            }
+        } else {
+            snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
+        }
+        
+        append_json_string(buf, final_selector);
     } else {
         append_json_string(buf, tag_name);
     }
@@ -690,9 +722,22 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     
-    // Convert text dimensions to CSS pixels
-    int css_x = (int)round(text->x / pixel_ratio);
-    int css_y = (int)round(text->y / pixel_ratio);
+    // CRITICAL FIX: Calculate absolute position for text nodes (same as block elements)
+    int abs_x = text->x;
+    int abs_y = text->y;
+    
+    // Calculate absolute position by traversing up the parent chain
+    ViewGroup* parent = text->parent;
+    while (parent && parent->type == RDT_VIEW_BLOCK) {
+        ViewBlock* parent_block = (ViewBlock*)parent;
+        abs_x += parent_block->x;
+        abs_y += parent_block->y;
+        parent = parent_block->parent;
+    }
+    
+    // Convert absolute text dimensions to CSS pixels
+    int css_x = (int)round(abs_x / pixel_ratio);
+    int css_y = (int)round(abs_y / pixel_ratio);
     int css_width = (int)round(text->width / pixel_ratio);
     int css_height = (int)round(text->height / pixel_ratio);
     
