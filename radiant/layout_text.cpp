@@ -47,7 +47,13 @@ void line_break(LayoutContext* lycon) {
     line_align(lycon);
 
     // advance to next line
-    lycon->block.advance_y += max(lycon->line.max_ascender + lycon->line.max_descender, lycon->block.line_height);
+    // CRITICAL FIX: Use CSS line-height instead of max(font_height, css_line_height)
+    // CSS line-height should override font metrics for consistent browser behavior
+    int font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
+    int css_line_height = lycon->block.line_height;
+    int used_line_height = css_line_height; // Use CSS line-height directly
+    // printf("DEBUG: Line advance - font: %d, css: %d, used: %d (CSS override)\n", font_line_height, css_line_height, used_line_height);
+    lycon->block.advance_y += used_line_height;
     // reset the new line
     line_init(lycon);
 }
@@ -144,7 +150,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     lycon->prev_view = (View*)text;    
     text->start_index = str - text_start;
     int font_height = lycon->font.face->size->metrics.height >> 6;
-    text->x = lycon->line.advance_x;  text->height = font_height;
+    text->x = lycon->line.advance_x;  text->height = lycon->block.line_height;
     if (lycon->line.vertical_align == LXB_CSS_VALUE_MIDDLE) {
         log_debug("middle-aligned-text: font %d, line %d", font_height, lycon->block.line_height);
         text->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;

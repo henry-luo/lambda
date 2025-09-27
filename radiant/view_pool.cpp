@@ -745,9 +745,9 @@ void print_view_tree_json(ViewGroup* view_root, float pixel_ratio) {
     }
     strbuf_append_str(json_buf, "\n}\n");
     
-    // Write to file
-    write_string_to_file("view_tree.json", json_buf->str);
+    // Write to file in /tmp directory for easier access
+    write_string_to_file("/tmp/view_tree.json", json_buf->str);
     
-    printf("JSON layout data written to: view_tree.json\n");
+    printf("JSON layout data written to: /tmp/view_tree.json\n");
     strbuf_free(json_buf);
 }
