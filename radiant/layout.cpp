@@ -257,6 +257,12 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         lxb_html_element_t *elmt = node->as_element();
         DisplayValue display = resolve_display(elmt);
         
+        // Debug: print display values for table elements
+        if (node->tag() == LXB_TAG_TABLE) {
+            printf("DEBUG: TABLE element - outer=%d, inner=%d (LXB_CSS_VALUE_TABLE=%d)\n", 
+                   display.outer, display.inner, LXB_CSS_VALUE_TABLE);
+        }
+        
         // Check for flex container first
         if (display.inner == LXB_CSS_VALUE_FLEX) {
             // This element is a flex container - route to flex layout
@@ -264,7 +270,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             return;
         }
         // Check for table formatting context root (Phase 1)
-        if (display.inner == LXB_CSS_VALUE_TABLE) {
+        if (display.outer == LXB_CSS_VALUE_TABLE || display.inner == LXB_CSS_VALUE_TABLE) {
+            printf("DEBUG: Table detected! outer=%d, inner=%d\n", display.outer, display.inner);
             layout_table_box(lycon, node, display);
             return;
         }
