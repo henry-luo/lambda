@@ -392,6 +392,7 @@ help:
 	@echo "  test-all      - Run complete test suite (all test types)"
 	@echo "  test-radiant  - Run all Radiant layout engine tests (95+ tests: flexbox, layout, rendering)"
 	@echo "  test-layout   - Run Radiant layout integration tests (all categories)"
+	@echo "                  Usage: make test-layout TEST=table_simple (run specific test)"
 	@echo "  test-windows  - Run CI tests for Windows executable"
 	@echo "  test-linux    - Run CI tests for Linux executable"
 	@echo "  run           - Build and run the default executable"
@@ -835,7 +836,12 @@ test-layout: build-radiant
 	@echo "🎨 Running Radiant Layout Engine Tests"
 	@echo "======================================"
 	@if [ -f "test/layout/tools/test_layout_auto.js" ]; then \
-		cd test/layout/tools && node test_layout_auto.js --radiant-exe $(PWD)/radiant.exe; \
+		if [ -n "$(TEST)" ]; then \
+			echo "🎯 Running single test: $(TEST)"; \
+			cd test/layout/tools && node test_layout_auto.js --radiant-exe $(PWD)/radiant.exe --test $(TEST); \
+		else \
+			cd test/layout/tools && node test_layout_auto.js --radiant-exe $(PWD)/radiant.exe; \
+		fi; \
 	else \
 		echo "❌ Error: Layout test script not found at test/layout/tools/test_layout_auto.js"; \
 		exit 1; \
