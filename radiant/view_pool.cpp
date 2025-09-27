@@ -617,7 +617,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
     
-    // CSS properties (basic for now)
+    // CSS properties (enhanced to match text output)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"css_properties\": {\n");
     
@@ -629,8 +629,58 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     // CRITICAL FIX: Check for flex container
     else if (block->embed && block->embed->flex_container) display = "flex";
     append_json_string(buf, display);
-    strbuf_append_str(buf, "\n");
     
+    // Add block properties if available
+    if (block->blk) {
+        strbuf_append_str(buf, ",\n");
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"line_height\": %.2f,\n", block->blk->line_height);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"text_align\": \"%s\",\n", lxb_css_value_by_id(block->blk->text_align)->name);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"text_indent\": %.2f,\n", block->blk->text_indent);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"min_width\": %.2f,\n", block->blk->min_width);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"max_width\": %.2f,\n", block->blk->max_width);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"min_height\": %.2f,\n", block->blk->min_height);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"max_height\": %.2f,\n", block->blk->max_height);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"box_sizing\": \"%s\"", 
+            block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX ? "border-box" : "content-box");
+        
+        if (block->blk->given_width >= 0) {
+            strbuf_append_str(buf, ",\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"given_width\": %d", block->blk->given_width);
+        }
+        if (block->blk->given_height >= 0) {
+            strbuf_append_str(buf, ",\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"given_height\": %d", block->blk->given_height);
+        }
+    }
+    
+    // Add flex container properties if available
+    if (block->embed && block->embed->flex_container) {
+        strbuf_append_str(buf, ",\n");
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "\"flex_container\": {\n");
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"row_gap\": %d,\n", block->embed->flex_container->row_gap);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"column_gap\": %d,\n", block->embed->flex_container->column_gap);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"main_axis_size\": %d,\n", block->embed->flex_container->main_axis_size);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"cross_axis_size\": %d\n", block->embed->flex_container->cross_axis_size);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "}");
+    }
+    
+    strbuf_append_str(buf, "\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
     
@@ -653,6 +703,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             print_block_json((ViewBlock*)child, buf, indent + 4, pixel_ratio);
         } else if (child->type == RDT_VIEW_TEXT) {
             print_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
+        } else if (child->type == RDT_VIEW_INLINE) {
+            // CRITICAL FIX: Handle inline elements (spans) with their children
+            print_inline_json((ViewSpan*)child, buf, indent + 4, pixel_ratio);
         } else {
             // Handle other view types
             strbuf_append_char_n(buf, ' ', indent + 4);
@@ -694,7 +747,7 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"content\": ");
     
-    // Extract text content with better error handling
+    // Extract text content with better error handling (matching text output)
     if (text->node) {
         unsigned char* text_data = text->node->text_data();
         if (text_data && text->length > 0) {
@@ -718,6 +771,16 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
         append_json_string(buf, "[no-node]");
     }
     strbuf_append_str(buf, ",\n");
+    
+    // Add text fragment information (matching text output)
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"text_info\": {\n");
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"start_index\": %d,\n", text->start_index);
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"length\": %d\n", text->length);
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "},\n");
     
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
@@ -755,6 +818,184 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
     
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}\n");
+    
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "}");
+}
+
+// JSON generation for inline elements (spans)
+void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_ratio) {
+    if (!span) {
+        strbuf_append_str(buf, "null");
+        return;
+    }
+    
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "{\n");
+    
+    // Basic view properties
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"type\": ");
+    append_json_string(buf, get_view_type_name_json(span->type));
+    strbuf_append_str(buf, ",\n");
+    
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"tag\": ");
+    
+    // Get tag name
+    const char* tag_name = "span";
+    if (span->node) {
+        const char* node_name = span->node->name();
+        if (node_name) {
+            tag_name = node_name;
+        }
+    }
+    append_json_string(buf, tag_name);
+    strbuf_append_str(buf, ",\n");
+    
+    // Generate selector (same logic as blocks)
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"selector\": ");
+    
+    if (span->node) {
+        size_t class_len;
+        const lxb_char_t* class_attr = span->node->get_attribute("class", &class_len);
+        
+        // Start with tag name and class
+        char base_selector[256];
+        if (class_attr && class_len > 0) {
+            snprintf(base_selector, sizeof(base_selector), "%s.%.*s", tag_name, (int)class_len, class_attr);
+        } else {
+            snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
+        }
+        
+        // Add nth-of-type if there are multiple siblings with same tag
+        char final_selector[512];
+        DomNode* parent = span->node->parent;
+        if (parent) {
+            // Count siblings with same tag name
+            int sibling_count = 0;
+            int current_index = 0;
+            DomNode* sibling = parent->first_child();
+            
+            while (sibling) {
+                if (sibling->type == LEXBOR_ELEMENT) {
+                    const char* sibling_tag = sibling->name();
+                    if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
+                        sibling_count++;
+                        if (sibling == span->node) {
+                            current_index = sibling_count; // 1-based index
+                        }
+                    }
+                }
+                sibling = sibling->next_sibling();
+            }
+            
+            // Add nth-of-type if multiple siblings exist
+            if (sibling_count > 1 && current_index > 0) {
+                snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)", base_selector, current_index);
+            } else {
+                snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
+            }
+        } else {
+            snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
+        }
+        
+        append_json_string(buf, final_selector);
+    } else {
+        append_json_string(buf, tag_name);
+    }
+    strbuf_append_str(buf, ",\n");
+    
+    // CSS properties (enhanced to match text output)
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"css_properties\": {\n");
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_str(buf, "\"display\": \"inline\"");
+    
+    // Add inline properties if available
+    if (span->in_line) {
+        if (span->in_line->cursor) {
+            const char* cursor = "default";
+            switch (span->in_line->cursor) {
+                case LXB_CSS_VALUE_POINTER: cursor = "pointer"; break;
+                case LXB_CSS_VALUE_TEXT: cursor = "text"; break;
+                default: cursor = (const char*)lxb_css_value_by_id(span->in_line->cursor)->name; break;
+            }
+            strbuf_append_str(buf, ",\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"cursor\": \"%s\"", cursor);
+        }
+        if (span->in_line->color.c) {
+            strbuf_append_str(buf, ",\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"color\": \"#%06x\"", span->in_line->color.c);
+        }
+        if (span->in_line->vertical_align) {
+            strbuf_append_str(buf, ",\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"vertical_align\": \"%s\"", lxb_css_value_by_id(span->in_line->vertical_align)->name);
+        }
+    }
+    
+    // Add font properties if available
+    if (span->font) {
+        strbuf_append_str(buf, ",\n");
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "\"font\": {\n");
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"family\": \"%s\",\n", span->font->family);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"size\": %d,\n", span->font->font_size);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"style\": \"%s\",\n", lxb_css_value_by_id(span->font->font_style)->name);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"weight\": \"%s\",\n", lxb_css_value_by_id(span->font->font_weight)->name);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"decoration\": \"%s\"\n", lxb_css_value_by_id(span->font->text_deco)->name);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "}");
+    }
+    
+    strbuf_append_str(buf, "\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "},\n");
+    
+    // Children (this is the critical part - process span children!)
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"children\": [\n");
+    
+    View* child = ((ViewGroup*)span)->child;
+    bool first_child = true;
+    while (child) {
+        if (!first_child) {
+            strbuf_append_str(buf, ",\n");
+        }
+        first_child = false;
+        
+        if (child->type == RDT_VIEW_TEXT) {
+            print_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
+        } else if (child->type == RDT_VIEW_INLINE) {
+            // Nested inline elements
+            print_inline_json((ViewSpan*)child, buf, indent + 4, pixel_ratio);
+        } else {
+            // Handle other child types
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "{\n");
+            strbuf_append_char_n(buf, ' ', indent + 6);
+            strbuf_append_str(buf, "\"type\": ");
+            append_json_string(buf, get_view_type_name_json(child->type));
+            strbuf_append_str(buf, "\n");
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_str(buf, "}");
+        }
+        
+        child = child->next;
+    }
+    
+    strbuf_append_str(buf, "\n");
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "]\n");
     
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "}");

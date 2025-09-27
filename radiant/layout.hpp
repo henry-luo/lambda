@@ -105,5 +105,6 @@ void print_view_tree(ViewGroup* view_root, float pixel_ratio);
 void print_view_tree_json(ViewGroup* view_root, float pixel_ratio);
 void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_ratio);
 void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio);
+void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_ratio);
 
 #endif // LAYOUT_HPP
