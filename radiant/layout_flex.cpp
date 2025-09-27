@@ -479,6 +479,8 @@ int create_flex_lines(FlexContainerLayout* flex_layout, ViewBlock** items, int i
             
             // Check if we need to wrap (only if not the first item in line)
             // CRITICAL FIX: Use wrap value directly - it's now stored as Lexbor constant
+            // Check if we need to wrap (only if not the first item in line)
+            // CRITICAL FIX: Use wrap value directly - it's now stored as Lexbor constant
             if (flex_layout->wrap != WRAP_NOWRAP && 
                 line->item_count > 0 && 
                 main_size + item_basis + gap_space > container_main_size) {

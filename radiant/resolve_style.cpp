@@ -1299,11 +1299,11 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 // Convert to pixels based on unit
                 int gap_px = 0;
                 if (custom->value.length >= 2 && strncmp((const char*)custom->value.data + custom->value.length - 2, "px", 2) == 0) {
-                    gap_px = (int)gap_value;
+                    gap_px = (int)(gap_value * lycon->ui_context->pixel_ratio);
                 } else if (custom->value.length >= 2 && strncmp((const char*)custom->value.data + custom->value.length - 2, "em", 2) == 0) {
-                    gap_px = (int)(gap_value * lycon->font.current_font_size);
+                    gap_px = (int)(gap_value * lycon->font.current_font_size * lycon->ui_context->pixel_ratio);
                 } else {
-                    gap_px = (int)gap_value; // Assume pixels if no unit
+                    gap_px = (int)(gap_value * lycon->ui_context->pixel_ratio); // Assume pixels if no unit
                 }
                 
                 // Set gap on flex container - create container if needed

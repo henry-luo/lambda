@@ -19,6 +19,7 @@ The Radiant layout engine follows a structured pipeline:
 - **View Tree**: Hierarchical structure representing rendered elements
 - **Style Resolution**: CSS property parsing and application
 - **Layout Algorithms**: Block, flex, and other layout implementations
+- **Pixel Ratio**: hi-res display may have pixel ratio higher than 1. This value is stored in UiContext. And during resolve_style(), CSS pixel values are converted to physical pixel values, and dimensional fields in Radian view tree store physical pixel value.
 
 ## Key Data Structures
 
