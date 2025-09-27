@@ -311,7 +311,7 @@ int run_layout_test(const char* html_file) {
     
     // Print view tree (existing functionality)
     if (doc->view_tree && doc->view_tree->root) {
-        print_view_tree((ViewGroup*)doc->view_tree->root);
+        print_view_tree((ViewGroup*)doc->view_tree->root, ui_context.pixel_ratio);
     } else {
         printf("Warning: No view tree generated\n");
     }
