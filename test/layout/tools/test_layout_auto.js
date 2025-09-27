@@ -189,7 +189,7 @@ class LayoutTester {
             }
             
             // Skip elements with zero dimensions (not visible)
-            const hasZeroDimensions = elem.layout.width === 0 && elem.layout.height === 0;
+            const hasZeroDimensions = elem.layout && elem.layout.width === 0 && elem.layout.height === 0;
             if (hasZeroDimensions) {
                 return;
             }
@@ -209,13 +209,14 @@ class LayoutTester {
                 elem.tag === 'html' ||          // Root element
                 elem.tag === 'body' ||          // Body element  
                 elem.selector?.includes('.') || // Has CSS class (content)
-                elem.layout.width < 1200 ||     // Smaller than viewport (content)
+                (elem.layout && elem.layout.width < 1200) ||     // Smaller than viewport (content)
                 (elem.css && elem.css.display === 'flex'); // Flex containers
             
             if (isLayoutElement) {
                 // DEBUG: Log what browser elements we're including
                 if (this.verbose && (elem.tag === 'html' || elem.tag === 'body' || elem.selector?.includes('container'))) {
-                    console.log(`DEBUG: Including browser element: ${elem.selector} (${elem.tag}) - ${elem.layout.width}x${elem.layout.height} at (${elem.layout.x},${elem.layout.y})`);
+                    const layout = elem.layout || { width: 'N/A', height: 'N/A', x: 'N/A', y: 'N/A' };
+                    console.log(`DEBUG: Including browser element: ${elem.selector} (${elem.tag}) - ${layout.width}x${layout.height} at (${layout.x},${layout.y})`);
                 }
                 contentElements[key] = elem;
             }
@@ -309,7 +310,15 @@ class LayoutTester {
     generateElementKeys(elem, index) {
         const keys = [];
         
-        if (!elem.layout) return keys;
+        if (!elem || !elem.layout) {
+            console.warn('WARNING: Element or layout is undefined in generateElementKeys:', { 
+                elem: !!elem, 
+                layout: elem ? !!elem.layout : 'N/A',
+                selector: elem ? elem.selector : 'N/A',
+                tag: elem ? elem.tag : 'N/A'
+            });
+            return keys;
+        }
         
         const { x, y, width, height } = elem.layout;
         
@@ -513,6 +522,12 @@ class LayoutTester {
     compareElementLayout(radiant, browser) {
         const differences = [];
         const properties = ['x', 'y', 'width', 'height'];
+        
+        // Safety check for undefined layout objects
+        if (!radiant || !browser) {
+            console.warn('WARNING: Undefined layout object in comparison:', { radiant: !!radiant, browser: !!browser });
+            return differences;
+        }
         
         for (const prop of properties) {
             const radiantVal = radiant[prop] || 0;
