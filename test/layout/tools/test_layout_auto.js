@@ -73,7 +73,7 @@ class LayoutTester {
     }
     
     async loadRadiantOutput() {
-        const jsonFile = path.join(this.projectRoot, 'view_tree.json');
+        const jsonFile = '/tmp/view_tree.json';
         try {
             const content = await fs.readFile(jsonFile, 'utf8');
             return JSON.parse(content);
@@ -106,7 +106,7 @@ class LayoutTester {
                 selector: currentPath,
                 tag: 'text',
                 layout: node.layout,
-                text: node.text || '',
+                text: node.content || '',  // CRITICAL FIX: Use 'content' not 'text'
                 isTextNode: true
             });
         } else if (node.layout) {
