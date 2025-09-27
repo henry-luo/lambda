@@ -392,7 +392,9 @@ help:
 	@echo "  test-all      - Run complete test suite (all test types)"
 	@echo "  test-radiant  - Run all Radiant layout engine tests (95+ tests: flexbox, layout, rendering)"
 	@echo "  test-layout   - Run Radiant layout integration tests (all categories)"
+	@echo "                  Usage: make test-layout SUITE=baseline (run specific suite)"
 	@echo "                  Usage: make test-layout TEST=table_simple (run specific test)"
+	@echo "                  Available suites: basic, intermediate, medium, advanced, baseline"
 	@echo "  test-windows  - Run CI tests for Windows executable"
 	@echo "  test-linux    - Run CI tests for Linux executable"
 	@echo "  run           - Build and run the default executable"
@@ -839,7 +841,11 @@ test-layout: build-radiant
 		if [ -n "$(TEST)" ]; then \
 			echo "🎯 Running single test: $(TEST)"; \
 			cd test/layout/tools && node test_layout_auto.js --radiant-exe $(PWD)/radiant.exe --test $(TEST); \
+		elif [ -n "$(SUITE)" ]; then \
+			echo "📂 Running test suite: $(SUITE)"; \
+			cd test/layout/tools && node test_layout_auto.js --radiant-exe $(PWD)/radiant.exe --category $(SUITE); \
 		else \
+			echo "🎯 Running all layout tests"; \
 			cd test/layout/tools && node test_layout_auto.js --radiant-exe $(PWD)/radiant.exe; \
 		fi; \
 	else \

@@ -16,6 +16,7 @@ class LayoutTester {
     constructor(options = {}) {
         this.radiantExe = options.radiantExe || path.join(__dirname, '..', '..', '..', 'radiant.exe');
         this.tolerance = options.tolerance || 2.0;
+        this.textTolerance = options.textTolerance || 1.0; // Allow 1px difference for text
         this.generateReferences = options.generateReferences || false;
         this.verbose = options.verbose || false;
         
@@ -283,7 +284,7 @@ class LayoutTester {
                 const maxDiff = Math.max(...diffs.map(d => d.difference));
                 results.maxTextDifference = Math.max(results.maxTextDifference, maxDiff);
                 
-                if (maxDiff > this.tolerance) {
+                if (maxDiff > this.textTolerance) {
                     results.textDifferences.push({
                         type: 'text_position_difference',
                         text: radiantText.text,
@@ -503,7 +504,7 @@ class LayoutTester {
         
         // Focus on layout accuracy rather than just element count
         const layoutAccuracy = results.maxDifference <= this.tolerance ? 'ACCURATE' : 'INACCURATE';
-        const textAccuracy = results.maxTextDifference <= this.tolerance ? 'ACCURATE' : 'INACCURATE';
+        const textAccuracy = results.maxTextDifference <= this.textTolerance ? 'ACCURATE' : 'INACCURATE';
         const maxDiffStr = results.maxDifference.toFixed(2);
         const maxTextDiffStr = results.maxTextDifference.toFixed(2);
         
@@ -596,7 +597,7 @@ class LayoutTester {
             
             // Text accuracy check - only fail if there are text nodes and they're inaccurate
             const textAccurate = comparison.totalTextNodes === 0 || 
-                               (comparison.maxTextDifference <= this.tolerance && comparison.matchedTextNodes > 0);
+                               (comparison.maxTextDifference <= this.textTolerance && comparison.matchedTextNodes > 0);
             
             // Pass if we have accurate layout positioning AND accurate text positioning (when text exists)
             const passed = layoutAccurate && hasLayoutMatches && textAccurate;
@@ -823,6 +824,7 @@ async function main() {
     const options = {
         radiantExe: './radiant.exe',
         tolerance: 2.0,
+        textTolerance: 1.0,
         generateReferences: false,
         verbose: false
     };
@@ -852,6 +854,9 @@ async function main() {
                 break;
             case '--tolerance':
                 options.tolerance = parseFloat(args[++i]);
+                break;
+            case '--text-tolerance':
+                options.textTolerance = parseFloat(args[++i]);
                 break;
             case '--generate-references':
             case '-g':
@@ -885,6 +890,7 @@ Options:
   --category, -c <name>      Test specific category (basic|intermediate|medium|advanced|baseline)
   --test, -t <name>          Test specific test file (e.g., table_simple)
   --tolerance <pixels>       Layout difference tolerance in pixels (default: 2.0)
+  --text-tolerance <pixels>  Text position/size tolerance in pixels (default: 1.0)
   --generate-references, -g  Generate browser references if missing
   --verbose, -v              Show detailed failure information
   --radiant-exe <path>       Path to Radiant executable (default: ./radiant.exe)
@@ -896,6 +902,7 @@ Examples:
   node test_layout_auto.js -t table_simple    # Test specific test file
   node test_layout_auto.js -g -v              # Generate references and show details
   node test_layout_auto.js --tolerance 1.0    # Use 1px tolerance
+  node test_layout_auto.js --text-tolerance 0.5  # Use 0.5px text tolerance
 
 Generated files:
   ../reference/<category>/<test>.json         # Browser reference data (with text nodes)
