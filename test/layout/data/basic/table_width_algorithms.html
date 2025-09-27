@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Table Width Algorithm Test</title>
+  <style>
+    body { margin: 16px; font-family: Arial, sans-serif; }
+    table { 
+      border-collapse: separate; 
+      border-spacing: 0; 
+      margin-bottom: 30px;
+    }
+    th, td { 
+      padding: 8px 12px; 
+      border: 1px solid #666; 
+      background: #fff; 
+    }
+    thead th { background: #f0f0f0; }
+    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }
+    
+    .auto-width { table-layout: auto; }
+    .fixed-width { table-layout: fixed; width: 600px; }
+    .percentage-width { width: 80%; }
+    
+    .narrow { width: 50px; }
+    .wide { width: 200px; }
+  </style>
+</head>
+<body>
+  <table class="auto-width">
+    <caption>Auto Width Algorithm (content-based sizing)</caption>
+    <thead>
+      <tr>
+        <th>Short</th>
+        <th>Medium Length Header</th>
+        <th>Very Long Header That Should Determine Column Width</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>A</td>
+        <td>Medium text content</td>
+        <td>This is a very long piece of text that should make this column much wider than the others</td>
+      </tr>
+      <tr>
+        <td>B</td>
+        <td>More content</td>
+        <td>Another long text string to test width calculation algorithms</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table class="fixed-width">
+    <caption>Fixed Width Algorithm (600px total, equal distribution)</caption>
+    <thead>
+      <tr>
+        <th>Column 1</th>
+        <th>Column 2</th>
+        <th>Column 3</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Short</td>
+        <td>This is a very long piece of text that would normally make this column wide</td>
+        <td>More text</td>
+      </tr>
+      <tr>
+        <td>A</td>
+        <td>But with fixed layout, all columns should be roughly equal width</td>
+        <td>C</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table class="percentage-width">
+    <caption>Percentage Width (80% of container)</caption>
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Description</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Item 1</td>
+        <td>Description of the first item with moderate length text</td>
+        <td>Active</td>
+      </tr>
+      <tr>
+        <td>Item 2</td>
+        <td>Description of the second item</td>
+        <td>Inactive</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>
