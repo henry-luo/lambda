@@ -4,407 +4,1377 @@
     "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/140.0.0.0 Safari/537.36",
     "viewport": {
       "width": 1200,
-      "height": 800
+      "height": 800,
+      "deviceScaleFactor": 1
     }
   },
   "layout_data": {
-    "viewport": {
-      "width": 1200,
-      "height": 800
+    "html": {
+      "selector": "html",
+      "tag": "html",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 1200,
+        "height": 243.19,
+        "contentWidth": 1200,
+        "contentHeight": 800,
+        "scrollWidth": 1200,
+        "scrollHeight": 800
+      },
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Test: Basic Typography\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 800px;\n        }\n        \n        /* Basic typography styles */\n        h1 {\n            font-size: 32px;\n            margin-bottom: 16px;\n            font-weight: bold;\n        }\n        \n        h2 {\n            font-size: 24px;\n            margin-bottom: 12px;\n            margin-top: 24px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n            line-height: 1.6;\n        }\n        \n        .emphasis {\n            font-style: italic;\n        }\n        \n        .strong {\n            font-weight: bold;\n        }\n    \n\n\n    Main Heading\n    This is a regular paragraph with some italic text and bold text.\n    \n    Secondary Heading\n    Another paragraph that should have proper spacing and line height for readability.\n    \n    \n    \n    {\n        \"test_id\": \"text_001_basic_typography\",\n        \"category\": \"text\",\n        \"features\": [\"typography\", \"headings\", \"paragraphs\", \"line-height\", \"margins\"],\n        \"description\": \"Basic text typography with headings, paragraphs, and inline formatting\",\n        \"markdown_equivalent\": \"# Main Heading\\n\\nThis is a regular paragraph with some *italic text* and **bold text**.\\n\\n## Secondary Heading\\n\\nAnother paragraph...\",\n        \"complexity\": \"basic\"\n    }",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Main Heading",
+          "parentElement": "h1",
+          "rects": [
+            {
+              "x": 20,
+              "y": 26,
+              "width": 208.02,
+              "height": 36,
+              "right": 228.02,
+              "bottom": 62
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
+        },
+        {
+          "text": "This is a regular paragraph with some ",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 20,
+              "y": 88,
+              "width": 272.13,
+              "height": 17,
+              "right": 292.13,
+              "bottom": 105
+            }
+          ],
+          "length": 38,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 38
+        },
+        {
+          "text": "italic text",
+          "parentElement": "span",
+          "rects": [
+            {
+              "x": 292.13,
+              "y": 88,
+              "width": 62.25,
+              "height": 17,
+              "right": 354.38,
+              "bottom": 105
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": " and ",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 354.38,
+              "y": 88,
+              "width": 35.59,
+              "height": 17,
+              "right": 389.97,
+              "bottom": 105
+            }
+          ],
+          "length": 5,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 5
+        },
+        {
+          "text": "bold text",
+          "parentElement": "span",
+          "rects": [
+            {
+              "x": 389.97,
+              "y": 88,
+              "width": 66.67,
+              "height": 17,
+              "right": 456.64,
+              "bottom": 105
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": ".",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 456.64,
+              "y": 88,
+              "width": 4.45,
+              "height": 17,
+              "right": 461.09,
+              "bottom": 105
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "Secondary Heading",
+          "parentElement": "h2",
+          "rects": [
+            {
+              "x": 20,
+              "y": 137.59,
+              "width": 224.06,
+              "height": 27,
+              "right": 244.06,
+              "bottom": 164.59
+            }
+          ],
+          "length": 17,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 17
+        },
+        {
+          "text": "Another paragraph that should have proper spacing and line height for readability.",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 20,
+              "y": 185.59,
+              "width": 577.88,
+              "height": 17,
+              "right": 597.88,
+              "bottom": 202.59
+            }
+          ],
+          "length": 82,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 82
+        }
+      ],
+      "childCount": 2,
+      "depth": 0
     },
-    "elements": {
-      "html_0": {
-        "tag": "html",
-        "selector": "html",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 1200,
-          "height": 243.19
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+    "head": {
+      "selector": "head",
+      "tag": "head",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
       },
-      "head_1": {
-        "tag": "head",
-        "selector": "head",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "meta_2": {
-        "tag": "meta",
-        "selector": "meta",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "textContent": "Test: Basic Typography\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 800px;\n        }\n        \n        /* Basic typography styles */\n        h1 {\n            font-size: 32px;\n            margin-bottom: 16px;\n            font-weight: bold;\n        }\n        \n        h2 {\n            font-size: 24px;\n            margin-bottom: 12px;\n            margin-top: 24px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n            line-height: 1.6;\n        }\n        \n        .emphasis {\n            font-style: italic;\n        }\n        \n        .strong {\n            font-weight: bold;\n        }",
+      "hasTextNodes": false,
+      "textNodes": [],
+      "childCount": 4,
+      "depth": 0
+    },
+    "meta:nth-of-type(1)": {
+      "selector": "meta:nth-of-type(1)",
+      "tag": "meta",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
       },
-      "meta_3": {
-        "tag": "meta",
-        "selector": "meta",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "title_4": {
-        "tag": "title",
-        "selector": "title",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "textContent": null,
+      "hasTextNodes": false,
+      "textNodes": [],
+      "childCount": 0,
+      "depth": 0
+    },
+    "meta:nth-of-type(2)": {
+      "selector": "meta:nth-of-type(2)",
+      "tag": "meta",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
       },
-      "style_5": {
-        "tag": "style",
-        "selector": "style",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "body_6": {
-        "tag": "body",
-        "selector": "body",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 800,
-          "height": 243.19
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 20,
-          "paddingRight": 20,
-          "paddingBottom": 20,
-          "paddingLeft": 20
-        }
+      "textContent": null,
+      "hasTextNodes": false,
+      "textNodes": [],
+      "childCount": 0,
+      "depth": 0
+    },
+    "title": {
+      "selector": "title",
+      "tag": "title",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
       },
-      "h1_7": {
-        "tag": "h1",
-        "selector": "h1",
-        "layout": {
-          "x": 20,
-          "y": 20,
-          "width": 760,
-          "height": 48
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 16,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "p_8": {
-        "tag": "p",
-        "selector": "p",
-        "layout": {
-          "x": 20,
-          "y": 84,
-          "width": 760,
-          "height": 25.59
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 16,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "textContent": "Test: Basic Typography",
+      "hasTextNodes": true,
+      "textNodes": [],
+      "childCount": 0,
+      "depth": 0
+    },
+    "style": {
+      "selector": "style",
+      "tag": "style",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
       },
-      "span.emphasis_9": {
-        "tag": "span",
-        "selector": "span.emphasis",
-        "layout": {
-          "x": 292.13,
-          "y": 88,
-          "width": 62.25,
-          "height": 17
-        },
-        "css": {
-          "display": "inline",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "normal",
+        "fontFamily": "Times",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "span.strong_10": {
-        "tag": "span",
-        "selector": "span.strong",
-        "layout": {
-          "x": 389.97,
-          "y": 88,
-          "width": 66.67,
-          "height": 17
-        },
-        "css": {
-          "display": "inline",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 800px;\n        }\n        \n        /* Basic typography styles */\n        h1 {\n            font-size: 32px;\n            margin-bottom: 16px;\n            font-weight: bold;\n        }\n        \n        h2 {\n            font-size: 24px;\n            margin-bottom: 12px;\n            margin-top: 24px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n            line-height: 1.6;\n        }\n        \n        .emphasis {\n            font-style: italic;\n        }\n        \n        .strong {\n            font-weight: bold;\n        }",
+      "hasTextNodes": true,
+      "textNodes": [],
+      "childCount": 0,
+      "depth": 0
+    },
+    "body": {
+      "selector": "body",
+      "tag": "body",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 800,
+        "height": 243.19,
+        "contentWidth": 800,
+        "contentHeight": 243,
+        "scrollWidth": 800,
+        "scrollHeight": 243
       },
-      "h2_11": {
-        "tag": "h2",
-        "selector": "h2",
-        "layout": {
-          "x": 20,
-          "y": 133.59,
-          "width": 760,
-          "height": 36
-        },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 24,
-          "marginRight": 0,
-          "marginBottom": 12,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
-        }
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 20,
+        "paddingRight": 20,
+        "paddingBottom": 20,
+        "paddingLeft": 20,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "24px",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
       },
-      "p_12": {
-        "tag": "p",
-        "selector": "p",
-        "layout": {
-          "x": 20,
-          "y": 181.59,
-          "width": 760,
-          "height": 25.59
+      "textContent": "Main Heading\n    This is a regular paragraph with some italic text and bold text.\n    \n    Secondary Heading\n    Another paragraph that should have proper spacing and line height for readability.\n    \n    \n    \n    {\n        \"test_id\": \"text_001_basic_typography\",\n        \"category\": \"text\",\n        \"features\": [\"typography\", \"headings\", \"paragraphs\", \"line-height\", \"margins\"],\n        \"description\": \"Basic text typography with headings, paragraphs, and inline formatting\",\n        \"markdown_equivalent\": \"# Main Heading\\n\\nThis is a regular paragraph with some *italic text* and **bold text**.\\n\\n## Secondary Heading\\n\\nAnother paragraph...\",\n        \"complexity\": \"basic\"\n    }",
+      "hasTextNodes": false,
+      "textNodes": [
+        {
+          "text": "Main Heading",
+          "parentElement": "h1",
+          "rects": [
+            {
+              "x": 20,
+              "y": 26,
+              "width": 208.02,
+              "height": 36,
+              "right": 228.02,
+              "bottom": 62
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
         },
-        "css": {
-          "display": "block",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 16,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
+        {
+          "text": "This is a regular paragraph with some ",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 20,
+              "y": 88,
+              "width": 272.13,
+              "height": 17,
+              "right": 292.13,
+              "bottom": 105
+            }
+          ],
+          "length": 38,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 38
+        },
+        {
+          "text": "italic text",
+          "parentElement": "span",
+          "rects": [
+            {
+              "x": 292.13,
+              "y": 88,
+              "width": 62.25,
+              "height": 17,
+              "right": 354.38,
+              "bottom": 105
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": " and ",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 354.38,
+              "y": 88,
+              "width": 35.59,
+              "height": 17,
+              "right": 389.97,
+              "bottom": 105
+            }
+          ],
+          "length": 5,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 5
+        },
+        {
+          "text": "bold text",
+          "parentElement": "span",
+          "rects": [
+            {
+              "x": 389.97,
+              "y": 88,
+              "width": 66.67,
+              "height": 17,
+              "right": 456.64,
+              "bottom": 105
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": ".",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 456.64,
+              "y": 88,
+              "width": 4.45,
+              "height": 17,
+              "right": 461.09,
+              "bottom": 105
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        },
+        {
+          "text": "Secondary Heading",
+          "parentElement": "h2",
+          "rects": [
+            {
+              "x": 20,
+              "y": 137.59,
+              "width": 224.06,
+              "height": 27,
+              "right": 244.06,
+              "bottom": 164.59
+            }
+          ],
+          "length": 17,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 17
+        },
+        {
+          "text": "Another paragraph that should have proper spacing and line height for readability.",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 20,
+              "y": 185.59,
+              "width": 577.88,
+              "height": 17,
+              "right": 597.88,
+              "bottom": 202.59
+            }
+          ],
+          "length": 82,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 82
         }
+      ],
+      "childCount": 5,
+      "depth": 0
+    },
+    "h1": {
+      "selector": "h1",
+      "tag": "h1",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 20,
+        "y": 20,
+        "width": 760,
+        "height": 48,
+        "contentWidth": 760,
+        "contentHeight": 48,
+        "scrollWidth": 760,
+        "scrollHeight": 48
       },
-      "#test-metadata_13": {
-        "tag": "script",
-        "selector": "#test-metadata",
-        "layout": {
-          "x": 0,
-          "y": 0,
-          "width": 0,
-          "height": 0
-        },
-        "css": {
-          "display": "none",
-          "position": "static",
-          "flexDirection": "row",
-          "justifyContent": "normal",
-          "alignItems": "normal",
-          "flexGrow": 0,
-          "flexShrink": 1,
-          "flexBasis": "auto",
-          "marginTop": 0,
-          "marginRight": 0,
-          "marginBottom": 0,
-          "marginLeft": 0,
-          "paddingTop": 0,
-          "paddingRight": 0,
-          "paddingBottom": 0,
-          "paddingLeft": 0
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 16,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 32,
+        "lineHeight": "48px",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Main Heading",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Main Heading",
+          "parentElement": "h1",
+          "rects": [
+            {
+              "x": 20,
+              "y": 26,
+              "width": 208.02,
+              "height": 36,
+              "right": 228.02,
+              "bottom": 62
+            }
+          ],
+          "length": 12,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 12
         }
-      }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "p:nth-of-type(1)": {
+      "selector": "p:nth-of-type(1)",
+      "tag": "p",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 20,
+        "y": 84,
+        "width": 760,
+        "height": 25.59,
+        "contentWidth": 760,
+        "contentHeight": 26,
+        "scrollWidth": 760,
+        "scrollHeight": 26
+      },
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 16,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "25.6px",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "This is a regular paragraph with some italic text and bold text.",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "This is a regular paragraph with some ",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 20,
+              "y": 88,
+              "width": 272.13,
+              "height": 17,
+              "right": 292.13,
+              "bottom": 105
+            }
+          ],
+          "length": 38,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 38
+        },
+        {
+          "text": "italic text",
+          "parentElement": "span",
+          "rects": [
+            {
+              "x": 292.13,
+              "y": 88,
+              "width": 62.25,
+              "height": 17,
+              "right": 354.38,
+              "bottom": 105
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        },
+        {
+          "text": " and ",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 354.38,
+              "y": 88,
+              "width": 35.59,
+              "height": 17,
+              "right": 389.97,
+              "bottom": 105
+            }
+          ],
+          "length": 5,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 5
+        },
+        {
+          "text": "bold text",
+          "parentElement": "span",
+          "rects": [
+            {
+              "x": 389.97,
+              "y": 88,
+              "width": 66.67,
+              "height": 17,
+              "right": 456.64,
+              "bottom": 105
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        },
+        {
+          "text": ".",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 456.64,
+              "y": 88,
+              "width": 4.45,
+              "height": 17,
+              "right": 461.09,
+              "bottom": 105
+            }
+          ],
+          "length": 1,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 1
+        }
+      ],
+      "childCount": 2,
+      "depth": 0
+    },
+    "span.emphasis:nth-of-type(1)": {
+      "selector": "span.emphasis:nth-of-type(1)",
+      "tag": "span",
+      "id": null,
+      "classes": [
+        "emphasis"
+      ],
+      "layout": {
+        "x": 292.13,
+        "y": 88,
+        "width": 62.25,
+        "height": 17,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
+      },
+      "computed": {
+        "display": "inline",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "25.6px",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "italic text",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "italic text",
+          "parentElement": "span",
+          "rects": [
+            {
+              "x": 292.13,
+              "y": 88,
+              "width": 62.25,
+              "height": 17,
+              "right": 354.38,
+              "bottom": 105
+            }
+          ],
+          "length": 11,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 11
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "span.strong:nth-of-type(2)": {
+      "selector": "span.strong:nth-of-type(2)",
+      "tag": "span",
+      "id": null,
+      "classes": [
+        "strong"
+      ],
+      "layout": {
+        "x": 389.97,
+        "y": 88,
+        "width": 66.67,
+        "height": 17,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
+      },
+      "computed": {
+        "display": "inline",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "25.6px",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "bold text",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "bold text",
+          "parentElement": "span",
+          "rects": [
+            {
+              "x": 389.97,
+              "y": 88,
+              "width": 66.67,
+              "height": 17,
+              "right": 456.64,
+              "bottom": 105
+            }
+          ],
+          "length": 9,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 9
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "h2": {
+      "selector": "h2",
+      "tag": "h2",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 20,
+        "y": 133.59,
+        "width": 760,
+        "height": 36,
+        "contentWidth": 760,
+        "contentHeight": 36,
+        "scrollWidth": 760,
+        "scrollHeight": 36
+      },
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 24,
+        "marginRight": 0,
+        "marginBottom": 12,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 24,
+        "lineHeight": "36px",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "700",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Secondary Heading",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Secondary Heading",
+          "parentElement": "h2",
+          "rects": [
+            {
+              "x": 20,
+              "y": 137.59,
+              "width": 224.06,
+              "height": 27,
+              "right": 244.06,
+              "bottom": 164.59
+            }
+          ],
+          "length": 17,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 17
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "p:nth-of-type(2)": {
+      "selector": "p:nth-of-type(2)",
+      "tag": "p",
+      "id": null,
+      "classes": [],
+      "layout": {
+        "x": 20,
+        "y": 181.59,
+        "width": 760,
+        "height": 25.59,
+        "contentWidth": 760,
+        "contentHeight": 26,
+        "scrollWidth": 760,
+        "scrollHeight": 26
+      },
+      "computed": {
+        "display": "block",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 16,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "25.6px",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "Another paragraph that should have proper spacing and line height for readability.",
+      "hasTextNodes": true,
+      "textNodes": [
+        {
+          "text": "Another paragraph that should have proper spacing and line height for readability.",
+          "parentElement": "p",
+          "rects": [
+            {
+              "x": 20,
+              "y": 185.59,
+              "width": 577.88,
+              "height": 17,
+              "right": 597.88,
+              "bottom": 202.59
+            }
+          ],
+          "length": 82,
+          "isWhitespaceOnly": false,
+          "startOffset": 0,
+          "endOffset": 82
+        }
+      ],
+      "childCount": 0,
+      "depth": 0
+    },
+    "#test-metadata": {
+      "selector": "#test-metadata",
+      "tag": "script",
+      "id": "test-metadata",
+      "classes": [],
+      "layout": {
+        "x": 0,
+        "y": 0,
+        "width": 0,
+        "height": 0,
+        "contentWidth": 0,
+        "contentHeight": 0,
+        "scrollWidth": 0,
+        "scrollHeight": 0
+      },
+      "computed": {
+        "display": "none",
+        "position": "static",
+        "marginTop": 0,
+        "marginRight": 0,
+        "marginBottom": 0,
+        "marginLeft": 0,
+        "paddingTop": 0,
+        "paddingRight": 0,
+        "paddingBottom": 0,
+        "paddingLeft": 0,
+        "borderTopWidth": 0,
+        "borderRightWidth": 0,
+        "borderBottomWidth": 0,
+        "borderLeftWidth": 0,
+        "flexDirection": "row",
+        "flexWrap": "nowrap",
+        "justifyContent": "normal",
+        "alignItems": "normal",
+        "alignContent": "normal",
+        "flexGrow": 0,
+        "flexShrink": 1,
+        "flexBasis": "auto",
+        "alignSelf": "auto",
+        "order": 0,
+        "gap": "normal",
+        "fontSize": 16,
+        "lineHeight": "24px",
+        "fontFamily": "Arial, sans-serif",
+        "fontWeight": "400",
+        "textAlign": "start",
+        "verticalAlign": "baseline",
+        "top": "auto",
+        "right": "auto",
+        "bottom": "auto",
+        "left": "auto",
+        "zIndex": "auto",
+        "overflow": "visible",
+        "overflowX": "visible",
+        "overflowY": "visible"
+      },
+      "textContent": "{\n        \"test_id\": \"text_001_basic_typography\",\n        \"category\": \"text\",\n        \"features\": [\"typography\", \"headings\", \"paragraphs\", \"line-height\", \"margins\"],\n        \"description\": \"Basic text typography with headings, paragraphs, and inline formatting\",\n        \"markdown_equivalent\": \"# Main Heading\\n\\nThis is a regular paragraph with some *italic text* and **bold text**.\\n\\n## Secondary Heading\\n\\nAnother paragraph...\",\n        \"complexity\": \"basic\"\n    }",
+      "hasTextNodes": true,
+      "textNodes": [],
+      "childCount": 0,
+      "depth": 0
+    },
+    "__viewport__": {
+      "width": 1200,
+      "height": 800,
+      "devicePixelRatio": 1
+    },
+    "__metadata__": {
+      "test_id": "text_001_basic_typography",
+      "category": "text",
+      "features": [
+        "typography",
+        "headings",
+        "paragraphs",
+        "line-height",
+        "margins"
+      ],
+      "description": "Basic text typography with headings, paragraphs, and inline formatting",
+      "markdown_equivalent": "# Main Heading\n\nThis is a regular paragraph with some *italic text* and **bold text**.\n\n## Secondary Heading\n\nAnother paragraph...",
+      "complexity": "basic"
     }
   }
 }
