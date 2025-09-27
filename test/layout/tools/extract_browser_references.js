@@ -109,7 +109,6 @@ async function extractLayoutFromFile(htmlFilePath) {
         // Create reference JSON
         const reference = {
             test_file: path.basename(htmlFilePath),
-            extraction_date: new Date().toISOString(),
             browser_info: {
                 userAgent: await page.evaluate(() => navigator.userAgent),
                 viewport: { width: 1200, height: 800 }
