@@ -420,6 +420,21 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
         case LXB_TAG_SCRIPT:  case LXB_TAG_STYLE:  case LXB_TAG_SVG:
             outer_display = LXB_CSS_VALUE_NONE;  inner_display = LXB_CSS_VALUE_NONE;
             break;
+        // HTML table elements default display mapping (Phase 1)
+        case LXB_TAG_TABLE:
+            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_TABLE;  break;
+        case LXB_TAG_CAPTION:
+            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_FLOW;  break;
+        case LXB_TAG_THEAD: case LXB_TAG_TBODY: case LXB_TAG_TFOOT:
+            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_TABLE_ROW_GROUP;  break;
+        case LXB_TAG_TR:
+            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_TABLE_ROW;  break;
+        case LXB_TAG_TH: case LXB_TAG_TD:
+            outer_display = LXB_CSS_VALUE_TABLE_CELL;  inner_display = LXB_CSS_VALUE_TABLE_CELL;  break;
+        case LXB_TAG_COLGROUP:
+            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_TABLE_COLUMN_GROUP;  break;
+        case LXB_TAG_COL:
+            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_TABLE_COLUMN;  break;
         default:  // inline elements, like span, b, i, u, a, img, input, or custom elements
             outer_display = LXB_CSS_VALUE_INLINE;  inner_display = LXB_CSS_VALUE_FLOW;
     }
@@ -1287,6 +1302,21 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             }
         }
         
+        // Handle justify-content space-evenly as custom property since lexbor doesn't support it
+        if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "justify-content", 15) == 0) {
+            const char* value_str = (const char*)custom->value.data;
+            
+            // Check if the value is "space-evenly"
+            if (custom->value.length == 12 && strncmp(value_str, "space-evenly", 12) == 0) {
+                // Set justify-content to space-evenly using our custom constant
+                if (block) {
+                    alloc_flex_container_prop(lycon, block);
+                    block->embed->flex_container->justify = LXB_CSS_VALUE_SPACE_EVENLY;
+                    log_debug("Set justify-content: space-evenly\n");
+                }
+            }
+        }
+
         // Handle gap property as custom property until lexbor supports it
         if (custom->name.length == 3 && strncmp((const char*)custom->name.data, "gap", 3) == 0) {
             const char* value_str = (const char*)custom->value.data;
