@@ -47,12 +47,26 @@ void line_break(LayoutContext* lycon) {
     line_align(lycon);
 
     // advance to next line
-    // CRITICAL FIX: Use CSS line-height instead of max(font_height, css_line_height)
-    // CSS line-height should override font metrics for consistent browser behavior
+    // CRITICAL FIX: Smart line height selection for mixed font sizes vs uniform text
+    // For mixed font sizes (spans), use max to accommodate larger fonts
+    // For uniform text, prefer CSS line height for browser compatibility
     int font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
     int css_line_height = lycon->block.line_height;
-    int used_line_height = css_line_height; // Use CSS line-height directly
-    // printf("DEBUG: Line advance - font: %d, css: %d, used: %d (CSS override)\n", font_line_height, css_line_height, used_line_height);
+    
+    // Check if we have mixed font sizes by comparing font height to CSS height
+    bool has_mixed_fonts = (font_line_height > css_line_height + 2); // 2px tolerance
+    int used_line_height;
+    
+    if (has_mixed_fonts) {
+        // Mixed font sizes - use max to accommodate larger fonts
+        used_line_height = max(css_line_height, font_line_height);
+    } else {
+        // Uniform font size - prefer CSS line height, but ensure minimum font height
+        used_line_height = max(css_line_height, font_line_height - 1); // -1px adjustment for browser compatibility
+    }
+    
+    // printf("DEBUG: Line advance - font: %d, css: %d, mixed: %s, used: %d\n", 
+    //        font_line_height, css_line_height, has_mixed_fonts ? "yes" : "no", used_line_height);
     lycon->block.advance_y += used_line_height;
     // reset the new line
     line_init(lycon);
