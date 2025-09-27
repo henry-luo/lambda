@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Table Colspan Test</title>
+  <style>
+    body { margin: 16px; font-family: Arial, sans-serif; }
+    table { border-collapse: separate; border-spacing: 0; }
+    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; }
+    thead th { background: #f0f0f0; }
+    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <table>
+    <caption>Colspan Test Table</caption>
+    <thead>
+      <tr>
+        <th colspan="2">Merged Header</th>
+        <th>C</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>A1</td>
+        <td>B1</td>
+        <td>C1</td>
+      </tr>
+      <tr>
+        <td colspan="3">Full Width Cell</td>
+      </tr>
+      <tr>
+        <td>A3</td>
+        <td rowspan="2">Tall Cell</td>
+        <td>C3</td>
+      </tr>
+      <tr>
+        <td>A4</td>
+        <td>C4</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>
