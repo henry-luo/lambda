@@ -17,6 +17,9 @@ void table_auto_layout(LayoutContext* lycon, struct ViewTable* table);
 void table_auto_layout_algorithm(LayoutContext* lycon, struct ViewTable* table, int columns, int* col_pref, int* col_widths, long long sum_pref, int avail_width);
 void table_fixed_layout_algorithm(LayoutContext* lycon, struct ViewTable* table, int columns, int* col_widths, int avail_width);
 
-// Text positioning handled by relative view positioning - no manual adjustment needed
+// Text positioning adjustment helpers (called after cell positions are calculated)
+void adjust_table_text_positions_final(struct ViewTable* table);
+void adjust_row_text_positions_final(struct ViewTable* table, struct ViewBlock* row, int table_abs_x, int cell_border, int cell_padding);
+void adjust_cell_text_positions_final(struct ViewBlock* cell, int text_abs_x);
 
 #endif // LAYOUT_TABLE_HPP
