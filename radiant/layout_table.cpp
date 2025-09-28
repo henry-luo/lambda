@@ -453,19 +453,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     printf("DEBUG: table_auto_layout starting\n");
     printf("DEBUG: table->table_layout = %d (AUTO=%d, FIXED=%d)\n", table->table_layout, ViewTable::TABLE_LAYOUT_AUTO, ViewTable::TABLE_LAYOUT_FIXED);
     
-    // Get table's computed style properties for border-collapse and spacing
-    bool border_collapse = false; // Default to separate borders
-    int border_spacing_h = 0, border_spacing_v = 0;
-    
-    // Check table's border-collapse property
-    if (table->node) {
-        // TODO: Parse CSS border-collapse property from table->node
-        // For now, detect from CSS class or inline style
-        // This is a simplified implementation - full CSS parsing would be better
-        const char* style_attr = nullptr;
-        // Get style attribute if available (simplified)
-        // border_collapse = (style contains "border-collapse: collapse")
-    }
+    // Use table's border-collapse property (already parsed by parse_table_css_properties)
+    bool border_collapse = table->border_collapse;
+    int border_spacing_h = table->border_spacing_h;
+    int border_spacing_v = table->border_spacing_v;
     
     printf("DEBUG: border_collapse=%s\n", border_collapse ? "collapse" : "separate");
     printf("DEBUG: table_layout=%s\n", table->table_layout == ViewTable::TABLE_LAYOUT_FIXED ? "fixed" : "auto");
@@ -515,7 +506,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     int columns = max_columns;
     if (columns <= 0 || total_rows <= 0) {
         // No rows/cells, set minimal size and return
-        table->x = 0; table->y = 0; table->width = 0; table->height = 0;
+        table->width = 0; table->height = 0;
         table->content_width = 0; table->content_height = 0;
         return;
     }
@@ -666,9 +657,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Calculate final table dimensions (include gaps for separate border model)
     int final_table_width = 0; 
     for (int i = 0; i < columns; i++) final_table_width += col_widths[i];
-    if (!table->border_collapse && columns > 1) {
-        int hgap_local = table->border_spacing_h;
-        final_table_width += (columns - 1) * hgap_local;
+    if (!border_collapse && columns > 1) {
+        final_table_width += (columns - 1) * border_spacing_h;
     }
     
     int current_y = 0;
@@ -701,8 +691,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // 4) Enhanced row and cell layout with colspan/rowspan support
     // Pre-calculate column x positions (include horizontal border-spacing when not collapsed)
-    int hgap = table->border_collapse ? 0 : table->border_spacing_h;
-    int vgap = table->border_collapse ? 0 : table->border_spacing_v;
+    int hgap = border_collapse ? 0 : border_spacing_h;
+    int vgap = border_collapse ? 0 : border_spacing_v;
     int* col_x_positions = (int*)calloc(columns + 1, sizeof(int));
     col_x_positions[0] = 0;
     for (int i = 1; i <= columns; i++) {
@@ -736,9 +726,9 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 cell_width += hgap * (tcell->col_span - 1);
             }
             
-            // Position cell
+            // Position cell relative to row origin (Radiant uses relative positioning)
             cell->x = col_x_positions[start_col];
-            cell->y = current_y;
+            cell->y = 0;  // Cells positioned relative to their parent row
             cell->width = cell_width;
             
             // Calculate cell height based on content and padding
@@ -859,7 +849,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 if (row->type != RDT_VIEW_TABLE_ROW) continue;
                 int rh = layout_row(row, layout_row_index);
                 // add vertical gap between rows for separate border model, except after last table row
-                int add_v = (!table->border_collapse && (layout_row_index < total_rows - 1)) ? vgap : 0;
+                int add_v = (!border_collapse && (layout_row_index < total_rows - 1)) ? vgap : 0;
                 current_y += rh + add_v;
                 group_height += rh + add_v;
                 layout_row_index++;
@@ -875,7 +865,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             // Direct table row (not in a group)
             int rh = layout_row(child, layout_row_index);
             // add vertical gap between rows for separate border model, except after last table row
-            int add_v = (!table->border_collapse && (layout_row_index < total_rows - 1)) ? vgap : 0;
+            int add_v = (!border_collapse && (layout_row_index < total_rows - 1)) ? vgap : 0;
             current_y += rh + add_v;
             layout_row_index++;
             
@@ -888,9 +878,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // 6) Set final table dimensions
     table_content_height = current_y;
     
-    // Position table (inherit from parent layout context)
-    table->x = 0;
-    table->y = 0;
+    // Table position should be set by the parent layout context, not here
+    // The ViewTable will be positioned like a normal ViewBlock by the layout system
     table->width = final_table_width;
     table->height = table_content_height;
     table->content_width = final_table_width;
@@ -911,6 +900,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 void layout_table_box(LayoutContext* lycon, DomNode* elmt, DisplayValue display) {
     printf("DEBUG: layout_table_box called for element %s\n", elmt->name());
     
+    // Save parent context for positioning (like layout_block does)
+    Blockbox pa_block = lycon->block;
+    Linebox pa_line = lycon->line;
+    
     // Attempt to build the table tree
     ViewTable* table = build_table_tree(lycon, elmt);
     if (!table) {
@@ -924,17 +917,26 @@ void layout_table_box(LayoutContext* lycon, DomNode* elmt, DisplayValue display)
     // Apply enhanced table layout algorithm
     table_auto_layout(lycon, table);
     
-    printf("DEBUG: table layout completed successfully\n");
+    // Position table using parent context (like layout_block does)
+    table->x = pa_line.left;
+    table->y = pa_block.advance_y;
 }
 
 // Phase 3: Table-layout: fixed algorithm implementation
 void table_fixed_layout_algorithm(LayoutContext* lycon, ViewTable* table, int columns, int* col_widths, int avail_width) {
     printf("DEBUG: table_fixed_layout_algorithm starting with %d columns, avail_width=%d\n", columns, avail_width);
     
+    // CRITICAL FIX: Use explicit table width if specified, not available width
+    int target_table_width = avail_width;
+    if (lycon->block.given_width > 0) {
+        target_table_width = lycon->block.given_width;
+        printf("DEBUG: Using explicit table width: %d (instead of avail_width: %d)\n", target_table_width, avail_width);
+    }
+    
     // Fixed layout algorithm:
     // 1. Use explicit column widths from <col> elements or first row cells
-    // 2. If no explicit widths, distribute available width equally
-    // 3. Table width is determined by available width, not content
+    // 2. If no explicit widths, distribute table width equally
+    // 3. Table width is determined by CSS width property, not content
     
     // Step 1: Collect explicit column widths from first row
     int* explicit_widths = (int*)calloc(columns, sizeof(int));
@@ -988,7 +990,7 @@ void table_fixed_layout_algorithm(LayoutContext* lycon, ViewTable* table, int co
     }
     
     // Step 2: Calculate column widths
-    int remaining_width = avail_width - total_explicit_width;
+    int remaining_width = target_table_width - total_explicit_width;
     int remaining_columns = columns - columns_with_explicit_width;
     
     if (remaining_columns > 0 && remaining_width > 0) {
@@ -1013,9 +1015,9 @@ void table_fixed_layout_algorithm(LayoutContext* lycon, ViewTable* table, int co
             col_widths[i] = explicit_widths[i];
         }
     } else {
-        // No explicit widths - distribute available width equally
-        int equal_width = avail_width / columns;
-        int extra_pixels = avail_width % columns;
+        // No explicit widths - distribute table width equally
+        int equal_width = target_table_width / columns;
+        int extra_pixels = target_table_width % columns;
         
         for (int i = 0; i < columns; i++) {
             col_widths[i] = equal_width;
@@ -1026,8 +1028,8 @@ void table_fixed_layout_algorithm(LayoutContext* lycon, ViewTable* table, int co
         }
     }
     
-    // Step 3: Calculate final table width (use available width for fixed layout)
-    int final_table_width = avail_width;
+    // Step 3: Calculate final table width (use explicit width for fixed layout)
+    int final_table_width = target_table_width;
     
     printf("DEBUG: Fixed layout - final_table_width=%d\n", final_table_width);
     for (int i = 0; i < columns; i++) {
