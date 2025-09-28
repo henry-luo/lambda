@@ -9,10 +9,24 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
     ViewTree* tree = lycon->doc->view_tree;
     switch (type) {
         case RDT_VIEW_BLOCK:  case RDT_VIEW_INLINE_BLOCK:  case RDT_VIEW_LIST_ITEM:
-        case RDT_VIEW_TABLE: case RDT_VIEW_TABLE_ROW_GROUP:
-        case RDT_VIEW_TABLE_ROW: case RDT_VIEW_TABLE_CELL:
             err = pool_variable_alloc(tree->pool, sizeof(ViewBlock), (void **)&view);
             memset(view, 0, sizeof(ViewBlock));
+            break;
+        case RDT_VIEW_TABLE:
+            err = pool_variable_alloc(tree->pool, sizeof(ViewTable), (void **)&view);
+            memset(view, 0, sizeof(ViewTable));
+            break;
+        case RDT_VIEW_TABLE_ROW_GROUP:
+            err = pool_variable_alloc(tree->pool, sizeof(ViewTableRowGroup), (void **)&view);
+            memset(view, 0, sizeof(ViewTableRowGroup));
+            break;
+        case RDT_VIEW_TABLE_ROW:
+            err = pool_variable_alloc(tree->pool, sizeof(ViewTableRow), (void **)&view);
+            memset(view, 0, sizeof(ViewTableRow));
+            break;
+        case RDT_VIEW_TABLE_CELL:
+            err = pool_variable_alloc(tree->pool, sizeof(ViewTableCell), (void **)&view);
+            memset(view, 0, sizeof(ViewTableCell));
             break;
         case RDT_VIEW_INLINE:
             err = pool_variable_alloc(tree->pool, sizeof(ViewSpan), (void **)&view);

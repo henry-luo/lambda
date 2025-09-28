@@ -158,6 +158,7 @@ static void parse_table_css_properties(DomNode* elmt, ViewTable* table) {
     // TODO: Parse from computed styles (stylesheet-based rules)
     // This would require extending the CSS resolution system to handle table properties
     // For now, inline styles provide sufficient functionality for testing
+    
 }
 
 // Build a ViewTable subtree from DOM (Phase 1)
