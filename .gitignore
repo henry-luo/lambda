@@ -34,8 +34,7 @@ cache/
 __pycache__/
 
 # Executables and other project-specific generated files
-flexbox
-/core
+core/
 lambda-parser/test-lambda-parser
 lambda-parser/tree-sitter-lambda/src/grammar.json
 output.pgm
@@ -98,11 +97,6 @@ mac-deps/
 linux-deps/
 windows-deps/
 win-native-deps/
-
-# ICU source and build artifacts
-icu/
-icu-compact/
-icu-compact-build/
 
 # Documentation related
 .obsidian/
