@@ -993,10 +993,14 @@ void table_fixed_layout_algorithm(LayoutContext* lycon, ViewTable* table, int co
     int remaining_width = target_table_width - total_explicit_width;
     int remaining_columns = columns - columns_with_explicit_width;
     
+    
     if (remaining_columns > 0 && remaining_width > 0) {
         // Distribute remaining width equally among columns without explicit width
-        int equal_width = remaining_width / remaining_columns;
-        int extra_pixels = remaining_width % remaining_columns;
+        // For fixed layout, subtract border-spacing from available width
+        int spacing_width = (columns > 1) ? (columns - 1) * table->border_spacing_h : 0;
+        int available_width = remaining_width - spacing_width;
+        int equal_width = available_width / remaining_columns;
+        int extra_pixels = available_width % remaining_columns;
         
         for (int i = 0; i < columns; i++) {
             if (has_explicit_width[i]) {
@@ -1016,8 +1020,11 @@ void table_fixed_layout_algorithm(LayoutContext* lycon, ViewTable* table, int co
         }
     } else {
         // No explicit widths - distribute table width equally
-        int equal_width = target_table_width / columns;
-        int extra_pixels = target_table_width % columns;
+        // For fixed layout, subtract border-spacing from available width
+        int spacing_width = (columns > 1) ? (columns - 1) * table->border_spacing_h : 0;
+        int available_width = target_table_width - spacing_width;
+        int equal_width = available_width / columns;
+        int extra_pixels = available_width % columns;
         
         for (int i = 0; i < columns; i++) {
             col_widths[i] = equal_width;
