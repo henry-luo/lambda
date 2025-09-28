@@ -968,83 +968,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     #undef GRID
 }
 
-// Helper function to adjust text positions within table cells to be relative to document
-void adjust_table_text_positions(ViewTable* table) {
-    if (!table) return;
-    
-    // Recursively traverse table structure and adjust text positions
-    for (ViewBlock* child = table->first_child; child; child = child->next_sibling) {
-        if (child->type == RDT_VIEW_TABLE_ROW_GROUP) {
-            // Row group: traverse rows
-            for (ViewBlock* row = child->first_child; row; row = row->next_sibling) {
-                if (row->type == RDT_VIEW_TABLE_ROW) {
-                    adjust_row_text_positions(table, child, row);
-                }
-            }
-        } else if (child->type == RDT_VIEW_TABLE_ROW) {
-            // Direct row: adjust text positions
-            adjust_row_text_positions(table, nullptr, child);
-        }
-    }
-}
-
-// Helper function to adjust text positions within a table row
-void adjust_row_text_positions(ViewTable* table, ViewBlock* row_group, ViewBlock* row) {
-    if (!table || !row) return;
-    
-    for (ViewBlock* cell = row->first_child; cell; cell = cell->next_sibling) {
-        if (cell->type != RDT_VIEW_TABLE_CELL) continue;
-        
-        // Calculate absolute cell position
-        int cell_abs_x = table->x + cell->x;
-        int cell_abs_y = table->y;
-        
-        if (row_group) {
-            cell_abs_y += row_group->y;
-        }
-        cell_abs_y += row->y + cell->y;
-        
-        // CRITICAL FIX: Add body margin offset since table is positioned at 0,0 but should be at 16,16
-        cell_abs_x += 16;  // Body margin from CSS: body { margin: 16px; }
-        cell_abs_y += 16;  // Body margin from CSS: body { margin: 16px; }
-        
-        printf("DEBUG: Cell positioning - table->x=%d, cell->x=%d, cell_abs_x=%d (with body margin)\n", 
-               table->x, cell->x, cell_abs_x);
-        
-        // Adjust all text within this cell
-        adjust_cell_text_positions(cell, cell_abs_x, cell_abs_y);
-    }
-}
-
-// Helper function to adjust text positions within a single cell
-void adjust_cell_text_positions(ViewBlock* cell, int cell_abs_x, int cell_abs_y) {
-    if (!cell) return;
-    
-    // Calculate cell padding and border offsets (matches CSS: td { padding: 8px; border: 1px solid #666; })
-    int cell_padding_left = 8;  // CSS padding
-    int cell_border_left = 1;   // CSS border width
-    int cell_padding_top = 0;   // CSS padding - text baseline positioning, not top padding
-    int cell_border_top = 1;    // CSS border width
-    
-    // Recursively adjust text positions
-    for (View* child = ((ViewGroup*)cell)->child; child; child = child->next) {
-        if (child->type == RDT_VIEW_TEXT) {
-            ViewText* text = (ViewText*)child;
-            printf("DEBUG: Text positioning - original x=%d, cell_abs_x=%d, border=%d, padding=%d\n", 
-                   text->x, cell_abs_x, cell_border_left, cell_padding_left);
-            // Adjust text position to be relative to document with proper padding/border offset
-            text->x += cell_abs_x + cell_border_left + cell_padding_left;
-            text->y += cell_abs_y + cell_border_top + cell_padding_top;
-            printf("DEBUG: Text positioning - final x=%d, y=%d\n", text->x, text->y);
-        } else if (child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK) {
-            ViewBlock* block = (ViewBlock*)child;
-            // Recursively adjust block content with proper padding/border offset
-            block->x += cell_abs_x + cell_border_left + cell_padding_left;
-            block->y += cell_abs_y + cell_border_top + cell_padding_top;
-            // Could recursively adjust block children if needed
-        }
-    }
-}
+// Text positioning functions removed - using relative view positioning instead
 
 // Enhanced table layout entry point
 void layout_table_box(LayoutContext* lycon, DomNode* elmt, DisplayValue display) {
@@ -1073,8 +997,7 @@ void layout_table_box(LayoutContext* lycon, DomNode* elmt, DisplayValue display)
     table->y = pa_block.advance_y;
     printf("DEBUG: Table positioned at x=%d, y=%d\n", table->x, table->y);
     
-    // CRITICAL FIX: Adjust all text positions to be relative to document, not cells
-    adjust_table_text_positions(table);
+    // Text positioning handled by relative view positioning - no manual adjustment needed
     
     // CRITICAL FIX: Update parent layout context with table height
     lycon->block.advance_y += table->height;
