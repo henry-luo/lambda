@@ -600,7 +600,10 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     
     // Calculate absolute position by traversing up the parent chain
     ViewGroup* parent = block->parent;
-    while (parent && parent->type == RDT_VIEW_BLOCK) {
+    while (parent && (parent->type == RDT_VIEW_BLOCK || parent->type == RDT_VIEW_INLINE_BLOCK ||
+                      parent->type == RDT_VIEW_LIST_ITEM || parent->type == RDT_VIEW_TABLE ||
+                      parent->type == RDT_VIEW_TABLE_ROW_GROUP || parent->type == RDT_VIEW_TABLE_ROW ||
+                      parent->type == RDT_VIEW_TABLE_CELL)) {
         ViewBlock* parent_block = (ViewBlock*)parent;
         abs_x += parent_block->x;
         abs_y += parent_block->y;
@@ -805,7 +808,10 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
     
     // Calculate absolute position by traversing up the parent chain
     ViewGroup* parent = text->parent;
-    while (parent && parent->type == RDT_VIEW_BLOCK) {
+    while (parent && (parent->type == RDT_VIEW_BLOCK || parent->type == RDT_VIEW_INLINE_BLOCK ||
+                      parent->type == RDT_VIEW_LIST_ITEM || parent->type == RDT_VIEW_TABLE ||
+                      parent->type == RDT_VIEW_TABLE_ROW_GROUP || parent->type == RDT_VIEW_TABLE_ROW ||
+                      parent->type == RDT_VIEW_TABLE_CELL)) {
         ViewBlock* parent_block = (ViewBlock*)parent;
         abs_x += parent_block->x;
         abs_y += parent_block->y;

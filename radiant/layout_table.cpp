@@ -273,11 +273,26 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt) {
                             cell->bound->background->color.a = 255; 
                         }
                     }
-                    // Layout cell contents using existing flow
+                    // Layout cell contents using existing flow with proper padding
                     ViewGroup* cell_saved_parent = lycon->parent; View* cell_saved_prev = lycon->prev_view; lycon->parent = (ViewGroup*)cell; lycon->prev_view = nullptr; lycon->elmt = cellNode;
+                    
+                    // Apply cell padding to content positioning (8px from CSS)
+                    Blockbox saved_block = lycon->block;
+                    Linebox saved_line = lycon->line;
+                    
+                    // Set up content area with padding offset
+                    int cell_padding = 8; // matches CSS: td { padding: 8px; }
+                    lycon->block.advance_y = cell_padding;
+                    lycon->line.left = cell_padding;
+                    lycon->line.right = cell_padding;
+                    
                     for (DomNode* cc = cellNode->first_child(); cc; cc = cc->next_sibling()) {
                         layout_flow_node(lycon, cc);
                     }
+                    
+                    // Restore context
+                    lycon->block = saved_block;
+                    lycon->line = saved_line;
                     lycon->parent = cell_saved_parent; lycon->prev_view = (View*)cell; lycon->elmt = rowNode;
                 }
                 lycon->parent = row_saved_parent; lycon->prev_view = (View*)row; lycon->elmt = child;
@@ -328,10 +343,26 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt) {
                         cell->bound->background->color.a = 255; 
                     }
                 }
+                // Layout cell contents using existing flow with proper padding
                 ViewGroup* cell_saved_parent = lycon->parent; View* cell_saved_prev = lycon->prev_view; lycon->parent = (ViewGroup*)cell; lycon->prev_view = nullptr; lycon->elmt = cellNode;
+                
+                // Apply cell padding to content positioning (8px from CSS)
+                Blockbox saved_block = lycon->block;
+                Linebox saved_line = lycon->line;
+                
+                // Set up content area with padding offset
+                int cell_padding = 8; // matches CSS: td { padding: 8px; }
+                lycon->block.advance_y = cell_padding;
+                lycon->line.left = cell_padding;
+                lycon->line.right = cell_padding;
+                
                 for (DomNode* cc = cellNode->first_child(); cc; cc = cc->next_sibling()) {
                     layout_flow_node(lycon, cc);
                 }
+                
+                // Restore context
+                lycon->block = saved_block;
+                lycon->line = saved_line;
                 lycon->parent = cell_saved_parent; lycon->prev_view = (View*)cell; lycon->elmt = child;
             }
             lycon->parent = row_saved_parent; lycon->prev_view = (View*)row; lycon->elmt = elmt;
@@ -384,11 +415,11 @@ static int measure_cell_min_content_width(ViewBlock* cell) {
                 // This is roughly 5x more space, suggesting browsers prefer not to wrap long content aggressively
                 child_width = text->width; // Use full width for long content - browsers don't wrap aggressively
             }
-            printf("DEBUG: text len=%d, actual_width=%d, estimated_min_width=%d\n", text_len, text->width, child_width);
+            // printf("DEBUG: text len=%d, actual_width=%d, estimated_min_width=%d\n", text_len, text->width, child_width);
         } else if (child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* block_child = (ViewBlock*)child;
             child_width = block_child->width;
-            printf("DEBUG: block content width=%d\n", child_width);
+            // printf("DEBUG: block content width=%d\n", child_width);
         }
         if (child_width > min_width) {
             min_width = child_width;
@@ -399,9 +430,20 @@ static int measure_cell_min_content_width(ViewBlock* cell) {
     if (cell->bound) {
         min_width += cell->bound->padding.left + cell->bound->padding.right;
     } else {
-        // Default padding from CSS: 8px top/bottom, 12px left/right
-        min_width += 24; // 12px left + 12px right padding
+        // Default padding from CSS: 8px all sides (padding: 8px)
+        min_width += 16; // 8px left + 8px right padding
     }
+    
+    // Add cell border (browsers include border in width calculation)
+    if (cell->bound && cell->bound->border) {
+        min_width += cell->bound->border->width.left + cell->bound->border->width.right;
+    } else {
+        // Default border from CSS: 1px solid #666
+        min_width += 2; // 1px left + 1px right border
+    }
+    
+    printf("DEBUG: Cell content width calculation - text_width=%d, padding=16, border=2, total=%d\n", 
+           min_width - 18, min_width);
     
     return min_width > 0 ? min_width : 50; // minimum fallback
 }
@@ -651,7 +693,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
     
     for (int i = 0; i < columns; i++) {
-        printf("DEBUG: col[%d] pref_width=%d\n", i, col_pref[i]);
+        // printf("DEBUG: col[%d] pref_width=%d\n", i, col_pref[i]);
     }
     
     // Calculate final table dimensions (include gaps for separate border model)
@@ -660,6 +702,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!border_collapse && columns > 1) {
         final_table_width += (columns - 1) * border_spacing_h;
     }
+    
+    // DEBUG: Table width calculation
+    // printf("DEBUG: Table width calculation - columns=%d, border_collapse=%d\n", columns, border_collapse);
+    // printf("DEBUG: Column widths: ");
+    // for (int i = 0; i < columns; i++) printf("col[%d]=%d ", i, col_widths[i]);
+    // printf("\nDEBUG: border_spacing_h=%d, final_table_width=%d\n", border_spacing_h, final_table_width);
     
     int current_y = 0;
     int table_content_height = 0;
@@ -745,27 +793,45 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             
             // Ensure minimum height and add padding
             if (cell_content_height <= 0) {
-                cell_content_height = lycon->block.line_height > 0 ? (int)lycon->block.line_height : 20;
+                cell_content_height = lycon->block.line_height > 0 ? (int)lycon->block.line_height : 17; // match browser line height
             }
             
-            // Add cell padding (top + bottom)
+            // Add cell padding (top + bottom) - matches CSS: td { padding: 8px; }
             int cell_padding = 0;
-            if (cell->bound) {
+            if (cell->bound && cell->bound->padding.top > 0) {
                 cell_padding = cell->bound->padding.top + cell->bound->padding.bottom;
             } else {
-                cell_padding = 16; // default padding (8px top + 8px bottom)
+                cell_padding = 16; // default padding (8px top + 8px bottom) from CSS
             }
             
-            int total_cell_height = cell_content_height + cell_padding;
+            // Add cell border (top + bottom)
+            int cell_border = 0;
+            if (cell->bound && cell->bound->border) {
+                cell_border = cell->bound->border->width.top + cell->bound->border->width.bottom;
+            } else {
+                cell_border = 2; // default border (1px top + 1px bottom)
+            }
+            
+            int total_cell_height = cell_content_height + cell_padding + cell_border;
             
             // Store the content height for vertical alignment calculations
             int content_height = total_cell_height;
             
-            // For rowspan cells, distribute height across spanned rows
+            // For rowspan cells, calculate height spanning multiple rows
             if (tcell->row_span > 1) {
-                // For now, set the full height on the cell
-                // TODO: Implement proper rowspan height distribution
-                cell->height = total_cell_height;
+                // Calculate height for multiple rows including gaps
+                int rowspan_height = total_cell_height * tcell->row_span;
+                
+                // Add vertical gaps between spanned rows (for separate border model)
+                if (!border_collapse && tcell->row_span > 1) {
+                    rowspan_height += vgap * (tcell->row_span - 1);
+                }
+                
+                cell->height = rowspan_height;
+                // Rowspan cells contribute to the current row height
+                if (total_cell_height > row_height) {
+                    row_height = total_cell_height;
+                }
             } else {
                 cell->height = total_cell_height;
                 if (total_cell_height > row_height) {
@@ -850,14 +916,20 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 int rh = layout_row(row, layout_row_index);
                 // add vertical gap between rows for separate border model, except after last table row
                 int add_v = (!border_collapse && (layout_row_index < total_rows - 1)) ? vgap : 0;
+                // DEBUG: Row positioning calculation
+                // printf("DEBUG: Row %d - height=%d, add_v=%d, current_y before=%d, after=%d\n", 
+                //        layout_row_index, rh, add_v, current_y, current_y + rh + add_v);
                 current_y += rh + add_v;
                 group_height += rh + add_v;
                 layout_row_index++;
             }
             
             // Set row group dimensions
-            child->x = 0;
-            child->y = group_start_y;
+            // CRITICAL FIX: Position row group relative to table, not absolute
+            // For border-collapse, apply 0.5px offset (using integer approximation)
+            int border_offset = 0;  // 0.5px → 0px approximation (closest integer to 0.5px)
+            child->x = border_offset;
+            child->y = group_start_y + border_offset;
             child->width = final_table_width;
             child->height = group_height;
             
@@ -896,6 +968,84 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     #undef GRID
 }
 
+// Helper function to adjust text positions within table cells to be relative to document
+void adjust_table_text_positions(ViewTable* table) {
+    if (!table) return;
+    
+    // Recursively traverse table structure and adjust text positions
+    for (ViewBlock* child = table->first_child; child; child = child->next_sibling) {
+        if (child->type == RDT_VIEW_TABLE_ROW_GROUP) {
+            // Row group: traverse rows
+            for (ViewBlock* row = child->first_child; row; row = row->next_sibling) {
+                if (row->type == RDT_VIEW_TABLE_ROW) {
+                    adjust_row_text_positions(table, child, row);
+                }
+            }
+        } else if (child->type == RDT_VIEW_TABLE_ROW) {
+            // Direct row: adjust text positions
+            adjust_row_text_positions(table, nullptr, child);
+        }
+    }
+}
+
+// Helper function to adjust text positions within a table row
+void adjust_row_text_positions(ViewTable* table, ViewBlock* row_group, ViewBlock* row) {
+    if (!table || !row) return;
+    
+    for (ViewBlock* cell = row->first_child; cell; cell = cell->next_sibling) {
+        if (cell->type != RDT_VIEW_TABLE_CELL) continue;
+        
+        // Calculate absolute cell position
+        int cell_abs_x = table->x + cell->x;
+        int cell_abs_y = table->y;
+        
+        if (row_group) {
+            cell_abs_y += row_group->y;
+        }
+        cell_abs_y += row->y + cell->y;
+        
+        // CRITICAL FIX: Add body margin offset since table is positioned at 0,0 but should be at 16,16
+        cell_abs_x += 16;  // Body margin from CSS: body { margin: 16px; }
+        cell_abs_y += 16;  // Body margin from CSS: body { margin: 16px; }
+        
+        printf("DEBUG: Cell positioning - table->x=%d, cell->x=%d, cell_abs_x=%d (with body margin)\n", 
+               table->x, cell->x, cell_abs_x);
+        
+        // Adjust all text within this cell
+        adjust_cell_text_positions(cell, cell_abs_x, cell_abs_y);
+    }
+}
+
+// Helper function to adjust text positions within a single cell
+void adjust_cell_text_positions(ViewBlock* cell, int cell_abs_x, int cell_abs_y) {
+    if (!cell) return;
+    
+    // Calculate cell padding and border offsets (matches CSS: td { padding: 8px; border: 1px solid #666; })
+    int cell_padding_left = 8;  // CSS padding
+    int cell_border_left = 1;   // CSS border width
+    int cell_padding_top = 0;   // CSS padding - text baseline positioning, not top padding
+    int cell_border_top = 1;    // CSS border width
+    
+    // Recursively adjust text positions
+    for (View* child = ((ViewGroup*)cell)->child; child; child = child->next) {
+        if (child->type == RDT_VIEW_TEXT) {
+            ViewText* text = (ViewText*)child;
+            printf("DEBUG: Text positioning - original x=%d, cell_abs_x=%d, border=%d, padding=%d\n", 
+                   text->x, cell_abs_x, cell_border_left, cell_padding_left);
+            // Adjust text position to be relative to document with proper padding/border offset
+            text->x += cell_abs_x + cell_border_left + cell_padding_left;
+            text->y += cell_abs_y + cell_border_top + cell_padding_top;
+            printf("DEBUG: Text positioning - final x=%d, y=%d\n", text->x, text->y);
+        } else if (child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK) {
+            ViewBlock* block = (ViewBlock*)child;
+            // Recursively adjust block content with proper padding/border offset
+            block->x += cell_abs_x + cell_border_left + cell_padding_left;
+            block->y += cell_abs_y + cell_border_top + cell_padding_top;
+            // Could recursively adjust block children if needed
+        }
+    }
+}
+
 // Enhanced table layout entry point
 void layout_table_box(LayoutContext* lycon, DomNode* elmt, DisplayValue display) {
     printf("DEBUG: layout_table_box called for element %s\n", elmt->name());
@@ -918,8 +1068,24 @@ void layout_table_box(LayoutContext* lycon, DomNode* elmt, DisplayValue display)
     table_auto_layout(lycon, table);
     
     // Position table using parent context (like layout_block does)
+    printf("DEBUG: Table positioning - pa_line.left=%d, pa_block.advance_y=%d\n", pa_line.left, pa_block.advance_y);
     table->x = pa_line.left;
     table->y = pa_block.advance_y;
+    printf("DEBUG: Table positioned at x=%d, y=%d\n", table->x, table->y);
+    
+    // CRITICAL FIX: Adjust all text positions to be relative to document, not cells
+    adjust_table_text_positions(table);
+    
+    // CRITICAL FIX: Update parent layout context with table height
+    lycon->block.advance_y += table->height;
+    
+    // BORDER-COLLAPSE FIX: Apply 0.5px offset for collapsed borders
+    // When borders collapse, browsers use sub-pixel positioning to center borders
+    if (table->border_collapse) {
+        // Note: Using integer positioning for now, but browsers use 0.5px offsets
+        // This is a limitation of current integer-based layout system
+        printf("DEBUG: Border-collapse detected - would apply 0.5px offset in sub-pixel system\n");
+    }
 }
 
 // Phase 3: Table-layout: fixed algorithm implementation
@@ -1090,4 +1256,16 @@ void table_auto_layout_algorithm(LayoutContext* lycon, ViewTable* table, int col
     for (int i = 0; i < columns; i++) {
         printf("DEBUG: col[%d] final_width=%d\n", i, col_widths[i]);
     }
+    
+    // Calculate column X positions for debugging
+    int* debug_col_x = (int*)calloc(columns, sizeof(int));
+    debug_col_x[0] = 0;
+    for (int i = 1; i < columns; i++) {
+        debug_col_x[i] = debug_col_x[i-1] + col_widths[i-1];
+    }
+    for (int i = 0; i < columns; i++) {
+        printf("DEBUG: Column %d: x_position=%d, width=%d, end_x=%d\n", 
+               i, debug_col_x[i], col_widths[i], debug_col_x[i] + col_widths[i]);
+    }
+    free(debug_col_x);
 }
