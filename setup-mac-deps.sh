@@ -10,45 +10,45 @@ SYSTEM_PREFIX="/usr/local"
 # Check for cleanup option
 if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     echo "Cleaning up intermediate files..."
-    
+
     # Clean tree-sitter build files
     if [ -d "lambda/tree-sitter" ]; then
         cd lambda/tree-sitter
         make clean 2>/dev/null || true
         cd - > /dev/null
     fi
-    
+
     # Clean tree-sitter-lambda build files
     if [ -d "lambda/tree-sitter-lambda" ]; then
         cd lambda/tree-sitter-lambda
         make clean 2>/dev/null || true
         cd - > /dev/null
     fi
-    
+
     # Clean build directories
     rm -rf build/ build_debug/ 2>/dev/null || true
-    
+
     # Clean object files
     find . -name "*.o" -type f -delete 2>/dev/null || true
-    
+
     # Clean dependency build files but keep the built libraries
     if [ -d "build_temp" ]; then
         rm -rf build_temp/
     fi
-    
+
     # Clean nghttp2 and curl build files
     if [ -d "mac-deps/nghttp2" ]; then
         cd mac-deps/nghttp2
         make clean 2>/dev/null || true
         cd - > /dev/null
     fi
-    
+
     if [ -d "mac-deps/curl-8.10.1" ]; then
         cd mac-deps/curl-8.10.1
         make clean 2>/dev/null || true
         cd - > /dev/null
     fi
-    
+
     echo "Cleanup completed."
     exit 0
 fi
@@ -59,7 +59,7 @@ echo "Setting up Mac native compilation dependencies..."
 check_tool() {
     local tool="$1"
     local install_cmd="$2"
-    
+
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "Error: $tool is required but not installed."
         echo "Install it with: $install_cmd"
@@ -132,19 +132,19 @@ download_extract() {
     local name="$1"
     local url="$2"
     local archive="$3"
-    
+
     if [ ! -d "build_temp/$name" ]; then
         echo "Downloading $name..."
         cd build_temp
         curl -L "$url" -o "$archive"
-        
+
         case "$archive" in
             *.tar.gz) tar -xzf "$archive" ;;
             *.tar.bz2) tar -xjf "$archive" ;;
             *.tar.xz) tar -xJf "$archive" ;;
             *.zip) unzip "$archive" ;;
         esac
-        
+
         rm "$archive"
         cd - > /dev/null
     else
@@ -157,16 +157,16 @@ build_dependency() {
     local name="$1"
     local src_dir="$2"
     local build_cmd="$3"
-    
+
     echo "Building $name for Mac..."
-    
+
     if [ ! -d "build_temp/$src_dir" ]; then
         echo "Warning: Source directory build_temp/$src_dir not found"
         return 1
     fi
-    
+
     cd "build_temp/$src_dir"
-    
+
     # Set up environment for native Mac compilation
     export CC="gcc"
     export CXX="g++"
@@ -176,7 +176,7 @@ build_dependency() {
     export CFLAGS="-O2 -arch $(uname -m)"
     export CXXFLAGS="-O2 -arch $(uname -m)"
     export LDFLAGS="-arch $(uname -m)"
-    
+
     # Add Homebrew paths if available
     if command -v brew >/dev/null 2>&1; then
         BREW_PREFIX=$(brew --prefix)
@@ -184,14 +184,14 @@ build_dependency() {
         export LDFLAGS="-L$BREW_PREFIX/lib $LDFLAGS"
         export PKG_CONFIG_PATH="$BREW_PREFIX/lib/pkgconfig:$PKG_CONFIG_PATH"
     fi
-    
+
     # Run the build command in a subshell to prevent exit from affecting the main script
     (eval "$build_cmd") || {
         echo "Warning: $name build failed"
         cd - > /dev/null
         return 1
     }
-    
+
     cd - > /dev/null
     return 0
 }
@@ -199,28 +199,28 @@ build_dependency() {
 # Function to clean up intermediate files
 cleanup_intermediate_files() {
     echo "Cleaning up intermediate files..."
-    
+
     # Clean object files but keep static libraries
     find . -name "*.o" -type f -delete 2>/dev/null || true
-    
+
     # Clean dependency build files but keep the built libraries
     if [ -d "build_temp" ]; then
         rm -rf build_temp/
     fi
-    
+
     echo "Cleanup completed."
 }
 
 # Function to build lexbor submodule for Mac
 build_lexbor_submodule_for_mac() {
     echo "Building lexbor submodule for Mac..."
-    
+
     # Check if already built in submodule directory
     if [ -f "lexbor/liblexbor_static.a" ]; then
         echo "lexbor submodule already built"
         return 0
     fi
-    
+
     # Ensure submodule is initialized
     if [ ! -f "lexbor/CMakeLists.txt" ]; then
         echo "Initializing lexbor submodule..."
@@ -229,22 +229,22 @@ build_lexbor_submodule_for_mac() {
             return 1
         }
     fi
-    
+
     # Check if CMakeLists.txt exists
     if [ ! -f "lexbor/CMakeLists.txt" ]; then
         echo "❌ CMakeLists.txt not found in lexbor submodule directory"
         return 1
     fi
-    
+
     cd lexbor
-    
+
     # Clean previous builds
     rm -rf build-mac liblexbor_static.a 2>/dev/null || true
-    
+
     # Create build directory
     mkdir -p build-mac
     cd build-mac
-    
+
     echo "Configuring lexbor submodule with CMake..."
     if cmake \
         -DCMAKE_BUILD_TYPE=Release \
@@ -254,7 +254,7 @@ build_lexbor_submodule_for_mac() {
         -DLEXBOR_BUILD_EXAMPLES=OFF \
         -DLEXBOR_INSTALL=OFF \
         ..; then
-        
+
         echo "Building lexbor submodule..."
         if make -j$(sysctl -n hw.ncpu); then
             # Copy the static library to the lexbor root directory where build config expects it
@@ -279,7 +279,7 @@ build_lexbor_submodule_for_mac() {
             fi
         fi
     fi
-    
+
     echo "❌ lexbor submodule build failed"
     cd - > /dev/null
     cd - > /dev/null
@@ -289,13 +289,13 @@ build_lexbor_submodule_for_mac() {
 # Function to build MIR for Mac
 build_mir_for_mac() {
     echo "Building MIR for Mac..."
-    
+
     # Check if already installed in system location
     if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ]; then
         echo "MIR already installed in system location"
         return 0
     fi
-    
+
     if [ ! -d "build_temp/mir" ]; then
         cd build_temp
         echo "Cloning MIR repository..."
@@ -306,21 +306,21 @@ build_mir_for_mac() {
         }
         cd - > /dev/null
     fi
-    
+
     cd "build_temp/mir"
-    
+
     echo "Building MIR..."
     if make -j$(sysctl -n hw.ncpu); then
         echo "Installing MIR to system location (requires sudo)..."
         # Create directories and copy files manually
         sudo mkdir -p "$SYSTEM_PREFIX/lib"
         sudo mkdir -p "$SYSTEM_PREFIX/include"
-        
+
         # Copy the static library
         if [ -f "libmir.a" ]; then
             sudo cp "libmir.a" "$SYSTEM_PREFIX/lib/"
         fi
-        
+
         # Copy headers
         if [ -f "mir.h" ]; then
             sudo cp "mir.h" "$SYSTEM_PREFIX/include/"
@@ -328,12 +328,12 @@ build_mir_for_mac() {
         if [ -f "mir-gen.h" ]; then
             sudo cp "mir-gen.h" "$SYSTEM_PREFIX/include/"
         fi
-        
+
         echo "✅ MIR built successfully"
         cd - > /dev/null
         return 0
     fi
-    
+
     echo "❌ MIR build failed"
     cd - > /dev/null
     return 1
@@ -342,13 +342,13 @@ build_mir_for_mac() {
 # Function to build ThorVG v1.0-pre11 for Mac
 build_thorvg_v1_0_pre11_for_mac() {
     echo "Building ThorVG v1.0-pre11 for Mac..."
-    
+
     # Check if already installed in system location
     if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ]; then
         echo "ThorVG v1.0-pre11 already installed in system location"
         return 0
     fi
-    
+
     if [ ! -d "build_temp/thorvg" ]; then
         cd build_temp
         echo "Cloning ThorVG repository..."
@@ -359,9 +359,9 @@ build_thorvg_v1_0_pre11_for_mac() {
         }
         cd - > /dev/null
     fi
-    
+
     cd "build_temp/thorvg"
-    
+
     # Checkout v1.0-pre11 specifically
     echo "Checking out ThorVG v1.0-pre11..."
     git fetch --tags
@@ -370,7 +370,7 @@ build_thorvg_v1_0_pre11_for_mac() {
         cd - > /dev/null
         return 1
     }
-    
+
     # Check for meson build system
     if [ -f "meson.build" ]; then
         # Check if meson is available
@@ -395,10 +395,10 @@ build_thorvg_v1_0_pre11_for_mac() {
                 fi
             fi
         fi
-        
+
         # Create build directory
         mkdir -p build-mac
-        
+
         echo "Configuring ThorVG with Meson..."
         if meson setup build-mac \
             --buildtype=release \
@@ -411,7 +411,7 @@ build_thorvg_v1_0_pre11_for_mac() {
             -Dtools= \
             -Dtests=false \
             -Dexamples=false; then
-            
+
             echo "Building ThorVG v1.0-pre11..."
             if meson compile -C build-mac; then
                 echo "Installing ThorVG v1.0-pre11 to system location (requires sudo)..."
@@ -427,7 +427,7 @@ build_thorvg_v1_0_pre11_for_mac() {
         cd - > /dev/null
         return 1
     fi
-    
+
     echo "❌ ThorVG v1.0-pre1 build failed"
     cd - > /dev/null
     return 1
@@ -436,13 +436,13 @@ build_thorvg_v1_0_pre11_for_mac() {
 # Function to build Google Test for Mac
 build_gtest_for_mac() {
     echo "Building Google Test for Mac..."
-    
+
     # Check if already installed in system location
     if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
         echo "Google Test already installed in system location"
         return 0
     fi
-    
+
     if [ ! -d "build_temp/googletest" ]; then
         cd build_temp
         echo "Cloning Google Test repository..."
@@ -453,13 +453,13 @@ build_gtest_for_mac() {
         }
         cd - > /dev/null
     fi
-    
+
     cd "build_temp/googletest"
-    
+
     # Create build directory
     mkdir -p build-mac
     cd build-mac
-    
+
     echo "Configuring Google Test with CMake..."
     if cmake \
         -DCMAKE_BUILD_TYPE=Release \
@@ -469,12 +469,12 @@ build_gtest_for_mac() {
         -DINSTALL_GTEST=ON \
         -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" \
         ..; then
-        
+
         echo "Building Google Test..."
         if make -j$(sysctl -n hw.ncpu); then
             echo "Installing Google Test to system location (requires sudo)..."
             sudo make install
-            
+
             # Verify the build
             if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
                 echo "✅ Google Test built successfully"
@@ -484,7 +484,7 @@ build_gtest_for_mac() {
             fi
         fi
     fi
-    
+
     echo "❌ Google Test build failed"
     cd - > /dev/null
     cd - > /dev/null
@@ -494,21 +494,21 @@ build_gtest_for_mac() {
 # Function to setup FreeType 2.13.3 for Mac (specific version required by build config)
 setup_freetype_2_13_3_for_mac() {
     echo "Setting up FreeType 2.13.3 for Mac..."
-    
+
     # Expected paths from build config
     EXPECTED_FREETYPE_PATH="/opt/homebrew/Cellar/freetype/2.13.3"
     EXPECTED_INCLUDE_PATH="$EXPECTED_FREETYPE_PATH/include/freetype2"
     EXPECTED_LIB_PATH="$EXPECTED_FREETYPE_PATH/lib/libfreetype.a"
-    
+
     # Check if the exact version is already installed
     if [ -d "$EXPECTED_FREETYPE_PATH" ] && [ -f "$EXPECTED_INCLUDE_PATH/ft2build.h" ] && [ -f "$EXPECTED_LIB_PATH" ]; then
         echo "✅ FreeType 2.13.3 already available at expected location"
         return 0
     fi
-    
+
     if command -v brew >/dev/null 2>&1; then
         echo "Installing FreeType 2.13.3 via Homebrew..."
-        
+
         # Try to install the specific version
         # First check if we need to unlink current version
         if brew list freetype >/dev/null 2>&1; then
@@ -516,7 +516,7 @@ setup_freetype_2_13_3_for_mac() {
             if [ "$CURRENT_VERSION" != "2.13.3" ]; then
                 echo "Current FreeType version: $CURRENT_VERSION, need 2.13.3"
                 echo "Attempting to install FreeType 2.13.3..."
-                
+
                 # Try to install the specific version using Homebrew formula
                 if brew install freetype@2.13.3 2>/dev/null || brew install freetype; then
                     echo "FreeType installation completed"
@@ -534,14 +534,14 @@ setup_freetype_2_13_3_for_mac() {
                 return 1
             fi
         fi
-        
+
         # Check what we actually got after installation
         ACTUAL_PATH=$(find /opt/homebrew/Cellar/freetype -name "2.13.3*" -type d 2>/dev/null | head -1)
         if [ -z "$ACTUAL_PATH" ]; then
             # Try to find any freetype version and create symlink if needed
             LATEST_VERSION=$(ls /opt/homebrew/Cellar/freetype/ | sort -V | tail -1)
             ACTUAL_PATH="/opt/homebrew/Cellar/freetype/$LATEST_VERSION"
-            
+
             if [ -d "$ACTUAL_PATH" ]; then
                 echo "Found FreeType $LATEST_VERSION, creating compatibility symlink for 2.13.3..."
                 ln -sf "$ACTUAL_PATH" "$EXPECTED_FREETYPE_PATH" 2>/dev/null || {
@@ -555,7 +555,7 @@ setup_freetype_2_13_3_for_mac() {
                 return 1
             fi
         fi
-        
+
         # Final verification
         if [ -f "$EXPECTED_INCLUDE_PATH/ft2build.h" ]; then
             echo "✅ FreeType 2.13.3 setup completed successfully"
@@ -570,6 +570,189 @@ setup_freetype_2_13_3_for_mac() {
     fi
 }
 
+# Function to build nghttp2 for Mac
+build_nghttp2_for_mac() {
+    echo "Building nghttp2 for Mac..."
+
+    # Check if already built
+    if [ -f "mac-deps/nghttp2/lib/libnghttp2.a" ]; then
+        echo "nghttp2 already built"
+        return 0
+    fi
+
+    # Create mac-deps directory if it doesn't exist
+    mkdir -p mac-deps
+
+    # Download nghttp2 if not exists
+    if [ ! -d "mac-deps/nghttp2" ]; then
+        echo "Downloading nghttp2..."
+        cd mac-deps
+        git clone https://github.com/nghttp2/nghttp2.git || {
+            echo "Warning: Could not clone nghttp2 repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+
+    cd mac-deps/nghttp2
+
+    # Prefer CMake if available, fallback to autotools if configure exists
+    if [ -f "CMakeLists.txt" ]; then
+        echo "Configuring nghttp2 with CMake..."
+        mkdir -p build-mac
+        cd build-mac
+        if cmake -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_STATIC_LIBS=ON \
+            -DENABLE_LIB_ONLY=ON \
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_INSTALL_PREFIX="$(pwd)/../" ..; then
+            echo "Building nghttp2 (CMake)..."
+            if make -j$(sysctl -n hw.ncpu); then
+                echo "Installing nghttp2 (CMake)..."
+                if make install; then
+                    echo "✅ nghttp2 built successfully (CMake)"
+                    cd - > /dev/null
+                    cd - > /dev/null
+                    return 0
+                fi
+            fi
+        fi
+        cd - > /dev/null
+    elif [ -f "configure" ]; then
+        echo "Configuring nghttp2 (autotools)..."
+        if ./configure --prefix="$SCRIPT_DIR/mac-deps/nghttp2" \
+            --enable-static --disable-shared \
+            --disable-app --disable-hpack-tools \
+            --disable-examples --disable-python-bindings \
+            --disable-failmalloc --without-libxml2 \
+            --without-jansson --without-zlib \
+            --without-libevent-openssl --without-libcares \
+            --without-openssl --without-libev \
+            --without-cunit --without-jemalloc; then
+            echo "Building nghttp2 (autotools)..."
+            if make -j$(sysctl -n hw.ncpu); then
+                echo "Installing nghttp2 (autotools)..."
+                if make install; then
+                    echo "✅ nghttp2 built successfully (autotools)"
+                    cd - > /dev/null
+                    return 0
+                fi
+            fi
+        fi
+        cd - > /dev/null
+    elif [ -f "configure.ac" ]; then
+        echo "Generating configure script for nghttp2..."
+        if command -v autoreconf >/dev/null 2>&1; then
+            autoreconf -i
+            if [ -f "configure" ]; then
+                echo "Configuring nghttp2 (autotools with autoreconf)..."
+                if ./configure --prefix="$SCRIPT_DIR/mac-deps/nghttp2" \
+                    --enable-static --disable-shared \
+                    --disable-app --disable-hpack-tools \
+                    --disable-examples --disable-python-bindings \
+                    --disable-failmalloc --without-libxml2 \
+                    --without-jansson --without-zlib \
+                    --without-libevent-openssl --without-libcares \
+                    --without-openssl --without-libev \
+                    --without-cunit --without-jemalloc; then
+                    echo "Building nghttp2 (autotools)..."
+                    if make -j$(sysctl -n hw.ncpu); then
+                        echo "Installing nghttp2 (autotools)..."
+                        if make install; then
+                            echo "✅ nghttp2 built successfully (autotools)"
+                            cd - > /dev/null
+                            return 0
+                        fi
+                    fi
+                fi
+            fi
+        else
+            echo "❌ autoreconf not found - cannot generate configure script"
+        fi
+        cd - > /dev/null
+    else
+        echo "❌ No supported build system found for nghttp2 (no CMakeLists.txt or configure)"
+        cd - > /dev/null
+        return 1
+    fi
+
+    echo "❌ nghttp2 build failed"
+    cd - > /dev/null
+    return 1
+}
+
+# Function to build libcurl with HTTP/2 support for Mac
+build_curl_with_http2_for_mac() {
+    echo "Building libcurl with HTTP/2 support for Mac..."
+
+    # Check if already built
+    if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
+        echo "libcurl with HTTP/2 already built"
+        return 0
+    fi
+
+    # Create mac-deps directory if it doesn't exist
+    mkdir -p mac-deps
+
+    # Download curl if not exists
+    if [ ! -d "mac-deps/curl-8.10.1" ]; then
+        echo "Downloading curl 8.10.1..."
+        cd mac-deps
+        curl -L "https://curl.se/download/curl-8.10.1.tar.gz" -o curl-8.10.1.tar.gz
+        tar -xzf curl-8.10.1.tar.gz
+        rm curl-8.10.1.tar.gz
+        cd - > /dev/null
+    fi
+
+    cd mac-deps/curl-8.10.1
+
+    # Get OpenSSL path from Homebrew
+    if command -v brew >/dev/null 2>&1; then
+        OPENSSL_PATH=$(brew --prefix openssl@3)
+    else
+        echo "❌ Homebrew required for OpenSSL path"
+        cd - > /dev/null
+        return 1
+    fi
+
+    # Configure libcurl with HTTP/2 support
+    echo "Configuring libcurl with HTTP/2 support..."
+    if ./configure --prefix="$SCRIPT_DIR/mac-deps/curl-8.10.1" \
+        --enable-static --disable-shared \
+        --with-openssl="$OPENSSL_PATH" \
+        --with-nghttp2="$SCRIPT_DIR/mac-deps/nghttp2" \
+        --disable-ldap --disable-ldaps --disable-rtsp --disable-proxy \
+        --disable-dict --disable-telnet --disable-tftp --disable-pop3 \
+        --disable-imap --disable-smb --disable-smtp --disable-gopher \
+        --disable-mqtt --disable-manual --disable-libcurl-option \
+        --disable-sspi --disable-ntlm --disable-tls-srp \
+        --disable-unix-sockets --disable-cookies --disable-socketpair \
+        --disable-http-auth --disable-doh --disable-mime \
+        --disable-dateparse --disable-netrc --disable-progress-meter \
+        --disable-alt-svc --disable-headers-api --disable-hsts \
+        --without-brotli --without-zstd --without-librtmp \
+        --without-libssh2 --without-libpsl --without-ngtcp2 \
+        --without-nghttp3 --without-libidn2 --without-libgsasl \
+        --without-quiche; then
+
+        echo "Building libcurl..."
+        if make -j$(sysctl -n hw.ncpu); then
+            echo "Installing libcurl..."
+            if make install; then
+                echo "✅ libcurl with HTTP/2 built successfully"
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+
+    echo "❌ libcurl build failed"
+    cd - > /dev/null
+    return 1
+}
+
 echo "Found native compiler: $(which gcc)"
 
 # Build tree-sitter library for Mac
@@ -577,13 +760,13 @@ echo "Found native compiler: $(which gcc)"
 if [ ! -f "lambda/tree-sitter/libtree-sitter.a" ]; then
     echo "Building tree-sitter library for Mac..."
     cd lambda/tree-sitter
-    
+
     # Clean previous builds
     make clean || true
-    
+
     # Build static library for Mac
     make libtree-sitter.a
-    
+
     cd - > /dev/null
     echo "Tree-sitter library built successfully"
 else
@@ -594,13 +777,13 @@ fi
 if [ ! -f "lambda/tree-sitter-lambda/libtree-sitter-lambda.a" ]; then
     echo "Building tree-sitter-lambda for Mac..."
     cd lambda/tree-sitter-lambda
-    
+
     # Clean previous builds
     make clean || true
-    
+
     # Build static library for Mac (creates libtree-sitter-lambda.a)
     make libtree-sitter-lambda.a
-    
+
     cd - > /dev/null
     echo "Tree-sitter-lambda built successfully"
 else
@@ -704,7 +887,7 @@ echo "Installing Homebrew dependencies..."
 # Required dependencies from build_lambda_config.json
 HOMEBREW_DEPS=(
     "mpdecimal"  # For decimal arithmetic - referenced in build config
-    "utf8proc"   # For Unicode processing - referenced in build config  
+    "utf8proc"   # For Unicode processing - referenced in build config
     "coreutils"  # For timeout command needed by test suite
     "openssl@3"  # For SSL/TLS support - required for libcurl
     "ginac"      # For mathematical expression equivalence testing
@@ -745,7 +928,7 @@ if command -v brew >/dev/null 2>&1; then
             fi
         fi
     done
-    
+
     # Install Radiant project dependencies
     echo "Installing Radiant project dependencies..."
     for dep in "${RADIANT_DEPS[@]}"; do
@@ -761,7 +944,7 @@ if command -v brew >/dev/null 2>&1; then
             fi
         fi
     done
-    
+
     # Try to install optional dependencies, but don't fail if they're not available
     echo "Installing optional Radiant dependencies (will continue if not available)..."
     for dep in "${RADIANT_OPTIONAL_DEPS[@]}"; do
@@ -785,7 +968,7 @@ if command -v brew >/dev/null 2>&1; then
     BREW_PREFIX=$(brew --prefix)
     TIMEOUT_PATH="$BREW_PREFIX/bin/timeout"
     GNU_TIMEOUT_PATH="$BREW_PREFIX/opt/coreutils/libexec/gnubin/timeout"
-    
+
     if [ ! -f "$TIMEOUT_PATH" ] && [ -f "$GNU_TIMEOUT_PATH" ]; then
         echo "Creating timeout symlink..."
         ln -sf "$GNU_TIMEOUT_PATH" "$TIMEOUT_PATH"
@@ -798,189 +981,6 @@ if command -v brew >/dev/null 2>&1; then
 else
     echo "⚠️  Warning: Cannot set up timeout command without Homebrew"
 fi
-
-# Function to build nghttp2 for Mac
-build_nghttp2_for_mac() {
-    echo "Building nghttp2 for Mac..."
-    
-    # Check if already built
-    if [ -f "mac-deps/nghttp2/lib/libnghttp2.a" ]; then
-        echo "nghttp2 already built"
-        return 0
-    fi
-    
-    # Create mac-deps directory if it doesn't exist
-    mkdir -p mac-deps
-    
-    # Download nghttp2 if not exists
-    if [ ! -d "mac-deps/nghttp2" ]; then
-        echo "Downloading nghttp2..."
-        cd mac-deps
-        git clone https://github.com/nghttp2/nghttp2.git || {
-            echo "Warning: Could not clone nghttp2 repository"
-            cd - > /dev/null
-            return 1
-        }
-        cd - > /dev/null
-    fi
-    
-    cd mac-deps/nghttp2
-
-    # Prefer CMake if available, fallback to autotools if configure exists
-    if [ -f "CMakeLists.txt" ]; then
-        echo "Configuring nghttp2 with CMake..."
-        mkdir -p build-mac
-        cd build-mac
-        if cmake -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_SHARED_LIBS=OFF \
-            -DBUILD_STATIC_LIBS=ON \
-            -DENABLE_LIB_ONLY=ON \
-            -DBUILD_TESTING=OFF \
-            -DCMAKE_INSTALL_PREFIX="$(pwd)/../" ..; then
-            echo "Building nghttp2 (CMake)..."
-            if make -j$(sysctl -n hw.ncpu); then
-                echo "Installing nghttp2 (CMake)..."
-                if make install; then
-                    echo "✅ nghttp2 built successfully (CMake)"
-                    cd - > /dev/null
-                    cd - > /dev/null
-                    return 0
-                fi
-            fi
-        fi
-        cd - > /dev/null
-    elif [ -f "configure" ]; then
-        echo "Configuring nghttp2 (autotools)..."
-        if ./configure --prefix="$SCRIPT_DIR/mac-deps/nghttp2" \
-            --enable-static --disable-shared \
-            --disable-app --disable-hpack-tools \
-            --disable-examples --disable-python-bindings \
-            --disable-failmalloc --without-libxml2 \
-            --without-jansson --without-zlib \
-            --without-libevent-openssl --without-libcares \
-            --without-openssl --without-libev \
-            --without-cunit --without-jemalloc; then
-            echo "Building nghttp2 (autotools)..."
-            if make -j$(sysctl -n hw.ncpu); then
-                echo "Installing nghttp2 (autotools)..."
-                if make install; then
-                    echo "✅ nghttp2 built successfully (autotools)"
-                    cd - > /dev/null
-                    return 0
-                fi
-            fi
-        fi
-        cd - > /dev/null
-    elif [ -f "configure.ac" ]; then
-        echo "Generating configure script for nghttp2..."
-        if command -v autoreconf >/dev/null 2>&1; then
-            autoreconf -i
-            if [ -f "configure" ]; then
-                echo "Configuring nghttp2 (autotools with autoreconf)..."
-                if ./configure --prefix="$SCRIPT_DIR/mac-deps/nghttp2" \
-                    --enable-static --disable-shared \
-                    --disable-app --disable-hpack-tools \
-                    --disable-examples --disable-python-bindings \
-                    --disable-failmalloc --without-libxml2 \
-                    --without-jansson --without-zlib \
-                    --without-libevent-openssl --without-libcares \
-                    --without-openssl --without-libev \
-                    --without-cunit --without-jemalloc; then
-                    echo "Building nghttp2 (autotools)..."
-                    if make -j$(sysctl -n hw.ncpu); then
-                        echo "Installing nghttp2 (autotools)..."
-                        if make install; then
-                            echo "✅ nghttp2 built successfully (autotools)"
-                            cd - > /dev/null
-                            return 0
-                        fi
-                    fi
-                fi
-            fi
-        else
-            echo "❌ autoreconf not found - cannot generate configure script"
-        fi
-        cd - > /dev/null
-    else
-        echo "❌ No supported build system found for nghttp2 (no CMakeLists.txt or configure)"
-        cd - > /dev/null
-        return 1
-    fi
-
-    echo "❌ nghttp2 build failed"
-    cd - > /dev/null
-    return 1
-}
-
-# Function to build libcurl with HTTP/2 support for Mac
-build_curl_with_http2_for_mac() {
-    echo "Building libcurl with HTTP/2 support for Mac..."
-    
-    # Check if already built
-    if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
-        echo "libcurl with HTTP/2 already built"
-        return 0
-    fi
-    
-    # Create mac-deps directory if it doesn't exist
-    mkdir -p mac-deps
-    
-    # Download curl if not exists
-    if [ ! -d "mac-deps/curl-8.10.1" ]; then
-        echo "Downloading curl 8.10.1..."
-        cd mac-deps
-        curl -L "https://curl.se/download/curl-8.10.1.tar.gz" -o curl-8.10.1.tar.gz
-        tar -xzf curl-8.10.1.tar.gz
-        rm curl-8.10.1.tar.gz
-        cd - > /dev/null
-    fi
-    
-    cd mac-deps/curl-8.10.1
-    
-    # Get OpenSSL path from Homebrew
-    if command -v brew >/dev/null 2>&1; then
-        OPENSSL_PATH=$(brew --prefix openssl@3)
-    else
-        echo "❌ Homebrew required for OpenSSL path"
-        cd - > /dev/null
-        return 1
-    fi
-    
-    # Configure libcurl with HTTP/2 support
-    echo "Configuring libcurl with HTTP/2 support..."
-    if ./configure --prefix="$SCRIPT_DIR/mac-deps/curl-8.10.1" \
-        --enable-static --disable-shared \
-        --with-openssl="$OPENSSL_PATH" \
-        --with-nghttp2="$SCRIPT_DIR/mac-deps/nghttp2" \
-        --disable-ldap --disable-ldaps --disable-rtsp --disable-proxy \
-        --disable-dict --disable-telnet --disable-tftp --disable-pop3 \
-        --disable-imap --disable-smb --disable-smtp --disable-gopher \
-        --disable-mqtt --disable-manual --disable-libcurl-option \
-        --disable-sspi --disable-ntlm --disable-tls-srp \
-        --disable-unix-sockets --disable-cookies --disable-socketpair \
-        --disable-http-auth --disable-doh --disable-mime \
-        --disable-dateparse --disable-netrc --disable-progress-meter \
-        --disable-alt-svc --disable-headers-api --disable-hsts \
-        --without-brotli --without-zstd --without-librtmp \
-        --without-libssh2 --without-libpsl --without-ngtcp2 \
-        --without-nghttp3 --without-libidn2 --without-libgsasl \
-        --without-quiche; then
-        
-        echo "Building libcurl..."
-        if make -j$(sysctl -n hw.ncpu); then
-            echo "Installing libcurl..."
-            if make install; then
-                echo "✅ libcurl with HTTP/2 built successfully"
-                cd - > /dev/null
-                return 0
-            fi
-        fi
-    fi
-    
-    echo "❌ libcurl build failed"
-    cd - > /dev/null
-    return 1
-}
 
 # Clean up intermediate files
 cleanup_intermediate_files
@@ -996,7 +996,6 @@ if command -v brew >/dev/null 2>&1; then
     BREW_PREFIX=$(brew --prefix)
     echo "- mpdecimal: $([ -f "$BREW_PREFIX/lib/libmpdec.a" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- utf8proc: $([ -f "$BREW_PREFIX/lib/libutf8proc.a" ] && echo "✓ Available" || echo "✗ Missing")"
-    echo "- libedit: $([ -f "$BREW_PREFIX/lib/libedit.a" ] || [ -f "$BREW_PREFIX/lib/libedit.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- criterion: $([ -d "$BREW_PREFIX/Cellar/criterion" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- coreutils: $([ -f "$BREW_PREFIX/bin/gtimeout" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- timeout: $([ -f "$BREW_PREFIX/bin/timeout" ] && command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
