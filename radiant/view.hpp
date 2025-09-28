@@ -314,6 +314,13 @@ typedef struct ViewTable : ViewBlock {
         TABLE_LAYOUT_FIXED = 1    // Fixed width calculation based on first row/col elements
     } table_layout;
     
+    // Border model and spacing (Phase 4)
+    // border_collapse=false => separate borders, apply border-spacing gaps
+    // border_collapse=true  => collapsed borders, no gaps between cells
+    bool border_collapse;
+    int border_spacing_h; // horizontal spacing between columns (px)
+    int border_spacing_v; // vertical spacing between rows (px)
+    
     // Table-specific state will be held externally (e.g., TableModel) and referenced by ViewTable later.
 } ViewTable;
 
