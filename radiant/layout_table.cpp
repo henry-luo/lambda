@@ -25,68 +25,42 @@ static void parse_cell_spans(DomNode* cellNode, ViewTableCell* cell) {
     
     if (!cellNode) return;
     
-    // For now, implement a simple test case for demonstration
-    // TODO: Implement proper DOM attribute parsing when lexbor API is stable
+    // Phase 2: Implement proper DOM attribute parsing for colspan/rowspan
+    if (!cellNode->is_element()) return;
     
-    // Simple test: if this is a test file, apply some hardcoded spans
-    // This is just for demonstration of the colspan/rowspan infrastructure
-    static int cell_counter = 0;
-    cell_counter++;
+    // Get the underlying lexbor element
+    lxb_html_element_t* element = cellNode->lxb_elmt;
+    if (!element) return;
     
-    // Hardcoded test pattern for demonstration
-    if (cell_counter == 1) {
-        // First cell gets colspan=2 (simulating merged header)
-        cell->col_span = 2;
-        printf("DEBUG: Applied test colspan=2 to cell %d\n", cell_counter);
-    } else if (cell_counter == 7) {
-        // Seventh cell gets colspan=3 (simulating full width)
-        cell->col_span = 3;
-        printf("DEBUG: Applied test colspan=3 to cell %d\n", cell_counter);
-    } else if (cell_counter == 9) {
-        // Ninth cell gets rowspan=2 (simulating tall cell)
-        cell->row_span = 2;
-        printf("DEBUG: Applied test rowspan=2 to cell %d\n", cell_counter);
-    }
-    
-    // Add some vertical alignment test cases
-    if (cell_counter == 2) {
-        cell->vertical_align = ViewTableCell::CELL_VALIGN_MIDDLE;
-        printf("DEBUG: Applied middle alignment to cell %d\n", cell_counter);
-    } else if (cell_counter == 3) {
-        cell->vertical_align = ViewTableCell::CELL_VALIGN_BOTTOM;
-        printf("DEBUG: Applied bottom alignment to cell %d\n", cell_counter);
-    } else if (cell_counter == 5) {
-        cell->vertical_align = ViewTableCell::CELL_VALIGN_BASELINE;
-        printf("DEBUG: Applied baseline alignment to cell %d\n", cell_counter);
-    }
-    
-    /*
     // Parse colspan attribute
-    lxb_dom_attr_t* colspan_attr = lxb_dom_element_attr_by_name(lxb_dom_interface_element(cellNode), 
+    lxb_dom_attr_t* colspan_attr = lxb_dom_element_attr_by_name(lxb_dom_interface_element(element), 
                                                                (const lxb_char_t*)"colspan", 7);
     if (colspan_attr && colspan_attr->value) {
-        const char* colspan_str = (const char*)lxb_dom_attr_value(colspan_attr, nullptr);
-        if (colspan_str) {
+        size_t attr_len;
+        const char* colspan_str = (const char*)lxb_dom_attr_value(colspan_attr, &attr_len);
+        if (colspan_str && attr_len > 0) {
             int span = atoi(colspan_str);
             if (span > 0 && span <= 1000) { // reasonable limit
                 cell->col_span = span;
+                printf("DEBUG: Parsed colspan=%d from DOM\n", span);
             }
         }
     }
     
     // Parse rowspan attribute
-    lxb_dom_attr_t* rowspan_attr = lxb_dom_element_attr_by_name(lxb_dom_interface_element(cellNode), 
+    lxb_dom_attr_t* rowspan_attr = lxb_dom_element_attr_by_name(lxb_dom_interface_element(element), 
                                                                (const lxb_char_t*)"rowspan", 7);
     if (rowspan_attr && rowspan_attr->value) {
-        const char* rowspan_str = (const char*)lxb_dom_attr_value(rowspan_attr, nullptr);
-        if (rowspan_str) {
+        size_t attr_len;
+        const char* rowspan_str = (const char*)lxb_dom_attr_value(rowspan_attr, &attr_len);
+        if (rowspan_str && attr_len > 0) {
             int span = atoi(rowspan_str);
             if (span > 0 && span <= 65534) { // reasonable limit
                 cell->row_span = span;
+                printf("DEBUG: Parsed rowspan=%d from DOM\n", span);
             }
         }
     }
-    */
     
     if (cell->col_span > 1 || cell->row_span > 1) {
         printf("DEBUG: Cell with colspan=%d, rowspan=%d\n", cell->col_span, cell->row_span);
@@ -146,8 +120,31 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* elmt) {
         return nullptr; 
     }
     printf("DEBUG: Created ViewTable at %p\n", table);
-    // Resolve table styles onto the view
+    
+    // Initialize table layout mode (default to auto)
+    table->table_layout = ViewTable::TABLE_LAYOUT_AUTO;
+    
+    // Resolve table styles onto the view first
     dom_node_resolve_style(elmt, lycon);
+    
+    // Parse CSS table-layout property from DOM node (after style resolution)
+    if (elmt && elmt->is_element()) {
+        // Simple detection: check for "table-layout: fixed" in style attribute
+        lxb_html_element_t* element = elmt->lxb_elmt;
+        if (element) {
+            lxb_dom_attr_t* style_attr = lxb_dom_element_attr_by_name(lxb_dom_interface_element(element), 
+                                                                     (const lxb_char_t*)"style", 5);
+            if (style_attr && style_attr->value) {
+                size_t attr_len;
+                const char* style_str = (const char*)lxb_dom_attr_value(style_attr, &attr_len);
+                if (style_str && strstr(style_str, "table-layout: fixed")) {
+                    table->table_layout = ViewTable::TABLE_LAYOUT_FIXED;
+                    printf("DEBUG: Detected table-layout: fixed from style attribute\n");
+                    printf("DEBUG: Set table->table_layout = %d (FIXED=%d)\n", table->table_layout, ViewTable::TABLE_LAYOUT_FIXED);
+                }
+            }
+        }
+    }
 
     // Enter table as parent
     lycon->parent = (ViewGroup*)table;
@@ -402,6 +399,7 @@ static int measure_cell_content_width(ViewBlock* cell) {
 void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!table) return;
     printf("DEBUG: table_auto_layout starting\n");
+    printf("DEBUG: table->table_layout = %d (AUTO=%d, FIXED=%d)\n", table->table_layout, ViewTable::TABLE_LAYOUT_AUTO, ViewTable::TABLE_LAYOUT_FIXED);
     
     // Get table's computed style properties for border-collapse and spacing
     bool border_collapse = false; // Default to separate borders
@@ -418,6 +416,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
     
     printf("DEBUG: border_collapse=%s\n", border_collapse ? "collapse" : "separate");
+    printf("DEBUG: table_layout=%s\n", table->table_layout == ViewTable::TABLE_LAYOUT_FIXED ? "fixed" : "auto");
     
     // Determine available width from parent context
     int avail_width = lycon->block.width > 0 ? lycon->block.width : 0;
@@ -588,99 +587,33 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         // Note: padding is already included in measure_cell_min_content_width, no need to add more
     }
 
-    // 3) Enhanced column width distribution algorithm
+    // 3) Column width distribution algorithm (auto vs fixed)
     long long sum_pref = 0; 
     for (int i = 0; i < columns; i++) sum_pref += col_pref[i];
     
     printf("DEBUG: columns=%d, sum_pref=%lld, avail_width=%d\n", columns, sum_pref, avail_width);
+    
+    // Allocate column widths array
+    int* col_widths = (int*)calloc(columns, sizeof(int));
+    
+    // Choose algorithm based on table-layout property
+    if (table->table_layout == ViewTable::TABLE_LAYOUT_FIXED) {
+        printf("DEBUG: Using table-layout: fixed algorithm\n");
+        // Fixed layout: use first row or explicit column widths
+        table_fixed_layout_algorithm(lycon, table, columns, col_widths, avail_width);
+    } else {
+        printf("DEBUG: Using table-layout: auto algorithm\n");
+        // Auto layout: content-based width calculation (existing algorithm)
+        table_auto_layout_algorithm(lycon, table, columns, col_pref, col_widths, sum_pref, avail_width);
+    }
+    
     for (int i = 0; i < columns; i++) {
         printf("DEBUG: col[%d] pref_width=%d\n", i, col_pref[i]);
     }
     
-    int* col_widths = (int*)calloc(columns, sizeof(int));
-    
-    // Enhanced auto table layout algorithm matching browser behavior
-    // Key insight: Browser produces [61.58, 61.58, 294.59] = 417.75px total
-    // This shows browsers use a sophisticated min/max content algorithm
-    
-    if (sum_pref > 0) {
-        // Step 1: Calculate minimum and maximum content widths per column
-        // For auto table layout, browsers consider both min-content and max-content
-        
-        // Step 2: Implement CSS Table Layout Algorithm
-        // The browser behavior suggests it's using a constrained optimization:
-        // - Give minimal space to short content columns
-        // - Give proportionally more space to long content columns
-        // - But constrain total width to reasonable bounds
-        
-        // Analyze content types per column to make better decisions
-        int* col_min_widths = (int*)calloc(columns, sizeof(int));
-        int* col_max_widths = (int*)calloc(columns, sizeof(int));
-        
-        // Calculate min/max widths (simplified: use current pref as both for now)
-        for (int i = 0; i < columns; i++) {
-            col_min_widths[i] = col_pref[i];
-            col_max_widths[i] = col_pref[i];
-        }
-        
-        // Browser-accurate algorithm: use full available width for tables
-        // Browser reference shows table width = 760px (full container width)
-        // This matches CSS table behavior where tables expand to fill available space
-        
-        int target_table_width = avail_width; // Use full available width
-        
-        // Ensure the table uses the full available width unless content requires less
-        // Browser behavior: tables expand to container width by default
-        if (sum_pref < target_table_width) {
-            // Content fits within available width - use available width
-            target_table_width = avail_width;
-        } else {
-            // Content exceeds available width - use content width
-            target_table_width = (int)sum_pref;
-        }
-        
-        printf("DEBUG: target_table_width=%d (constrained from %lld)\n", target_table_width, sum_pref);
-        
-        // Distribute width using CSS table layout algorithm
-        // When table width > content width, distribute extra space proportionally
-        int total_distributed = 0;
-        
-        if (target_table_width > sum_pref) {
-            // Table is wider than content - distribute extra space proportionally
-            for (int i = 0; i < columns; i++) {
-                double proportion = (double)col_pref[i] / (double)sum_pref;
-                col_widths[i] = (int)(target_table_width * proportion);
-                total_distributed += col_widths[i];
-            }
-        } else {
-            // Table width matches content - use preferred widths
-            for (int i = 0; i < columns; i++) {
-                col_widths[i] = col_pref[i];
-                total_distributed += col_widths[i];
-            }
-        }
-        
-        // Adjust for rounding errors
-        if (total_distributed != target_table_width && columns > 0) {
-            col_widths[columns - 1] += (target_table_width - total_distributed);
-        }
-        
-        free(col_min_widths);
-        free(col_max_widths);
-    } else {
-        // Fallback: equal column widths using minimal space
-        int min_col_width = 50; // reasonable minimum
-        for (int i = 0; i < columns; i++) col_widths[i] = min_col_width;
-    }
-
     // Calculate final table dimensions
     int final_table_width = 0; 
     for (int i = 0; i < columns; i++) final_table_width += col_widths[i];
-    
-    printf("DEBUG: final_table_width=%d\n", final_table_width);
-    for (int i = 0; i < columns; i++) {
-        printf("DEBUG: col[%d] final_width=%d\n", i, col_widths[i]);
-    }
     
     int current_y = 0;
     int table_content_height = 0;
@@ -927,4 +860,160 @@ void layout_table_box(LayoutContext* lycon, DomNode* elmt, DisplayValue display)
     table_auto_layout(lycon, table);
     
     printf("DEBUG: table layout completed successfully\n");
+}
+
+// Phase 3: Table-layout: fixed algorithm implementation
+void table_fixed_layout_algorithm(LayoutContext* lycon, ViewTable* table, int columns, int* col_widths, int avail_width) {
+    printf("DEBUG: table_fixed_layout_algorithm starting with %d columns, avail_width=%d\n", columns, avail_width);
+    
+    // Fixed layout algorithm:
+    // 1. Use explicit column widths from <col> elements or first row cells
+    // 2. If no explicit widths, distribute available width equally
+    // 3. Table width is determined by available width, not content
+    
+    // Step 1: Collect explicit column widths from first row
+    int* explicit_widths = (int*)calloc(columns, sizeof(int));
+    bool* has_explicit_width = (bool*)calloc(columns, sizeof(bool));
+    int total_explicit_width = 0;
+    int columns_with_explicit_width = 0;
+    
+    // Find first row to get explicit widths
+    ViewBlock* first_row = nullptr;
+    for (ViewBlock* child = table->first_child; child; child = child->next_sibling) {
+        if (child->type == RDT_VIEW_TABLE_ROW_GROUP) {
+            // Look inside row group for first row
+            for (ViewBlock* row = child->first_child; row; row = row->next_sibling) {
+                if (row->type == RDT_VIEW_TABLE_ROW) {
+                    first_row = row;
+                    break;
+                }
+            }
+            if (first_row) break;
+        } else if (child->type == RDT_VIEW_TABLE_ROW) {
+            first_row = child;
+            break;
+        }
+    }
+    
+    // Extract explicit widths from first row cells
+    if (first_row) {
+        int col_index = 0;
+        for (ViewBlock* cell = first_row->first_child; cell && col_index < columns; cell = cell->next_sibling) {
+            if (cell->type != RDT_VIEW_TABLE_CELL) continue;
+            
+            ViewTableCell* tcell = (ViewTableCell*)cell;
+            
+            // TODO: Parse explicit width from CSS (width property)
+            // For now, we'll use a simple heuristic or default behavior
+            // In a full implementation, we'd check cell->bound->width or similar
+            
+            // Placeholder: check if cell has explicit width
+            // This would normally come from CSS parsing
+            bool has_width = false; // cell->bound && cell->bound->width > 0;
+            
+            if (has_width) {
+                // explicit_widths[col_index] = cell->bound->width;
+                // has_explicit_width[col_index] = true;
+                // total_explicit_width += explicit_widths[col_index];
+                // columns_with_explicit_width++;
+            }
+            
+            col_index += tcell->col_span; // Skip spanned columns
+        }
+    }
+    
+    // Step 2: Calculate column widths
+    int remaining_width = avail_width - total_explicit_width;
+    int remaining_columns = columns - columns_with_explicit_width;
+    
+    if (remaining_columns > 0 && remaining_width > 0) {
+        // Distribute remaining width equally among columns without explicit width
+        int equal_width = remaining_width / remaining_columns;
+        int extra_pixels = remaining_width % remaining_columns;
+        
+        for (int i = 0; i < columns; i++) {
+            if (has_explicit_width[i]) {
+                col_widths[i] = explicit_widths[i];
+            } else {
+                col_widths[i] = equal_width;
+                if (extra_pixels > 0) {
+                    col_widths[i]++;
+                    extra_pixels--;
+                }
+            }
+        }
+    } else if (remaining_columns == 0) {
+        // All columns have explicit widths
+        for (int i = 0; i < columns; i++) {
+            col_widths[i] = explicit_widths[i];
+        }
+    } else {
+        // No explicit widths - distribute available width equally
+        int equal_width = avail_width / columns;
+        int extra_pixels = avail_width % columns;
+        
+        for (int i = 0; i < columns; i++) {
+            col_widths[i] = equal_width;
+            if (extra_pixels > 0) {
+                col_widths[i]++;
+                extra_pixels--;
+            }
+        }
+    }
+    
+    // Step 3: Calculate final table width (use available width for fixed layout)
+    int final_table_width = avail_width;
+    
+    printf("DEBUG: Fixed layout - final_table_width=%d\n", final_table_width);
+    for (int i = 0; i < columns; i++) {
+        printf("DEBUG: col[%d] final_width=%d\n", i, col_widths[i]);
+    }
+    
+    // Clean up
+    free(explicit_widths);
+    free(has_explicit_width);
+}
+
+// Phase 3: Extract auto layout algorithm into separate function
+void table_auto_layout_algorithm(LayoutContext* lycon, ViewTable* table, int columns, int* col_pref, int* col_widths, long long sum_pref, int avail_width) {
+    printf("DEBUG: table_auto_layout_algorithm starting\n");
+    
+    // This is the existing auto layout algorithm
+    // Browser-accurate algorithm: use content-based width for tables
+    // Browser reference shows table width = 417.75px (content-based, not full container)
+    // CSS tables use "shrink-to-fit" width by default, not full container width
+    
+    int target_table_width = (int)sum_pref; // Use content-based width
+    
+    // Tables should use content width unless explicitly sized
+    // This matches browser behavior where tables shrink to fit content
+    if (sum_pref > avail_width) {
+        // Content exceeds available width - constrain to available width
+        target_table_width = avail_width;
+    } else {
+        // Content fits - use content width (shrink-to-fit behavior)
+        target_table_width = (int)sum_pref;
+    }
+    
+    printf("DEBUG: target_table_width=%d (constrained from %lld)\n", target_table_width, sum_pref);
+    
+    // Distribute width using CSS table layout algorithm
+    // When table width > content width, distribute extra space proportionally
+    if (target_table_width > sum_pref) {
+        // Table is wider than content - distribute extra space proportionally
+        for (int i = 0; i < columns; i++) {
+            double proportion = (double)col_pref[i] / (double)sum_pref;
+            col_widths[i] = (int)(target_table_width * proportion);
+        }
+    } else {
+        // Table matches content width - use preferred widths directly
+        for (int i = 0; i < columns; i++) {
+            col_widths[i] = col_pref[i];
+        }
+    }
+    
+    printf("DEBUG: final_table_width=%d\n", target_table_width);
+    for (int i = 0; i < columns; i++) {
+        printf("DEBUG: col[%d] final_width=%d\n", i, col_widths[i]);
+    }
 }

@@ -308,6 +308,12 @@ typedef struct ViewBlock : ViewSpan {
 // Table-specific lightweight subclasses (no additional fields yet)
 // These keep table concerns out of the base ViewBlock while preserving layout/render compatibility.
 typedef struct ViewTable : ViewBlock {
+    // Table layout algorithm mode
+    enum {
+        TABLE_LAYOUT_AUTO = 0,    // Content-based width calculation (default)
+        TABLE_LAYOUT_FIXED = 1    // Fixed width calculation based on first row/col elements
+    } table_layout;
+    
     // Table-specific state will be held externally (e.g., TableModel) and referenced by ViewTable later.
 } ViewTable;
 
