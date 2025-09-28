@@ -323,8 +323,7 @@ clean-tree-sitter-minimal:
 	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
 	    generate-premake clean-premake build-test build-test-linux \
-	    ***REMOVED***
-	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant test-radiant
+	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant test-radiants
 
 # Help target - shows available commands
 help:
@@ -391,9 +390,6 @@ help:
 	@echo "  test-integration - Run end-to-end integration tests"
 	@echo "  test-all      - Run complete test suite (all test types)"
 	@echo "  test-radiant  - Run all Radiant layout engine tests (95+ tests: flexbox, layout, rendering)"
-	
-	
-	
 	@echo "                  Available suites: basic, intermediate, medium, advanced, baseline"
 	@echo "  test-windows  - Run CI tests for Windows executable"
 	@echo "  test-linux    - Run CI tests for Linux executable"
@@ -832,27 +828,6 @@ test-radiant: build-radiant
 		echo "Warning: Advanced flex new features tests not found. Skipping test_flex_new_features.exe"; \
 	fi
 	@echo "✅ All Radiant tests passed successfully!"
-
-# Test layout engine specifically
-
-	@echo "🎨 Running Radiant Layout Engine Tests"
-	@echo "======================================"
-	@if [ -f "test/layout/tools/test_layout_auto.js" ]; then \
-		if [ -n "$(TEST)" ]; then \
-			echo "🎯 Running single test: $(TEST)"; \
-			cd test/layout/tools && node test_layout_auto.js --radiant-exe $(PWD)/radiant.exe --test $(TEST); \
-		elif [ -n "$(SUITE)" ]; then \
-			echo "📂 Running test suite: $(SUITE)"; \
-			cd test/layout/tools && node test_layout_auto.js --radiant-exe $(PWD)/radiant.exe --category $(SUITE); \
-		else \
-			echo "🎯 Running all layout tests"; \
-			cd test/layout/tools && node test_layout_auto.js --radiant-exe $(PWD)/radiant.exe; \
-		fi; \
-	else \
-		echo "❌ Error: Layout test script not found at test/layout/tools/test_layout_auto.js"; \
-		exit 1; \
-	fi
-
 
 test-coverage:
 	@echo "Running tests with coverage analysis..."
@@ -1426,34 +1401,3 @@ build-test: build-lambda-input
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
 	cd build/premake && premake5 gmake --file=../../premake5.lua && $(MAKE) config=debug_native -j$(JOBS)
-
-# Capture browser layout references using Puppeteer
-# Usage:
-#   make capture-browser-layout                # captures all categories (basic, intermediate, advanced) if present
-#   make capture-browser-layout CATEGORY=basic # captures only basic category
-#   make capture-browser-layout FILE=path/to/test.html  # captures a single file
-capture-browser-layout:
-	@echo "🧭 Capturing browser layout references..."
-	@if [ -d "test/layout/tools" ]; then \
-	    cd test/layout/tools && \
-	    if [ ! -d node_modules ]; then \
-	        echo "📦 Installing test tools dependencies..."; \
-	        npm install; \
-	    fi; \
-	    if [ -n "$(FILE)" ]; then \
-	        echo "📄 Single file: $(FILE)"; \
-	        node extract_browser_references.js $(FILE); \
-	    elif [ -n "$(CATEGORY)" ]; then \
-	        echo "📂 Category: $(CATEGORY)"; \
-	        node extract_browser_references.js --category $(CATEGORY); \
-	    else \
-	        echo "📚 All categories (basic, intermediate, advanced)"; \
-	        node extract_browser_references.js; \
-	    fi; \
-	else \
-	    echo "❌ Error: Tools directory not found at test/layout/tools"; \
-	    exit 1; \
-	fi
-
-# Include KLEE analysis targets
-
