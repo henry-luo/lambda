@@ -20,6 +20,27 @@ ALL_LIBS=(
     "build-essential"        # includes pthread
 )
 
+# Radiant project dependencies - for HTML/CSS/SVG rendering engine
+# Note: freetype is included but may need specific version handling
+# Note: lexbor is built from submodule instead of system package
+# Note: ThorVG is built from source (see build_thorvg_v1_0_pre11_for_linux function)
+RADIANT_DEPS=(
+    "libsdl2-dev"            # Cross-platform multimedia library
+    "libsdl2-image-dev"      # SDL2 image loading support
+    "libglfw3-dev"           # OpenGL window and context management
+    "libfreetype6-dev"       # FreeType font rendering library
+    "libfontconfig1-dev"     # Font configuration library
+    "libexpat1-dev"          # XML parser library (dependency of fontconfig)
+    "libpng-dev"             # PNG image format support
+    "libbz2-dev"             # Alternative compression library
+    "zlib1g-dev"             # Compression library (already included above)
+    "libjpeg-turbo8-dev"     # JPEG image format support (TurboJPEG)
+    "gettext"                # For libintl support
+    "libgl1-mesa-dev"        # OpenGL development libraries
+    "libglu1-mesa-dev"       # OpenGL utility libraries
+    "libegl1-mesa-dev"       # EGL development libraries
+)
+
 # Function to build libharu from source
 build_libharu_for_linux() {
     echo "Building libharu from source..."
@@ -48,32 +69,32 @@ build_libharu_for_linux() {
 # Check for cleanup option
 if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     echo "Cleaning up intermediate files..."
-    
+
     # Clean tree-sitter build files
     if [ -d "lambda/tree-sitter" ]; then
         cd lambda/tree-sitter
         make clean 2>/dev/null || true
         cd - > /dev/null
     fi
-    
+
     # Clean tree-sitter-lambda build files
     if [ -d "lambda/tree-sitter-lambda" ]; then
         cd lambda/tree-sitter-lambda
         make clean 2>/dev/null || true
         cd - > /dev/null
     fi
-    
+
     # Clean build directories
     rm -rf build/ build_debug/ 2>/dev/null || true
-    
+
     # Clean object files
     find . -name "*.o" -type f -delete 2>/dev/null || true
-    
+
     # Clean dependency build files but keep the built libraries
     if [ -d "build_temp" ]; then
         rm -rf build_temp/
     fi
-    
+
     echo "Cleanup completed."
     exit 0
 fi
@@ -84,7 +105,7 @@ echo "Setting up Linux (Ubuntu) native compilation dependencies..."
 verify_installation() {
     local tool="$1"
     local package="$2"
-    
+
     if command -v "$tool" >/dev/null 2>&1; then
         echo "✅ $tool verified and working"
         return 0
@@ -262,16 +283,16 @@ sudo apt update
 # Function to build Google Test for Linux
 build_gtest_for_linux() {
     echo "Building Google Test for Linux..."
-    
+
     # Check if already installed in system location
     if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
         echo "Google Test already installed in system location"
         return 0
     fi
-    
+
     # Create build_temp directory if it doesn't exist
     mkdir -p "build_temp"
-    
+
     # Build from source
     if [ ! -d "build_temp/googletest" ]; then
         cd build_temp
@@ -283,13 +304,13 @@ build_gtest_for_linux() {
         }
         cd - > /dev/null
     fi
-    
+
     cd "build_temp/googletest"
-    
+
     # Create build directory
     mkdir -p build
     cd build
-    
+
     echo "Configuring Google Test with CMake..."
     if cmake -DCMAKE_BUILD_TYPE=Release \
              -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" \
@@ -297,15 +318,15 @@ build_gtest_for_linux() {
              -DBUILD_GTEST=ON \
              -DGTEST_CREATE_SHARED_LIBRARY=OFF \
              ..; then
-        
+
         echo "Building Google Test..."
         if make -j$(nproc); then
             echo "Installing Google Test to system location (requires sudo)..."
             sudo make install
-            
+
             # Update library cache
             sudo ldconfig
-            
+
             # Verify the build
             if [ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ]; then
                 echo "✅ Google Test built successfully"
@@ -315,7 +336,7 @@ build_gtest_for_linux() {
             fi
         fi
     fi
-    
+
     echo "❌ Google Test build failed"
     cd - > /dev/null
     cd - > /dev/null
@@ -378,6 +399,18 @@ for lib in "${ALL_LIBS[@]}"; do
     fi
 done
 
+# Install Radiant project dependencies
+echo "Installing Radiant project dependencies..."
+for dep in "${RADIANT_DEPS[@]}"; do
+    # Skip zlib1g-dev as it's already installed above
+    if [ "$dep" = "zlib1g-dev" ]; then
+        echo "zlib1g-dev already handled in core dependencies"
+        continue
+    fi
+
+    install_if_missing "$dep" "$dep"
+done
+
 # Build libharu from source (not available in repos)
 if ! build_libharu_for_linux; then
     echo "Warning: libharu build failed"
@@ -436,19 +469,19 @@ download_extract() {
     local name="$1"
     local url="$2"
     local archive="$3"
-    
+
     if [ ! -d "build_temp/$name" ]; then
         echo "Downloading $name..."
         cd build_temp
         curl -L "$url" -o "$archive"
-        
+
         case "$archive" in
             *.tar.gz) tar -xzf "$archive" ;;
             *.tar.bz2) tar -xjf "$archive" ;;
             *.tar.xz) tar -xJf "$archive" ;;
             *.zip) unzip "$archive" ;;
         esac
-        
+
         rm "$archive"
         cd - > /dev/null
     else
@@ -461,16 +494,16 @@ build_dependency() {
     local name="$1"
     local src_dir="$2"
     local build_cmd="$3"
-    
+
     echo "Building $name for Linux..."
-    
+
     if [ ! -d "build_temp/$src_dir" ]; then
         echo "Warning: Source directory build_temp/$src_dir not found"
         return 1
     fi
-    
+
     cd "build_temp/$src_dir"
-    
+
     # Set up environment for native Linux compilation
     export CC="gcc"
     export CXX="g++"
@@ -480,19 +513,19 @@ build_dependency() {
     export CFLAGS="-O2 -fPIC"
     export CXXFLAGS="-O2 -fPIC"
     export LDFLAGS=""
-    
+
     # Add standard library paths
     export CPPFLAGS="-I/usr/include -I/usr/local/include $CPPFLAGS"
     export LDFLAGS="-L/usr/lib -L/usr/local/lib $LDFLAGS"
     export PKG_CONFIG_PATH="/usr/lib/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
-    
+
     # Run the build command in a subshell to prevent exit from affecting the main script
     (eval "$build_cmd") || {
         echo "Warning: $name build failed"
         cd - > /dev/null
         return 1
     }
-    
+
     cd - > /dev/null
     return 0
 }
@@ -500,31 +533,133 @@ build_dependency() {
 # Function to clean up intermediate files
 cleanup_intermediate_files() {
     echo "Cleaning up intermediate files..."
-    
+
     # Clean object files but keep static libraries
     find . -name "*.o" -type f -delete 2>/dev/null || true
-    
+
     # Clean dependency build files but keep the built libraries
     if [ -d "build_temp" ]; then
         rm -rf build_temp/
     fi
-    
+
     echo "Cleanup completed."
+}
+
+# Function to build ThorVG v1.0-pre11 for Linux
+build_thorvg_v1_0_pre11_for_linux() {
+    echo "Building ThorVG v1.0-pre11 for Linux..."
+
+    # Check if already installed in system location
+    if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.so" ]; then
+        echo "ThorVG v1.0-pre11 already installed in system location"
+        return 0
+    fi
+
+    # Create build_temp directory if it doesn't exist
+    mkdir -p "build_temp"
+
+    if [ ! -d "build_temp/thorvg" ]; then
+        cd build_temp
+        echo "Cloning ThorVG repository..."
+        git clone https://github.com/thorvg/thorvg.git || {
+            echo "Warning: Could not clone ThorVG repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+
+    cd "build_temp/thorvg"
+
+    # Checkout v1.0-pre11 specifically
+    echo "Checking out ThorVG v1.0-pre11..."
+    git fetch --tags
+    git checkout v1.0-pre11 || {
+        echo "❌ Failed to checkout ThorVG v1.0-pre11"
+        cd - > /dev/null
+        return 1
+    }
+
+    # Check for meson build system
+    if [ -f "meson.build" ]; then
+        # Check if meson is available
+        if ! command -v meson >/dev/null 2>&1; then
+            echo "Installing meson via pip3..."
+            if command -v pip3 >/dev/null 2>&1; then
+                pip3 install --user meson ninja || {
+                    echo "Failed to install meson via pip3, trying apt..."
+                    if sudo apt update && sudo apt install -y meson ninja-build; then
+                        echo "✅ meson installed via apt"
+                    else
+                        echo "Failed to install meson via apt"
+                        cd - > /dev/null
+                        return 1
+                    fi
+                }
+                # Add user bin to PATH if not already there
+                export PATH="$HOME/.local/bin:$PATH"
+            else
+                echo "pip3 not found, trying apt..."
+                if sudo apt update && sudo apt install -y python3-pip meson ninja-build; then
+                    echo "✅ meson installed via apt"
+                else
+                    echo "Cannot install meson - no pip3 or apt package manager"
+                    cd - > /dev/null
+                    return 1
+                fi
+            fi
+        fi
+
+        # Create build directory
+        mkdir -p build-linux
+
+        echo "Configuring ThorVG with Meson..."
+        if meson setup build-linux \
+            --buildtype=release \
+            --default-library=both \
+            --prefix="$SYSTEM_PREFIX" \
+            -Dengines=sw,gl \
+            -Dloaders=svg,png,jpg \
+            -Dsavers= \
+            -Dbindings=capi \
+            -Dtools= \
+            -Dtests=false \
+            -Dexamples=false; then
+
+            echo "Building ThorVG v1.0-pre11..."
+            if meson compile -C build-linux; then
+                echo "Installing ThorVG v1.0-pre11 to system location (requires sudo)..."
+                if sudo meson install -C build-linux; then
+                    echo "✅ ThorVG v1.0-pre11 built successfully"
+                    cd - > /dev/null
+                    return 0
+                fi
+            fi
+        fi
+    else
+        echo "❌ ThorVG meson.build not found - unsupported build system"
+        cd - > /dev/null
+        return 1
+    fi
+
+    echo "❌ ThorVG v1.0-pre11 build failed"
+    cd - > /dev/null
+    return 1
 }
 
 # Function to build mpdecimal for Linux
 build_mpdecimal_for_linux() {
     echo "Building mpdecimal for Linux..."
-    
+
     # Check if already installed in system location
     if [ -f "$SYSTEM_PREFIX/include/mpdecimal.h" ]; then
         echo "mpdecimal already installed in system location"
         return 0
     fi
-    
+
     # Create build_temp directory if it doesn't exist
     mkdir -p "build_temp"
-    
+
     # Build from source
     if [ ! -d "build_temp/mpdecimal" ]; then
         cd build_temp
@@ -535,19 +670,19 @@ build_mpdecimal_for_linux() {
         rm "mpdecimal-2.5.1.tar.gz"
         cd - > /dev/null
     fi
-    
+
     cd "build_temp/mpdecimal"
-    
+
     echo "Configuring mpdecimal..."
     if ./configure --prefix="$SYSTEM_PREFIX"; then
         echo "Building mpdecimal..."
         if make -j$(nproc); then
             echo "Installing mpdecimal to system location (requires sudo)..."
             sudo make install
-            
+
             # Update library cache
             sudo ldconfig
-            
+
             # Verify the build
             if [ -f "$SYSTEM_PREFIX/include/mpdecimal.h" ]; then
                 echo "✅ mpdecimal built and installed successfully"
@@ -556,7 +691,7 @@ build_mpdecimal_for_linux() {
             fi
         fi
     fi
-    
+
     echo "❌ mpdecimal build failed"
     cd - > /dev/null
     return 1
@@ -565,13 +700,13 @@ build_mpdecimal_for_linux() {
 # Function to build lexbor for Linux
 build_lexbor_for_linux() {
     echo "Building lexbor for Linux..."
-    
+
     # Check if already installed in system location
     if [ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ]; then
         echo "lexbor already installed in system location"
         return 0
     fi
-    
+
     # Try apt package first (if available)
     echo "Checking for lexbor package..."
     if dpkg -l | grep -q liblexbor-dev; then
@@ -581,7 +716,7 @@ build_lexbor_for_linux() {
         # lexbor is not commonly available in Ubuntu repos, so build from source
         echo "lexbor not available via apt, building from source..."
     fi
-    
+
     # Build from source
     if [ ! -d "build_temp/lexbor" ]; then
         cd build_temp
@@ -593,20 +728,20 @@ build_lexbor_for_linux() {
         }
         cd - > /dev/null
     fi
-    
+
     cd "build_temp/lexbor"
-    
+
     # Check if CMakeLists.txt exists
     if [ ! -f "CMakeLists.txt" ]; then
         echo "Warning: CMakeLists.txt not found in lexbor directory"
         cd - > /dev/null
         return 1
     fi
-    
+
     # Create build directory
     mkdir -p build-linux
     cd build-linux
-    
+
     echo "Configuring lexbor with CMake..."
     if cmake \
         -DCMAKE_BUILD_TYPE=Release \
@@ -616,15 +751,15 @@ build_lexbor_for_linux() {
         -DLEXBOR_BUILD_EXAMPLES=OFF \
         -DCMAKE_INSTALL_PREFIX="$SYSTEM_PREFIX" \
         ..; then
-        
+
         echo "Building lexbor..."
         if make -j$(nproc); then
             echo "Installing lexbor to system location (requires sudo)..."
             sudo make install
-            
+
             # Update library cache
             sudo ldconfig
-            
+
             # Verify the build
             if [ -f "$SYSTEM_PREFIX/lib/liblexbor_static.a" ] || [ -f "$SYSTEM_PREFIX/lib/liblexbor.a" ]; then
                 echo "✅ lexbor built successfully"
@@ -634,7 +769,7 @@ build_lexbor_for_linux() {
             fi
         fi
     fi
-    
+
     echo "❌ lexbor build failed"
     cd - > /dev/null
     cd - > /dev/null
@@ -644,13 +779,13 @@ build_lexbor_for_linux() {
 # Function to build utf8proc for Linux
 build_utf8proc_for_linux() {
     echo "Building utf8proc for Linux..."
-    
+
     # Check if already installed in system location
     if [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ]; then
         echo "utf8proc already installed in system location"
         return 0
     fi
-    
+
     # Build from source
     if [ ! -d "build_temp/utf8proc" ]; then
         cd build_temp
@@ -662,24 +797,24 @@ build_utf8proc_for_linux() {
         }
         cd - > /dev/null
     fi
-    
+
     cd "build_temp/utf8proc"
-    
+
     # Check if Makefile exists
     if [ ! -f "Makefile" ]; then
         echo "Warning: Makefile not found in utf8proc directory"
         cd - > /dev/null
         return 1
     fi
-    
+
     echo "Building utf8proc..."
     if make -j$(nproc); then
         echo "Installing utf8proc to system location (requires sudo)..."
         sudo make install
-        
+
         # Update library cache
         sudo ldconfig
-        
+
         # Verify the build
         if [ -f "$SYSTEM_PREFIX/lib/libutf8proc.a" ] || [ -f "$SYSTEM_PREFIX/lib/libutf8proc.so" ]; then
             echo "✅ utf8proc built successfully"
@@ -687,7 +822,7 @@ build_utf8proc_for_linux() {
             return 0
         fi
     fi
-    
+
     echo "❌ utf8proc build failed"
     cd - > /dev/null
     return 1
@@ -696,16 +831,16 @@ build_utf8proc_for_linux() {
 # Function to build MIR for Linux
 build_mir_for_linux() {
     echo "Building MIR for Linux..."
-    
+
     # Check if already installed in system location
     if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] || [ -f "$SYSTEM_PREFIX/lib/libmir.so" ]; then
         echo "MIR already installed in system location"
         return 0
     fi
-    
+
     # Create build_temp directory if it doesn't exist
     mkdir -p "build_temp"
-    
+
     # Build from source
     if [ ! -d "build_temp/mir" ]; then
         cd build_temp
@@ -717,23 +852,23 @@ build_mir_for_linux() {
         }
         cd - > /dev/null
     fi
-    
+
     cd "build_temp/mir"
-    
+
     # Check if GNUmakefile exists (MIR uses GNUmakefile, not Makefile)
     if [ ! -f "GNUmakefile" ]; then
         echo "Warning: GNUmakefile not found in MIR directory"
         cd - > /dev/null
         return 1
     fi
-    
+
     echo "Building MIR..."
     if make -j$(nproc); then
         echo "Installing MIR to system location (requires sudo)..."
         # Create directories if they don't exist
         sudo mkdir -p "$SYSTEM_PREFIX/lib"
         sudo mkdir -p "$SYSTEM_PREFIX/include"
-        
+
         # Copy library (try different names)
         if [ -f "libmir.a" ]; then
             sudo cp libmir.a "$SYSTEM_PREFIX/lib/"
@@ -743,7 +878,7 @@ build_mir_for_linux() {
             echo "Warning: MIR library not found"
             find . -name "*.a" -name "*mir*" | head -5
         fi
-        
+
         # Copy headers (more comprehensive approach)
         if [ -f "mir.h" ]; then
             sudo cp mir.h "$SYSTEM_PREFIX/include/"
@@ -752,7 +887,7 @@ build_mir_for_linux() {
             echo "Warning: mir.h not found"
             find . -name "mir.h" | head -5
         fi
-        
+
         # Copy c2mir.h specifically (critical for compilation)
         C2MIR_PATH=$(find . -name "c2mir.h" | head -1)
         if [ -n "$C2MIR_PATH" ] && [ -f "$C2MIR_PATH" ]; then
@@ -769,7 +904,7 @@ build_mir_for_linux() {
                 find . -name "c2mir.h" | head -5
             fi
         fi
-        
+
         # Copy all MIR-related headers
         for header in mir-*.h; do
             if [ -f "$header" ]; then
@@ -777,10 +912,10 @@ build_mir_for_linux() {
                 echo "✅ $header copied to $SYSTEM_PREFIX/include/"
             fi
         done
-        
+
         # Update library cache
         sudo ldconfig
-        
+
         # Verify the build
         if [ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && [ -f "$SYSTEM_PREFIX/include/mir.h" ] && [ -f "$SYSTEM_PREFIX/include/c2mir.h" ]; then
             echo "✅ MIR built successfully"
@@ -800,7 +935,7 @@ build_mir_for_linux() {
             return 1
         fi
     fi
-    
+
     echo "❌ MIR build failed"
     cd - > /dev/null
     return 1
@@ -865,6 +1000,17 @@ else
         echo "Warning: lexbor build failed"
     else
         echo "lexbor built successfully"
+    fi
+fi
+
+# Build ThorVG v1.0-pre11 for Linux (required for Radiant project)
+if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.so" ]; then
+    echo "ThorVG already available"
+else
+    if ! build_thorvg_v1_0_pre11_for_linux; then
+        echo "Warning: ThorVG build failed"
+    else
+        echo "ThorVG v1.0-pre11 built successfully"
     fi
 fi
 
@@ -957,21 +1103,21 @@ if command -v premake5 >/dev/null 2>&1; then
     echo "✅ premake5 already available"
 else
     echo "Installing premake5 from source..."
-    
+
     # Install uuid-dev dependency for premake5 build
     echo "Installing uuid-dev dependency for premake5..."
     install_if_missing "uuid-dev" "uuid-dev"
-    
+
     PREMAKE_BUILD_DIR="build_temp/premake5"
     if [ ! -d "$PREMAKE_BUILD_DIR" ]; then
         mkdir -p build_temp
         cd build_temp
-        
+
         # Clone and build premake5 from source (works on all architectures)
         echo "Cloning premake5 source..."
         if git clone --recurse-submodules https://github.com/premake/premake-core.git premake5; then
             cd premake5
-            
+
             # Build premake5 using make
             echo "Building premake5..."
             if make -f Bootstrap.mak linux; then
@@ -987,7 +1133,7 @@ else
         else
             echo "❌ Failed to clone premake5"
         fi
-        
+
         cd "$SCRIPT_DIR"
     else
         echo "✅ premake5 build directory already exists"
@@ -1003,14 +1149,14 @@ else
     echo "Installing Google Test via apt..."
     if sudo apt install -y libgtest-dev libgmock-dev; then
         echo "✅ Google Test installed successfully via apt"
-        
+
         # On Ubuntu, the gtest package only installs source files, we need to build them
         echo "Building Google Test libraries from apt-installed sources..."
         if [ -d "/usr/src/gtest" ]; then
             cd /usr/src/gtest
             sudo cmake CMakeLists.txt
             sudo make
-            
+
             # Copy libraries to standard location
             sudo cp lib/*.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || sudo cp *.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || {
                 echo "Trying alternative build approach..."
@@ -1020,7 +1166,7 @@ else
                 sudo make
                 sudo cp lib/*.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || sudo cp *.a "$SYSTEM_PREFIX/lib/"
             }
-            
+
             # Build gmock too if available
             if [ -d "/usr/src/gmock" ]; then
                 cd /usr/src/gmock
@@ -1035,7 +1181,7 @@ else
                     sudo cp lib/*.a "$SYSTEM_PREFIX/lib/" 2>/dev/null || sudo cp *.a "$SYSTEM_PREFIX/lib/"
                 }
             fi
-            
+
             sudo ldconfig
             cd "$SCRIPT_DIR"
             echo "✅ Google Test libraries built from apt sources"
@@ -1075,6 +1221,17 @@ echo "- utf8proc: $([ -f "/usr/lib/x86_64-linux-gnu/libutf8proc.so" ] || [ -f "$
 echo "- gtest: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] || dpkg -l | grep -q libgtest-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo "- premake5: $(command -v premake5 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+echo ""
+echo "Radiant project dependencies:"
+echo "- SDL2: $(dpkg -l | grep -q libsdl2-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- SDL2-image: $(dpkg -l | grep -q libsdl2-image-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- GLFW: $(dpkg -l | grep -q libglfw3-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- FreeType: $(dpkg -l | grep -q libfreetype6-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- fontconfig: $(dpkg -l | grep -q libfontconfig1-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- libpng: $(dpkg -l | grep -q libpng-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.so" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- OpenGL: $(dpkg -l | grep -q libgl1-mesa-dev && echo "✓ Available" || echo "✗ Missing")"
+echo "- EGL: $(dpkg -l | grep -q libegl1-mesa-dev && echo "✓ Available" || echo "✗ Missing")"
 echo ""
 echo "Next steps:"
 echo "1. Run: make"
