@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Advanced CSS Grid Features Test</title>
+    <style>
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr) 200px;
+            grid-template-rows: minmax(100px, auto) 150px minmax(50px, 200px);
+            grid-auto-flow: row dense;
+            gap: 15px;
+            width: 800px;
+            background-color: #f5f5f5;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .grid-item {
+            background-color: #3498db;
+            color: white;
+            padding: 15px;
+            text-align: center;
+            border-radius: 5px;
+        }
+        
+        .item-large {
+            grid-column: span 2;
+            background-color: #e74c3c;
+        }
+        
+        .item-tall {
+            grid-row: span 2;
+            background-color: #2ecc71;
+        }
+        
+        .item-positioned {
+            grid-column: 4;
+            grid-row: 1;
+            background-color: #f39c12;
+        }
+        
+        .auto-fit-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            width: 600px;
+            background-color: #ecf0f1;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        
+        .auto-fit-item {
+            background-color: #9b59b6;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Advanced CSS Grid Features Test</h1>
+    
+    <h2>1. Repeat, Minmax, and Dense Packing</h2>
+    <div class="grid-container">
+        <div class="grid-item">Item 1</div>
+        <div class="grid-item item-large">Large Item (spans 2 cols)</div>
+        <div class="grid-item item-positioned">Positioned Item</div>
+        <div class="grid-item">Item 4</div>
+        <div class="grid-item item-tall">Tall Item (spans 2 rows)</div>
+        <div class="grid-item">Item 6</div>
+        <div class="grid-item">Item 7</div>
+        <div class="grid-item">Item 8</div>
+        <div class="grid-item">Item 9</div>
+    </div>
+    
+    <h2>2. Auto-Fit with Minmax</h2>
+    <div class="auto-fit-container">
+        <div class="auto-fit-item">Auto 1</div>
+        <div class="auto-fit-item">Auto 2</div>
+        <div class="auto-fit-item">Auto 3</div>
+        <div class="auto-fit-item">Auto 4</div>
+        <div class="auto-fit-item">Auto 5</div>
+    </div>
+    
+    <h3>Features Tested:</h3>
+    <ul>
+        <li><strong>repeat(3, 1fr)</strong> - Repeat function with fractional units</li>
+        <li><strong>minmax(100px, auto)</strong> - Flexible track sizing with constraints</li>
+        <li><strong>grid-auto-flow: row dense</strong> - Dense packing algorithm</li>
+        <li><strong>repeat(auto-fit, minmax(150px, 1fr))</strong> - Responsive grid with auto-fit</li>
+        <li><strong>span 2</strong> - Grid items spanning multiple tracks</li>
+        <li><strong>Explicit positioning</strong> - Items placed at specific grid lines</li>
+    </ul>
+    
+    <h3>Expected Behavior:</h3>
+    <ul>
+        <li>First grid should have 4 columns (3 equal + 1 fixed 200px)</li>
+        <li>Rows should resize based on content with minmax constraints</li>
+        <li>Dense packing should fill gaps left by positioned items</li>
+        <li>Second grid should automatically fit items based on available space</li>
+        <li>Items should maintain minimum 150px width but grow to fill space</li>
+    </ul>
+</body>
+</html>

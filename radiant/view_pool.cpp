@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "grid.hpp"
 #include <time.h>
 
 #include "../lib/log.h"
@@ -178,6 +179,16 @@ void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block) {
         prop->item_count = 0;
         prop->line_count = 0;
         block->embed->flex_container = prop;
+    }
+}
+
+// alloc grid container prop
+void alloc_grid_container_prop(LayoutContext* lycon, ViewBlock* block) {
+    if (!block->embed) { 
+        block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp)); 
+    }
+    if (!block->embed->grid_container) {
+        init_grid_container(block);
     }
 }
 

@@ -65,6 +65,7 @@ FontProp* alloc_font_prop(LayoutContext* lycon);
 BlockProp* alloc_block_prop(LayoutContext* lycon);
 FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon);
 void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block);
+void alloc_grid_container_prop(LayoutContext* lycon, ViewBlock* block);
 View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node);
 void free_view(ViewTree* tree, View* view);
 

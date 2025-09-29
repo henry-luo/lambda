@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "grid.hpp"
 
 #include "../lib/log.h"
 #include <string.h>
@@ -1277,6 +1278,10 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     // Enhanced flexbox properties are handled through existing cases above
     // Additional properties like aspect-ratio will be handled as custom properties
 
+    // CSS Grid Layout Properties
+    // Note: Most grid properties are handled as custom properties since lexbor doesn't support them yet
+    // When lexbor adds support, these can be moved to proper property cases
+
     case LXB_CSS_PROPERTY__CUSTOM: { // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
         log_debug("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
@@ -1349,6 +1354,171 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                     block->embed->flex_container->column_gap = gap_px;
                     log_debug("Set gap: %dpx (from %s)\n", gap_px, value_str);
                 }
+            }
+        }
+
+        // Handle CSS Grid properties as custom properties until lexbor supports them
+        
+        // grid-template-rows
+        if (custom->name.length == 18 && strncmp((const char*)custom->name.data, "grid-template-rows", 18) == 0) {
+            if (block) {
+                alloc_grid_container_prop(lycon, block);
+                
+                // Enhanced parsing for advanced features
+                char template_str[256];
+                int len = min((int)custom->value.length, 255);
+                strncpy(template_str, (const char*)custom->value.data, len);
+                template_str[len] = '\0';
+                
+                // Parse the template string (handles minmax, repeat, etc.)
+                if (block->embed->grid_container->grid_template_rows) {
+                    parse_grid_template_tracks(block->embed->grid_container->grid_template_rows, template_str);
+                }
+                
+                log_debug("Set grid-template-rows: %s\n", template_str);
+            }
+        }
+        
+        // grid-template-columns
+        if (custom->name.length == 21 && strncmp((const char*)custom->name.data, "grid-template-columns", 21) == 0) {
+            if (block) {
+                alloc_grid_container_prop(lycon, block);
+                
+                // Enhanced parsing for advanced features
+                char template_str[256];
+                int len = min((int)custom->value.length, 255);
+                strncpy(template_str, (const char*)custom->value.data, len);
+                template_str[len] = '\0';
+                
+                // Parse the template string (handles minmax, repeat, etc.)
+                if (block->embed->grid_container->grid_template_columns) {
+                    parse_grid_template_tracks(block->embed->grid_container->grid_template_columns, template_str);
+                }
+                
+                log_debug("Set grid-template-columns: %s\n", template_str);
+            }
+        }
+        
+        // grid-template-areas
+        if (custom->name.length == 19 && strncmp((const char*)custom->name.data, "grid-template-areas", 19) == 0) {
+            if (block) {
+                alloc_grid_container_prop(lycon, block);
+                // Parse grid template areas
+                char areas_str[256];
+                int len = min((int)custom->value.length, 255);
+                strncpy(areas_str, (const char*)custom->value.data, len);
+                areas_str[len] = '\0';
+                parse_grid_template_areas(block->embed->grid_container, areas_str);
+                log_debug("Set grid-template-areas: %s\n", areas_str);
+            }
+        }
+        
+        // grid-row-start, grid-row-end, grid-column-start, grid-column-end
+        if (custom->name.length == 14 && strncmp((const char*)custom->name.data, "grid-row-start", 14) == 0) {
+            char* endptr;
+            int line_value = strtol((const char*)custom->value.data, &endptr, 10);
+            if (endptr != (const char*)custom->value.data) {
+                span->grid_row_start = line_value;
+                span->has_explicit_grid_row_start = true;
+                log_debug("Set grid-row-start: %d\n", line_value);
+            }
+        }
+        
+        if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "grid-row-end", 12) == 0) {
+            char* endptr;
+            int line_value = strtol((const char*)custom->value.data, &endptr, 10);
+            if (endptr != (const char*)custom->value.data) {
+                span->grid_row_end = line_value;
+                span->has_explicit_grid_row_end = true;
+                log_debug("Set grid-row-end: %d\n", line_value);
+            }
+        }
+        
+        if (custom->name.length == 17 && strncmp((const char*)custom->name.data, "grid-column-start", 17) == 0) {
+            char* endptr;
+            int line_value = strtol((const char*)custom->value.data, &endptr, 10);
+            if (endptr != (const char*)custom->value.data) {
+                span->grid_column_start = line_value;
+                span->has_explicit_grid_column_start = true;
+                log_debug("Set grid-column-start: %d\n", line_value);
+            }
+        }
+        
+        if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "grid-column-end", 15) == 0) {
+            char* endptr;
+            int line_value = strtol((const char*)custom->value.data, &endptr, 10);
+            if (endptr != (const char*)custom->value.data) {
+                span->grid_column_end = line_value;
+                span->has_explicit_grid_column_end = true;
+                log_debug("Set grid-column-end: %d\n", line_value);
+            }
+        }
+        
+        // grid-area
+        if (custom->name.length == 9 && strncmp((const char*)custom->name.data, "grid-area", 9) == 0) {
+            // Copy the grid area name
+            int len = min((int)custom->value.length, 63); // Reasonable limit
+            if (span->grid_area) {
+                free(span->grid_area); // Free existing area name
+            }
+            span->grid_area = (char*)malloc(len + 1);
+            strncpy(span->grid_area, (const char*)custom->value.data, len);
+            span->grid_area[len] = '\0';
+            log_debug("Set grid-area: %s\n", span->grid_area);
+        }
+        
+        // row-gap and column-gap for grid
+        if (custom->name.length == 7 && strncmp((const char*)custom->name.data, "row-gap", 7) == 0) {
+            const char* value_str = (const char*)custom->value.data;
+            char* endptr;
+            float gap_value = strtof(value_str, &endptr);
+            
+            if (endptr != value_str && gap_value >= 0) {
+                int gap_px = (int)(gap_value * lycon->ui_context->pixel_ratio);
+                if (block) {
+                    alloc_grid_container_prop(lycon, block);
+                    block->embed->grid_container->row_gap = gap_px;
+                    log_debug("Set row-gap: %dpx\n", gap_px);
+                }
+            }
+        }
+        
+        if (custom->name.length == 10 && strncmp((const char*)custom->name.data, "column-gap", 10) == 0) {
+            const char* value_str = (const char*)custom->value.data;
+            char* endptr;
+            float gap_value = strtof(value_str, &endptr);
+            
+            if (endptr != value_str && gap_value >= 0) {
+                int gap_px = (int)(gap_value * lycon->ui_context->pixel_ratio);
+                if (block) {
+                    alloc_grid_container_prop(lycon, block);
+                    block->embed->grid_container->column_gap = gap_px;
+                    log_debug("Set column-gap: %dpx\n", gap_px);
+                }
+            }
+        }
+        
+        // grid-auto-flow
+        if (custom->name.length == 14 && strncmp((const char*)custom->name.data, "grid-auto-flow", 14) == 0) {
+            if (block) {
+                alloc_grid_container_prop(lycon, block);
+                
+                const char* value_str = (const char*)custom->value.data;
+                
+                // Parse grid-auto-flow values (can be "row", "column", "row dense", "column dense")
+                if (strstr(value_str, "row")) {
+                    block->embed->grid_container->grid_auto_flow = LXB_CSS_VALUE_ROW;
+                } else if (strstr(value_str, "column")) {
+                    block->embed->grid_container->grid_auto_flow = LXB_CSS_VALUE_COLUMN;
+                }
+                
+                // Check for dense packing
+                if (strstr(value_str, "dense")) {
+                    block->embed->grid_container->is_dense_packing = true;
+                    log_debug("Enabled dense packing for grid auto-flow\n");
+                }
+                
+                log_debug("Set grid-auto-flow: %.*s\n", (int)custom->value.length, custom->value.data);
             }
         }
     }

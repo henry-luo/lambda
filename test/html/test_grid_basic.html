@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Basic CSS Grid Test</title>
+    <style>
+        .grid-container {
+            display: grid;
+            grid-template-columns: 1fr 2fr 1fr;
+            grid-template-rows: 100px 200px;
+            gap: 10px;
+            width: 600px;
+            height: 320px;
+            background-color: #f0f0f0;
+            padding: 20px;
+        }
+        
+        .grid-item {
+            background-color: #4CAF50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .item1 {
+            grid-row-start: 1;
+            grid-column-start: 1;
+            grid-column-end: 3;
+        }
+        
+        .item2 {
+            grid-row-start: 1;
+            grid-column-start: 3;
+        }
+        
+        .item3 {
+            grid-row-start: 2;
+            grid-column-start: 1;
+        }
+        
+        .item4 {
+            grid-row-start: 2;
+            grid-column-start: 2;
+            grid-column-end: 4;
+        }
+    </style>
+</head>
+<body>
+    <h1>CSS Grid Layout Test</h1>
+    
+    <div class="grid-container">
+        <div class="grid-item item1">Header (spans 2 columns)</div>
+        <div class="grid-item item2">Sidebar</div>
+        <div class="grid-item item3">Left</div>
+        <div class="grid-item item4">Main Content (spans 2 columns)</div>
+    </div>
+    
+    <p>This tests basic CSS Grid functionality with:</p>
+    <ul>
+        <li>Grid container with display: grid</li>
+        <li>Grid template columns using fr units</li>
+        <li>Fixed row heights</li>
+        <li>Gap between grid items</li>
+        <li>Explicit grid item placement</li>
+        <li>Grid items spanning multiple columns</li>
+    </ul>
+</body>
+</html>

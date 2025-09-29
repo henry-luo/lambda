@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CSS Grid Areas Test</title>
+    <style>
+        .grid-container {
+            display: grid;
+            grid-template-areas: 
+                "header header sidebar"
+                "main main sidebar"
+                "footer footer footer";
+            grid-template-columns: 2fr 1fr 1fr;
+            grid-template-rows: 80px 200px 60px;
+            gap: 15px;
+            width: 700px;
+            height: 370px;
+            background-color: #e8e8e8;
+            padding: 15px;
+        }
+        
+        .grid-item {
+            padding: 15px;
+            text-align: center;
+            color: white;
+            font-weight: bold;
+        }
+        
+        .header {
+            grid-area: header;
+            background-color: #2196F3;
+        }
+        
+        .main {
+            grid-area: main;
+            background-color: #4CAF50;
+        }
+        
+        .sidebar {
+            grid-area: sidebar;
+            background-color: #FF9800;
+        }
+        
+        .footer {
+            grid-area: footer;
+            background-color: #9C27B0;
+        }
+    </style>
+</head>
+<body>
+    <h1>CSS Grid Areas Test</h1>
+    
+    <div class="grid-container">
+        <div class="grid-item header">Header Area</div>
+        <div class="grid-item main">Main Content Area</div>
+        <div class="grid-item sidebar">Sidebar Area</div>
+        <div class="grid-item footer">Footer Area</div>
+    </div>
+    
+    <p>This tests CSS Grid named areas functionality with:</p>
+    <ul>
+        <li>Grid template areas definition</li>
+        <li>Named grid areas assignment</li>
+        <li>Complex layout with different area shapes</li>
+        <li>Mixed column sizing (fr units)</li>
+        <li>Fixed row heights</li>
+    </ul>
+</body>
+</html>

@@ -2,6 +2,7 @@
 #include "layout_flex.hpp"
 #include "layout_flex_content.hpp"
 #include "layout_nested.hpp"
+#include "grid.hpp"
 
 #include "../lib/log.h"
 
@@ -168,6 +169,31 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 
                 // Now run the flex layout algorithm with the processed children
                 layout_flex_container_new(lycon, block);
+            }
+            else if (display.inner == LXB_CSS_VALUE_GRID) {
+                log_debug("Setting up grid container for %s\n", block->node->name());
+                
+                // Initialize grid container if not already done
+                if (!block->embed) {
+                    block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+                }
+                if (!block->embed->grid_container) {
+                    init_grid_container(block);
+                }
+                
+                // Process DOM children into View objects first
+                // Grid containers need their DOM children converted to View objects
+                // before the grid algorithm can work
+                do {
+                    printf("Processing grid child %p\n", child);
+                    layout_flow_node(lycon, child);
+                    DomNode* next_child = child->next_sibling();
+                    printf("Got next grid sibling %p\n", next_child);
+                    child = next_child;
+                } while (child);
+                
+                // Now run the grid layout algorithm with the processed children
+                layout_grid_container_new(lycon, block);
             }
             else {
                 log_debug("unknown display type\n");

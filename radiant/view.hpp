@@ -48,6 +48,15 @@ extern "C" {
 #define LXB_CSS_VALUE_SPACE_EVENLY      (LXB_CSS_VALUE__LAST_ENTRY + 28)
 #define LXB_CSS_VALUE_AUTO              (LXB_CSS_VALUE__LAST_ENTRY + 29)
 
+// Additional CSS constants for grid layout
+#define LXB_CSS_VALUE_GRID              (LXB_CSS_VALUE__LAST_ENTRY + 30)
+#define LXB_CSS_VALUE_INLINE_GRID       (LXB_CSS_VALUE__LAST_ENTRY + 31)
+#define LXB_CSS_VALUE_MIN_CONTENT       (LXB_CSS_VALUE__LAST_ENTRY + 32)
+#define LXB_CSS_VALUE_MAX_CONTENT       (LXB_CSS_VALUE__LAST_ENTRY + 33)
+#define LXB_CSS_VALUE_FIT_CONTENT       (LXB_CSS_VALUE__LAST_ENTRY + 34)
+#define LXB_CSS_VALUE_FR                (LXB_CSS_VALUE__LAST_ENTRY + 35)
+#define LXB_CSS_VALUE_DENSE             (LXB_CSS_VALUE__LAST_ENTRY + 36)
+
 
 #define LENGTH_AUTO                 (INT_MAX - 1)
 
@@ -234,6 +243,28 @@ typedef struct ViewSpan : ViewGroup {
     // Position and visibility (from old FlexItem)
     int position;  // PositionType
     int visibility;  // Visibility
+    
+    // Grid item properties (following flex pattern)
+    int grid_row_start;          // Grid row start line
+    int grid_row_end;            // Grid row end line
+    int grid_column_start;       // Grid column start line
+    int grid_column_end;         // Grid column end line
+    char* grid_area;             // Named grid area
+    int justify_self;            // Item-specific justify alignment (LXB_CSS_VALUE_*)
+    int align_self_grid;         // Item-specific align alignment for grid (LXB_CSS_VALUE_*)
+    
+    // Grid item computed properties
+    int computed_grid_row_start;
+    int computed_grid_row_end;
+    int computed_grid_column_start;
+    int computed_grid_column_end;
+    
+    // Grid item flags
+    bool has_explicit_grid_row_start;
+    bool has_explicit_grid_row_end;
+    bool has_explicit_grid_column_start;
+    bool has_explicit_grid_column_end;
+    bool is_grid_auto_placed;
 } ViewSpan;
 
 typedef struct {
@@ -291,6 +322,7 @@ typedef struct {
     ImageSurface* img;  // image surface
     Document* doc;  // iframe document
     FlexContainerLayout* flex_container; // integrated flex container layout
+    struct GridContainerLayout* grid_container; // integrated grid container layout
 } EmbedProp;
 
 typedef struct ViewBlock : ViewSpan {
