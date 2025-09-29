@@ -164,7 +164,16 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
 void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop) {
     fbox->style = *fprop;
     fbox->current_font_size = fprop->font_size;
-    fbox->face = load_styled_font(uicon, fprop->family ? fprop->family : font_name, fprop);
+    
+    // Try @font-face descriptors first, then fall back to system fonts
+    const char* family_to_load = fprop->family ? fprop->family : font_name;
+    bool is_fallback = false;
+    fbox->face = load_font_with_descriptors(uicon, family_to_load, fprop, &is_fallback);
+    
+    // If @font-face loading failed, fall back to original method
+    if (!fbox->face) {
+        fbox->face = load_styled_font(uicon, family_to_load, fprop);
+    }
     
     if (!fbox->face) {
         log_error("Failed to setup font: %s", font_name);

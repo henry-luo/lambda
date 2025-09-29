@@ -315,15 +315,28 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (lycon->block.line_height == -1) {
         // Special marker value means no explicit line-height was set in CSS
         // Use font intrinsic height for line-height: normal, with browser-compatible adjustment
-        int font_height = lycon->font.face->size->metrics.height >> 6;
         
-        // CRITICAL FIX: Adjust font height to match browser behavior more closely
-        // Browsers seem to use slightly smaller line heights than FreeType reports
-        if (font_height >= 18) {
-            font_height -= 1;  // Reduce by 1px for fonts 18px and larger
+        // DEBUG: Check font face state
+        if (!lycon->font.face) {
+            printf("ERROR: Font face is NULL when calculating line height!\n");
+            lycon->block.line_height = 17; // Fallback to reasonable default
+        } else if (!lycon->font.face->size) {
+            printf("ERROR: Font face size is NULL when calculating line height!\n");
+            lycon->block.line_height = 17; // Fallback to reasonable default
+        } else {
+            int font_height = lycon->font.face->size->metrics.height >> 6;
+            printf("DEBUG: Font face loaded: %s, font_height=%d\n", 
+                   lycon->font.face->family_name ? lycon->font.face->family_name : "unknown", font_height);
+        
+            // CRITICAL FIX: Adjust font height to match browser behavior more closely
+            // Browsers seem to use slightly smaller line heights than FreeType reports
+            if (font_height >= 18) {
+                font_height -= 1;  // Reduce by 1px for fonts 18px and larger
+            }
+            
+            lycon->block.line_height = font_height;
         }
         
-        lycon->block.line_height = font_height;
         printf("DEBUG: Updated line-height after CSS resolution to browser-compatible height: %d (font_size=%d)\n", 
                lycon->block.line_height, lycon->font.style.font_size);
     }

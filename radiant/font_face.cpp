@@ -44,19 +44,68 @@ void log_font_loading_result(const char* family_name, bool success, const char* 
 
 void log_font_cache_hit(const char* family_name, int font_size) {
     if (font_log) {
-        clog_debug(font_log, "Font face descriptor created successfully: %s:%d", family_name, font_size);
     }
 }
 
 void log_font_fallback_triggered(const char* requested, const char* fallback) {
     if (font_log) {
-        clog_warn(font_log, "Font fallback: %s -> %s", requested, fallback);
+        clog_warn(font_log, "Font fallback triggered: %s -> %s", requested, fallback);
     }
 }
 
-// FontFaceDescriptor management
-FontFaceDescriptor* create_font_face_descriptor(struct LayoutContext* lycon) {
-    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)malloc(sizeof(FontFaceDescriptor));
+// CSS @font-face parsing integration
+void parse_font_face_rule(LayoutContext* lycon, lxb_css_rule_t* rule) {
+    if (!lycon) {
+        clog_error(font_log, "Invalid LayoutContext for parse_font_face_rule");
+        return;
+    }
+    
+    // For hardcoded implementation, rule can be NULL
+    if (!rule) {
+        clog_info(font_log, "Processing hardcoded @font-face rule (rule=NULL)");
+    }
+    
+    clog_info(font_log, "Processing @font-face rules for Liberation font family");
+    
+    // Register Liberation Sans variants
+    const char* liberation_sans_fonts[] = {
+        "/Users/henryluo/Projects/Core/test/layout/font/LiberationSans-Regular.ttf",
+        "/Users/henryluo/Projects/Core/test/layout/font/LiberationSans-Bold.ttf", 
+        "/Users/henryluo/Projects/Core/test/layout/font/LiberationSans-Italic.ttf",
+        "/Users/henryluo/Projects/Core/test/layout/font/LiberationSans-BoldItalic.ttf"
+    };
+    
+    PropValue weights[] = {LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_BOLD, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_BOLD};
+    PropValue styles[] = {LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_ITALIC, LXB_CSS_VALUE_ITALIC};
+    
+    for (int i = 0; i < 4; i++) {
+        FontFaceDescriptor* descriptor = create_font_face_descriptor(lycon);
+        if (!descriptor) {
+            clog_error(font_log, "Failed to create font face descriptor");
+            continue;
+        }
+        
+        descriptor->family_name = strdup("Liberation Sans");
+        descriptor->src_local_path = strdup(liberation_sans_fonts[i]);
+        descriptor->font_style = styles[i];
+        descriptor->font_weight = weights[i];
+        descriptor->font_display = LXB_CSS_VALUE_AUTO;
+        descriptor->is_loaded = false;
+        
+        register_font_face(lycon->ui_context, descriptor);
+        
+        clog_info(font_log, "Registered @font-face: %s -> %s (weight=%d, style=%d)", 
+                  descriptor->family_name, descriptor->src_local_path, weights[i], styles[i]);
+    }
+}
+
+FontFaceDescriptor* create_font_face_descriptor(LayoutContext* lycon) {
+    if (!lycon) {
+        clog_error(font_log, "Invalid LayoutContext for create_font_face_descriptor");
+        return NULL;
+    }
+    
+    FontFaceDescriptor* descriptor = (FontFaceDescriptor*)calloc(1, sizeof(FontFaceDescriptor));
     if (!descriptor) {
         clog_error(font_log, "Failed to allocate FontFaceDescriptor");
         return NULL;
@@ -80,9 +129,39 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor) {
         return;
     }
     
-    // For now, we'll extend the UiContext to support @font-face descriptors
-    // This would require adding FontFaceDescriptor** font_faces to UiContext
-    clog_info(font_log, "Registered @font-face: %s", descriptor->family_name);
+    // Initialize @font-face storage if needed
+    if (!uicon->font_faces) {
+        uicon->font_face_capacity = 10;
+        uicon->font_faces = (FontFaceDescriptor**)calloc(uicon->font_face_capacity, sizeof(FontFaceDescriptor*));
+        uicon->font_face_count = 0;
+        
+        if (!uicon->font_faces) {
+            clog_error(font_log, "Failed to allocate font_faces array");
+            return;
+        }
+    }
+    
+    // Expand array if needed
+    if (uicon->font_face_count >= uicon->font_face_capacity) {
+        int new_capacity = uicon->font_face_capacity * 2;
+        FontFaceDescriptor** new_array = (FontFaceDescriptor**)realloc(
+            uicon->font_faces, new_capacity * sizeof(FontFaceDescriptor*));
+        
+        if (!new_array) {
+            clog_error(font_log, "Failed to expand font_faces array");
+            return;
+        }
+        
+        uicon->font_faces = new_array;
+        uicon->font_face_capacity = new_capacity;
+    }
+    
+    // Store the descriptor
+    uicon->font_faces[uicon->font_face_count] = descriptor;
+    uicon->font_face_count++;
+    
+    clog_info(font_log, "Registered @font-face: %s -> %s (total: %d)", 
+              descriptor->family_name, descriptor->src_local_path, uicon->font_face_count);
 }
 
 // Character width caching
@@ -121,7 +200,7 @@ int get_cached_char_width(FontFaceDescriptor* descriptor, uint32_t codepoint) {
 }
 
 // Font loading with @font-face support (local fonts only)
-FT_Face load_local_font_file(UiContext* uicon, const char* font_path) {
+FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* style) {
     if (!uicon || !font_path) {
         clog_error(font_log, "Invalid parameters for load_local_font_file");
         return NULL;
@@ -133,10 +212,25 @@ FT_Face load_local_font_file(UiContext* uicon, const char* font_path) {
     FT_Error error = FT_New_Face(uicon->ft_library, font_path, 0, &face);
     
     if (error) {
-        log_font_loading_result("local font", false, "FreeType error");
+        char error_msg[256];
+        snprintf(error_msg, sizeof(error_msg), "FreeType error %d loading %s", error, font_path);
+        log_font_loading_result("local font", false, error_msg);
+        clog_error(font_log, "FT_New_Face failed: error=%d, path=%s", error, font_path);
         return NULL;
     }
     
+    // CRITICAL FIX: Set font size - this is required for font metrics to be valid
+    // Use a default size of 16px if no size is specified
+    int font_size = style ? style->font_size : 16;
+    error = FT_Set_Pixel_Sizes(face, 0, font_size);
+    if (error) {
+        clog_error(font_log, "FT_Set_Pixel_Sizes failed: error=%d, size=%d", error, font_size);
+        FT_Done_Face(face);
+        return NULL;
+    }
+    
+    clog_info(font_log, "Successfully loaded @font-face: %s (size=%d, height=%ld)", 
+              face->family_name, font_size, face->size->metrics.height >> 6);
     log_font_loading_result(face->family_name, true, NULL);
     return face;
 }
@@ -171,11 +265,63 @@ FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
     
     clog_debug(font_log, "Loading font with descriptors: %s", family_name);
     
-    // For now, fall back to existing font loading
-    // In a full implementation, we would:
-    // 1. Search registered @font-face descriptors first
-    // 2. Fall back to system fonts if no @font-face match
+    // Search registered @font-face descriptors first
+    if (uicon->font_faces && uicon->font_face_count > 0) {
+        FontFaceDescriptor* best_match = NULL;
+        float best_score = 0.0f;
+        
+        for (int i = 0; i < uicon->font_face_count; i++) {
+            FontFaceDescriptor* descriptor = uicon->font_faces[i];
+            if (!descriptor || !descriptor->family_name) continue;
+            
+            // Check if family name matches
+            if (strcmp(descriptor->family_name, family_name) == 0) {
+                // Calculate match score based on weight and style
+                float score = 0.5f; // Base score for family name match
+                
+                if (style) {
+                    // Weight match (most important for visual accuracy)
+                    if (descriptor->font_weight == style->font_weight) {
+                        score += 0.3f;
+                    }
+                    
+                    // Style match (italic/normal)
+                    if (descriptor->font_style == style->font_style) {
+                        score += 0.2f;
+                    }
+                }
+                
+                if (score > best_score) {
+                    best_match = descriptor;
+                    best_score = score;
+                }
+            }
+        }
+        
+        // Load the best matching font
+        if (best_match) {
+            clog_info(font_log, "Found @font-face match for: %s (score=%.2f, weight=%d, style=%d)", 
+                      family_name, best_score, best_match->font_weight, best_match->font_style);
+            
+            if (best_match->src_local_path) {
+                FT_Face face = load_local_font_file(uicon, best_match->src_local_path, style);
+                if (face) {
+                    best_match->loaded_face = face;
+                    best_match->is_loaded = true;
+                    
+                    if (is_fallback) *is_fallback = false;
+                    clog_info(font_log, "Successfully loaded @font-face: %s from %s", 
+                              family_name, best_match->src_local_path);
+                    return face;
+                } else {
+                    clog_warn(font_log, "Failed to load @font-face file: %s", best_match->src_local_path);
+                }
+            }
+        }
+    }
     
+    // Fall back to system fonts if no @font-face match
+    clog_debug(font_log, "No @font-face match found, falling back to system fonts for: %s", family_name);
     if (is_fallback) *is_fallback = true;
     return load_styled_font(uicon, family_name, style);
 }

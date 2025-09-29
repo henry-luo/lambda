@@ -143,7 +143,7 @@ void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor);
 // Font loading with @font-face support (local fonts only)
 FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name, 
                                    FontProp* style, bool* is_fallback);
-FT_Face load_local_font_file(UiContext* uicon, const char* font_path);
+FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* style);
 bool resolve_font_path_from_descriptor(FontFaceDescriptor* descriptor, char** resolved_path);
 
 // Character width caching for performance

@@ -17,6 +17,10 @@ extern "C" {
 
 // #include "lib/arraylist.h"
 
+// Forward declarations
+struct FontFaceDescriptor;
+typedef struct FontFaceDescriptor FontFaceDescriptor;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -411,6 +415,11 @@ typedef struct {
     struct hashmap* fontface_map;  // cache of font faces loaded
     FontProp default_font;  // default font style
     char** fallback_fonts;  // fallback fonts
+
+    // @font-face support
+    FontFaceDescriptor** font_faces;    // Array of @font-face declarations
+    int font_face_count;
+    int font_face_capacity;
 
     // image cache
     struct hashmap* image_cache;  // cache for images loaded

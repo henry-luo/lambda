@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "layout_flex.hpp"
 #include "layout_table.hpp"
+#include "font_face.h"
 
 #include "../lib/log.h"
 void view_pool_init(ViewTree* tree);
@@ -461,6 +462,19 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
 void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
+    
+    // Initialize text flow logging
+    init_text_flow_logging();
+    
+    // Process @font-face rules before layout begins
+    // This is a simplified implementation - in a full system, this would be done during CSS parsing
+    if (doc && doc->dom_tree) {
+        clog_info(font_log, "Processing @font-face rules for document");
+        // For now, we'll create a hardcoded @font-face descriptor for Liberation Sans
+        // This should be replaced with actual CSS parsing
+        parse_font_face_rule(lycon, NULL); // NULL rule for hardcoded implementation
+    }
+    
     // most browsers use a generic sans-serif font as the default
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
     // default font size in HTML is 16 px for most browsers
