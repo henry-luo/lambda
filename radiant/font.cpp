@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "view.hpp"
+#include "font_face.h"
 #include "../lib/log.h"
 
 /* Explicit strdup declaration for compatibility */
@@ -31,7 +32,13 @@ char* load_font_path(FcConfig *font_config, const char* font_name) {
 
     FcResult result;  FcChar8 *file = NULL;  char *path = NULL;
     FcPattern *match = FcFontMatch(font_config, pattern, &result);
-    if (!match) { printf("Font not found\n"); }
+    if (!match) { 
+        if (font_log) {
+            clog_warn(font_log, "Font not found: %s", font_name);
+        } else {
+            log_warn("Font not found: %s", font_name);
+        }
+    }
     else {
         // get font file path
         if (FcPatternGetString(match, FC_FILE, 0, &file) != FcResultMatch) {
@@ -60,29 +67,29 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
     FontfaceEntry search_key = {.name = name_and_size->str, .face = NULL};
     FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, &search_key);
     if (entry) {
-        printf("Fontface loaded from cache: %s\n", name_and_size->str);
+        log_debug("Fontface loaded from cache: %s", name_and_size->str);
         strbuf_free(name_and_size);
         return entry->face;
     }
     else {
-        printf("Fontface not found in cache: %s\n", name_and_size->str);
+        log_debug("Fontface not found in cache: %s", name_and_size->str);
     }
 
     FT_Face face = NULL;
     char* font_path = load_font_path(uicon->font_config, font_name);
     if (font_path) {
         // load the font
-        printf("Loading font at: %s\n", font_path);
+        log_font_loading_attempt(font_name, font_path);
         if (FT_New_Face(uicon->ft_library, (const char *)font_path, 0, &face)) {
-            printf("Could not load font\n");  
+            log_font_loading_result(font_name, false, "FreeType error");
             face = NULL;
         } else {
             // Set height of the font
             FT_Set_Pixel_Sizes(face, 0, font_size);
-            printf("Font loaded: %s, height:%ld, ascend:%ld, descend:%ld, em size: %d\n", 
-                face->family_name, face->size->metrics.height >> 6,
-                face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6,
-                face->units_per_EM >> 6);
+            log_info("Font loaded: %s, height:%ld, ascend:%ld, descend:%ld, em size: %d", 
+                    face->family_name, face->size->metrics.height >> 6,
+                    face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6,
+                    face->units_per_EM >> 6);
             // put the font face into the hashmap
             if (uicon->fontface_map) {
                 // copy the font name
@@ -113,8 +120,12 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
         strbuf_append_str(name, ":italic");
     }
     FT_Face face = load_font_face(uicon, name->str, font_style->font_size);
-    printf("Loading font: %s, ascd: %ld, desc: %ld\n", 
-        name->str, face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6);
+    if (face) {
+        log_info("Loading styled font: %s, ascd: %ld, desc: %ld", 
+                name->str, face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6);
+    } else {
+        log_error("Failed to load styled font: %s", name->str);
+    }
     strbuf_free(name);
     return face;
 }
@@ -128,18 +139,22 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
     }
     
     // failed to load glyph under current font, try fallback fonts
-    log_debug("failed to load glyph: %u", codepoint);
+    log_debug("Failed to load glyph: U+%04X", codepoint);
     char** font_ptr = uicon->fallback_fonts;
     while (*font_ptr) {
-        log_debug("trying fallback font '%s' for char: %u", *font_ptr, codepoint);
+        log_debug("Trying fallback font '%s' for char: U+%04X", *font_ptr, codepoint);
         FT_Face fallback_face = load_styled_font(uicon, *font_ptr, font_style);
         if (fallback_face) {
             char_index = FT_Get_Char_Index(fallback_face, codepoint);
             if (char_index > 0) {
                 error = FT_Load_Glyph(fallback_face, char_index, FT_LOAD_RENDER);
-                if (!error) { slot = fallback_face->glyph;  return slot; } 
+                if (!error) { 
+                    log_font_fallback_triggered(face ? face->family_name : "unknown", *font_ptr);
+                    slot = fallback_face->glyph;  
+                    return slot; 
+                } 
             }
-            log_debug("failed to load glyph from fallback font: %s, %u", *font_ptr, codepoint);
+            log_debug("Failed to load glyph from fallback font: %s, U+%04X", *font_ptr, codepoint);
         }
         font_ptr++;
     }
@@ -148,13 +163,22 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
 
 void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop) {
     fbox->style = *fprop;
+    fbox->current_font_size = fprop->font_size;
     fbox->face = load_styled_font(uicon, fprop->family ? fprop->family : font_name, fprop);
+    
+    if (!fbox->face) {
+        log_error("Failed to setup font: %s", font_name);
+        return;
+    }
+    
     if (FT_Load_Char(fbox->face, ' ', FT_LOAD_RENDER)) {
-        fprintf(stderr, "could not load space character\n");
+        log_warn("Could not load space character for font: %s", font_name);
         fbox->space_width = fbox->face->size->metrics.y_ppem >> 6;
     } else {
         fbox->space_width = fbox->face->glyph->advance.x >> 6;
     }
+    
+    log_debug("Font setup complete: %s (space_width: %.1f)", font_name, fbox->space_width);
 }
 
 bool fontface_entry_free(const void *item, void *udata) {
@@ -167,7 +191,7 @@ bool fontface_entry_free(const void *item, void *udata) {
 void fontface_cleanup(UiContext* uicon) {
     // loop through the hashmap and free the font faces
     if (uicon->fontface_map) {
-        printf("Cleaning up font faces\n");
+        log_info("Cleaning up font faces");
         hashmap_scan(uicon->fontface_map, fontface_entry_free, NULL);
         hashmap_free(uicon->fontface_map);
         uicon->fontface_map = NULL;
