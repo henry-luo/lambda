@@ -1368,10 +1368,15 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         // Handle CSS Grid properties as custom properties until lexbor supports them
+        printf("DEBUG: Processing custom property: %.*s (length=%zu) = %.*s\n", 
+               (int)custom->name.length, (const char*)custom->name.data, custom->name.length,
+               (int)custom->value.length, (const char*)custom->value.data);
         
         // grid-template-rows
         if (custom->name.length == 18 && strncmp((const char*)custom->name.data, "grid-template-rows", 18) == 0) {
+            printf("DEBUG: grid-template-rows matched! block=%p\n", block);
             if (block) {
+                printf("DEBUG: Inside grid-template-rows block processing\n");
                 alloc_grid_container_prop(lycon, block);
                 
                 // Enhanced parsing for advanced features
@@ -1381,17 +1386,24 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 template_str[len] = '\0';
                 
                 // Parse the template string (handles minmax, repeat, etc.)
+                printf("DEBUG: About to parse grid-template-rows: '%s'\n", template_str);
                 if (block->embed->grid_container->grid_template_rows) {
+                    printf("DEBUG: Calling parse_grid_template_tracks for rows\n");
                     parse_grid_template_tracks(block->embed->grid_container->grid_template_rows, template_str);
+                } else {
+                    printf("DEBUG: grid_template_rows is NULL!\n");
                 }
                 
+                printf("DEBUG: Set grid-template-rows: %s\n", template_str);
                 log_debug("Set grid-template-rows: %s\n", template_str);
             }
         }
         
         // grid-template-columns
         if (custom->name.length == 21 && strncmp((const char*)custom->name.data, "grid-template-columns", 21) == 0) {
+            printf("DEBUG: grid-template-columns matched! block=%p\n", block);
             if (block) {
+                printf("DEBUG: Inside grid-template-columns block processing\n");
                 alloc_grid_container_prop(lycon, block);
                 
                 // Enhanced parsing for advanced features
@@ -1401,10 +1413,15 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 template_str[len] = '\0';
                 
                 // Parse the template string (handles minmax, repeat, etc.)
+                printf("DEBUG: About to parse grid-template-columns: '%s'\n", template_str);
                 if (block->embed->grid_container->grid_template_columns) {
+                    printf("DEBUG: Calling parse_grid_template_tracks for columns\n");
                     parse_grid_template_tracks(block->embed->grid_container->grid_template_columns, template_str);
+                } else {
+                    printf("DEBUG: grid_template_columns is NULL!\n");
                 }
                 
+                printf("DEBUG: Set grid-template-columns: %s\n", template_str);
                 log_debug("Set grid-template-columns: %s\n", template_str);
             }
         }

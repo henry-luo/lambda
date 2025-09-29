@@ -204,6 +204,14 @@ void layout_grid_container_new(LayoutContext* lycon, ViewBlock* container) {
     align_grid_items(grid_layout);
     
     // Debug: Final item positions
+    printf("DEBUG: FINAL GRID POSITIONS:\n");
+    for (int i = 0; i < item_count; i++) {
+        ViewBlock* item = items[i];
+        printf("DEBUG: FINAL_GRID_ITEM %d - pos: (%d,%d), size: %dx%d, grid_area: (%d-%d, %d-%d)\n", 
+               i, item->x, item->y, item->width, item->height,
+               item->computed_grid_row_start, item->computed_grid_row_end,
+               item->computed_grid_column_start, item->computed_grid_column_end);
+    }
     log_debug("FINAL GRID POSITIONS:\n");
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];

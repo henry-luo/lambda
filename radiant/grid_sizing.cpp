@@ -295,7 +295,8 @@ void expand_flexible_tracks_in_axis(GridTrack* tracks, int track_count, int avai
     float total_fr = 0;
     for (int i = 0; i < track_count; i++) {
         if (tracks[i].is_flexible && tracks[i].size && tracks[i].size->type == GRID_TRACK_SIZE_FR) {
-            total_fr += tracks[i].size->value;
+            // Convert from stored integer (multiplied by 100) back to float
+            total_fr += tracks[i].size->value / 100.0f;
         }
     }
     
@@ -304,11 +305,17 @@ void expand_flexible_tracks_in_axis(GridTrack* tracks, int track_count, int avai
     // Distribute space proportionally
     float fr_size = available_space / total_fr;
     
+    printf("DEBUG: Flexible track sizing - available_space=%d, total_fr=%.1f, fr_size=%.1f\n", 
+           available_space, total_fr, fr_size);
+    
     for (int i = 0; i < track_count; i++) {
         GridTrack* track = &tracks[i];
         if (track->is_flexible && track->size && track->size->type == GRID_TRACK_SIZE_FR) {
-            track->computed_size = (int)(track->size->value * fr_size);
+            // Convert from stored integer (multiplied by 100) back to float
+            float fr_value = track->size->value / 100.0f;
+            track->computed_size = (int)(fr_value * fr_size);
             
+            printf("DEBUG: Flexible track %d: %.1ffr = %dpx\n", i, fr_value, track->computed_size);
             log_debug("Flexible track %d: %dfr = %dpx\n", i, track->size->value, track->computed_size);
         }
     }
