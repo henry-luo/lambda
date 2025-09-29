@@ -1357,12 +1357,21 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                     gap_px = (int)(gap_value * lycon->ui_context->pixel_ratio); // Assume pixels if no unit
                 }
                 
-                // Set gap on flex container - create container if needed
+                // Set gap on appropriate container type
                 if (block) {
-                    alloc_flex_container_prop(lycon, block);
-                    block->embed->flex_container->row_gap = gap_px;
-                    block->embed->flex_container->column_gap = gap_px;
-                    log_debug("Set gap: %dpx (from %s)\n", gap_px, value_str);
+                    // Check if this is a grid container
+                    if (block->embed && block->embed->grid_container) {
+                        printf("DEBUG: Setting gap on grid container: %dpx\n", gap_px);
+                        block->embed->grid_container->row_gap = gap_px;
+                        block->embed->grid_container->column_gap = gap_px;
+                        log_debug("Set grid gap: %dpx (from %s)\n", gap_px, value_str);
+                    } else {
+                        // Fallback to flex container for backward compatibility
+                        alloc_flex_container_prop(lycon, block);
+                        block->embed->flex_container->row_gap = gap_px;
+                        block->embed->flex_container->column_gap = gap_px;
+                        log_debug("Set flex gap: %dpx (from %s)\n", gap_px, value_str);
+                    }
                 }
             }
         }

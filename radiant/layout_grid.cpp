@@ -367,32 +367,79 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
 void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, GridItemPlacement* placement) {
     if (!grid_layout || !item || !placement) return;
     
-    // Simple auto-placement algorithm - place items in reading order
-    // This is a basic implementation; full CSS Grid auto-placement is more complex
+    printf("DEBUG: auto_place_grid_item called for item %p\n", item);
     
-    static int auto_row = 1;
-    static int auto_column = 1;
+    // Enhanced auto-placement algorithm that respects grid dimensions
+    static int current_row = 1;
+    static int current_column = 1;
+    static int item_counter = 0;
     
-    if (grid_layout->grid_auto_flow == LXB_CSS_VALUE_ROW) {
-        // Place items row by row
-        placement->row_start = auto_row;
-        placement->row_end = auto_row + 1;
-        placement->column_start = auto_column;
-        placement->column_end = auto_column + 1;
-        
-        auto_column++;
-        // For now, assume single row - in full implementation, would check for wrapping
-    } else {
-        // Place items column by column
-        placement->column_start = auto_column;
-        placement->column_end = auto_column + 1;
-        placement->row_start = auto_row;
-        placement->row_end = auto_row + 1;
-        
-        auto_row++;
-        // For now, assume single column - in full implementation, would check for wrapping
+    // Reset counters for new grid layout (simple heuristic)
+    if (item_counter == 0) {
+        current_row = 1;
+        current_column = 1;
     }
     
+    // Determine grid dimensions from template or use defaults
+    int max_columns = grid_layout->explicit_column_count;
+    int max_rows = grid_layout->explicit_row_count;
+    
+    // If no explicit template, try to infer from computed dimensions
+    if (max_columns <= 0) {
+        max_columns = grid_layout->computed_column_count;
+    }
+    if (max_rows <= 0) {
+        max_rows = grid_layout->computed_row_count;
+    }
+    
+    // Fallback to reasonable defaults for 2x2 grid
+    if (max_columns <= 0) max_columns = 2;
+    if (max_rows <= 0) max_rows = 2;
+    
+    printf("DEBUG: Grid dimensions for auto-placement: %dx%d (cols x rows)\n", max_columns, max_rows);
+    
+    if (grid_layout->grid_auto_flow == LXB_CSS_VALUE_ROW) {
+        // Place items row by row (default behavior)
+        placement->row_start = current_row;
+        placement->row_end = current_row + 1;
+        placement->column_start = current_column;
+        placement->column_end = current_column + 1;
+        
+        printf("DEBUG: Placing item %d at row %d, col %d\n", item_counter, current_row, current_column);
+        
+        // Advance to next position
+        current_column++;
+        if (current_column > max_columns) {
+            current_column = 1;
+            current_row++;
+        }
+    } else {
+        // Place items column by column
+        placement->column_start = current_column;
+        placement->column_end = current_column + 1;
+        placement->row_start = current_row;
+        placement->row_end = current_row + 1;
+        
+        printf("DEBUG: Placing item %d at row %d, col %d (column-first)\n", item_counter, current_row, current_column);
+        
+        // Advance to next position
+        current_row++;
+        if (current_row > max_rows) {
+            current_row = 1;
+            current_column++;
+        }
+    }
+    
+    item_counter++;
+    
+    // Reset counter when we've placed all items (simple heuristic)
+    if (item_counter >= grid_layout->item_count) {
+        item_counter = 0;
+    }
+    
+    printf("DEBUG: Auto-placed item at row %d-%d, col %d-%d\n", 
+           placement->row_start, placement->row_end,
+           placement->column_start, placement->column_end);
     log_debug("Auto-placed item at row %d-%d, col %d-%d\n", 
               placement->row_start, placement->row_end,
               placement->column_start, placement->column_end);
@@ -402,6 +449,7 @@ void auto_place_grid_item(GridContainerLayout* grid_layout, ViewBlock* item, Gri
 void determine_grid_size(GridContainerLayout* grid_layout) {
     if (!grid_layout) return;
     
+    printf("DEBUG: Determining grid size\n");
     log_debug("Determining grid size\n");
     
     // Count explicit tracks from template
@@ -410,21 +458,43 @@ void determine_grid_size(GridContainerLayout* grid_layout) {
     grid_layout->explicit_column_count = grid_layout->grid_template_columns ? 
                                         grid_layout->grid_template_columns->track_count : 0;
     
+    printf("DEBUG: Explicit tracks - rows: %d, columns: %d\n", 
+           grid_layout->explicit_row_count, grid_layout->explicit_column_count);
+    
     // Find maximum implicit tracks needed based on item placement
     int max_row = grid_layout->explicit_row_count;
     int max_column = grid_layout->explicit_column_count;
     
+    printf("DEBUG: Checking %d items for grid size requirements\n", grid_layout->item_count);
     for (int i = 0; i < grid_layout->item_count; i++) {
         ViewBlock* item = grid_layout->grid_items[i];
-        max_row = fmax(max_row, item->computed_grid_row_end);
-        max_column = fmax(max_column, item->computed_grid_column_end);
+        printf("DEBUG: Item %d placement - row: %d-%d, col: %d-%d\n", 
+               i, item->computed_grid_row_start, item->computed_grid_row_end,
+               item->computed_grid_column_start, item->computed_grid_column_end);
+        
+        // CRITICAL FIX: Grid positions are 1-indexed, but we need the actual track count
+        // If an item ends at position 2, it uses tracks 0 and 1 (2 tracks total)
+        max_row = fmax(max_row, item->computed_grid_row_end - 1);
+        max_column = fmax(max_column, item->computed_grid_column_end - 1);
     }
+    
+    // Ensure minimum grid size matches explicit template
+    if (max_row < grid_layout->explicit_row_count) max_row = grid_layout->explicit_row_count;
+    if (max_column < grid_layout->explicit_column_count) max_column = grid_layout->explicit_column_count;
     
     grid_layout->implicit_row_count = max_row - grid_layout->explicit_row_count;
     grid_layout->implicit_column_count = max_column - grid_layout->explicit_column_count;
     
+    // Ensure non-negative implicit counts
+    if (grid_layout->implicit_row_count < 0) grid_layout->implicit_row_count = 0;
+    if (grid_layout->implicit_column_count < 0) grid_layout->implicit_column_count = 0;
+    
     grid_layout->computed_row_count = max_row;
     grid_layout->computed_column_count = max_column;
+    
+    printf("DEBUG: Final grid size - rows: %d (%d explicit + %d implicit), cols: %d (%d explicit + %d implicit)\n",
+           grid_layout->computed_row_count, grid_layout->explicit_row_count, grid_layout->implicit_row_count,
+           grid_layout->computed_column_count, grid_layout->explicit_column_count, grid_layout->implicit_column_count);
     
     log_debug("Grid size determined - rows: %d (%d explicit + %d implicit), cols: %d (%d explicit + %d implicit)\n",
               grid_layout->computed_row_count, grid_layout->explicit_row_count, grid_layout->implicit_row_count,
