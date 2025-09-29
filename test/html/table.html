@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html>
+    <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSS Table Layout Test Cases</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h2 {
+            margin-top: 0px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+        .test-case {
+            margin-bottom: 40px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            display: inline-block;
+            width: 400px;
+            vertical-align: top;
+        }
+        .container {
+            border: 2px solid #333;
+            margin-top: 20px;
+            position: relative;
+            width: 400px;
+            box-sizing: border-box;
+        }
+        .cell {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            position: relative;
+            font-size: 14px;
+        }
+        .cell:nth-child(1) { background-color: #ffcccc; }
+        .cell:nth-child(2) { background-color: #ccffcc; }
+        .cell:nth-child(3) { background-color: #ccccff; }
+        .cell:nth-child(4) { background-color: #ffffcc; }
+        .cell:nth-child(5) { background-color: #ffccff; }
+        .cell:nth-child(6) { background-color: #ccffff; }
+        .cell::after {
+            content: attr(data-info);
+            font-size: 12px;
+            display: block;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .explanation {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #e9f7fe;
+            border-radius: 4px;
+        }
+
+        /* Basic Layout */
+        .basic-layout .container {
+            display: table;
+            border-collapse: separate;
+            border-spacing: 10px;
+        }
+        .basic-layout .row {
+            display: table-row;
+        }
+        .basic-layout .cell {
+            display: table-cell;
+        }
+
+        /* Cell Alignment */
+        .cell-alignment .container {
+            display: table;
+            padding: 10px;
+            border-spacing: 10px;
+        }
+        .cell-alignment .row {
+            display: table-row;
+            height: 120px;
+        }
+        .cell-alignment .cell {
+            display: table-cell;
+            border: 1px solid #666;
+        }
+        .cell-alignment .cell:nth-child(1) { 
+            vertical-align: top;
+            text-align: left;
+        }
+        .cell-alignment .cell:nth-child(2) { 
+            vertical-align: middle;
+            text-align: center;
+        }
+        .cell-alignment .cell:nth-child(3) { 
+            vertical-align: bottom;
+            text-align: right;
+        }
+
+        /* Fixed Layout */
+        .fixed-layout .container {
+            display: table;
+            table-layout: fixed;
+            padding: 10px;
+            border-spacing: 10px;
+        }
+        .fixed-layout .row {
+            display: table-row;
+        }
+        .fixed-layout .cell {
+            display: table-cell;
+            overflow: hidden;
+        }
+        .fixed-layout .cell:nth-child(1) { width: 100px; }
+        .fixed-layout .cell:nth-child(2) { width: 150px; }
+        .fixed-layout .cell:nth-child(3) { width: 100px; }
+
+        /* Auto Layout */
+        .auto-layout .container {
+            display: table;
+            table-layout: auto;
+            border-collapse: separate;
+            border-spacing: 5px;
+        }
+        .auto-layout .row {
+            display: table-row;
+        }
+        .auto-layout .cell {
+            display: table-cell;
+        }
+
+        /* Caption Header */
+        .caption-header .container {
+            display: table;
+            border-collapse: separate;
+            border-spacing: 5px;
+        }
+        .caption-header .caption {
+            display: table-caption;
+            caption-side: top;
+            font-weight: bold;
+            padding: 10px;
+            background-color: #f0f0f0;
+            text-align: center;
+        }
+        .caption-header .header-group {
+            display: table-header-group;
+        }
+        .caption-header .body-group {
+            display: table-row-group;
+        }
+        .caption-header .row {
+            display: table-row;
+        }
+        .caption-header .cell {
+            display: table-cell;
+            border: 1px solid #ccc;
+        }
+        .caption-header .header-group .cell {
+            background-color: #e0e0e0;
+            font-weight: bold;
+        }
+
+        /* Border Collapse */
+        .border-collapse .container {
+            display: table;
+            border-collapse: collapse;
+        }
+        .border-collapse .row {
+            display: table-row;
+        }
+        .border-collapse .cell {
+            display: table-cell;
+            padding: 15px;
+            border: 2px solid #666;
+        }
+
+        /* Empty Cells */
+        .empty-cells .container {
+            display: table;
+            empty-cells: show;
+            padding: 10px;
+            border-spacing: 10px;
+        }
+        .empty-cells .row {
+            display: table-row;
+        }
+        .empty-cells .cell {
+            display: table-cell;
+            padding: 15px;
+            border: 1px solid #666;
+        }
+
+        /* Column Groups */
+        .column-groups .container {
+            display: table;
+            padding: 10px;
+            border-spacing: 5px;
+        }
+        .column-groups .col-group {
+            display: table-column-group;
+        }
+        .column-groups .col {
+            display: table-column;
+        }
+        .column-groups .col:nth-child(1) { 
+            background-color: #ffe0e0; 
+            width: 100px;
+        }
+        .column-groups .col:nth-child(2) { 
+            background-color: #e0ffe0; 
+            width: 150px;
+        }
+        .column-groups .col:nth-child(3) { 
+            background-color: #e0e0ff; 
+            width: 100px;
+        }
+        .column-groups .row {
+            display: table-row;
+        }
+        .column-groups .cell {
+            display: table-cell;
+            border: 1px solid #999;
+        }
+
+        /* Footer Group */
+        .footer-group .container {
+            display: table;
+            padding: 10px;
+            border-spacing: 5px;
+        }
+        .footer-group .header-group {
+            display: table-header-group;
+        }
+        .footer-group .body-group {
+            display: table-row-group;
+        }
+        .footer-group .footer-group-elem {
+            display: table-footer-group;
+        }
+        .footer-group .row {
+            display: table-row;
+        }
+        .footer-group .cell {
+            display: table-cell;
+            border: 1px solid #ccc;
+        }
+        .footer-group .header-group .cell {
+            background-color: #d0d0d0;
+            font-weight: bold;
+        }
+        .footer-group .footer-group-elem .cell {
+            background-color: #f0f0f0;
+            font-weight: bold;
+        }
+
+        /* Inline Table */
+        .inline-table-test .container {
+            padding: 20px;
+            position: relative;
+        }
+        .inline-table-test .inline-table {
+            display: inline-table;
+            border: 2px solid #666;
+            border-spacing: 5px;
+            margin: 10px;
+            vertical-align: top;
+        }
+        .inline-table-test .row {
+            display: table-row;
+        }
+        .inline-table-test .cell {
+            display: table-cell;
+            padding: 8px;
+            font-size: 12px;
+            border: 1px solid #999;
+        }
+        .inline-table-test .table1 .cell:nth-child(1) { background-color: #ffcccc; }
+        .inline-table-test .table1 .cell:nth-child(2) { background-color: #ccffcc; }
+        .inline-table-test .table2 .cell:nth-child(1) { background-color: #ccccff; }
+        .inline-table-test .table2 .cell:nth-child(2) { background-color: #ffffcc; }
+    </style>
+</head>
+<body>
+    <h1>CSS Table Layout Test Cases</h1>
+
+    <div class="test-case basic-layout">
+        <h2>Basic Table Layout</h2>
+        <div class="explanation">Basic table layout with 2 rows and 3 columns using display: table properties.</div>
+        <div class="container">
+            <div class="row">
+                <div class="cell" data-info="table-cell">Cell 1</div>
+                <div class="cell" data-info="table-cell">Cell 2</div>
+                <div class="cell" data-info="table-cell">Cell 3</div>
+            </div>
+            <div class="row">
+                <div class="cell" data-info="table-cell">Cell 4</div>
+                <div class="cell" data-info="table-cell">Cell 5</div>
+                <div class="cell" data-info="table-cell">Cell 6</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case cell-alignment">
+        <h2>Cell Alignment</h2>
+        <div class="explanation">Table cells with different vertical and horizontal alignment properties.</div>
+        <div class="container">
+            <div class="row">
+                <div class="cell" data-info="top/left">Top Left</div>
+                <div class="cell" data-info="middle/center">Middle Center</div>
+                <div class="cell" data-info="bottom/right">Bottom Right</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case fixed-layout">
+        <h2>Fixed Table Layout</h2>
+        <div class="explanation">Table with fixed layout algorithm and predefined column widths.</div>
+        <div class="container">
+            <div class="row">
+                <div class="cell" data-info="100px width">Fixed 100px</div>
+                <div class="cell" data-info="150px width">Fixed 150px</div>
+                <div class="cell" data-info="100px width">Fixed 100px</div>
+            </div>
+            <div class="row">
+                <div class="cell" data-info="fixed width">Cell 4</div>
+                <div class="cell" data-info="fixed width">Cell 5</div>
+                <div class="cell" data-info="fixed width">Cell 6</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case auto-layout">
+        <h2>Auto Table Layout</h2>
+        <div class="explanation">Table with automatic layout algorithm where column widths adjust to content.</div>
+        <div class="container">
+            <div class="row">
+                <div class="cell" data-info="content-based">Short</div>
+                <div class="cell" data-info="content-based">This is a much longer content that will make this column wider</div>
+                <div class="cell" data-info="content-based">Medium content</div>
+            </div>
+            <div class="row">
+                <div class="cell" data-info="auto width">Cell 4</div>
+                <div class="cell" data-info="auto width">Cell 5</div>
+                <div class="cell" data-info="auto width">Cell 6</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case caption-header">
+        <h2>Caption and Header</h2>
+        <div class="explanation">Table with caption and header group showing structured table layout.</div>
+        <div class="container">
+            <div class="caption" data-info="table-caption">Table Caption</div>
+            <div class="header-group">
+                <div class="row">
+                    <div class="cell" data-info="header-group">Header 1</div>
+                    <div class="cell" data-info="header-group">Header 2</div>
+                    <div class="cell" data-info="header-group">Header 3</div>
+                </div>
+            </div>
+            <div class="body-group">
+                <div class="row">
+                    <div class="cell" data-info="body-group">Data 1</div>
+                    <div class="cell" data-info="body-group">Data 2</div>
+                    <div class="cell" data-info="body-group">Data 3</div>
+                </div>
+                <div class="row">
+                    <div class="cell" data-info="body-group">Data 4</div>
+                    <div class="cell" data-info="body-group">Data 5</div>
+                    <div class="cell" data-info="body-group">Data 6</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case border-collapse">
+        <h2>Border Collapse</h2>
+        <div class="explanation">Table with collapsed border model where adjacent borders are merged.</div>
+        <div class="container">
+            <div class="row">
+                <div class="cell" data-info="collapsed borders">Collapsed 1</div>
+                <div class="cell" data-info="collapsed borders">Collapsed 2</div>
+                <div class="cell" data-info="collapsed borders">Collapsed 3</div>
+            </div>
+            <div class="row">
+                <div class="cell" data-info="collapsed borders">Collapsed 4</div>
+                <div class="cell" data-info="collapsed borders">Collapsed 5</div>
+                <div class="cell" data-info="collapsed borders">Collapsed 6</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case empty-cells">
+        <h2>Empty Cells</h2>
+        <div class="explanation">Table with empty cells shown with borders and backgrounds.</div>
+        <div class="container">
+            <div class="row">
+                <div class="cell" data-info="has content">Content</div>
+                <div class="cell" data-info="empty cell"></div>
+                <div class="cell" data-info="has content">Content</div>
+            </div>
+            <div class="row">
+                <div class="cell" data-info="empty cell"></div>
+                <div class="cell" data-info="has content">Content</div>
+                <div class="cell" data-info="empty cell"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case column-groups">
+        <h2>Column Groups</h2>
+        <div class="explanation">Table with column groups for styling and sizing entire columns.</div>
+        <div class="container">
+            <div class="col-group">
+                <div class="col"></div>
+                <div class="col"></div>
+                <div class="col"></div>
+            </div>
+            <div class="row">
+                <div class="cell" data-info="column 1">Col 1</div>
+                <div class="cell" data-info="column 2">Col 2</div>
+                <div class="cell" data-info="column 3">Col 3</div>
+            </div>
+            <div class="row">
+                <div class="cell" data-info="column 1">Data 1</div>
+                <div class="cell" data-info="column 2">Data 2</div>
+                <div class="cell" data-info="column 3">Data 3</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case footer-group">
+        <h2>Footer Group</h2>
+        <div class="explanation">Table with header, body, and footer groups showing proper structural ordering.</div>
+        <div class="container">
+            <div class="header-group">
+                <div class="row">
+                    <div class="cell" data-info="header-group">Header 1</div>
+                    <div class="cell" data-info="header-group">Header 2</div>
+                    <div class="cell" data-info="header-group">Header 3</div>
+                </div>
+            </div>
+            <div class="body-group">
+                <div class="row">
+                    <div class="cell" data-info="body-group">Data 1</div>
+                    <div class="cell" data-info="body-group">Data 2</div>
+                    <div class="cell" data-info="body-group">Data 3</div>
+                </div>
+            </div>
+            <div class="footer-group-elem">
+                <div class="row">
+                    <div class="cell" data-info="footer-group">Footer 1</div>
+                    <div class="cell" data-info="footer-group">Footer 2</div>
+                    <div class="cell" data-info="footer-group">Footer 3</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="test-case inline-table-test">
+        <h2>Inline Table</h2>
+        <div class="explanation">Inline tables that flow with text content and can be vertically aligned.</div>
+        <div class="container">
+            <span>Text before</span>
+            <div class="inline-table table1">
+                <div class="row">
+                    <div class="cell" data-info="inline-table">A1</div>
+                    <div class="cell" data-info="inline-table">A2</div>
+                </div>
+                <div class="row">
+                    <div class="cell" data-info="inline-table">B1</div>
+                    <div class="cell" data-info="inline-table">B2</div>
+                </div>
+            </div>
+            <span>between</span>
+            <div class="inline-table table2">
+                <div class="row">
+                    <div class="cell" data-info="inline-table">C1</div>
+                    <div class="cell" data-info="inline-table">C2</div>
+                </div>
+                <div class="row">
+                    <div class="cell" data-info="inline-table">D1</div>
+                    <div class="cell" data-info="inline-table">D2</div>
+                </div>
+            </div>
+            <span>after</span>
+        </div>
+    </div>
+
+    <div class="test-case html-table-test">
+        <h2>HTML Table with Spans</h2>
+        <div class="explanation">Actual HTML table element with proper colspan and rowspan attributes.</div>
+        <div class="container">
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr>
+                        <th style="padding: 8px; border: 1px solid #666; background-color: #e0e0e0; font-size: 12px;">Header 1</th>
+                        <th style="padding: 8px; border: 1px solid #666; background-color: #e0e0e0; font-size: 12px;">Header 2</th>
+                        <th style="padding: 8px; border: 1px solid #666; background-color: #e0e0e0; font-size: 12px;">Header 3</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td colspan="2" style="padding: 8px; border: 1px solid #666; background-color: #ffccff; text-align: center; font-size: 12px;" data-info="colspan=2">Colspan 2</td>
+                        <td rowspan="2" style="padding: 8px; border: 1px solid #666; background-color: #ccffff; text-align: center; font-size: 12px;" data-info="rowspan=2">Rowspan 2</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ffcccc; text-align: center; font-size: 12px;">Cell 4</td>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ccffcc; text-align: center; font-size: 12px;">Cell 5</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ffcccc; text-align: center; font-size: 12px;">Cell 7</td>
+                        <td colspan="2" style="padding: 8px; border: 1px solid #666; background-color: #ffccff; text-align: center; font-size: 12px;" data-info="colspan=2">Colspan 2</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case width-height-test">
+        <h2>Width and Height Control</h2>
+        <div class="explanation">Table with explicit width and height constraints on columns and rows.</div>
+        <div class="container">
+            <table style="width: 100%; height: 200px; border-collapse: separate; border-spacing: 5px;">
+                <thead>
+                    <tr>
+                        <th style="width: 25%; height: 40px; padding: 8px; border: 1px solid #666; background-color: #e0e0e0; font-size: 12px;" data-info="25% width">25% Width</th>
+                        <th style="width: 50%; height: 40px; padding: 8px; border: 1px solid #666; background-color: #e0e0e0; font-size: 12px;" data-info="50% width">50% Width</th>
+                        <th style="width: 25%; height: 40px; padding: 8px; border: 1px solid #666; background-color: #e0e0e0; font-size: 12px;" data-info="25% width">25% Width</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr style="height: 50px;">
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ffcccc; text-align: center; font-size: 12px;" data-info="50px height">Tall Row</td>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ccffcc; text-align: center; font-size: 12px;" data-info="50px height">Cell 2</td>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ccccff; text-align: center; font-size: 12px;" data-info="50px height">Cell 3</td>
+                    </tr>
+                    <tr style="height: 30px;">
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ffcccc; text-align: center; font-size: 12px;" data-info="30px height">Short Row</td>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ccffcc; text-align: center; font-size: 12px;" data-info="30px height">Cell 5</td>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ccccff; text-align: center; font-size: 12px;" data-info="30px height">Cell 6</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case border-separate-test">
+        <h2>Border Separate with Spacing</h2>
+        <div class="explanation">Table with separate border model and custom horizontal/vertical spacing.</div>
+        <div class="container">
+            <table style="width: 100%; border-collapse: separate; border-spacing: 12px 8px; border: 2px solid #333;">
+                <thead>
+                    <tr>
+                        <th style="padding: 8px; border: 2px solid #666; background-color: #e0e0e0; font-size: 12px;" data-info="12px H-spacing">Header 1</th>
+                        <th style="padding: 8px; border: 2px solid #666; background-color: #e0e0e0; font-size: 12px;" data-info="8px V-spacing">Header 2</th>
+                        <th style="padding: 8px; border: 2px solid #666; background-color: #e0e0e0; font-size: 12px;" data-info="separate borders">Header 3</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="padding: 8px; border: 2px solid #666; background-color: #ffcccc; text-align: center; font-size: 12px;">Cell 1</td>
+                        <td style="padding: 8px; border: 2px solid #666; background-color: #ccffcc; text-align: center; font-size: 12px;">Cell 2</td>
+                        <td style="padding: 8px; border: 2px solid #666; background-color: #ccccff; text-align: center; font-size: 12px;">Cell 3</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case empty-cells-hide-test">
+        <h2>Empty Cells Hidden</h2>
+        <div class="explanation">Table with empty-cells: hide property making empty cells invisible.</div>
+        <div class="container">
+            <table style="width: 100%; border-collapse: separate; border-spacing: 5px; empty-cells: hide;">
+                <thead>
+                    <tr>
+                        <th style="padding: 8px; border: 1px solid #666; background-color: #e0e0e0; font-size: 12px;">Header 1</th>
+                        <th style="padding: 8px; border: 1px solid #666; background-color: #e0e0e0; font-size: 12px;">Header 2</th>
+                        <th style="padding: 8px; border: 1px solid #666; background-color: #e0e0e0; font-size: 12px;">Header 3</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ffcccc; text-align: center; font-size: 12px;" data-info="has content">Content</td>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ccffcc; text-align: center; font-size: 12px;" data-info="empty - hidden"></td>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ccccff; text-align: center; font-size: 12px;" data-info="has content">Content</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ffcccc; text-align: center; font-size: 12px;" data-info="empty - hidden"></td>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ccffcc; text-align: center; font-size: 12px;" data-info="has content">Content</td>
+                        <td style="padding: 8px; border: 1px solid #666; background-color: #ccccff; text-align: center; font-size: 12px;" data-info="empty - hidden"></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case caption-bottom-test">
+        <h2>Bottom Caption</h2>
+        <div class="explanation">Table with caption positioned at the bottom using caption-side property.</div>
+        <div class="container">
+            <table style="width: 100%; border-collapse: collapse;">
+                <caption style="caption-side: bottom; font-weight: bold; padding: 8px; background-color: #f0f0f0; border: 1px solid #ccc; font-size: 12px;" data-info="caption-side: bottom">Bottom Caption</caption>
+                <thead>
+                    <tr>
+                        <th style="padding: 6px; border: 1px solid #666; background-color: #e0e0e0; font-size: 11px;">Col 1</th>
+                        <th style="padding: 6px; border: 1px solid #666; background-color: #e0e0e0; font-size: 11px;">Col 2</th>
+                        <th style="padding: 6px; border: 1px solid #666; background-color: #e0e0e0; font-size: 11px;">Col 3</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="padding: 6px; border: 1px solid #666; background-color: #ffcccc; text-align: center; font-size: 11px;">Data 1</td>
+                        <td style="padding: 6px; border: 1px solid #666; background-color: #ccffcc; text-align: center; font-size: 11px;">Data 2</td>
+                        <td style="padding: 6px; border: 1px solid #666; background-color: #ccccff; text-align: center; font-size: 11px;">Data 3</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 6px; border: 1px solid #666; background-color: #ffcccc; text-align: center; font-size: 11px;">Data 4</td>
+                        <td style="padding: 6px; border: 1px solid #666; background-color: #ccffcc; text-align: center; font-size: 11px;">Data 5</td>
+                        <td style="padding: 6px; border: 1px solid #666; background-color: #ccccff; text-align: center; font-size: 11px;">Data 6</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case vertical-alignment-test">
+        <h2>Vertical Alignment</h2>
+        <div class="explanation">Table cells demonstrating different vertical alignment options.</div>
+        <div class="container">
+            <table style="width: 100%; border-collapse: separate; border-spacing: 3px;">
+                <thead>
+                    <tr>
+                        <th style="padding: 6px; border: 1px solid #666; background-color: #e0e0e0; font-size: 11px;">Top</th>
+                        <th style="padding: 6px; border: 1px solid #666; background-color: #e0e0e0; font-size: 11px;">Middle</th>
+                        <th style="padding: 6px; border: 1px solid #666; background-color: #e0e0e0; font-size: 11px;">Bottom</th>
+                        <th style="padding: 6px; border: 1px solid #666; background-color: #e0e0e0; font-size: 11px;">Baseline</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="height: 60px; padding: 6px; border: 1px solid #666; background-color: #ffcccc; text-align: center; font-size: 11px; vertical-align: top;" data-info="vertical-align: top">Top<br/>Aligned</td>
+                        <td style="height: 60px; padding: 6px; border: 1px solid #666; background-color: #ccffcc; text-align: center; font-size: 11px; vertical-align: middle;" data-info="vertical-align: middle">Middle<br/>Aligned</td>
+                        <td style="height: 60px; padding: 6px; border: 1px solid #666; background-color: #ccccff; text-align: center; font-size: 11px; vertical-align: bottom;" data-info="vertical-align: bottom">Bottom<br/>Aligned</td>
+                        <td style="height: 60px; padding: 6px; border: 1px solid #666; background-color: #ffffcc; text-align: center; font-size: 11px; vertical-align: baseline;" data-info="vertical-align: baseline">Baseline<br/>Text</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case text-overflow-test">
+        <h2>Text Overflow and Wrapping</h2>
+        <div class="explanation">Table cells with different text overflow and wrapping behaviors.</div>
+        <div class="container">
+            <table style="width: 100%; table-layout: fixed; border-collapse: collapse;">
+                <thead>
+                    <tr>
+                        <th style="width: 30%; padding: 6px; border: 1px solid #666; background-color: #e0e0e0; font-size: 11px;">Ellipsis</th>
+                        <th style="width: 35%; padding: 6px; border: 1px solid #666; background-color: #e0e0e0; font-size: 11px;">Word Wrap</th>
+                        <th style="width: 35%; padding: 6px; border: 1px solid #666; background-color: #e0e0e0; font-size: 11px;">Hidden</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="padding: 6px; border: 1px solid #666; background-color: #ffcccc; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" data-info="text-overflow: ellipsis">Very long text that gets truncated with ellipsis</td>
+                        <td style="padding: 6px; border: 1px solid #666; background-color: #ccffcc; font-size: 11px; word-wrap: break-word;" data-info="word-wrap: break-word">Very long text that wraps to multiple lines properly</td>
+                        <td style="padding: 6px; border: 1px solid #666; background-color: #ccccff; font-size: 11px; overflow: hidden;" data-info="overflow: hidden">Very long text that gets completely hidden when overflowing</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</body>
+</html>

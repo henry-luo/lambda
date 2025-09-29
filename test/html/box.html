@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Box Model Layout Test Cases</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h2 {
+            margin-top: 0px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+        .test-case {
+            margin-bottom: 40px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            display: inline-block;
+            width: 400px;
+            vertical-align: top;
+        }
+        .container {
+            border: 2px solid #333;
+            margin-top: 20px;
+            position: relative;
+            background-color: white;
+            padding: 15px;
+        }
+        .box {
+            border: 1px solid #666;
+            text-align: center;
+            position: relative;
+            margin: 10px 0;
+        }
+        .box::after {
+            content: attr(data-info);
+            font-size: 11px;
+            display: block;
+            color: #666;
+            margin-top: 5px;
+        }
+        .explanation {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #e9f7fe;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        /* Width and Height Test */
+        .width-height-test .box-fixed {
+            width: 200px;
+            height: 80px;
+            background-color: #ffcccc;
+            padding: 10px;
+        }
+        .width-height-test .box-percentage {
+            width: 70%;
+            height: 60px;
+            background-color: #ccffcc;
+            padding: 10px;
+        }
+        .width-height-test .box-auto {
+            width: auto;
+            height: 50px;
+            background-color: #ccccff;
+            padding: 10px;
+        }
+        
+        /* Margin Test */
+        .margin-test .margin-uniform {
+            width: 120px;
+            height: 50px;
+            margin: 15px;
+            background-color: #ffcccc;
+            padding: 8px;
+        }
+        .margin-test .margin-auto {
+            width: 150px;
+            height: 50px;
+            margin: 15px auto;
+            background-color: #ccffcc;
+            padding: 8px;
+        }
+        .margin-test .margin-negative {
+            width: 120px;
+            height: 50px;
+            margin: -5px 15px 15px 15px;
+            background-color: #ccccff;
+            padding: 8px;
+        }
+        
+        /* Padding Test */
+        .padding-test .box {
+            width: 150px;
+            margin: 8px 0;
+            background-color: white;
+        }
+        .padding-test .padding-none {
+            padding: 0;
+            background-color: #ffcccc;
+            border: 2px solid #999;
+        }
+        .padding-test .padding-uniform {
+            padding: 15px;
+            background-color: #ccffcc;
+            border: 2px solid #999;
+        }
+        .padding-test .padding-asymmetric {
+            padding: 5px 20px 15px 10px;
+            background-color: #ccccff;
+            border: 2px solid #999;
+        }
+        .padding-test .inner-content {
+            background-color: #f0f0f0;
+            border: 1px dashed #666;
+            padding: 5px;
+        }
+        
+        /* Border Test */
+        .border-test .box {
+            width: 100px;
+            height: 50px;
+            margin: 8px;
+            padding: 8px;
+            display: inline-block;
+            vertical-align: top;
+            background-color: white;
+        }
+        .border-test .border-solid {
+            border: 3px solid #ff0000;
+            background-color: #ffcccc;
+        }
+        .border-test .border-dashed {
+            border: 2px dashed #00aa00;
+            background-color: #ccffcc;
+        }
+        .border-test .border-radius {
+            border: 2px solid #666;
+            border-radius: 8px;
+            background-color: #ccccff;
+        }
+        .border-test .border-mixed {
+            border-top: 2px solid #ff0000;
+            border-right: 3px dashed #00aa00;
+            border-bottom: 2px dotted #0000ff;
+            border-left: 4px double #aa00aa;
+            background-color: #ffffcc;
+        }
+        
+        /* Box-sizing Test */
+        .box-sizing-test .box {
+            width: 160px;
+            height: 60px;
+            margin: 10px;
+            padding: 15px;
+            border: 5px solid #666;
+            text-align: center;
+            line-height: 30px;
+            font-size: 12px;
+        }
+        .box-sizing-test .content-box {
+            box-sizing: content-box;
+            background-color: #ffcccc;
+        }
+        .box-sizing-test .border-box {
+            box-sizing: border-box;
+            background-color: #ccffcc;
+        }
+        
+        /* Text Alignment Test */
+        .text-align-test .box {
+            width: 250px;
+            height: 50px;
+            margin: 8px 0;
+            padding: 12px;
+            background-color: white;
+            line-height: 26px;
+        }
+        .text-align-test .align-left {
+            text-align: left;
+            background-color: #ffcccc;
+        }
+        .text-align-test .align-center {
+            text-align: center;
+            background-color: #ccffcc;
+        }
+        .text-align-test .align-right {
+            text-align: right;
+            background-color: #ccccff;
+        }
+        .text-align-test .align-justify {
+            text-align: justify;
+            background-color: #ffffcc;
+        }
+        
+        /* Vertical Alignment Test */
+        .vertical-align-test .inline-container {
+            line-height: 80px;
+            background-color: #f8f8f8;
+            padding: 10px;
+            margin: 5px 0;
+        }
+        .vertical-align-test .inline-element {
+            display: inline-block;
+            width: 60px;
+            height: 40px;
+            margin: 0 5px;
+            border: 1px solid #666;
+            text-align: center;
+            line-height: 40px;
+            font-size: 11px;
+        }
+        .vertical-align-test .baseline {
+            vertical-align: baseline;
+            background-color: #ffcccc;
+        }
+        .vertical-align-test .top {
+            vertical-align: top;
+            background-color: #ccffcc;
+        }
+        .vertical-align-test .middle {
+            vertical-align: middle;
+            background-color: #ccccff;
+        }
+        .vertical-align-test .bottom {
+            vertical-align: bottom;
+            background-color: #ffffcc;
+        }
+        
+        /* Centering Test */
+        .centering-test .center-container {
+            position: relative;
+            height: 100px;
+            background-color: #f0f0f0;
+            margin: 8px 0;
+            border: 1px dashed #999;
+        }
+        .centering-test .margin-auto-center {
+            width: 120px;
+            height: 40px;
+            margin: 10px auto;
+            background-color: #ffcccc;
+            text-align: center;
+            line-height: 40px;
+        }
+        .centering-test .absolute-center {
+            position: absolute;
+            width: 100px;
+            height: 30px;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #ccffcc;
+            text-align: center;
+            line-height: 30px;
+        }
+        
+        /* Baseline Alignment Test */
+        .baseline-test .baseline-container {
+            line-height: 2;
+            background-color: #f8f8f8;
+            padding: 10px;
+            margin: 5px 0;
+        }
+        .baseline-test .small-text {
+            font-size: 12px;
+            background-color: #ffcccc;
+            vertical-align: baseline;
+        }
+        .baseline-test .medium-text {
+            font-size: 16px;
+            background-color: #ccffcc;
+            vertical-align: baseline;
+        }
+        .baseline-test .large-text {
+            font-size: 20px;
+            background-color: #ccccff;
+            vertical-align: baseline;
+        }
+        .baseline-test .baseline-indicator {
+            border-bottom: 2px solid red;
+            display: inline;
+        }
+        
+        /* Line Height Test */
+        .line-height-test .text-sample {
+            width: 280px;
+            border: 1px solid #ccc;
+            padding: 8px;
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .line-height-test .line-height-1 {
+            line-height: 1;
+            background-color: #ffcccc;
+        }
+        .line-height-test .line-height-1-5 {
+            line-height: 1.5;
+            background-color: #ccffcc;
+        }
+        .line-height-test .line-height-2 {
+            line-height: 2;
+            background-color: #ccccff;
+        }
+        
+        /* Display Types Test */
+        .display-test .element {
+            margin: 3px;
+            padding: 8px;
+            border: 1px solid #666;
+            background-color: #f0f0f0;
+            font-size: 12px;
+        }
+        .display-test .block {
+            display: block;
+            background-color: #ffcccc;
+            width: 150px;
+        }
+        .display-test .inline {
+            display: inline;
+            background-color: #ccffcc;
+        }
+        .display-test .inline-block {
+            display: inline-block;
+            width: 80px;
+            height: 30px;
+            background-color: #ccccff;
+            text-align: center;
+            line-height: 30px;
+        }
+        
+        /* Overflow Test */
+        .overflow-test .overflow-box {
+            width: 120px;
+            height: 60px;
+            border: 2px solid #666;
+            margin: 8px;
+            padding: 5px;
+            display: inline-block;
+            vertical-align: top;
+            font-size: 11px;
+        }
+        .overflow-test .overflow-content {
+            width: 150px;
+            height: 80px;
+            background-color: #ffcccc;
+            border: 1px solid #999;
+            padding: 3px;
+        }
+        .overflow-test .overflow-visible {
+            overflow: visible;
+            background-color: #ffffcc;
+        }
+        .overflow-test .overflow-hidden {
+            overflow: hidden;
+            background-color: #ffccff;
+        }
+        .overflow-test .overflow-scroll {
+            overflow: scroll;
+            background-color: #ccffff;
+        }
+        
+        /* Nested Boxes Test */
+        .nested-test .outer-box {
+            width: 280px;
+            height: 120px;
+            padding: 15px;
+            border: 3px solid #666;
+            background-color: #ffcccc;
+            position: relative;
+        }
+        .nested-test .middle-box {
+            width: 80%;
+            height: 70%;
+            padding: 10px;
+            border: 2px solid #333;
+            background-color: #ccffcc;
+            position: relative;
+        }
+        .nested-test .inner-box {
+            width: 60%;
+            height: 50%;
+            padding: 5px;
+            border: 1px solid #000;
+            background-color: #ccccff;
+            text-align: center;
+            font-size: 10px;
+            line-height: 1.2;
+        }
+    </style>
+</head>
+<body>
+    <h1>Box Model Layout Test Cases</h1>
+    
+    <div class="test-case width-height-test">
+        <h2>Width and Height</h2>
+        <div class="explanation">Basic width and height properties with fixed, percentage, and auto values.</div>
+        <div class="container">
+            <div class="box box-fixed" data-info="width: 200px; height: 80px">Fixed Dimensions</div>
+            <div class="box box-percentage" data-info="width: 70%; height: 60px">Percentage Width</div>
+            <div class="box box-auto" data-info="width: auto; height: 50px">Auto Width</div>
+        </div>
+    </div>
+    
+    <div class="test-case margin-test">
+        <h2>Margins</h2>
+        <div class="explanation">Margin properties with uniform, auto centering, and negative values.</div>
+        <div class="container">
+            <div class="box margin-uniform" data-info="margin: 15px">Uniform Margin</div>
+            <div class="box margin-auto" data-info="margin: 15px auto">Auto Center</div>
+            <div class="box margin-negative" data-info="margin: -5px 15px 15px 15px">Negative Top</div>
+        </div>
+    </div>
+    
+    <div class="test-case padding-test">
+        <h2>Padding</h2>
+        <div class="explanation">Padding properties with various values affecting internal spacing.</div>
+        <div class="container">
+            <div class="box padding-none" data-info="padding: 0">
+                <div class="inner-content">No Padding</div>
+            </div>
+            <div class="box padding-uniform" data-info="padding: 15px">
+                <div class="inner-content">Uniform Padding</div>
+            </div>
+            <div class="box padding-asymmetric" data-info="padding: 5px 20px 15px 10px">
+                <div class="inner-content">Asymmetric</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case border-test">
+        <h2>Borders</h2>
+        <div class="explanation">Border styles, widths, and border-radius properties.</div>
+        <div class="container">
+            <div class="box border-solid" data-info="border: 3px solid">Solid</div>
+            <div class="box border-dashed" data-info="border: 2px dashed">Dashed</div>
+            <div class="box border-radius" data-info="border-radius: 8px">Radius</div>
+            <div class="box border-mixed" data-info="mixed borders">Mixed</div>
+        </div>
+    </div>
+    
+    <div class="test-case box-sizing-test">
+        <h2>Box Sizing</h2>
+        <div class="explanation">Content-box vs border-box behavior with same width values.</div>
+        <div class="container">
+            <div class="box content-box" data-info="box-sizing: content-box">Content Box</div>
+            <div class="box border-box" data-info="box-sizing: border-box">Border Box</div>
+        </div>
+    </div>
+    
+    <div class="test-case text-align-test">
+        <h2>Text Alignment</h2>
+        <div class="explanation">Horizontal text alignment using text-align property.</div>
+        <div class="container">
+            <div class="box align-left" data-info="text-align: left">Left aligned text content</div>
+            <div class="box align-center" data-info="text-align: center">Center aligned text</div>
+            <div class="box align-right" data-info="text-align: right">Right aligned text</div>
+            <div class="box align-justify" data-info="text-align: justify">Justified text distributes evenly</div>
+        </div>
+    </div>
+    
+    <div class="test-case vertical-align-test">
+        <h2>Vertical Alignment</h2>
+        <div class="explanation">Vertical alignment of inline and inline-block elements.</div>
+        <div class="container">
+            <div class="inline-container">
+                <span class="inline-element baseline" data-info="baseline">Base</span>
+                <span class="inline-element top" data-info="top">Top</span>
+                <span class="inline-element middle" data-info="middle">Mid</span>
+                <span class="inline-element bottom" data-info="bottom">Bot</span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case centering-test">
+        <h2>Centering Techniques</h2>
+        <div class="explanation">Various methods for centering elements horizontally and vertically.</div>
+        <div class="container">
+            <div class="center-container">
+                <div class="margin-auto-center" data-info="margin: auto">Margin Auto</div>
+            </div>
+            <div class="center-container">
+                <div class="absolute-center" data-info="absolute + transform">Absolute</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case baseline-test">
+        <h2>Baseline Alignment</h2>
+        <div class="explanation">Text baseline alignment with mixed font sizes.</div>
+        <div class="container">
+            <div class="baseline-container">
+                <span class="small-text">Small</span>
+                <span class="medium-text">Medium</span>
+                <span class="large-text">Large</span>
+                <span class="baseline-indicator">baseline</span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case line-height-test">
+        <h2>Line Height</h2>
+        <div class="explanation">Line-height property effects on text spacing and rhythm.</div>
+        <div class="container">
+            <div class="text-sample line-height-1" data-info="line-height: 1">
+                Tight spacing with line-height 1.0
+            </div>
+            <div class="text-sample line-height-1-5" data-info="line-height: 1.5">
+                Comfortable spacing with line-height 1.5
+            </div>
+            <div class="text-sample line-height-2" data-info="line-height: 2">
+                Double spacing with line-height 2.0
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case display-test">
+        <h2>Display Types</h2>
+        <div class="explanation">Various display property values and their layout behavior.</div>
+        <div class="container">
+            <div class="element block" data-info="display: block">Block Element</div>
+            <span class="element inline" data-info="display: inline">Inline 1</span>
+            <span class="element inline" data-info="display: inline">Inline 2</span>
+            <div class="element inline-block" data-info="inline-block">IB 1</div>
+            <div class="element inline-block" data-info="inline-block">IB 2</div>
+        </div>
+    </div>
+    
+    <div class="test-case overflow-test">
+        <h2>Overflow Behavior</h2>
+        <div class="explanation">Overflow property controls how content exceeding container bounds is handled.</div>
+        <div class="container">
+            <div class="overflow-box overflow-visible" data-info="overflow: visible">
+                <div class="overflow-content">Overflows visibly</div>
+            </div>
+            <div class="overflow-box overflow-hidden" data-info="overflow: hidden">
+                <div class="overflow-content">Content clipped</div>
+            </div>
+            <div class="overflow-box overflow-scroll" data-info="overflow: scroll">
+                <div class="overflow-content">Scrollable content</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case nested-test">
+        <h2>Nested Box Models</h2>
+        <div class="explanation">Complex nested scenarios with percentage dimensions and inheritance.</div>
+        <div class="container">
+            <div class="outer-box" data-info="280×120px + padding + border">
+                <div class="middle-box" data-info="80% × 70% of parent">
+                    <div class="inner-box" data-info="60% × 50% of parent">
+                        Nested Content
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+</body>
+</html>

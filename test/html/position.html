@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSS Positioning Layout Test Cases</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h2 {
+            margin-top: 0px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+        .test-case {
+            margin-bottom: 40px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            display: inline-block;
+            width: 400px;
+            vertical-align: top;
+        }
+        .container {
+            border: 2px solid #333;
+            margin-top: 20px;
+            position: relative;
+            width: 400px;
+            height: 300px;
+            padding: 10px;
+            background-color: #f8f8f8;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            position: relative;
+            border: 1px solid #999;
+        }
+        .item:nth-child(1) { background-color: #ffcccc; }
+        .item:nth-child(2) { background-color: #ccffcc; }
+        .item:nth-child(3) { background-color: #ccccff; }
+        .item:nth-child(4) { background-color: #ffffcc; }
+        .item:nth-child(5) { background-color: #ffccff; }
+        .item::after {
+            content: attr(data-info);
+            font-size: 12px;
+            display: block;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .explanation {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #e9f7fe;
+            border-radius: 4px;
+        }
+        
+        /* Float Left Test */
+        .float-left-test .float-left {
+            float: left;
+            width: 120px;
+            height: 80px;
+            background-color: #ffcccc;
+            margin: 10px;
+            padding: 10px;
+            text-align: center;
+        }
+        .float-left-test .content {
+            background-color: #f0f0f0;
+            padding: 10px;
+            line-height: 1.5;
+        }
+        
+        /* Float Right Test */
+        .float-right-test .float-right {
+            float: right;
+            width: 120px;
+            height: 80px;
+            background-color: #ccffcc;
+            margin: 10px;
+            padding: 10px;
+            text-align: center;
+        }
+        .float-right-test .content {
+            background-color: #f0f0f0;
+            padding: 10px;
+            line-height: 1.5;
+        }
+        
+        /* Float Both Test */
+        .float-both-test .float-left {
+            float: left;
+            width: 100px;
+            height: 80px;
+            background-color: #ffcccc;
+            margin: 10px;
+            padding: 10px;
+            text-align: center;
+        }
+        .float-both-test .float-right {
+            float: right;
+            width: 100px;
+            height: 80px;
+            background-color: #ccffcc;
+            margin: 10px;
+            padding: 10px;
+            text-align: center;
+        }
+        .float-both-test .content {
+            background-color: #f0f0f0;
+            padding: 10px;
+            line-height: 1.5;
+        }
+        
+        /* Clear Left Test */
+        .clear-left-test .float-left {
+            float: left;
+            width: 120px;
+            height: 60px;
+            background-color: #ffcccc;
+            margin: 5px;
+            padding: 10px;
+            text-align: center;
+        }
+        .clear-left-test .clear-left {
+            clear: left;
+            background-color: #ccccff;
+            padding: 10px;
+            margin: 5px;
+        }
+        .clear-left-test .normal-flow {
+            background-color: #f0f0f0;
+            padding: 10px;
+            margin: 5px;
+        }
+        
+        /* Clear Right Test */
+        .clear-right-test .float-right {
+            float: right;
+            width: 120px;
+            height: 60px;
+            background-color: #ccffcc;
+            margin: 5px;
+            padding: 10px;
+            text-align: center;
+        }
+        .clear-right-test .clear-right {
+            clear: right;
+            background-color: #ccccff;
+            padding: 10px;
+            margin: 5px;
+        }
+        .clear-right-test .normal-flow {
+            background-color: #f0f0f0;
+            padding: 10px;
+            margin: 5px;
+        }
+        
+        /* Clear Both Test */
+        .clear-both-test .float-left {
+            float: left;
+            width: 100px;
+            height: 60px;
+            background-color: #ffcccc;
+            margin: 5px;
+            padding: 10px;
+            text-align: center;
+        }
+        .clear-both-test .float-right {
+            float: right;
+            width: 100px;
+            height: 60px;
+            background-color: #ccffcc;
+            margin: 5px;
+            padding: 10px;
+            text-align: center;
+        }
+        .clear-both-test .clear-both {
+            clear: both;
+            background-color: #ccccff;
+            padding: 10px;
+            margin: 5px;
+        }
+        .clear-both-test .normal-flow {
+            background-color: #f0f0f0;
+            padding: 10px;
+            margin: 5px;
+        }
+        
+        /* Absolute Basic Test */
+        .absolute-basic-test .absolute-element {
+            position: absolute;
+            top: 50px;
+            left: 50px;
+            width: 120px;
+            height: 80px;
+            background-color: #ffcccc;
+            padding: 10px;
+            text-align: center;
+            border: 1px solid #999;
+        }
+        .absolute-basic-test .normal-content {
+            background-color: #f0f0f0;
+            padding: 10px;
+            line-height: 1.5;
+        }
+        
+        /* Absolute Corners Test */
+        .absolute-corners-test .top-left {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            width: 80px;
+            height: 60px;
+            background-color: #ffcccc;
+            text-align: center;
+            padding: 5px;
+        }
+        .absolute-corners-test .top-right {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 80px;
+            height: 60px;
+            background-color: #ccffcc;
+            text-align: center;
+            padding: 5px;
+        }
+        .absolute-corners-test .bottom-left {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            width: 80px;
+            height: 60px;
+            background-color: #ccccff;
+            text-align: center;
+            padding: 5px;
+        }
+        .absolute-corners-test .bottom-right {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            width: 80px;
+            height: 60px;
+            background-color: #ffffcc;
+            text-align: center;
+            padding: 5px;
+        }
+        .absolute-corners-test .center-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #ffccff;
+            padding: 10px;
+            text-align: center;
+        }
+        
+        /* Absolute Z-Index Test */
+        .absolute-zindex-test .layer-1 {
+            position: absolute;
+            top: 50px;
+            left: 50px;
+            width: 150px;
+            height: 100px;
+            background-color: #ffcccc;
+            z-index: 1;
+            padding: 10px;
+        }
+        .absolute-zindex-test .layer-2 {
+            position: absolute;
+            top: 80px;
+            left: 80px;
+            width: 150px;
+            height: 100px;
+            background-color: #ccffcc;
+            z-index: 2;
+            padding: 10px;
+        }
+        .absolute-zindex-test .layer-3 {
+            position: absolute;
+            top: 110px;
+            left: 110px;
+            width: 150px;
+            height: 100px;
+            background-color: #ccccff;
+            z-index: 3;
+            padding: 10px;
+        }
+        .absolute-zindex-test .behind {
+            position: absolute;
+            top: 30px;
+            left: 120px;
+            width: 100px;
+            height: 80px;
+            background-color: #ffffcc;
+            z-index: 0;
+            padding: 10px;
+        }
+        
+        /* Relative Basic Test */
+        .relative-basic-test .normal {
+            background-color: #f0f0f0;
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #ccc;
+        }
+        .relative-basic-test .relative-element {
+            position: relative;
+            top: 20px;
+            left: 30px;
+            background-color: #ffcccc;
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #999;
+        }
+        
+        /* Relative Offsets Test */
+        .relative-offsets-test .normal {
+            background-color: #f0f0f0;
+            padding: 10px;
+            margin: 15px 5px;
+            border: 1px solid #ccc;
+        }
+        .relative-offsets-test .relative-negative {
+            position: relative;
+            top: -10px;
+            left: -20px;
+            background-color: #ccffcc;
+            padding: 10px;
+            margin: 15px 5px;
+            border: 1px solid #999;
+        }
+        .relative-offsets-test .relative-positive {
+            position: relative;
+            top: 15px;
+            right: 25px;
+            background-color: #ccccff;
+            padding: 10px;
+            margin: 15px 5px;
+            border: 1px solid #999;
+        }
+        
+        /* Relative Containing Block Test */
+        .relative-containing-test .relative-container {
+            position: relative;
+            width: 300px;
+            height: 200px;
+            background-color: #e0e0e0;
+            border: 2px dashed #666;
+            margin: 20px;
+            padding: 10px;
+        }
+        .relative-containing-test .absolute-child {
+            position: absolute;
+            top: 30px;
+            right: 20px;
+            width: 100px;
+            height: 60px;
+            background-color: #ffcccc;
+            border: 1px solid #999;
+            padding: 5px;
+            text-align: center;
+        }
+        .relative-containing-test .normal-child {
+            background-color: #ccffcc;
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #999;
+        }
+        
+        /* Float Relative Combo Test */
+        .float-relative-combo-test .float-relative {
+            float: left;
+            position: relative;
+            top: 20px;
+            left: 15px;
+            width: 120px;
+            height: 80px;
+            background-color: #ffcccc;
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #999;
+            text-align: center;
+        }
+        .float-relative-combo-test .content {
+            background-color: #f0f0f0;
+            padding: 10px;
+            line-height: 1.5;
+        }
+        .float-relative-combo-test .another-float {
+            float: right;
+            position: relative;
+            top: -10px;
+            right: 20px;
+            width: 100px;
+            height: 60px;
+            background-color: #ccffcc;
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #999;
+            text-align: center;
+        }
+        
+        /* Nested Complex Test */
+        .nested-complex-test .float-left {
+            float: left;
+            width: 180px;
+            height: 120px;
+            background-color: #e0e0e0;
+            border: 2px dashed #666;
+            margin: 5px;
+            padding: 5px;
+        }
+        .nested-complex-test .relative-container {
+            position: relative;
+            width: 160px;
+            height: 80px;
+            background-color: #ccffcc;
+            border: 1px solid #999;
+            padding: 5px;
+            margin: 5px;
+        }
+        .nested-complex-test .absolute-child {
+            position: absolute;
+            top: 10px;
+            right: -20px;
+            width: 60px;
+            height: 40px;
+            background-color: #ffcccc;
+            border: 1px solid #666;
+            text-align: center;
+            font-size: 12px;
+            padding: 2px;
+        }
+        .nested-complex-test .content {
+            background-color: #f0f0f0;
+            padding: 10px;
+            line-height: 1.5;
+            clear: left;
+        }
+        
+        /* All Types Combined Test */
+        .all-types-test .static-element {
+            background-color: #f0f0f0;
+            padding: 8px;
+            margin: 3px;
+            border: 1px solid #ccc;
+        }
+        .all-types-test .relative-element {
+            position: relative;
+            top: 10px;
+            left: 20px;
+            background-color: #ccffcc;
+            padding: 8px;
+            margin: 3px;
+            border: 1px solid #999;
+        }
+        .all-types-test .float-element {
+            float: right;
+            width: 80px;
+            height: 60px;
+            background-color: #ffccff;
+            padding: 5px;
+            margin: 3px;
+            border: 1px solid #999;
+            font-size: 12px;
+            text-align: center;
+        }
+        .all-types-test .absolute-element {
+            position: absolute;
+            top: 100px;
+            left: 100px;
+            width: 120px;
+            height: 40px;
+            background-color: #ffffcc;
+            border: 1px solid #666;
+            padding: 5px;
+            text-align: center;
+            z-index: 10;
+        }
+        .all-types-test .clear-element {
+            clear: both;
+            background-color: #ccccff;
+            padding: 8px;
+            margin: 3px;
+            border: 1px solid #999;
+        }
+    </style>
+</head>
+<body>
+    <h1>CSS Positioning Layout Test Cases</h1>
+    
+    <div class="test-case float-left-test">
+        <h2>Float Left</h2>
+        <div class="explanation">Basic float left with text content wrapping around the floated element.</div>
+        <div class="container">
+            <div class="float-left" data-info="float: left">Floated Left</div>
+            <div class="content">
+                This content should wrap around the floated element. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case float-right-test">
+        <h2>Float Right</h2>
+        <div class="explanation">Basic float right with text content wrapping around the floated element.</div>
+        <div class="container">
+            <div class="float-right" data-info="float: right">Floated Right</div>
+            <div class="content">
+                This content should wrap around the floated element on the right side. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case float-both-test">
+        <h2>Float Both Sides</h2>
+        <div class="explanation">Text content flowing between left and right floated elements.</div>
+        <div class="container">
+            <div class="float-left" data-info="float: left">Left</div>
+            <div class="float-right" data-info="float: right">Right</div>
+            <div class="content">
+                This content flows between two floated elements, one on the left and one on the right. The text should wrap around both floated elements creating a narrow channel in the center.
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case clear-left-test">
+        <h2>Clear Left</h2>
+        <div class="explanation">Element with clear:left moves below all left-floated elements.</div>
+        <div class="container">
+            <div class="float-left" data-info="float: left">Float 1</div>
+            <div class="float-left" data-info="float: left">Float 2</div>
+            <div class="normal-flow">This element flows normally around floats.</div>
+            <div class="clear-left" data-info="clear: left">This element clears left floats and appears below them.</div>
+        </div>
+    </div>
+    
+    <div class="test-case clear-right-test">
+        <h2>Clear Right</h2>
+        <div class="explanation">Element with clear:right moves below all right-floated elements.</div>
+        <div class="container">
+            <div class="float-right" data-info="float: right">Float 1</div>
+            <div class="float-right" data-info="float: right">Float 2</div>
+            <div class="normal-flow">This element flows normally around floats.</div>
+            <div class="clear-right" data-info="clear: right">This element clears right floats and appears below them.</div>
+        </div>
+    </div>
+    
+    <div class="test-case clear-both-test">
+        <h2>Clear Both</h2>
+        <div class="explanation">Element with clear:both moves below all floated elements.</div>
+        <div class="container">
+            <div class="float-left" data-info="float: left">Left</div>
+            <div class="float-right" data-info="float: right">Right</div>
+            <div class="normal-flow">This flows between floated elements.</div>
+            <div class="clear-both" data-info="clear: both">This element clears both left and right floats.</div>
+        </div>
+    </div>
+    
+    <div class="test-case absolute-basic-test">
+        <h2>Absolute Position Basic</h2>
+        <div class="explanation">Basic absolute positioning with top and left offsets relative to positioned container.</div>
+        <div class="container">
+            <div class="normal-content">
+                This is normal document flow content that will be behind the absolutely positioned element.
+            </div>
+            <div class="absolute-element" data-info="position: absolute; top: 50px; left: 50px">Absolute</div>
+            <div class="normal-content">
+                More normal content. The absolutely positioned element is removed from normal flow.
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case absolute-corners-test">
+        <h2>Absolute Position All Corners</h2>
+        <div class="explanation">Absolute positioning in all four corners and center of container.</div>
+        <div class="container">
+            <div class="top-left" data-info="top: 10px; left: 10px">Top Left</div>
+            <div class="top-right" data-info="top: 10px; right: 10px">Top Right</div>
+            <div class="bottom-left" data-info="bottom: 10px; left: 10px">Bottom Left</div>
+            <div class="bottom-right" data-info="bottom: 10px; right: 10px">Bottom Right</div>
+            <div class="center-content" data-info="top: 50%; left: 50%; transform: translate(-50%, -50%)">Centered</div>
+        </div>
+    </div>
+    
+    <div class="test-case absolute-zindex-test">
+        <h2>Absolute Position Z-Index</h2>
+        <div class="explanation">Multiple overlapping absolutely positioned elements with different z-index values.</div>
+        <div class="container">
+            <div class="layer-1" data-info="z-index: 1">Layer 1 (z:1)</div>
+            <div class="layer-2" data-info="z-index: 2">Layer 2 (z:2)</div>
+            <div class="layer-3" data-info="z-index: 3">Layer 3 (z:3)</div>
+            <div class="behind" data-info="z-index: 0">Behind (z:0)</div>
+        </div>
+    </div>
+    
+    <div class="test-case relative-basic-test">
+        <h2>Relative Position Basic</h2>
+        <div class="explanation">Basic relative positioning with top and left offsets while preserving original space.</div>
+        <div class="container">
+            <div class="normal">Element 1 - Normal flow</div>
+            <div class="relative-element" data-info="position: relative; top: 20px; left: 30px">Element 2 - Relative positioned (offset 20px down, 30px right)</div>
+            <div class="normal">Element 3 - Normal flow (original space of relative element is preserved)</div>
+        </div>
+    </div>
+    
+    <div class="test-case relative-offsets-test">
+        <h2>Relative Position Negative Offsets</h2>
+        <div class="explanation">Relative positioning with negative and mixed direction offsets.</div>
+        <div class="container">
+            <div class="normal">Element 1 - Normal</div>
+            <div class="relative-negative" data-info="top: -10px; left: -20px">Element 2 - Negative offsets (up 10px, left 20px)</div>
+            <div class="normal">Element 3 - Normal</div>
+            <div class="relative-positive" data-info="top: 15px; right: 25px">Element 4 - Mixed offsets (down 15px, right 25px)</div>
+        </div>
+    </div>
+    
+    <div class="test-case relative-containing-test">
+        <h2>Relative Position as Containing Block</h2>
+        <div class="explanation">Relative positioned element serving as containing block for absolute child.</div>
+        <div class="container">
+            <div class="relative-container" data-info="position: relative">
+                Relative Container (establishes containing block)
+                <div class="normal-child">Normal child element</div>
+                <div class="absolute-child" data-info="position: absolute; top: 30px; right: 20px">Absolute child positioned relative to this container</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case float-relative-combo-test">
+        <h2>Float with Relative Positioning</h2>
+        <div class="explanation">Combination of float and relative positioning on the same elements.</div>
+        <div class="container">
+            <div class="float-relative" data-info="float: left; position: relative; top: 20px; left: 15px">Float Left + Relative</div>
+            <div class="another-float" data-info="float: right; position: relative; top: -10px; right: 20px">Float Right + Relative</div>
+            <div class="content">
+                This content flows around the floated elements that also have relative positioning applied. The relative positioning moves the floated elements from their normal float position.
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case nested-complex-test">
+        <h2>Complex Nested Positioning</h2>
+        <div class="explanation">Complex nested positioning: absolute within relative within float, with clear.</div>
+        <div class="container">
+            <div class="float-left" data-info="float: left">
+                Floated Container
+                <div class="relative-container" data-info="position: relative">
+                    Relative
+                    <div class="absolute-child" data-info="position: absolute; top: 10px; right: -20px">Abs</div>
+                </div>
+            </div>
+            <div class="content">
+                Content below the floated container with nested positioning. The absolute element is positioned relative to the relative container within the float.
+            </div>
+        </div>
+    </div>
+    
+    <div class="test-case all-types-test">
+        <h2>All Position Types Together</h2>
+        <div class="explanation">Comprehensive test combining static, relative, absolute, float, and clear positioning.</div>
+        <div class="container">
+            <div class="static-element" data-info="position: static">Static (normal flow)</div>
+            <div class="float-element" data-info="float: right">Float Right</div>
+            <div class="relative-element" data-info="position: relative; top: 10px; left: 20px">Relative positioned</div>
+            <div class="absolute-element" data-info="position: absolute; top: 100px; left: 100px; z-index: 10">Absolute overlay</div>
+            <div class="static-element" data-info="position: static">More static content that flows around float</div>
+            <div class="clear-element" data-info="clear: both">Cleared element (below all floats)</div>
+        </div>
+    </div>
+</body>
+</html>
