@@ -267,6 +267,11 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         lxb_html_element_t *elmt = node->as_element();
         DisplayValue display = resolve_display(elmt);
         
+        // Debug: print display values for all elements to diagnose grid issue
+        printf("DEBUG: Element %s - outer=%d, inner=%d (GRID=%d, FLEX=%d, FLOW=%d)\n", 
+               node->name(), display.outer, display.inner, 
+               LXB_CSS_VALUE_GRID, LXB_CSS_VALUE_FLEX, LXB_CSS_VALUE_FLOW);
+        
         // Debug: print display values for table elements
         if (node->tag() == LXB_TAG_TABLE) {
             printf("DEBUG: TABLE element - outer=%d, inner=%d (LXB_CSS_VALUE_TABLE=%d)\n", 
@@ -277,6 +282,13 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         if (display.inner == LXB_CSS_VALUE_FLEX) {
             // This element is a flex container - route to flex layout
             layout_block(lycon, node, display); // Block layout will handle flex containers
+            return;
+        }
+        // Check for grid container
+        if (display.inner == LXB_CSS_VALUE_GRID) {
+            printf("DEBUG: GRID container detected! Routing to layout_block\n");
+            // This element is a grid container - route to grid layout
+            layout_block(lycon, node, display); // Block layout will handle grid containers
             return;
         }
         // Check for table formatting context root (Phase 1)

@@ -107,12 +107,34 @@ void cleanup_grid_container(ViewBlock* container) {
 
 // Main grid layout algorithm entry point
 void layout_grid_container_new(LayoutContext* lycon, ViewBlock* container) {
+    printf("DEBUG: layout_grid_container_new called with container=%p\n", container);
+    if (!container) {
+        printf("DEBUG: Early return - container is NULL\n");
+        return;
+    }
+    if (!container->embed) {
+        printf("DEBUG: Early return - container->embed is NULL\n");
+        return;
+    }
+    if (!container->embed->grid_container) {
+        printf("DEBUG: Early return - container->embed->grid_container is NULL\n");
+        return;
+    }
     if (!container || !container->embed || !container->embed->grid_container) {
         log_debug("Early return - missing container or grid properties\n");
         return;
     }
     
     GridContainerLayout* grid_layout = container->embed->grid_container;
+    
+    printf("DEBUG: Grid container found - template_columns=%p, template_rows=%p\n", 
+           grid_layout->grid_template_columns, grid_layout->grid_template_rows);
+    if (grid_layout->grid_template_columns) {
+        printf("DEBUG: Template columns track count: %d\n", grid_layout->grid_template_columns->track_count);
+    }
+    if (grid_layout->grid_template_rows) {
+        printf("DEBUG: Template rows track count: %d\n", grid_layout->grid_template_rows->track_count);
+    }
     
     log_debug("GRID START - container: %dx%d at (%d,%d)\n", 
               container->width, container->height, container->x, container->y);
@@ -140,20 +162,25 @@ void layout_grid_container_new(LayoutContext* lycon, ViewBlock* container) {
               container->width, container->height);
     
     // Phase 1: Collect grid items
+    printf("DEBUG: Phase 1 - Collecting grid items\n");
     ViewBlock** items;
     int item_count = collect_grid_items(container, &items);
     
+    printf("DEBUG: GRID - collected %d items\n", item_count);
     log_debug("GRID - collected %d items\n", item_count);
     
     if (item_count == 0) {
+        printf("DEBUG: No grid items found, returning early\n");
         log_debug("No grid items found\n");
         return;
     }
     
     // Phase 2: Resolve grid template areas
+    printf("DEBUG: Phase 2 - Resolving grid template areas\n");
     resolve_grid_template_areas(grid_layout);
     
     // Phase 3: Place grid items (with dense packing if enabled)
+    printf("DEBUG: Phase 3 - Placing grid items\n");
     if (grid_layout->is_dense_packing) {
         auto_place_grid_items_dense(grid_layout);
     } else {
@@ -161,15 +188,19 @@ void layout_grid_container_new(LayoutContext* lycon, ViewBlock* container) {
     }
     
     // Phase 4: Determine grid size
+    printf("DEBUG: Phase 4 - Determining grid size\n");
     determine_grid_size(grid_layout);
     
     // Phase 5: Resolve track sizes
+    printf("DEBUG: Phase 5 - Resolving track sizes\n");
     resolve_track_sizes(grid_layout, container);
     
     // Phase 6: Position grid items
+    printf("DEBUG: Phase 6 - Positioning grid items\n");
     position_grid_items(grid_layout, container);
     
     // Phase 7: Align grid items
+    printf("DEBUG: Phase 7 - Aligning grid items\n");
     align_grid_items(grid_layout);
     
     // Debug: Final item positions

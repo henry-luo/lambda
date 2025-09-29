@@ -174,11 +174,16 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 log_debug("Setting up grid container for %s\n", block->node->name());
                 
                 // Initialize grid container if not already done
+                printf("DEBUG: Checking grid container initialization\n");
                 if (!block->embed) {
+                    printf("DEBUG: Creating embed prop\n");
                     block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
                 }
                 if (!block->embed->grid_container) {
+                    printf("DEBUG: Initializing grid container\n");
                     init_grid_container(block);
+                } else {
+                    printf("DEBUG: Grid container already exists\n");
                 }
                 
                 // Process DOM children into View objects first
@@ -193,7 +198,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 } while (child);
                 
                 // Now run the grid layout algorithm with the processed children
+                printf("DEBUG: About to call layout_grid_container_new\n");
                 layout_grid_container_new(lycon, block);
+                printf("DEBUG: Finished layout_grid_container_new\n");
             }
             else {
                 log_debug("unknown display type\n");

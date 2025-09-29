@@ -444,10 +444,13 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
         const lxb_css_rule_declaration_t* display_decl = 
             lxb_dom_element_style_by_id((lxb_dom_element_t*)elmt, LXB_CSS_PROPERTY_DISPLAY);
         if (display_decl) {
+            printf("DEBUG: CSS display found - a=%d, b=%d (GRID=%d)\n", 
+                   display_decl->u.display->a, display_decl->u.display->b, LXB_CSS_VALUE_GRID);
             log_debug("display_value: %s, %s\n", lxb_css_value_by_id(display_decl->u.display->a)->name, 
                 lxb_css_value_by_id(display_decl->u.display->b)->name);
             if (display_decl->u.display->b == LXB_CSS_VALUE__UNDEF) {
                 // map single display value
+                printf("DEBUG: Mapping single display value: %d\n", display_decl->u.display->a);
                 switch (display_decl->u.display->a) {
                     case LXB_CSS_VALUE_BLOCK:
                         outer_display = LXB_CSS_VALUE_BLOCK;
@@ -470,6 +473,12 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
                         inner_display = LXB_CSS_VALUE_FLEX;
                         break;
                     case LXB_CSS_VALUE_GRID:
+                        printf("DEBUG: GRID case matched! Setting inner=GRID\n");
+                        outer_display = LXB_CSS_VALUE_BLOCK;
+                        inner_display = LXB_CSS_VALUE_GRID;
+                        break;
+                    case 246:  // Actual parsed value for 'grid'
+                        printf("DEBUG: GRID case matched (value 246)! Setting inner=GRID\n");
                         outer_display = LXB_CSS_VALUE_BLOCK;
                         inner_display = LXB_CSS_VALUE_GRID;
                         break;
@@ -498,6 +507,7 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
                         inner_display = LXB_CSS_VALUE_TABLE_CELL;
                         break;
                     default:  // unknown display
+                        printf("DEBUG: Unknown display value %d, defaulting to inline flow\n", display_decl->u.display->a);
                         outer_display = LXB_CSS_VALUE_INLINE;
                         inner_display = LXB_CSS_VALUE_FLOW;
                 }

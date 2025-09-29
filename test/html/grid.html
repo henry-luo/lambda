@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSS Grid Layout Test Cases</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h2 {
+            margin-top: 0px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+        .test-case {
+            margin-bottom: 40px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            display: inline-block;
+            width: 400px;
+            vertical-align: top;
+        }
+        .container {
+            border: 2px solid #333;
+            margin-top: 20px;
+            position: relative;
+            width: 400px;
+            height: 300px;
+            box-sizing: border-box;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            position: relative;
+            font-size: 14px;
+        }
+        .item:nth-child(1) { background-color: #ffcccc; }
+        .item:nth-child(2) { background-color: #ccffcc; }
+        .item:nth-child(3) { background-color: #ccccff; }
+        .item:nth-child(4) { background-color: #ffffcc; }
+        .item:nth-child(5) { background-color: #ffccff; }
+        .item:nth-child(6) { background-color: #ccffff; }
+        .item:nth-child(7) { background-color: #ffeedd; }
+        .item:nth-child(8) { background-color: #ddffee; }
+        .item:nth-child(9) { background-color: #eeddff; }
+        .item::after {
+            content: attr(data-info);
+            font-size: 12px;
+            display: block;
+            margin-top: 5px;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .explanation {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #e9f7fe;
+            border-radius: 4px;
+        }
+
+        /* Basic Grid Layout */
+        .basic-layout .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 10px;
+            padding: 10px;
+        }
+
+        /* Fixed Columns */
+        .fixed-columns .container {
+            display: grid;
+            grid-template-columns: 100px 150px 100px;
+            grid-template-rows: repeat(2, 1fr);
+            gap: 10px;
+            padding: 10px;
+        }
+
+        /* Span Cells */
+        .span-cells .container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 10px;
+            padding: 10px;
+        }
+        .span-cells .item:nth-child(1) { 
+            grid-column: span 2;
+        }
+        .span-cells .item:nth-child(4) { 
+            grid-row: span 2;
+        }
+
+        /* Auto Placement */
+        .auto-placement .container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+            grid-auto-rows: 60px;
+            gap: 10px;
+            padding: 10px;
+        }
+
+        /* Template Areas */
+        .template-areas .container {
+            display: grid;
+            grid-template-columns: 1fr 2fr 1fr;
+            grid-template-rows: 60px 1fr 60px;
+            grid-template-areas: 
+                "header header header"
+                "sidebar main aside"
+                "footer footer footer";
+            gap: 10px;
+            padding: 10px;
+        }
+        .template-areas .header { grid-area: header; }
+        .template-areas .sidebar { grid-area: sidebar; }
+        .template-areas .main { grid-area: main; }
+        .template-areas .aside { grid-area: aside; }
+        .template-areas .footer { grid-area: footer; }
+
+        /* Alignment */
+        .alignment .container {
+            display: grid;
+            grid-template-columns: repeat(3, 100px);
+            grid-template-rows: repeat(3, 80px);
+            justify-content: center;
+            align-content: center;
+            gap: 10px;
+        }
+
+        /* Item Alignment */
+        .item-alignment .container {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            gap: 10px;
+            padding: 10px;
+        }
+        .item-alignment .item {
+            border: 2px dashed #666;
+            width: 80px;
+            height: 60px;
+        }
+        .item-alignment .item:nth-child(1) { 
+            justify-self: start;
+            align-self: start;
+        }
+        .item-alignment .item:nth-child(2) { 
+            justify-self: end;
+            align-self: start;
+        }
+        .item-alignment .item:nth-child(3) { 
+            justify-self: center;
+            align-self: center;
+        }
+        .item-alignment .item:nth-child(4) { 
+            justify-self: stretch;
+            align-self: stretch;
+            width: auto;
+            height: auto;
+        }
+
+        /* Line Numbers */
+        .line-numbers .container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 10px;
+            padding: 10px;
+        }
+        .line-numbers .item:nth-child(1) { 
+            grid-column: 1 / 3;
+            grid-row: 1 / 2;
+        }
+        .line-numbers .item:nth-child(2) { 
+            grid-column: 3 / 5;
+            grid-row: 1 / 3;
+        }
+        .line-numbers .item:nth-child(3) { 
+            grid-column: 1 / 2;
+            grid-row: 2 / 4;
+        }
+        .line-numbers .item:nth-child(4) { 
+            grid-column: 2 / 4;
+            grid-row: 3 / 4;
+        }
+
+        /* Fractional Units */
+        .fractional-units .container {
+            display: grid;
+            grid-template-columns: 1fr 2fr 3fr;
+            grid-template-rows: 100px 1fr 80px;
+            gap: 10px;
+            padding: 10px;
+        }
+
+        /* Auto Fill */
+        .auto-fill .container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+            grid-auto-rows: 80px;
+            gap: 10px;
+            padding: 10px;
+        }
+
+        /* Named Lines */
+        .named-lines .container {
+            display: grid;
+            grid-template-columns: [start] 1fr [middle] 2fr [end];
+            grid-template-rows: [top] 100px [center] 1fr [bottom];
+            gap: 10px;
+            padding: 10px;
+        }
+        .named-lines .header { 
+            grid-column: start / end;
+            grid-row: top / center;
+        }
+        .named-lines .sidebar { 
+            grid-column: start / middle;
+            grid-row: center / bottom;
+        }
+        .named-lines .main { 
+            grid-column: middle / end;
+            grid-row: center / bottom;
+        }
+
+        /* Nested Grid */
+        .nested-grid .container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 10px;
+            padding: 10px;
+        }
+        .nested-grid .nested-grid-item {
+            background-color: #ffffcc;
+            grid-column: 2 / 4;
+            grid-row: 1 / 3;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 5px;
+            padding: 5px;
+        }
+        .nested-grid .nested-item {
+            padding: 5px;
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .nested-grid .nested-item:nth-child(1) { background-color: #ffeedd; }
+        .nested-grid .nested-item:nth-child(2) { background-color: #ddffee; }
+        .nested-grid .nested-item:nth-child(3) { background-color: #eeddff; }
+        .nested-grid .nested-item:nth-child(4) { background-color: #ffddee; }
+
+        /* Dense Packing */
+        .dense-packing .container {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-auto-rows: 60px;
+            grid-auto-flow: row dense;
+            gap: 10px;
+            padding: 10px;
+        }
+        .dense-packing .item:nth-child(1) { 
+            grid-column: span 2;
+        }
+        .dense-packing .item:nth-child(4) { 
+            grid-column: span 3;
+        }
+
+        /* Overlapping */
+        .overlapping .container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 10px;
+            padding: 10px;
+        }
+        .overlapping .item {
+            border: 2px solid #333;
+        }
+        .overlapping .item:nth-child(1) { 
+            background-color: rgba(255, 204, 204, 0.8); 
+            grid-column: 1 / 3;
+            grid-row: 1 / 3;
+            z-index: 1;
+        }
+        .overlapping .item:nth-child(2) { 
+            background-color: rgba(204, 255, 204, 0.8); 
+            grid-column: 2 / 4;
+            grid-row: 2 / 4;
+            z-index: 2;
+        }
+        .overlapping .item:nth-child(3) { 
+            background-color: rgba(204, 204, 255, 0.9); 
+            grid-column: 2 / 3;
+            grid-row: 2 / 3;
+            z-index: 3;
+        }
+
+        /* Content Sizing */
+        .content-sizing .container {
+            display: grid;
+            grid-template-columns: min-content max-content 1fr;
+            grid-template-rows: auto 1fr auto;
+            gap: 10px;
+            padding: 10px;
+        }
+        .content-sizing .item:nth-child(1) { 
+            white-space: nowrap;
+        }
+        .content-sizing .item:nth-child(4) { 
+            height: 80px;
+        }
+
+        /* Column Flow */
+        .column-flow .container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 70px);
+            grid-auto-flow: column;
+            gap: 10px;
+            padding: 10px;
+        }
+
+        /* Masonry Like */
+        .masonry-like .container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-auto-rows: 40px;
+            gap: 10px;
+            padding: 10px;
+        }
+        .masonry-like .item:nth-child(1) { grid-row: span 2; }
+        .masonry-like .item:nth-child(3) { grid-row: span 3; }
+        .masonry-like .item:nth-child(5) { grid-row: span 2; }
+
+        /* Implicit Explicit */
+        .implicit-explicit .container {
+            display: grid;
+            grid-template-columns: repeat(2, 100px);
+            grid-template-rows: repeat(2, 80px);
+            grid-auto-columns: 120px;
+            grid-auto-rows: 60px;
+            gap: 10px;
+            padding: 10px;
+        }
+        .implicit-explicit .item {
+            border: 2px dashed #666;
+            font-size: 12px;
+        }
+        .implicit-explicit .item:nth-child(5) { 
+            grid-column: 3;
+            grid-row: 1;
+        }
+        .implicit-explicit .item:nth-child(6) { 
+            grid-column: 1;
+            grid-row: 3;
+        }
+
+        /* Responsive */
+        .responsive .container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+            grid-template-rows: minmax(80px, auto) 1fr minmax(60px, auto);
+            gap: 10px;
+            padding: 10px;
+        }
+        .responsive .header { 
+            grid-column: 1 / -1;
+        }
+        .responsive .footer { 
+            grid-column: 1 / -1;
+        }
+
+        /* Complex Areas */
+        .complex-areas .container {
+            display: grid;
+            grid-template-columns: 80px 1fr 100px 80px;
+            grid-template-rows: 60px 1fr 80px 50px;
+            grid-template-areas: 
+                "nav    header  header  ads"
+                "nav    main    aside   ads"
+                "nav    main    aside   ads"
+                "footer footer  footer  footer";
+            gap: 10px;
+            padding: 10px;
+        }
+        .complex-areas .item { font-size: 12px; }
+        .complex-areas .nav { grid-area: nav; }
+        .complex-areas .header { grid-area: header; }
+        .complex-areas .main { grid-area: main; }
+        .complex-areas .aside { grid-area: aside; }
+        .complex-areas .ads { grid-area: ads; }
+        .complex-areas .footer { grid-area: footer; }
+    </style>
+</head>
+<body>
+    <h1>CSS Grid Layout Test Cases</h1>
+
+    <div class="test-case basic-layout">
+        <h2>Basic Grid Layout</h2>
+        <div class="explanation">A basic 2x2 grid layout with equal-sized cells and 10px gap.</div>
+        <div class="container">
+            <div class="item" data-info="1fr x 1fr">Item 1</div>
+            <div class="item" data-info="1fr x 1fr">Item 2</div>
+            <div class="item" data-info="1fr x 1fr">Item 3</div>
+            <div class="item" data-info="1fr x 1fr">Item 4</div>
+        </div>
+    </div>
+
+    <div class="test-case fixed-columns">
+        <h2>Fixed Column Widths</h2>
+        <div class="explanation">Grid with fixed column widths (100px, 150px, 100px) and flexible rows.</div>
+        <div class="container">
+            <div class="item" data-info="100px wide">Item 1</div>
+            <div class="item" data-info="150px wide">Item 2</div>
+            <div class="item" data-info="100px wide">Item 3</div>
+            <div class="item" data-info="100px wide">Item 4</div>
+            <div class="item" data-info="150px wide">Item 5</div>
+            <div class="item" data-info="100px wide">Item 6</div>
+        </div>
+    </div>
+
+    <div class="test-case span-cells">
+        <h2>Spanning Multiple Cells</h2>
+        <div class="explanation">Grid items spanning multiple columns and rows using span keyword.</div>
+        <div class="container">
+            <div class="item" data-info="span 2 columns">Span 2 Cols</div>
+            <div class="item" data-info="regular cell">Item 2</div>
+            <div class="item" data-info="regular cell">Item 3</div>
+            <div class="item" data-info="span 2 rows">Span 2 Rows</div>
+            <div class="item" data-info="regular cell">Item 5</div>
+        </div>
+    </div>
+
+    <div class="test-case auto-placement">
+        <h2>Auto Placement</h2>
+        <div class="explanation">Grid with auto-fit columns that adjust based on container width and minimum size.</div>
+        <div class="container">
+            <div class="item" data-info="auto-fit">Item 1</div>
+            <div class="item" data-info="auto-fit">Item 2</div>
+            <div class="item" data-info="auto-fit">Item 3</div>
+            <div class="item" data-info="auto-fit">Item 4</div>
+            <div class="item" data-info="auto-fit">Item 5</div>
+            <div class="item" data-info="auto-fit">Item 6</div>
+        </div>
+    </div>
+
+    <div class="test-case template-areas">
+        <h2>Template Areas</h2>
+        <div class="explanation">Grid layout using named template areas for semantic layout structure.</div>
+        <div class="container">
+            <div class="item header" data-info="grid-area: header">Header</div>
+            <div class="item sidebar" data-info="grid-area: sidebar">Sidebar</div>
+            <div class="item main" data-info="grid-area: main">Main</div>
+            <div class="item aside" data-info="grid-area: aside">Aside</div>
+            <div class="item footer" data-info="grid-area: footer">Footer</div>
+        </div>
+    </div>
+
+    <div class="test-case alignment">
+        <h2>Grid Container Alignment</h2>
+        <div class="explanation">Grid container alignment using justify-content and align-content properties.</div>
+        <div class="container">
+            <div class="item" data-info="centered grid">Item 1</div>
+            <div class="item" data-info="centered grid">Item 2</div>
+            <div class="item" data-info="centered grid">Item 3</div>
+            <div class="item" data-info="centered grid">Item 4</div>
+            <div class="item" data-info="centered grid">Item 5</div>
+        </div>
+    </div>
+
+    <div class="test-case item-alignment">
+        <h2>Individual Item Alignment</h2>
+        <div class="explanation">Individual grid item alignment using justify-self and align-self properties.</div>
+        <div class="container">
+            <div class="item" data-info="start/start">Start/Start</div>
+            <div class="item" data-info="end/start">End/Start</div>
+            <div class="item" data-info="center/center">Center</div>
+            <div class="item" data-info="stretch">Stretch</div>
+        </div>
+    </div>
+
+    <div class="test-case line-numbers">
+        <h2>Grid Line Numbers</h2>
+        <div class="explanation">Grid items positioned using explicit line numbers for precise placement.</div>
+        <div class="container">
+            <div class="item" data-info="1/3, 1/2">1/3, 1/2</div>
+            <div class="item" data-info="3/5, 1/3">3/5, 1/3</div>
+            <div class="item" data-info="1/2, 2/4">1/2, 2/4</div>
+            <div class="item" data-info="2/4, 3/4">2/4, 3/4</div>
+        </div>
+    </div>
+
+    <div class="test-case fractional-units">
+        <h2>Fractional Units (fr)</h2>
+        <div class="explanation">Grid using fractional units (fr) mixed with fixed pixel sizes.</div>
+        <div class="container">
+            <div class="item" data-info="1fr column">1fr</div>
+            <div class="item" data-info="2fr column">2fr</div>
+            <div class="item" data-info="3fr column">3fr</div>
+            <div class="item" data-info="100px row">100px</div>
+            <div class="item" data-info="flexible row">Flex</div>
+            <div class="item" data-info="flexible row">Content</div>
+            <div class="item" data-info="80px row">80px</div>
+            <div class="item" data-info="80px row">Fixed</div>
+            <div class="item" data-info="80px row">Height</div>
+        </div>
+    </div>
+
+    <div class="test-case auto-fill">
+        <h2>Auto Fill</h2>
+        <div class="explanation">Grid with auto-fill creating responsive columns based on available space.</div>
+        <div class="container">
+            <div class="item" data-info="auto-fill">Item 1</div>
+            <div class="item" data-info="auto-fill">Item 2</div>
+            <div class="item" data-info="auto-fill">Item 3</div>
+            <div class="item" data-info="auto-fill">Item 4</div>
+            <div class="item" data-info="auto-fill">Item 5</div>
+        </div>
+    </div>
+
+    <div class="test-case named-lines">
+        <h2>Named Grid Lines</h2>
+        <div class="explanation">Grid layout using named grid lines for semantic positioning.</div>
+        <div class="container">
+            <div class="item header" data-info="start/end">Header (start/end)</div>
+            <div class="item sidebar" data-info="start/middle">Sidebar (start/middle)</div>
+            <div class="item main" data-info="middle/end">Main (middle/end)</div>
+        </div>
+    </div>
+
+    <div class="test-case nested-grid">
+        <h2>Nested Grid</h2>
+        <div class="explanation">Grid container with a nested grid item spanning multiple cells.</div>
+        <div class="container">
+            <div class="item" data-info="regular item">Item 1</div>
+            <div class="nested-grid-item" data-info="nested grid">
+                <div class="nested-item">Sub 1</div>
+                <div class="nested-item">Sub 2</div>
+                <div class="nested-item">Sub 3</div>
+                <div class="nested-item">Sub 4</div>
+            </div>
+            <div class="item" data-info="regular item">Item 3</div>
+            <div class="item" data-info="regular item">Item 4</div>
+        </div>
+    </div>
+
+    <div class="test-case dense-packing">
+        <h2>Dense Packing</h2>
+        <div class="explanation">Grid with dense packing algorithm to fill gaps in the grid.</div>
+        <div class="container">
+            <div class="item" data-info="span 2">Span 2</div>
+            <div class="item" data-info="regular">Item 2</div>
+            <div class="item" data-info="regular">Item 3</div>
+            <div class="item" data-info="span 3">Span 3</div>
+            <div class="item" data-info="regular">Item 5</div>
+            <div class="item" data-info="regular">Item 6</div>
+        </div>
+    </div>
+
+    <div class="test-case overlapping">
+        <h2>Overlapping Items</h2>
+        <div class="explanation">Grid items with overlapping placement and z-index stacking.</div>
+        <div class="container">
+            <div class="item" data-info="z-index: 1">Layer 1<br/>z-index: 1</div>
+            <div class="item" data-info="z-index: 2">Layer 2<br/>z-index: 2</div>
+            <div class="item" data-info="z-index: 3">Top<br/>z-index: 3</div>
+        </div>
+    </div>
+
+    <div class="test-case content-sizing">
+        <h2>Content-Based Sizing</h2>
+        <div class="explanation">Grid using content-based sizing keywords for flexible layouts.</div>
+        <div class="container">
+            <div class="item" data-info="min-content">Min</div>
+            <div class="item" data-info="max-content">Max Content</div>
+            <div class="item" data-info="1fr">Flexible</div>
+            <div class="item" data-info="auto height">Auto Height</div>
+            <div class="item" data-info="1fr">Center</div>
+            <div class="item" data-info="1fr">Flexible</div>
+            <div class="item" data-info="auto">Auto</div>
+            <div class="item" data-info="auto">Bottom</div>
+            <div class="item" data-info="auto">Auto</div>
+        </div>
+    </div>
+
+    <div class="test-case column-flow">
+        <h2>Column Flow</h2>
+        <div class="explanation">Grid items flow in columns instead of rows using grid-auto-flow: column.</div>
+        <div class="container">
+            <div class="item" data-info="column flow">1</div>
+            <div class="item" data-info="column flow">2</div>
+            <div class="item" data-info="column flow">3</div>
+            <div class="item" data-info="column flow">4</div>
+            <div class="item" data-info="column flow">5</div>
+            <div class="item" data-info="column flow">6</div>
+        </div>
+    </div>
+
+    <div class="test-case masonry-like">
+        <h2>Masonry-like Layout</h2>
+        <div class="explanation">Masonry-like layout using grid with variable row spans for different item heights.</div>
+        <div class="container">
+            <div class="item" data-info="span 2 rows">Height 2</div>
+            <div class="item" data-info="span 1 row">Height 1</div>
+            <div class="item" data-info="span 3 rows">Height 3</div>
+            <div class="item" data-info="span 1 row">Height 1</div>
+            <div class="item" data-info="span 2 rows">Height 2</div>
+            <div class="item" data-info="span 1 row">Height 1</div>
+        </div>
+    </div>
+
+    <div class="test-case implicit-explicit">
+        <h2>Implicit vs Explicit Tracks</h2>
+        <div class="explanation">Demonstration of explicit vs implicit grid tracks with auto-sizing.</div>
+        <div class="container">
+            <div class="item" data-info="explicit">Explicit 1</div>
+            <div class="item" data-info="explicit">Explicit 2</div>
+            <div class="item" data-info="explicit">Explicit 3</div>
+            <div class="item" data-info="explicit">Explicit 4</div>
+            <div class="item" data-info="implicit col">Implicit Col</div>
+            <div class="item" data-info="implicit row">Implicit Row</div>
+        </div>
+    </div>
+
+    <div class="test-case responsive">
+        <h2>Responsive Layout</h2>
+        <div class="explanation">Responsive grid layout that adapts to container size with flexible columns.</div>
+        <div class="container">
+            <div class="item header" data-info="spans all columns">Responsive Header</div>
+            <div class="item" data-info="auto-fit">Auto 1</div>
+            <div class="item" data-info="auto-fit">Auto 2</div>
+            <div class="item" data-info="auto-fit">Auto 3</div>
+            <div class="item footer" data-info="spans all columns">Responsive Footer</div>
+        </div>
+    </div>
+
+    <div class="test-case complex-areas">
+        <h2>Complex Template Areas</h2>
+        <div class="explanation">Complex layout using grid template areas with multiple spanning regions.</div>
+        <div class="container">
+            <div class="item nav" data-info="nav area">Nav</div>
+            <div class="item header" data-info="header area">Header</div>
+            <div class="item main" data-info="main area">Main Content</div>
+            <div class="item aside" data-info="aside area">Aside</div>
+            <div class="item ads" data-info="ads area">Ads</div>
+            <div class="item footer" data-info="footer area">Footer</div>
+        </div>
+    </div>
+
+</body>
+</html>
