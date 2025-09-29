@@ -1428,14 +1428,20 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         
         // grid-template-areas
         if (custom->name.length == 19 && strncmp((const char*)custom->name.data, "grid-template-areas", 19) == 0) {
+            printf("DEBUG: grid-template-areas matched! block=%p\n", block);
             if (block) {
+                printf("DEBUG: Inside grid-template-areas block processing\n");
                 alloc_grid_container_prop(lycon, block);
+                printf("DEBUG: Grid container allocated, grid_container=%p\n", block->embed->grid_container);
+                
                 // Parse grid template areas
                 char areas_str[256];
                 int len = min((int)custom->value.length, 255);
                 strncpy(areas_str, (const char*)custom->value.data, len);
                 areas_str[len] = '\0';
+                printf("DEBUG: About to parse grid-template-areas: '%s'\n", areas_str);
                 parse_grid_template_areas(block->embed->grid_container, areas_str);
+                printf("DEBUG: Finished parsing grid-template-areas\n");
                 log_debug("Set grid-template-areas: %s\n", areas_str);
             }
         }

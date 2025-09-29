@@ -159,12 +159,19 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 // CRITICAL FIX: Process DOM children into View objects first
                 // This is what was missing - flex containers need their DOM children
                 // converted to View objects before the flex algorithm can work
+                int child_count = 0;
+                const int MAX_CHILDREN = 100; // Safety limit
                 do {
-                    printf("Processing flex child %p\n", child);
+                    printf("Processing flex child %p (count: %d)\n", child, child_count);
+                    if (child_count >= MAX_CHILDREN) {
+                        printf("ERROR: Too many flex children, breaking to prevent infinite loop\n");
+                        break;
+                    }
                     layout_flow_node(lycon, child);
                     DomNode* next_child = child->next_sibling();
                     printf("Got next flex sibling %p\n", next_child);
                     child = next_child;
+                    child_count++;
                 } while (child);
                 
                 // Now run the flex layout algorithm with the processed children
@@ -189,12 +196,19 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 // Process DOM children into View objects first
                 // Grid containers need their DOM children converted to View objects
                 // before the grid algorithm can work
+                int child_count = 0;
+                const int MAX_CHILDREN = 100; // Safety limit
                 do {
-                    printf("Processing grid child %p\n", child);
+                    printf("Processing grid child %p (count: %d)\n", child, child_count);
+                    if (child_count >= MAX_CHILDREN) {
+                        printf("ERROR: Too many children, breaking to prevent infinite loop\n");
+                        break;
+                    }
                     layout_flow_node(lycon, child);
                     DomNode* next_child = child->next_sibling();
                     printf("Got next grid sibling %p\n", next_child);
                     child = next_child;
+                    child_count++;
                 } while (child);
                 
                 // Now run the grid layout algorithm with the processed children

@@ -224,15 +224,25 @@ void layout_grid_container_new(LayoutContext* lycon, ViewBlock* container) {
 
 // Collect grid items from container children
 int collect_grid_items(ViewBlock* container, ViewBlock*** items) {
-    if (!container || !items) return 0;
+    printf("DEBUG: collect_grid_items called with container=%p, items=%p\n", container, items);
+    if (!container || !items) {
+        printf("DEBUG: Early return - container=%p, items=%p\n", container, items);
+        return 0;
+    }
     
     GridContainerLayout* grid = container->embed->grid_container;
-    if (!grid) return 0;
+    printf("DEBUG: grid=%p\n", grid);
+    if (!grid) {
+        printf("DEBUG: Early return - grid is NULL\n");
+        return 0;
+    }
     
     int count = 0;
     
     // Count children first - use ViewBlock hierarchy for grid items
+    printf("DEBUG: About to access container->first_child\n");
     ViewBlock* child = container->first_child;
+    printf("DEBUG: first_child=%p\n", child);
     while (child) {
         // Filter out absolutely positioned and hidden items
         if (child->position != POS_ABSOLUTE && child->visibility != VIS_HIDDEN) {
