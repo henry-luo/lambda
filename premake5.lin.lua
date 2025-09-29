@@ -371,7 +371,7 @@ project "radiant"
         "-fwrapv",
         "-fms-extensions",
         "-pedantic",
-        "-fcolor-diagnostics",
+        "-fdiagnostics-color=auto",
     }
     
     defines {

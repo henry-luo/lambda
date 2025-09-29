@@ -246,10 +246,10 @@
                 "lambda/tree-sitter-lambda/bindings/c",
                 "lib/mem-pool/include",
                 "lexbor/source",
-                "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
-                "/opt/homebrew/include/fontconfig",
-                "/opt/homebrew/opt/sdl2/include/SDL2 -I/opt/homebrew/opt/sdl2_image/include",
-                "/opt/homebrew/include"
+                "/usr/include/freetype2",
+                "/usr/include/fontconfig",
+                "/usr/include",
+                "/usr/include/libpng16"
             ],
             "source_files": [
                 "radiant/window.cpp",
@@ -433,7 +433,7 @@
                 "fwrapv",
                 "fms-extensions",
                 "pedantic",
-                "fcolor-diagnostics"
+                "fdiagnostics-color=auto"
             ],
             "cpp_flags": "-std=c++17",
             "defines": [
@@ -450,7 +450,7 @@
     "flags": [
         "fms-extensions",
         "pedantic",
-        "fcolor-diagnostics",
+        "fdiagnostics-color=auto",
         "fno-omit-frame-pointer",
         "g",
         "O2"
@@ -463,7 +463,7 @@
                 "std=c++17",
                 "fms-extensions",
                 "DNDEBUG",
-                "fcolor-diagnostics",
+                "fdiagnostics-color=auto",
                 "fno-omit-frame-pointer",
                 "O3",
                 "flto"
@@ -482,7 +482,7 @@
                 "std=c++17",
                 "fms-extensions",
                 "pedantic",
-                "fcolor-diagnostics",
+                "fdiagnostics-color=auto",
                 "fsanitize=address",
                 "fno-omit-frame-pointer",
                 "g3",
