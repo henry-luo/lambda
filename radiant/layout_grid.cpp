@@ -245,7 +245,11 @@ int collect_grid_items(ViewBlock* container, ViewBlock*** items) {
     printf("DEBUG: first_child=%p\n", child);
     while (child) {
         // Filter out absolutely positioned and hidden items
-        if (child->position != POS_ABSOLUTE && child->visibility != VIS_HIDDEN) {
+        bool is_absolute = child->position && 
+                          (child->position->position == LXB_CSS_VALUE_ABSOLUTE || 
+                           child->position->position == LXB_CSS_VALUE_FIXED);
+        bool is_hidden = child->visibility == VIS_HIDDEN;
+        if (!is_absolute && !is_hidden) {
             count++;
         }
         child = child->next_sibling;
@@ -268,7 +272,11 @@ int collect_grid_items(ViewBlock* container, ViewBlock*** items) {
     child = container->first_child;
     while (child) {
         // Filter out absolutely positioned and hidden items
-        if (child->position != POS_ABSOLUTE && child->visibility != VIS_HIDDEN) {
+        bool is_absolute = child->position && 
+                          (child->position->position == LXB_CSS_VALUE_ABSOLUTE || 
+                           child->position->position == LXB_CSS_VALUE_FIXED);
+        bool is_hidden = child->visibility == VIS_HIDDEN;
+        if (!is_absolute && !is_hidden) {
             grid->grid_items[count] = child;
             
             // Initialize grid item properties with defaults if not set
@@ -512,8 +520,12 @@ bool is_grid_item(ViewBlock* block) {
     if (!block || !block->parent) return false;
     
     ViewBlock* parent = (ViewBlock*)block->parent;
+    bool is_absolute = block->position && 
+                      (block->position->position == LXB_CSS_VALUE_ABSOLUTE || 
+                       block->position->position == LXB_CSS_VALUE_FIXED);
+    bool is_hidden = block->visibility == VIS_HIDDEN;
     return parent->embed && 
            parent->embed->grid_container && 
-           block->position != POS_ABSOLUTE &&
-           block->visibility != VIS_HIDDEN;
+           !is_absolute &&
+           !is_hidden;
 }

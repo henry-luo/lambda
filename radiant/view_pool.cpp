@@ -159,6 +159,18 @@ FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon) {
     return prop;
 }
 
+PositionProp* alloc_position_prop(LayoutContext* lycon) {
+    PositionProp* prop = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+    // set defaults using actual Lexbor constants
+    prop->position = 0x014d;  // LXB_CSS_VALUE_STATIC - default position
+    prop->top = prop->right = prop->bottom = prop->left = 0;  // default offsets
+    prop->z_index = 0;  // default z-index
+    prop->has_top = prop->has_right = prop->has_bottom = prop->has_left = false;  // no offsets set
+    prop->clear = LXB_CSS_VALUE_NONE;  // default clear
+    prop->float_prop = LXB_CSS_VALUE_NONE;  // default float
+    return prop;
+}
+
 // alloc flex container blk
 void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block) {
     if (!block->embed) { 

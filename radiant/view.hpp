@@ -57,6 +57,10 @@ extern "C" {
 #define LXB_CSS_VALUE_FR                (LXB_CSS_VALUE__LAST_ENTRY + 35)
 #define LXB_CSS_VALUE_DENSE             (LXB_CSS_VALUE__LAST_ENTRY + 36)
 
+// Note: CSS positioning constants are already defined in Lexbor:
+// LXB_CSS_VALUE_STATIC = 0x014d, LXB_CSS_VALUE_RELATIVE = 0x014e, 
+// LXB_CSS_VALUE_ABSOLUTE = 0x014f, LXB_CSS_VALUE_FIXED = 0x0151, LXB_CSS_VALUE_STICKY = 0x0150
+
 
 #define LENGTH_AUTO                 (INT_MAX - 1)
 
@@ -176,6 +180,15 @@ typedef struct {
 } BoundaryProp;
 
 typedef struct {
+    PropValue position;        // static, relative, absolute, fixed, sticky
+    int top, right, bottom, left;  // offset values in pixels
+    int z_index;              // stacking order
+    bool has_top, has_right, has_bottom, has_left;  // which offsets are set
+    PropValue clear;          // clear property for floats
+    PropValue float_prop;     // float property (left, right, none)
+} PositionProp;
+
+typedef struct {
     PropValue text_align;
     int line_height;  // non-negative
     int text_indent;  // can be negative
@@ -184,6 +197,8 @@ typedef struct {
     PropValue list_style_type;
     PropValue box_sizing;  // LXB_CSS_VALUE_CONTENT_BOX or LXB_CSS_VALUE_BORDER_BOX
     int given_width, given_height;  // CSS specified width/height values
+    PropValue clear;          // clear property for floats
+    PropValue float_prop;     // float property (left, right, none)
 } BlockProp;
 
 typedef struct View View;
@@ -333,6 +348,8 @@ typedef struct ViewBlock : ViewSpan {
     ScrollProp* scroller;  // handles overflow
     // block content related properties for flexbox, image, iframe
     EmbedProp* embed;
+    // positioning properties for CSS positioning
+    PositionProp* position;
     
     // Child navigation for flex layout tests
     struct ViewBlock* first_child;

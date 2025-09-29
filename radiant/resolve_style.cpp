@@ -533,6 +533,11 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     ViewSpan* span = (ViewSpan*)lycon->view;
     ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
     Color c;  int length;
+    
+    // Debug: Print the property type we're processing
+    if (declr->type == 86) {
+        printf("DEBUG: Found property 86! LXB_CSS_PROPERTY_POSITION=%d\n", LXB_CSS_PROPERTY_POSITION);
+    }
 
     switch (declr->type) {
     case LXB_CSS_PROPERTY_LINE_HEIGHT: {
@@ -1149,6 +1154,99 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
         }
         block->scroller->overflow_y = overflow->type;
+        break;
+    }
+    case LXB_CSS_PROPERTY_POSITION: {
+        printf("DEBUG: Entering LXB_CSS_PROPERTY_POSITION case!\n");
+        if (!block) { 
+            printf("DEBUG: No block available for position property\n");
+            break; 
+        }
+        const lxb_css_property_position_t *position = declr->u.position;
+        printf("DEBUG: CSS position property parsed: value=%d (STATIC=%d, RELATIVE=%d, ABSOLUTE=%d, FIXED=%d)\n", 
+                  position->type, LXB_CSS_VALUE_STATIC, LXB_CSS_VALUE_RELATIVE, LXB_CSS_VALUE_ABSOLUTE, LXB_CSS_VALUE_FIXED);
+        if (!block->position) {
+            block->position = alloc_position_prop(lycon);
+            printf("DEBUG: Allocated new PositionProp for block\n");
+        }
+        block->position->position = position->type;
+        printf("DEBUG: Stored position value %d in block->position->position\n", position->type);
+        break;
+    }
+    case LXB_CSS_PROPERTY_TOP: {
+        if (!block) { break; }
+        const lxb_css_value_length_percentage_t *top = declr->u.top;
+        if (!block->position) {
+            block->position = alloc_position_prop(lycon);
+        }
+        block->position->top = resolve_length_value(lycon, LXB_CSS_PROPERTY_TOP, top);
+        block->position->has_top = true;
+        log_debug("top offset: %dpx", block->position->top);
+        break;
+    }
+    case LXB_CSS_PROPERTY_RIGHT: {
+        if (!block) { break; }
+        const lxb_css_value_length_percentage_t *right = declr->u.right;
+        if (!block->position) {
+            block->position = alloc_position_prop(lycon);
+        }
+        block->position->right = resolve_length_value(lycon, LXB_CSS_PROPERTY_RIGHT, right);
+        block->position->has_right = true;
+        log_debug("right offset: %dpx", block->position->right);
+        break;
+    }
+    case LXB_CSS_PROPERTY_BOTTOM: {
+        if (!block) { break; }
+        const lxb_css_value_length_percentage_t *bottom = declr->u.bottom;
+        if (!block->position) {
+            block->position = alloc_position_prop(lycon);
+        }
+        block->position->bottom = resolve_length_value(lycon, LXB_CSS_PROPERTY_BOTTOM, bottom);
+        block->position->has_bottom = true;
+        log_debug("bottom offset: %dpx", block->position->bottom);
+        break;
+    }
+    case LXB_CSS_PROPERTY_LEFT: {
+        if (!block) { break; }
+        const lxb_css_value_length_percentage_t *left = declr->u.left;
+        if (!block->position) {
+            block->position = alloc_position_prop(lycon);
+        }
+        block->position->left = resolve_length_value(lycon, LXB_CSS_PROPERTY_LEFT, left);
+        block->position->has_left = true;
+        log_debug("left offset: %dpx", block->position->left);
+        break;
+    }
+    case LXB_CSS_PROPERTY_Z_INDEX: {
+        if (!block) { break; }
+        const lxb_css_property_z_index_t *z_index = declr->u.z_index;
+        if (!block->position) {
+            block->position = alloc_position_prop(lycon);
+        }
+        if (z_index->type == LXB_CSS_VALUE__NUMBER) {
+            block->position->z_index = (int)z_index->integer.num;
+        }
+        log_debug("z-index: %d", block->position->z_index);
+        break;
+    }
+    case LXB_CSS_PROPERTY_FLOAT: {
+        if (!block) { break; }
+        const lxb_css_property_float_t *float_prop = declr->u.floatp;
+        if (!block->position) {
+            block->position = alloc_position_prop(lycon);
+        }
+        block->position->float_prop = float_prop->type;
+        log_debug("float property: %d", float_prop->type);
+        break;
+    }
+    case LXB_CSS_PROPERTY_CLEAR: {
+        if (!block) { break; }
+        const lxb_css_property_clear_t *clear = declr->u.clear;
+        if (!block->position) {
+            block->position = alloc_position_prop(lycon);
+        }
+        block->position->clear = clear->type;
+        log_debug("clear property: %d", clear->type);
         break;
     }
     case LXB_CSS_PROPERTY_FLEX_DIRECTION: {

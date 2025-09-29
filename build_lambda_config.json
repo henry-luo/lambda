@@ -258,6 +258,7 @@
                 "radiant/layout.cpp",
                 "radiant/layout_block.cpp",
                 "radiant/layout_text.cpp",
+                "radiant/layout_positioned.cpp",
                 "radiant/layout_flex.cpp",
                 "radiant/layout_flex_content.cpp",
                 "radiant/layout_nested.cpp",
@@ -732,6 +733,18 @@
             "output": "lambda.exe",
             "compiler": "gcc",
             "libraries": [
+                {
+                    "name": "tree-sitter",
+                    "include": "lambda/tree-sitter/lib/include",
+                    "lib": "lambda/tree-sitter/libtree-sitter.a",
+                    "link": "static"
+                },
+                {
+                    "name": "tree-sitter-lambda",
+                    "include": "lambda/tree-sitter-lambda/bindings/c",
+                    "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+                    "link": "static"
+                },
                 {
                     "name": "curl",
                     "include": "/usr/include",

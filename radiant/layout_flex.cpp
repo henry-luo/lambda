@@ -221,7 +221,11 @@ int collect_flex_items(ViewBlock* container, ViewBlock*** items) {
     ViewBlock* child = container->first_child;
     while (child) {
         // Filter out absolutely positioned and hidden items
-        if (child->position != POS_ABSOLUTE && child->visibility != VIS_HIDDEN) {
+        bool is_absolute = child->position && 
+                          (child->position->position == LXB_CSS_VALUE_ABSOLUTE || 
+                           child->position->position == LXB_CSS_VALUE_FIXED);
+        bool is_hidden = child->visibility == VIS_HIDDEN;
+        if (!is_absolute && !is_hidden) {
             count++;
         }
         child = child->next_sibling;
@@ -244,7 +248,11 @@ int collect_flex_items(ViewBlock* container, ViewBlock*** items) {
     child = container->first_child;
     while (child) {
         // Filter out absolutely positioned and hidden items
-        if (child->position != POS_ABSOLUTE && child->visibility != VIS_HIDDEN) {
+        bool is_absolute = child->position && 
+                          (child->position->position == LXB_CSS_VALUE_ABSOLUTE || 
+                           child->position->position == LXB_CSS_VALUE_FIXED);
+        bool is_hidden = child->visibility == VIS_HIDDEN;
+        if (!is_absolute && !is_hidden) {
             flex->flex_items[count] = child;
             
             // CRITICAL FIX: Ensure flex items have proper flex properties initialized

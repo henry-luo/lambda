@@ -2,6 +2,7 @@
 #include "layout_flex.hpp"
 #include "layout_flex_content.hpp"
 #include "layout_nested.hpp"
+#include "layout_positioned.hpp"
 #include "grid.hpp"
 
 #include "../lib/log.h"
@@ -645,6 +646,29 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             // Flex container setup is handled in layout_block_content
         }
         layout_block_content(lycon, block, display);
+    }
+
+    // Apply CSS positioning after normal layout
+    if (block->position) {
+        printf("DEBUG: Found position property: type=%d (RELATIVE=334, ABSOLUTE=335, FIXED=337)\n", 
+                  block->position->position);
+        printf("DEBUG: Position offsets: top=%d(%s), right=%d(%s), bottom=%d(%s), left=%d(%s)\n",
+                  block->position->top, block->position->has_top ? "set" : "unset",
+                  block->position->right, block->position->has_right ? "set" : "unset", 
+                  block->position->bottom, block->position->has_bottom ? "set" : "unset",
+                  block->position->left, block->position->has_left ? "set" : "unset");
+        
+        if (block->position->position == 334) {  // LXB_CSS_VALUE_RELATIVE
+            printf("DEBUG: Applying relative positioning\n");
+            layout_relative_positioned(lycon, block);
+        } else if (block->position->position == 335 || block->position->position == 337) {  // ABSOLUTE or FIXED
+            printf("DEBUG: Applying absolute positioning\n");
+            layout_absolute_positioned(lycon, block);
+        } else {
+            printf("DEBUG: Position type %d not handled yet\n", block->position->position);
+        }
+    } else {
+        printf("DEBUG: No position property found for element %s\n", elmt->name());
     }
 
     // flow the block in parent context

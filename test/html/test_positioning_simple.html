@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Positioning Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        
+        .relative-test {
+            width: 200px;
+            height: 100px;
+            background-color: #ffcccc;
+            position: relative;
+            top: 10px;
+            left: 20px;
+        }
+        
+        .absolute-test {
+            width: 150px;
+            height: 80px;
+            background-color: #ccffcc;
+            position: absolute;
+            top: 50px;
+            left: 100px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Positioning Test</h1>
+    
+    <div class="relative-test">
+        Relative positioned box
+    </div>
+    
+    <div class="absolute-test">
+        Absolute positioned box
+    </div>
+    
+    <p>This tests basic CSS positioning implementation.</p>
+</body>
+</html>

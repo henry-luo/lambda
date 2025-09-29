@@ -64,6 +64,7 @@ void* alloc_prop(LayoutContext* lycon, size_t size);
 FontProp* alloc_font_prop(LayoutContext* lycon);
 BlockProp* alloc_block_prop(LayoutContext* lycon);
 FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon);
+PositionProp* alloc_position_prop(LayoutContext* lycon);
 void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_grid_container_prop(LayoutContext* lycon, ViewBlock* block);
 View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node);
@@ -88,6 +89,12 @@ Color color_name_to_rgb(PropValue color_name);
 
 void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container);
 void layout_html_root(LayoutContext* lycon, DomNode *elmt);
+
+// CSS Positioning functions
+void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
+void layout_absolute_positioned(LayoutContext* lycon, ViewBlock* block);
+bool element_has_positioning(ViewBlock* block);
+bool element_has_float(ViewBlock* block);
 
 void line_init(LayoutContext* lycon);
 int calculate_vertical_align_offset(PropValue align, int item_height, int line_height, int baseline_pos, int item_baseline);

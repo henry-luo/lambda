@@ -156,6 +156,7 @@ project "lambda-input-full-cpp"
         "lambda/name_pool.cpp",
         "lambda/lambda-data.cpp",
         "lambda/build_ast.cpp",
+        "lambda/validate.cpp",
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
@@ -250,6 +251,135 @@ project "lambda-input-full"
     }
     
 
+project "radiant"
+    kind "ConsoleApp"
+    language "C"
+    targetname "radiant.exe"
+    targetdir "."
+    objdir "build/obj/%{prj.name}"
+    -- Native HTML/CSS/SVG rendering engine
+    
+    language "C++"
+    files {
+        "radiant/window.cpp",
+        "radiant/ui_context.cpp",
+        "radiant/parse_html.cpp",
+        "radiant/layout.cpp",
+        "radiant/layout_block.cpp",
+        "radiant/layout_text.cpp",
+        "radiant/layout_positioned.cpp",
+        "radiant/layout_flex.cpp",
+        "radiant/layout_flex_content.cpp",
+        "radiant/layout_nested.cpp",
+        "radiant/layout_table.cpp",
+        "radiant/layout_grid.cpp",
+        "radiant/grid_utils.cpp",
+        "radiant/grid_sizing.cpp",
+        "radiant/grid_positioning.cpp",
+        "radiant/layout_grid_content.cpp",
+        "radiant/grid_advanced.cpp",
+        "radiant/view_pool_new.cpp",
+        "radiant/resolve_style.cpp",
+        "radiant/scroller.cpp",
+        "radiant/view_pool.cpp",
+        "radiant/font.cpp",
+        "radiant/font_face.cpp",
+        "radiant/surface.cpp",
+        "radiant/render.cpp",
+        "radiant/event.cpp",
+        "lib/strview.c",
+        "lib/strbuf.c",
+        "lib/hashmap.c",
+        "lib/arraylist.c",
+        "lib/log.c",
+        "lib/mem-pool/src/variable.c",
+        "lib/mem-pool/src/buffer.c",
+        "lib/mem-pool/src/utils.c",
+        "lib/file.c",
+        "lib/url.c",
+        "lib/url_parser.c",
+        "lib/utf.c",
+    }
+    
+    includedirs {
+        ".",
+        "lib",
+        "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/opt/sdl2/include/SDL2",
+        "/opt/homebrew/opt/sdl2_image/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/usr/local/lib",
+        "build/lib",
+        "/opt/homebrew/opt/sdl2_image/lib",
+    }
+    
+    links {
+        "SDL2_image",
+        "iconv",
+        "stdc++",
+    }
+    
+    linkoptions {
+        "../../lexbor/liblexbor_static.a",
+        "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
+        "/opt/homebrew/lib/libpng.a",
+        "/opt/homebrew/opt/bzip2/lib/libbz2.a",
+        "/opt/homebrew/lib/libfontconfig.a",
+        "/opt/homebrew/opt/expat/lib/libexpat.a",
+        "/usr/local/lib/libthorvg.a",
+        "/opt/homebrew/opt/zlib/lib/libz.a",
+        "/opt/homebrew/lib/libintl.a",
+        "/opt/homebrew/lib/libglfw3.a",
+        "/opt/homebrew/lib/libturbojpeg.a",
+    }
+    
+    linkoptions {
+        "-framework OpenGL",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+    }
+    
+    disablewarnings {
+        "incompatible-pointer-types",
+        "undef",
+        "uninitialized",
+        "sign-compare",
+        "implicit-function-declaration",
+        "implicit-int",
+        "return-type",
+        "format",
+        "free-nonheap-object",
+        "shadow",
+        "array-bounds",
+        "null-dereference",
+        "pointer-arith",
+        "pointer-compare",
+        "pointer-sign",
+        "pointer-to-int-cast",
+        "microsoft-anon-tag",
+    }
+    
+    buildoptions {
+        "-fwrapv",
+        "-fms-extensions",
+        "-pedantic",
+        "-fcolor-diagnostics",
+    }
+    
+    defines {
+        "_POSIX_C_SOURCE=200809L",
+        "_GNU_SOURCE",
+    }
+    
+
 project "lambda"
     kind "ConsoleApp"
     language "C++"
@@ -293,6 +423,7 @@ project "lambda"
         "lambda/lambda-proc.cpp",
         "lambda/utf_string.cpp",
         "lambda/lambda-mem.cpp",
+        "lambda/validate.cpp",
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
@@ -400,6 +531,7 @@ project "lambda"
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
+        "/usr/local/lib/liblexbor_static.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
         "/usr/local/lib/libmir.a",
         "/usr/lib/aarch64-linux-gnu/libnghttp2.a",
@@ -462,9 +594,9 @@ project "test_strbuf_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -518,9 +650,9 @@ project "test_stringbuf_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -574,9 +706,9 @@ project "test_strview_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -630,9 +762,9 @@ project "test_variable_pool_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -686,9 +818,9 @@ project "test_num_stack_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -742,9 +874,9 @@ project "test_datetime_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -798,9 +930,9 @@ project "test_url_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -854,9 +986,9 @@ project "test_url_extra_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -910,9 +1042,9 @@ project "test_cmdedit_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -971,9 +1103,9 @@ project "test_mime_detect_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -1069,9 +1201,9 @@ project "test_math_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -1167,9 +1299,9 @@ project "test_math_ascii_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -1265,9 +1397,9 @@ project "test_markup_roundtrip_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -1363,9 +1495,9 @@ project "test_input_roundtrip_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -1461,9 +1593,9 @@ project "test_dir_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -1559,9 +1691,9 @@ project "test_http_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -1657,9 +1789,9 @@ project "test_sysinfo_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -1755,9 +1887,9 @@ project "test_jsx_roundtrip_new_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -1853,9 +1985,9 @@ project "test_mdx_roundtrip_new_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -1951,9 +2083,9 @@ project "test_css_tokenizer_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -2049,9 +2181,9 @@ project "test_css_parser_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -2147,9 +2279,9 @@ project "test_css_integration_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -2245,9 +2377,9 @@ project "test_css_files_safe_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -2343,9 +2475,9 @@ project "test_css_frameworks_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -2441,9 +2573,9 @@ project "test_mdx_roundtrip_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -2539,9 +2671,9 @@ project "test_jsx_roundtrip_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -2613,6 +2745,403 @@ project "test_jsx_roundtrip_gtest"
     }
     
 
+project "test_radiant_flex_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_radiant_flex_gtest.cpp",
+        "radiant/layout_flex.cpp",
+        "radiant/layout_test_support.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "/usr/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    defines {
+        "FLEX_TEST_MODE",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+        "lexbor_static",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-std=c++17",
+    }
+    
+
+project "test_radiant_flex_algorithm_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_radiant_flex_algorithm_gtest.cpp",
+        "radiant/layout_flex.cpp",
+        "radiant/layout_test_support.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "/usr/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    defines {
+        "FLEX_TEST_MODE",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+        "lexbor_static",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-std=c++17",
+    }
+    
+
+project "test_radiant_flex_integration_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_radiant_flex_integration_gtest.cpp",
+        "radiant/layout_flex.cpp",
+        "radiant/layout_test_support.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "/usr/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    defines {
+        "FLEX_TEST_MODE",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+        "lexbor_static",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-std=c++17",
+    }
+    
+
+project "test_radiant_text_flow_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_radiant_text_flow_gtest.cpp",
+        "radiant/layout_test_support.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "/usr/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    defines {
+        "FLEX_TEST_MODE",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+        "lexbor_static",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-std=c++17",
+    }
+    
+
+project "test_radiant_font_face_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_radiant_font_face_gtest.cpp",
+        "radiant/layout_test_support.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "/usr/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    defines {
+        "FLEX_TEST_MODE",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+        "lexbor_static",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-std=c++17",
+    }
+    
+
+project "test_radiant_layout_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_radiant_layout_gtest.cpp",
+        "radiant/layout.cpp",
+        "radiant/layout_flex.cpp",
+        "radiant/layout_text.cpp",
+        "radiant/font_face.cpp",
+        "radiant/layout_test_support.cpp",
+    }
+    
+    includedirs {
+        "lib/mem-pool/include",
+        "/usr/include",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "/usr/local/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include/openssl",
+        "/usr/include/openssl",
+        "/usr/local/include",
+        "/usr/include",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
+        "/usr/local/include",
+        "/opt/homebrew/include",
+    }
+    
+    defines {
+        "FLEX_TEST_MODE",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+        "lexbor_static",
+    }
+    
+    linkoptions {
+        "/usr/local/lib/libgtest.a",
+        "/usr/local/lib/libgtest_main.a",
+    }
+    
+    links { "stdc++" }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-std=c++17",
+    }
+    
+
 project "test_validator_gtest"
     kind "ConsoleApp"
     language "C++"
@@ -2637,9 +3166,9 @@ project "test_validator_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -2734,9 +3263,9 @@ project "test_ast_validator_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -2831,9 +3360,9 @@ project "test_lambda_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -2887,9 +3416,9 @@ project "test_lambda_repl_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -2943,9 +3472,9 @@ project "test_lambda_proc_gtest"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
@@ -2999,9 +3528,9 @@ project "test_lambda_runner"
         "/usr/local/include",
         "/usr/include",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "/usr/include",
-        "/usr/include",
         "/usr/local/include",
+        "/usr/include",
+        "/usr/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
