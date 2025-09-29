@@ -1,4 +1,5 @@
 #include "layout.hpp"
+#include "layout_positioned.hpp"
 
 #include "../lib/log.h"
 
@@ -21,6 +22,17 @@ void line_init(LayoutContext* lycon) {
     lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
     lycon->line.start_view = NULL;
     lycon->line.line_start_font = lycon->font;
+    
+    // Phase 6: Apply line box adjustment for floats
+    // Create a temporary float context to check for intersecting floats
+    ViewBlock* current_block = (ViewBlock*)lycon->view;
+    if (current_block && current_block->type != RDT_VIEW_INLINE) {
+        FloatContext* float_ctx = create_float_context(current_block);
+        if (float_ctx) {
+            adjust_line_for_floats(lycon, float_ctx);
+            free(float_ctx);
+        }
+    }
 }
 
 void line_break(LayoutContext* lycon) {

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Complete CSS Positioning Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        
+        .container {
+            width: 600px;
+            background-color: #f5f5f5;
+            padding: 20px;
+            position: relative;
+        }
+        
+        .float-left {
+            width: 150px;
+            height: 120px;
+            background-color: #ffcccc;
+            float: left;
+            margin: 10px;
+            padding: 10px;
+        }
+        
+        .float-right {
+            width: 120px;
+            height: 100px;
+            background-color: #ccffcc;
+            float: right;
+            margin: 10px;
+            padding: 10px;
+        }
+        
+        .relative-box {
+            background-color: #ccccff;
+            position: relative;
+            top: 20px;
+            left: 30px;
+            padding: 15px;
+            margin: 10px;
+        }
+        
+        .absolute-box {
+            width: 100px;
+            height: 60px;
+            background-color: #ffffcc;
+            position: absolute;
+            top: 50px;
+            right: 50px;
+            padding: 10px;
+        }
+        
+        .clear-both {
+            background-color: #ffccff;
+            clear: left;
+            padding: 10px;
+            margin: 10px;
+        }
+        
+        .content {
+            background-color: #e0e0e0;
+            padding: 15px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <h1>Complete CSS Positioning System Test</h1>
+    
+    <div class="container">
+        <div class="float-left">
+            <strong>Left Float</strong><br>
+            This box floats to the left side.
+        </div>
+        
+        <div class="float-right">
+            <strong>Right Float</strong><br>
+            This box floats to the right.
+        </div>
+        
+        <div class="absolute-box">
+            <strong>Absolute</strong><br>
+            Positioned absolutely.
+        </div>
+        
+        <div class="content">
+            This is the main content area that should demonstrate all positioning features working together. 
+            The text should flow around the floated elements, adjusting line boundaries dynamically. 
+            Meanwhile, the absolute positioned element should be positioned precisely at the specified coordinates 
+            without affecting the normal document flow.
+        </div>
+        
+        <div class="relative-box">
+            This box uses relative positioning and should be offset from its normal position by 20px top and 30px left.
+        </div>
+        
+        <div class="clear-both">
+            This element has clear: left and should appear below the left floated elements.
+        </div>
+    </div>
+    
+    <p>This final paragraph should appear below all positioned content and demonstrate that the positioning system doesn't break normal document flow.</p>
+</body>
+</html>

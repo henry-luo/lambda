@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Line Box Adjustment Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        
+        .container {
+            width: 500px;
+            background-color: #f0f0f0;
+            padding: 15px;
+        }
+        
+        .float-left {
+            width: 120px;
+            height: 100px;
+            background-color: #ffcccc;
+            float: left;
+            margin: 5px;
+        }
+        
+        .float-right {
+            width: 100px;
+            height: 80px;
+            background-color: #ccffcc;
+            float: right;
+            margin: 5px;
+        }
+        
+        .content {
+            background-color: #ccccff;
+            padding: 10px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <h1>Line Box Adjustment Test</h1>
+    
+    <div class="container">
+        <div class="float-left">Left Float</div>
+        <div class="float-right">Right Float</div>
+        
+        <div class="content">
+            This is a long paragraph of text that should demonstrate line box adjustment. 
+            The text should flow around the floated elements, with lines being shorter 
+            where they intersect with floats and returning to full width below the floats. 
+            This tests the core functionality of CSS float layout where text content 
+            dynamically adjusts its line boundaries based on intersecting float elements.
+        </div>
+    </div>
+    
+    <p>This paragraph should appear below all floated content and use the full width.</p>
+</body>
+</html>

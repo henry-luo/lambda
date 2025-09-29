@@ -671,6 +671,18 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         printf("DEBUG: No position property found for element %s\n", elmt->name());
     }
 
+    // Apply CSS float layout after positioning
+    if (block->position && element_has_float(block)) {
+        printf("DEBUG: Element has float property, applying float layout\n");
+        layout_float_element(lycon, block);
+    }
+
+    // Apply CSS clear property after float layout
+    if (block->position && block->position->clear != LXB_CSS_VALUE_NONE) {
+        printf("DEBUG: Element has clear property, applying clear layout\n");
+        layout_clear_element(lycon, block);
+    }
+
     // flow the block in parent context
     log_debug("flow block in parent context\n");
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;

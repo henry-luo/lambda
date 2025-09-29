@@ -6,7 +6,7 @@ extern "C" {
 #endif
 #include <GLFW/glfw3.h>
 #ifndef FLEX_TEST_MODE
-#include <fontconfig.h>
+#include <fontconfig/fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <thorvg_capi.h>
@@ -58,21 +58,21 @@ extern "C" {
 #define LXB_CSS_VALUE_DENSE             (LXB_CSS_VALUE__LAST_ENTRY + 36)
 
 // Note: CSS positioning constants are already defined in Lexbor:
-// LXB_CSS_VALUE_STATIC = 0x014d, LXB_CSS_VALUE_RELATIVE = 0x014e, 
+// LXB_CSS_VALUE_STATIC = 0x014d, LXB_CSS_VALUE_RELATIVE = 0x014e,
 // LXB_CSS_VALUE_ABSOLUTE = 0x014f, LXB_CSS_VALUE_FIXED = 0x0151, LXB_CSS_VALUE_STICKY = 0x0150
 
 
 #define LENGTH_AUTO                 (INT_MAX - 1)
 
 typedef union {
-    uint32_t c;  // 32-bit ABGR color format, 
+    uint32_t c;  // 32-bit ABGR color format,
     struct {
         uint8_t r;
         uint8_t g;
         uint8_t b;
         uint8_t a;
     };
-} Color;  
+} Color;
 
 typedef struct Rect {
     int x, y;
@@ -96,7 +96,7 @@ typedef struct ImageSurface {
     int height;            // the intrinsic height of the surface/image
     int pitch;             // no. of bytes for rows of pixels
     // image pixels, 32-bits per pixel, RGBA format
-    // pack order is [R] [G] [B] [A], high bit -> low bit    
+    // pack order is [R] [G] [B] [A], high bit -> low bit
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
 #ifndef FLEX_TEST_MODE
     Tvg_Paint* pic;       // ThorVG picture for SVG image
@@ -162,7 +162,7 @@ typedef struct {
     PropValue top_style, right_style, bottom_style, left_style;
     Color top_color, right_color, bottom_color, left_color;
     uint32_t top_color_specificity, right_color_specificity, bottom_color_specificity, left_color_specificity;
-    Spacing radius;    
+    Spacing radius;
 } BorderProp;
 
 typedef struct {
@@ -232,17 +232,17 @@ typedef struct ViewSpan : ViewGroup {
     int align_self;  // AlignType or LXB_CSS_VALUE_*
     int order;
     bool flex_basis_is_percent;
-    
+
     // Additional flex item properties from old implementation
     float aspect_ratio;
     int baseline_offset;
-    
+
     // Auto margin flags
     bool margin_top_auto;
     bool margin_right_auto;
     bool margin_bottom_auto;
     bool margin_left_auto;
-    
+
     // Percentage flags for constraints
     bool width_is_percent;
     bool height_is_percent;
@@ -250,15 +250,15 @@ typedef struct ViewSpan : ViewGroup {
     bool max_width_is_percent;
     bool min_height_is_percent;
     bool max_height_is_percent;
-    
+
     // Min/max constraints
     int min_width, max_width;
     int min_height, max_height;
-    
+
     // Position and visibility (from old FlexItem)
     int position;  // PositionType
     int visibility;  // Visibility
-    
+
     // Grid item properties (following flex pattern)
     int grid_row_start;          // Grid row start line
     int grid_row_end;            // Grid row end line
@@ -267,13 +267,13 @@ typedef struct ViewSpan : ViewGroup {
     char* grid_area;             // Named grid area
     int justify_self;            // Item-specific justify alignment (LXB_CSS_VALUE_*)
     int align_self_grid;         // Item-specific align alignment for grid (LXB_CSS_VALUE_*)
-    
+
     // Grid item computed properties
     int computed_grid_row_start;
     int computed_grid_row_end;
     int computed_grid_column_start;
     int computed_grid_column_end;
-    
+
     // Grid item flags
     bool has_explicit_grid_row_start;
     bool has_explicit_grid_row_end;
@@ -287,7 +287,7 @@ typedef struct {
     int v_max_scroll, h_max_scroll;
     int v_handle_y, v_handle_height;
     int h_handle_x, h_handle_width;
-    
+
     bool is_h_hovered, is_v_hovered;
     bool v_is_dragging, h_is_dragging;
     int drag_start_x, drag_start_y;
@@ -316,17 +316,17 @@ typedef struct {
     int column_gap;
     WritingMode writing_mode;
     TextDirection text_direction;
-    
+
     // Layout state (computed during layout)
     struct ViewBlock** flex_items;  // Array of child flex items
     int item_count;
     int allocated_items;  // For dynamic array growth
-    
+
     // Line information
     struct FlexLineInfo* lines;
     int line_count;
     int allocated_lines;
-    
+
     // Cached calculations
     int main_axis_size;
     int cross_axis_size;
@@ -350,7 +350,7 @@ typedef struct ViewBlock : ViewSpan {
     EmbedProp* embed;
     // positioning properties for CSS positioning
     PositionProp* position;
-    
+
     // Child navigation for flex layout tests
     struct ViewBlock* first_child;
     struct ViewBlock* last_child;
@@ -366,14 +366,14 @@ typedef struct ViewTable : ViewBlock {
         TABLE_LAYOUT_AUTO = 0,    // Content-based width calculation (default)
         TABLE_LAYOUT_FIXED = 1    // Fixed width calculation based on first row/col elements
     } table_layout;
-    
+
     // Border model and spacing (Phase 4)
     // border_collapse=false => separate borders, apply border-spacing gaps
     // border_collapse=true  => collapsed borders, no gaps between cells
     bool border_collapse;
     int border_spacing_h; // horizontal spacing between columns (px)
     int border_spacing_v; // vertical spacing between rows (px)
-    
+
     // Table-specific state will be held externally (e.g., TableModel) and referenced by ViewTable later.
 } ViewTable;
 
@@ -391,7 +391,7 @@ typedef struct ViewTableCell : ViewBlock {
     int row_span;  // Number of rows this cell spans (default: 1)
     int col_index; // Starting column index (computed during layout)
     int row_index; // Starting row index (computed during layout)
-    
+
     // Vertical alignment
     enum {
         CELL_VALIGN_TOP = 0,
@@ -432,7 +432,7 @@ typedef struct {
 #else
     void* face;    // Placeholder for test mode
 #endif
-    float space_width;  // width of a space character of the current font 
+    float space_width;  // width of a space character of the current font
     int current_font_size;  // font size of current element
 } FontBox;
 

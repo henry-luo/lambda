@@ -30,6 +30,8 @@ extern "C" {
 #ifdef __cplusplus
 extern "C" {
 #endif
+#include <string.h>
+#include <stdlib.h>
 #include <lexbor/html/html.h>
 #include <lexbor/css/css.h>
 #include <lexbor/style/style.h>

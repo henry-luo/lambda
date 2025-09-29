@@ -16,17 +16,6 @@ struct ViewBlock;
  * - Clear property (clear: left/right/both)
  */
 
-// Core positioning functions
-void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
-void layout_absolute_positioned(LayoutContext* lycon, ViewBlock* block);
-
-// Utility functions
-bool element_has_positioning(ViewBlock* block);
-bool element_has_float(ViewBlock* block);
-ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type);
-void calculate_relative_offset(ViewBlock* block, int* offset_x, int* offset_y);
-void calculate_absolute_position(ViewBlock* block, ViewBlock* containing_block);
-
 // Stacking context management (Phase 3)
 typedef struct StackingContext {
     ViewBlock* establishing_element;  // element that creates the context
@@ -49,3 +38,28 @@ typedef struct FloatContext {
     int current_y;           // current line position
     ViewBlock* container;    // containing block
 } FloatContext;
+
+// Core positioning functions
+void layout_relative_positioned(LayoutContext* lycon, ViewBlock* block);
+void layout_absolute_positioned(LayoutContext* lycon, ViewBlock* block);
+
+// Utility functions
+bool element_has_positioning(ViewBlock* block);
+bool element_has_float(ViewBlock* block);
+ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type);
+void calculate_relative_offset(ViewBlock* block, int* offset_x, int* offset_y);
+void calculate_absolute_position(ViewBlock* block, ViewBlock* containing_block);
+
+// Float layout functions (Phase 4)
+void layout_float_element(LayoutContext* lycon, ViewBlock* block);
+FloatContext* create_float_context(ViewBlock* container);
+void add_float_to_context(FloatContext* ctx, ViewBlock* element, PropValue float_side);
+void position_float_element(FloatContext* ctx, ViewBlock* element, PropValue float_side);
+void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx);
+int find_clear_position(FloatContext* ctx, PropValue clear_value);
+
+// Clear property functions (Phase 5)
+void layout_clear_element(LayoutContext* lycon, ViewBlock* block);
+
+// Line box adjustment functions (Phase 6)
+bool float_intersects_line(FloatBox* float_box, int line_top, int line_bottom);

@@ -2,6 +2,8 @@
 
 #include "view.hpp"
 #include "../lib/log.h"
+#include <ft2build.h>
+#include FT_FREETYPE_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,7 +22,7 @@ typedef struct FontFaceDescriptor {
     PropValue font_display;      // auto, block, swap, fallback, optional
     bool is_loaded;              // loading state
     FT_Face loaded_face;         // cached FT_Face when loaded
-    
+
     // Performance optimizations
     struct hashmap* char_width_cache;  // Unicode codepoint -> width cache
     bool metrics_computed;             // Font metrics computed flag
@@ -31,17 +33,17 @@ typedef struct EnhancedFontMetrics {
     // Core metrics
     int ascender, descender, height;
     int line_gap;               // Additional line spacing
-    
+
     // Advanced metrics for better typography
     int x_height;               // Height of lowercase 'x'
     int cap_height;             // Height of uppercase letters
     int baseline_offset;        // Baseline position adjustment
-    
+
     // OpenType metrics for better compatibility
     int typo_ascender, typo_descender, typo_line_gap;
     int win_ascent, win_descent;
     int hhea_ascender, hhea_descender, hhea_line_gap;
-    
+
     // Performance optimizations
     bool metrics_computed;      // Metrics computation flag
     struct hashmap* char_metrics_cache;  // Character metrics cache
@@ -53,16 +55,16 @@ typedef struct EnhancedFontBox {
     FT_Face face;
     float space_width;
     int current_font_size;
-    
+
     // Enhanced metrics
     EnhancedFontMetrics metrics;
     bool metrics_computed;
-    
+
     // Character caching for performance (Unicode support)
     struct hashmap* char_width_cache;    // codepoint -> width
     struct hashmap* char_bearing_cache;  // codepoint -> bearing
     bool cache_enabled;                  // Enable character caching
-    
+
     // High-DPI display support (preserve existing pixel_ratio handling)
     float pixel_ratio;                   // Current display pixel ratio
     bool high_dpi_aware;                 // High-DPI rendering enabled
@@ -72,7 +74,7 @@ typedef struct EnhancedFontBox {
 typedef struct FontMatchCriteria {
     const char* family_name;
     PropValue weight;           // 100-900
-    PropValue style;           // normal, italic, oblique  
+    PropValue style;           // normal, italic, oblique
     int size;                  // font size in pixels
     uint32_t required_codepoint; // Specific codepoint support needed (optional)
 } FontMatchCriteria;
@@ -94,7 +96,7 @@ typedef struct FontFallbackChain {
     FontFaceDescriptor** web_fonts;  // Associated @font-face fonts
     char** system_fonts;        // System font fallbacks
     char* generic_family;       // serif, sans-serif, monospace, etc.
-    
+
     // Caching for performance
     struct hashmap* codepoint_font_cache;  // codepoint -> FT_Face cache
     bool cache_enabled;                    // Enable codepoint caching
@@ -107,7 +109,7 @@ typedef struct CharacterMetrics {
     int bearing_x, bearing_y;   // Glyph bearing
     int width, height;          // Glyph dimensions
     bool is_cached;             // Cached flag
-    
+
     // High-DPI display support (preserve existing pixel_ratio handling)
     float pixel_ratio;          // Display pixel ratio used for these metrics
     bool scaled_for_display;    // Metrics scaled for high-DPI display
@@ -118,7 +120,7 @@ typedef struct GlyphRenderInfo {
     uint32_t codepoint;
     FT_GlyphSlot glyph;
     CharacterMetrics metrics;
-    
+
     // Rendering state
     bool needs_fallback;        // Requires font fallback
     FT_Face fallback_face;      // Fallback font face if needed
@@ -141,7 +143,7 @@ FontFaceDescriptor* create_font_face_descriptor(struct LayoutContext* lycon);
 void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor);
 
 // Font loading with @font-face support (local fonts only)
-FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name, 
+FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
                                    FontProp* style, bool* is_fallback);
 FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* style);
 bool resolve_font_path_from_descriptor(FontFaceDescriptor* descriptor, char** resolved_path);
@@ -187,11 +189,11 @@ void cache_glyph_metrics(EnhancedFontBox* fbox, uint32_t codepoint, CharacterMet
 
 // High-DPI display support for character rendering (preserve existing pixel_ratio)
 void scale_character_metrics_for_display(CharacterMetrics* metrics, float pixel_ratio);
-GlyphRenderInfo* load_glyph_with_pixel_ratio(UiContext* uicon, EnhancedFontBox* fbox, 
+GlyphRenderInfo* load_glyph_with_pixel_ratio(UiContext* uicon, EnhancedFontBox* fbox,
                                             uint32_t codepoint, float pixel_ratio);
 
 // Enhanced font system integration
-void setup_font_enhanced(UiContext* uicon, EnhancedFontBox* fbox, 
+void setup_font_enhanced(UiContext* uicon, EnhancedFontBox* fbox,
                         const char* font_name, FontProp* fprop);
 FT_Face load_font_with_fallback(UiContext* uicon, const char* family_name,
                                 FontProp* style, FontFallbackChain* fallback);

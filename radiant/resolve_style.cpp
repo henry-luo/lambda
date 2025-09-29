@@ -538,6 +538,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     if (declr->type == 86) {
         printf("DEBUG: Found property 86! LXB_CSS_PROPERTY_POSITION=%d\n", LXB_CSS_PROPERTY_POSITION);
     }
+    if (declr->type == 31) {
+        printf("DEBUG: Found property 31! LXB_CSS_PROPERTY_CLEAR=%d\n", LXB_CSS_PROPERTY_CLEAR);
+    }
 
     switch (declr->type) {
     case LXB_CSS_PROPERTY_LINE_HEIGHT: {
@@ -1217,6 +1220,18 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         log_debug("left offset: %dpx", block->position->left);
         break;
     }
+    case LXB_CSS_PROPERTY_CLEAR: {
+        if (!block) { break; }
+        const lxb_css_property_clear_t *clear = declr->u.clear;
+        printf("DEBUG: CSS clear property parsed: value=%d (LEFT=47, RIGHT=48, BOTH=372, NONE=%d)\n", 
+               clear->type, LXB_CSS_VALUE_NONE);
+        if (!block->position) {
+            block->position = alloc_position_prop(lycon);
+        }
+        block->position->clear = clear->type;
+        printf("DEBUG: Stored clear value %d in block->position->clear\n", clear->type);
+        break;
+    }
     case LXB_CSS_PROPERTY_Z_INDEX: {
         if (!block) { break; }
         const lxb_css_property_z_index_t *z_index = declr->u.z_index;
@@ -1237,16 +1252,6 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
         block->position->float_prop = float_prop->type;
         log_debug("float property: %d", float_prop->type);
-        break;
-    }
-    case LXB_CSS_PROPERTY_CLEAR: {
-        if (!block) { break; }
-        const lxb_css_property_clear_t *clear = declr->u.clear;
-        if (!block->position) {
-            block->position = alloc_position_prop(lycon);
-        }
-        block->position->clear = clear->type;
-        log_debug("clear property: %d", clear->type);
         break;
     }
     case LXB_CSS_PROPERTY_FLEX_DIRECTION: {
