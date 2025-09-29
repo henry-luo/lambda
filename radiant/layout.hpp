@@ -4,7 +4,7 @@
 #include "view.hpp"
 #include "dom.hpp"
 
-typedef struct {
+typedef struct StyleContext {
     struct StyleElement* parent;
     struct StyleNode* prev_node;
     lxb_css_parser_t *css_parser;
@@ -22,7 +22,7 @@ typedef struct Blockbox {
     struct Blockbox* pa_block;  // parent block
 } Blockbox;
 
-typedef struct {
+typedef struct Linebox {
     int left, right;  // left and right bounds of the line
     int advance_x;
     int max_ascender;
@@ -42,7 +42,7 @@ typedef enum LineFillStatus {
     RDT_LINE_FILLED = 2,
 } LineFillStatus;
 
-typedef struct {
+typedef struct LayoutContext {
     ViewGroup* parent;
     View* prev_view;
     View* view;  // current view
@@ -53,7 +53,7 @@ typedef struct {
     DomNode *elmt;  // current dom element, used before the view is created
     Document* doc;
     UiContext* ui_context;
-    
+
     // Additional fields for test compatibility
     int width, height;  // context dimensions
     int dpi;           // dots per inch

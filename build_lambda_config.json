@@ -267,6 +267,7 @@
                 "radiant/scroller.cpp",
                 "radiant/view_pool.cpp",
                 "radiant/font.cpp",
+                "radiant/font_face.cpp",
                 "radiant/surface.cpp",
                 "radiant/render.cpp",
                 "radiant/event.cpp",
@@ -1270,6 +1271,88 @@
                             "lexbor_static"
                         ],
                         "binary": "test_radiant_flex_integration_gtest.exe",
+                        "includes": [
+                            "radiant",
+                            "lib/mem-pool/include",
+                            "lexbor/source",
+                            "/opt/homebrew/Cellar/fontconfig/2.17.1/include",
+                            "/opt/homebrew/include"
+                        ],
+                        "defines": [
+                            "FLEX_TEST_MODE"
+                        ]
+                    },
+                    {
+                        "source": "test/test_radiant_text_flow_gtest.cpp",
+                        "name": "📝 Radiant Text Flow Tests (GTest)",
+                        "additional_sources": [
+                            "radiant/layout_test_support.cpp"
+                        ],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "lexbor_static"
+                        ],
+                        "binary": "test_radiant_text_flow_gtest.exe",
+                        "includes": [
+                            "radiant",
+                            "lib/mem-pool/include",
+                            "lexbor/source",
+                            "/opt/homebrew/Cellar/fontconfig/2.17.1/include",
+                            "/opt/homebrew/include"
+                        ],
+                        "defines": [
+                            "FLEX_TEST_MODE"
+                        ]
+                    },
+                    {
+                        "source": "test/test_radiant_font_face_gtest.cpp",
+                        "name": "🔤 Radiant Font Face Tests (GTest)",
+                        "additional_sources": [
+                            "radiant/layout_test_support.cpp"
+                        ],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "lexbor_static"
+                        ],
+                        "binary": "test_radiant_font_face_gtest.exe",
+                        "includes": [
+                            "radiant",
+                            "lib/mem-pool/include",
+                            "lexbor/source",
+                            "/opt/homebrew/Cellar/fontconfig/2.17.1/include",
+                            "/opt/homebrew/include"
+                        ],
+                        "defines": [
+                            "FLEX_TEST_MODE"
+                        ]
+                    },
+                    {
+                        "source": "test/test_radiant_layout_gtest.cpp",
+                        "name": "🏗️ Radiant Layout Engine Tests (GTest)",
+                        "additional_sources": [
+                            "radiant/layout.cpp",
+                            "radiant/layout_flex.cpp",
+                            "radiant/layout_text.cpp",
+                            "radiant/font_face.cpp",
+                            "radiant/layout_test_support.cpp"
+                        ],
+                        "dependencies": [
+                            "lambda-lib"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "lexbor_static"
+                        ],
+                        "binary": "test_radiant_layout_gtest.exe",
                         "includes": [
                             "radiant",
                             "lib/mem-pool/include",

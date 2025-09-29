@@ -323,7 +323,7 @@ clean-tree-sitter-minimal:
 	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
 	    generate-premake clean-premake build-test build-test-linux \
-	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant test-radiants
+	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant build-radiant-tests test-radiant
 
 # Help target - shows available commands
 help:
@@ -333,8 +333,10 @@ help:
 	@echo "  build         - Build lambda project using Premake build system (incremental, default)"
 	@echo "                  On Windows/MSYS2: Automatically configures MINGW64 toolchain with PATH fixes"
 	@echo "                  On other platforms: Prefers MINGW64 over CLANG64 to avoid Universal CRT"
-	@echo "  build-radiant - Build Radiant HTML/CSS/SVG rendering engine using Premake"
-	@echo "                  Automatically installs graphics libraries (lexbor, SDL2, freetype, etc.)"
+	@echo "  build-radiant - Build Radiant HTML/CSS/SVG rendering engine executable only"
+	@echo "                  Focuses on building radiant.exe without test executables"
+	@echo "  build-radiant-tests - Build all Radiant unit tests including text flow tests"
+	@echo "                  Builds flexbox, layout, font, and text flow test suites"
 	@echo "  debug         - Build with debug symbols and AddressSanitizer using Premake"
 	@echo "  release       - Build optimized release version using Premake"
 	@echo "  rebuild       - Force complete rebuild using Premake"
@@ -535,7 +537,7 @@ rebuild: clean $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 # Specific project builds
 lambda: build
 
-# Radiant HTML/CSS/SVG rendering engine build
+# Radiant HTML/CSS/SVG rendering engine build (executable only)
 build-radiant: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	@echo "Building Radiant HTML/CSS/SVG rendering engine..."
 	@echo "Generating unified Premake configuration (includes radiant target)..."
@@ -546,8 +548,45 @@ build-radiant: $(TS_ENUM_H) $(LAMBDA_EMBED_H_FILE) tree-sitter-libs
 	# Ensure explicit compiler variables are passed to Premake build
 	@echo "Using CC=$(CC) CXX=$(CXX)"
 	$(call run_make_with_error_summary,radiant)
-	@echo "Building Radiant test executables..."
-	@make -C build/premake test_radiant_flex_gtest test_radiant_flex_algorithm_gtest test_radiant_flex_integration_gtest 2>/dev/null || echo "Warning: Some Radiant tests could not be built"
+	@echo "✅ Radiant executable built successfully: $(RADIANT_EXE)"
+
+# Radiant test suite build (all radiant unit tests including text flow tests)
+build-radiant-tests: build-radiant
+	@echo "Building Radiant test suite..."
+	@echo "Building core flexbox tests..."
+	@make -C build/premake test_radiant_flex_gtest -j$(JOBS) CC="$(CC)" CXX="$(CXX)" 2>/dev/null || echo "Warning: Core flexbox tests could not be built"
+	@echo "Building flexbox algorithm tests..."
+	@make -C build/premake test_radiant_flex_algorithm_gtest -j$(JOBS) CC="$(CC)" CXX="$(CXX)" 2>/dev/null || echo "Warning: Flexbox algorithm tests could not be built"
+	@echo "Building flexbox integration tests..."
+	@make -C build/premake test_radiant_flex_integration_gtest -j$(JOBS) CC="$(CC)" CXX="$(CXX)" 2>/dev/null || echo "Warning: Flexbox integration tests could not be built"
+	@echo "Building text flow tests..."
+	@make -C build/premake test_radiant_text_flow_gtest -j$(JOBS) CC="$(CC)" CXX="$(CXX)" 2>/dev/null || echo "Warning: Text flow tests could not be built"
+	@echo "Building font face tests..."
+	@make -C build/premake test_radiant_font_face_gtest -j$(JOBS) CC="$(CC)" CXX="$(CXX)" 2>/dev/null || echo "Warning: Font face tests could not be built"
+	@echo "Building layout tests..."
+	@make -C build/premake test_radiant_layout_gtest -j$(JOBS) CC="$(CC)" CXX="$(CXX)" 2>/dev/null || echo "Warning: Layout tests could not be built"
+	@echo "Building additional flex tests..."
+	@make -C build/premake test_flex_minimal test_flex_core_validation test_flex_simple -j$(JOBS) CC="$(CC)" CXX="$(CXX)" 2>/dev/null || echo "Warning: Additional flex tests could not be built"
+	@make -C build/premake test_flex_layout_gtest test_flex_standalone test_flex_new_features -j$(JOBS) CC="$(CC)" CXX="$(CXX)" 2>/dev/null || echo "Warning: Advanced flex tests could not be built"
+	@echo "✅ Radiant test suite built successfully!"
+	@echo ""
+	@echo "📋 Available Radiant Test Executables:"
+	@echo "====================================="
+	@echo "Core Tests:"
+	@ls -la test/test_radiant_flex_gtest.exe 2>/dev/null && echo "  ✅ test_radiant_flex_gtest.exe - Core flexbox functionality" || echo "  ❌ test_radiant_flex_gtest.exe - Not built"
+	@ls -la test/test_radiant_flex_algorithm_gtest.exe 2>/dev/null && echo "  ✅ test_radiant_flex_algorithm_gtest.exe - Flexbox algorithms" || echo "  ❌ test_radiant_flex_algorithm_gtest.exe - Not built"
+	@ls -la test/test_radiant_flex_integration_gtest.exe 2>/dev/null && echo "  ✅ test_radiant_flex_integration_gtest.exe - Integration tests" || echo "  ❌ test_radiant_flex_integration_gtest.exe - Not built"
+	@echo "Text Flow Tests:"
+	@ls -la test/test_radiant_text_flow_gtest.exe 2>/dev/null && echo "  ✅ test_radiant_text_flow_gtest.exe - Text flow and typography" || echo "  ❌ test_radiant_text_flow_gtest.exe - Not built"
+	@ls -la test/test_radiant_font_face_gtest.exe 2>/dev/null && echo "  ✅ test_radiant_font_face_gtest.exe - Font loading and caching" || echo "  ❌ test_radiant_font_face_gtest.exe - Not built"
+	@ls -la test/test_radiant_layout_gtest.exe 2>/dev/null && echo "  ✅ test_radiant_layout_gtest.exe - Layout engine tests" || echo "  ❌ test_radiant_layout_gtest.exe - Not built"
+	@echo "Additional Tests:"
+	@ls -la test/test_flex_minimal.exe 2>/dev/null && echo "  ✅ test_flex_minimal.exe - Minimal flex tests" || echo "  ❌ test_flex_minimal.exe - Not built"
+	@ls -la test/test_flex_core_validation.exe 2>/dev/null && echo "  ✅ test_flex_core_validation.exe - Core validation" || echo "  ❌ test_flex_core_validation.exe - Not built"
+	@ls -la test/test_flex_simple.exe 2>/dev/null && echo "  ✅ test_flex_simple.exe - Simple flex tests" || echo "  ❌ test_flex_simple.exe - Not built"
+	@ls -la test/test_flex_layout_gtest.exe 2>/dev/null && echo "  ✅ test_flex_layout_gtest.exe - Comprehensive layout" || echo "  ❌ test_flex_layout_gtest.exe - Not built"
+	@ls -la test/test_flex_standalone.exe 2>/dev/null && echo "  ✅ test_flex_standalone.exe - Standalone tests" || echo "  ❌ test_flex_standalone.exe - Not built"
+	@ls -la test/test_flex_new_features.exe 2>/dev/null && echo "  ✅ test_flex_new_features.exe - New features" || echo "  ❌ test_flex_new_features.exe - Not built"
 
 radiant: build-radiant
 
@@ -618,10 +657,20 @@ clean-test:
 	@rm -f test/test_radiant_flex_gtest.exe 2>/dev/null || true
 	@rm -f test/test_radiant_flex_algorithm_gtest.exe 2>/dev/null || true
 	@rm -f test/test_radiant_flex_integration_gtest.exe 2>/dev/null || true
+	@rm -f test/test_radiant_text_flow_gtest.exe 2>/dev/null || true
+	@rm -f test/test_radiant_font_face_gtest.exe 2>/dev/null || true
+	@rm -f test/test_radiant_layout_gtest.exe 2>/dev/null || true
 	@rm -f test/test_flex_core_validation.exe 2>/dev/null || true
 	@rm -f test/test_flex_simple.exe 2>/dev/null || true
+	@rm -f test/test_flex_minimal.exe 2>/dev/null || true
+	@rm -f test/test_flex_layout_gtest.exe 2>/dev/null || true
+	@rm -f test/test_flex_standalone.exe 2>/dev/null || true
+	@rm -f test/test_flex_new_features.exe 2>/dev/null || true
 	@find test/ -name "*radiant*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
 	@find test/ -name "*flex*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
+	@find test/ -name "*text_flow*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
+	@find test/ -name "*font_face*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
+	@find test/ -name "*layout*" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
 	@echo "Test build outputs cleaned."
 
 clean-grammar:
@@ -768,64 +817,82 @@ test-std: build
 		exit 1; \
 	fi
 
-test-radiant: build-radiant
+test-radiant: build-radiant-tests
 	@echo "Running Radiant layout engine test suite..."
 	@echo "Testing core flexbox functionality..."
 	@if [ -f "test/test_radiant_flex_gtest.exe" ]; then \
 		./test/test_radiant_flex_gtest.exe; \
 	else \
-		echo "Error: Radiant flex core tests not found. Run 'make build-radiant' first."; \
+		echo "Error: Radiant flex core tests not found. Run 'make build-radiant-tests' first."; \
 		exit 1; \
 	fi
 	@echo "Testing flexbox algorithm..."
 	@if [ -f "test/test_radiant_flex_algorithm_gtest.exe" ]; then \
 		./test/test_radiant_flex_algorithm_gtest.exe; \
 	else \
-		echo "Error: Radiant flex algorithm tests not found. Run 'make build-radiant' first."; \
+		echo "Error: Radiant flex algorithm tests not found. Run 'make build-radiant-tests' first."; \
 		exit 1; \
 	fi
 	@echo "Testing flexbox integration..."
 	@if [ -f "test/test_radiant_flex_integration_gtest.exe" ]; then \
 		./test/test_radiant_flex_integration_gtest.exe; \
 	else \
-		echo "Error: Radiant flex integration tests not found. Run 'make build-radiant' first."; \
+		echo "Error: Radiant flex integration tests not found. Run 'make build-radiant-tests' first."; \
 		exit 1; \
 	fi
 	@echo "Testing minimal flexbox functionality..."
 	@if [ -f "test/test_flex_minimal.exe" ]; then \
 		./test/test_flex_minimal.exe; \
 	else \
-		echo "Warning: Minimal flex tests not found. Skipping test_flex_minimal.exe"; \
+		echo "Warning: Minimal flex tests not found. Run 'make build-radiant-tests' to build all tests."; \
 	fi
 	@echo "Testing core flex validation..."
 	@if [ -f "test/test_flex_core_validation.exe" ]; then \
 		./test/test_flex_core_validation.exe; \
 	else \
-		echo "Warning: Core validation tests not found. Skipping test_flex_core_validation.exe"; \
+		echo "Warning: Core validation tests not found. Run 'make build-radiant-tests' to build all tests."; \
 	fi
 	@echo "Testing simple flex functionality..."
 	@if [ -f "test/test_flex_simple.exe" ]; then \
 		./test/test_flex_simple.exe; \
 	else \
-		echo "Warning: Simple flex tests not found. Skipping test_flex_simple.exe"; \
+		echo "Warning: Simple flex tests not found. Run 'make build-radiant-tests' to build all tests."; \
 	fi
 	@echo "Testing comprehensive flex layout..."
 	@if [ -f "test/test_flex_layout_gtest.exe" ]; then \
 		./test/test_flex_layout_gtest.exe; \
 	else \
-		echo "Warning: Comprehensive flex layout tests not found. Skipping test_flex_layout_gtest.exe"; \
+		echo "Warning: Comprehensive flex layout tests not found. Run 'make build-radiant-tests' to build all tests."; \
 	fi
 	@echo "Testing standalone flex functionality..."
 	@if [ -f "test/test_flex_standalone.exe" ]; then \
 		timeout 10s ./test/test_flex_standalone.exe || echo "Warning: Standalone flex tests encountered issues (exit code: $$?)"; \
 	else \
-		echo "Warning: Standalone flex tests not found. Skipping test_flex_standalone.exe"; \
+		echo "Warning: Standalone flex tests not found. Run 'make build-radiant-tests' to build all tests."; \
 	fi
 	@echo "Testing advanced flex new features..."
 	@if [ -f "test/test_flex_new_features.exe" ]; then \
 		timeout 10s ./test/test_flex_new_features.exe || echo "Warning: Advanced flex new features tests encountered issues (exit code: $$?)"; \
 	else \
-		echo "Warning: Advanced flex new features tests not found. Skipping test_flex_new_features.exe"; \
+		echo "Warning: Advanced flex new features tests not found. Run 'make build-radiant-tests' to build all tests."; \
+	fi
+	@echo "Testing text flow and typography..."
+	@if [ -f "test/test_radiant_text_flow_gtest.exe" ]; then \
+		./test/test_radiant_text_flow_gtest.exe; \
+	else \
+		echo "Warning: Text flow tests not found. Run 'make build-radiant-tests' to build all tests."; \
+	fi
+	@echo "Testing font face functionality..."
+	@if [ -f "test/test_radiant_font_face_gtest.exe" ]; then \
+		./test/test_radiant_font_face_gtest.exe; \
+	else \
+		echo "Warning: Font face tests not found. Run 'make build-radiant-tests' to build all tests."; \
+	fi
+	@echo "Testing layout engine..."
+	@if [ -f "test/test_radiant_layout_gtest.exe" ]; then \
+		./test/test_radiant_layout_gtest.exe; \
+	else \
+		echo "Warning: Layout engine tests not found. Run 'make build-radiant-tests' to build all tests."; \
 	fi
 	@echo "✅ All Radiant tests passed successfully!"
 

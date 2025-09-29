@@ -9,7 +9,6 @@ extern "C" {
 
 // Forward declarations
 struct LayoutContext;
-typedef struct LayoutContext LayoutContext;
 
 // Font face descriptor for @font-face support
 typedef struct FontFaceDescriptor {
@@ -137,8 +136,8 @@ void init_text_flow_logging(void);
 void setup_text_flow_log_categories(void);
 
 // CSS @font-face parsing integration
-void parse_font_face_rule(LayoutContext* lycon, lxb_css_rule_t* rule);
-FontFaceDescriptor* create_font_face_descriptor(LayoutContext* lycon);
+void parse_font_face_rule(struct LayoutContext* lycon, lxb_css_rule_t* rule);
+FontFaceDescriptor* create_font_face_descriptor(struct LayoutContext* lycon);
 void register_font_face(UiContext* uicon, FontFaceDescriptor* descriptor);
 
 // Font loading with @font-face support (local fonts only)
