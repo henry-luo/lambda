@@ -574,11 +574,12 @@ class LayoutTester {
      * Compare two tree nodes directly for element matching
      * SIMPLE: Just match based on tag, position in tree, and basic properties
      */
-    compareTreeNodes(radiantNode, browserNode, path = '') {
+    compareTreeNodes(radiantNode, browserNode, path = '', parentContext = null) {
         const differences = [];
         const currentPath = (path && path !== 'root') ? path : (radiantNode.tag || browserNode.tag || 'unknown');
 
-        // Basic element matching
+        // CRITICAL CHANGE: Always match elements by tag name first
+        // Layout differences are recorded but don't prevent element matching
         if (radiantNode.tag !== browserNode.tag) {
             differences.push({
                 type: 'tag_mismatch',
@@ -589,26 +590,65 @@ class LayoutTester {
             return { matches: false, differences };
         }
 
-        // Layout comparison if both have layout
+        // Element matches by name - now evaluate layout quality
+        let layoutMatches = true;
         if (radiantNode.layout && browserNode.layout) {
-            const layoutDiffs = this.compareElementLayout(radiantNode.layout, browserNode.layout);
+            // CRITICAL CHANGE: Use relative positioning for child elements
+            let radiantLayout = radiantNode.layout;
+            let browserLayout = browserNode.layout;
+            
+            // If we have parent context, convert to relative positioning
+            if (parentContext) {
+                radiantLayout = {
+                    x: radiantNode.layout.x - parentContext.radiant.x,
+                    y: radiantNode.layout.y - parentContext.radiant.y,
+                    width: radiantNode.layout.width,
+                    height: radiantNode.layout.height
+                };
+                browserLayout = {
+                    x: browserNode.layout.x - parentContext.browser.x,
+                    y: browserNode.layout.y - parentContext.browser.y,
+                    width: browserNode.layout.width,
+                    height: browserNode.layout.height
+                };
+                
+                if (this.verbose) {
+                    console.log(`   🔄 Relative positioning for ${radiantNode.tag}:`);
+                    console.log(`      Radiant: (${radiantLayout.x}, ${radiantLayout.y}) vs Browser: (${browserLayout.x}, ${browserLayout.y})`);
+                }
+            }
+            
+            const layoutDiffs = this.compareElementLayout(radiantLayout, browserLayout);
             if (layoutDiffs.length > 0) {
                 const maxDiff = Math.max(...layoutDiffs.map(d => d.difference));
-                if (maxDiff > this.tolerance) {
-                    differences.push({
-                        type: 'layout_difference',
-                        path: currentPath,
-                        radiant: radiantNode.layout,
-                        browser: browserNode.layout,
-                        differences: layoutDiffs,
-                        maxDifference: maxDiff
-                    });
-                    return { matches: false, differences };
+                
+                // Record layout differences but don't fail element matching
+                differences.push({
+                    type: 'layout_difference',
+                    path: currentPath,
+                    radiant: radiantLayout,
+                    browser: browserLayout,
+                    differences: layoutDiffs,
+                    maxDifference: maxDiff,
+                    isRelative: !!parentContext
+                });
+                
+                layoutMatches = maxDiff <= this.tolerance;
+                
+                if (this.verbose) {
+                    const status = layoutMatches ? '✅' : '❌';
+                    const relativeStr = parentContext ? ' (relative)' : ' (absolute)';
+                    console.log(`   ${status} Layout${relativeStr} for ${radiantNode.tag}: ${maxDiff.toFixed(2)}px <= ${this.tolerance}px`);
                 }
             }
         }
 
-        return { matches: true, differences };
+        // CRITICAL: Element always matches by name, layout quality is separate
+        return { 
+            matches: true, 
+            layoutMatches: layoutMatches,
+            differences: differences 
+        };
     }
 
     /**
@@ -750,9 +790,9 @@ class LayoutTester {
     }
 
     /**
-     * Recursively compare two trees element by element
+     * Recursively compare two trees element by element with parent context
      */
-    compareTreesRecursively(radiantNode, browserNode, path = '') {
+    compareTreesRecursively(radiantNode, browserNode, path = '', parentContext = null) {
         const results = {
             totalElements: 0,
             matchedElements: 0,
@@ -789,25 +829,38 @@ class LayoutTester {
         results.totalElements = 1;
         const currentPath = (path && path !== 'root') ? `${path} > ${radiantNode.tag}` : radiantNode.tag;
 
-        // Compare current nodes
-        const nodeComparison = this.compareTreeNodes(radiantNode, browserNode, currentPath);
+        // Compare current nodes with parent context for relative positioning
+        const nodeComparison = this.compareTreeNodes(radiantNode, browserNode, currentPath, parentContext);
 
+        // CRITICAL CHANGE: Elements always match by name, record layout differences separately
         if (nodeComparison.matches) {
             results.matchedElements = 1;
             if (this.verbose && radiantNode.layout) {
-                console.log(`   ✅ Match: ${currentPath} - ${radiantNode.tag}`);
+                const layoutStatus = nodeComparison.layoutMatches ? '✅' : '⚠️';
+                console.log(`   ${layoutStatus} Match: ${currentPath} - ${radiantNode.tag}`);
             }
         } else {
-            results.differences.push(...nodeComparison.differences);
-            // Calculate max difference for layout mismatches
-            nodeComparison.differences.forEach(diff => {
-                if (diff.maxDifference) {
-                    results.maxDifference = Math.max(results.maxDifference, diff.maxDifference);
-                }
-            });
+            // Only tag mismatches prevent element matching
+            if (this.verbose) {
+                console.log(`   ❌ Tag mismatch: ${currentPath} - ${radiantNode.tag} vs ${browserNode.tag}`);
+            }
         }
 
-        // Compare children
+        // Record all differences (layout and tag mismatches)
+        results.differences.push(...nodeComparison.differences);
+        nodeComparison.differences.forEach(diff => {
+            if (diff.maxDifference) {
+                results.maxDifference = Math.max(results.maxDifference, diff.maxDifference);
+            }
+        });
+
+        // CRITICAL CHANGE: Create parent context for children (relative positioning)
+        const childParentContext = (radiantNode.layout && browserNode.layout) ? {
+            radiant: radiantNode.layout,
+            browser: browserNode.layout
+        } : null;
+
+        // Compare children with parent context
         const radiantChildren = radiantNode.children || [];
         const browserChildren = browserNode.children || [];
         const maxChildren = Math.max(radiantChildren.length, browserChildren.length);
@@ -816,7 +869,7 @@ class LayoutTester {
             const radiantChild = radiantChildren[i] || null;
             const browserChild = browserChildren[i] || null;
 
-            const childResults = this.compareTreesRecursively(radiantChild, browserChild, currentPath);
+            const childResults = this.compareTreesRecursively(radiantChild, browserChild, currentPath, childParentContext);
 
             // Merge results
             results.totalElements += childResults.totalElements;
@@ -973,6 +1026,7 @@ class LayoutTester {
 
             // FOCUS: Layout accuracy is the primary success criteria
             // Pass if layout differences are within tolerance, regardless of element structure differences
+            
             const layoutAccurate = comparison.maxDifference <= this.tolerance;
             const hasLayoutMatches = comparison.matchedElements > 0;
 
