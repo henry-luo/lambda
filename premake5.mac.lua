@@ -92,7 +92,7 @@ project "lambda-lib"
 
 project "lambda-input-full-c"
     kind "SharedLib"
-    language "C"
+    language "C++"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
     
@@ -124,7 +124,8 @@ project "lambda-input-full-c"
     
     buildoptions {
         "-pedantic",
-        "-fdiagnostics-color=auto"
+        "-fdiagnostics-color=auto",
+        "-std=c++17"
     }
     
     libdirs {
@@ -166,6 +167,11 @@ project "lambda-input-full-c"
         "-framework CoreGraphics",
         "-framework AppKit",
         "-framework Carbon",
+    }
+    
+    -- Automatically added C++ standard library
+    links {
+        "c++",
     }
     
 
@@ -224,6 +230,7 @@ project "lambda-input-full-cpp"
         buildoptions {
             "-pedantic",
             "-fdiagnostics-color=auto",
+            "-std=c17",
         }
     
     filter "files:**.cpp"
@@ -276,6 +283,11 @@ project "lambda-input-full-cpp"
         "-framework Carbon",
     }
     
+    -- Automatically added C++ standard library
+    links {
+        "c++",
+    }
+    
 
 project "lambda-input-full"
     kind "SharedLib"
@@ -296,13 +308,12 @@ project "lambda-input-full"
 
 project "radiant"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetname "radiant.exe"
     targetdir "."
     objdir "build/obj/%{prj.name}"
     -- Native HTML/CSS/SVG rendering engine
     
-    language "C++"
     files {
         "radiant/window.cpp",
         "radiant/ui_context.cpp",
@@ -330,6 +341,7 @@ project "radiant"
         "radiant/surface.cpp",
         "radiant/render.cpp",
         "radiant/event.cpp",
+        "radiant/radiant.cpp",
         "lib/strview.c",
         "lib/strbuf.c",
         "lib/hashmap.c",
@@ -382,19 +394,9 @@ project "radiant"
         "iconv",
     }
     
-    linkoptions {
-        "-framework OpenGL",
-        "-framework CoreFoundation",
-        "-framework CoreVideo",
-        "-framework IOKit",
-        "-framework Foundation",
-        "-framework CoreGraphics",
-        "-framework AppKit",
-        "-framework Carbon",
-    }
-    
+    -- Automatically added C++ standard library
     links {
-        "iconv",
+        "c++",
     }
     
     linkoptions {
@@ -491,6 +493,32 @@ project "lambda"
         "lambda/input/css_tokenizer.c",
         "lambda/input/css_properties.c",
         "lambda/input/css_parser.c",
+        "radiant/ui_context.cpp",
+        "radiant/parse_html.cpp",
+        "radiant/layout.cpp",
+        "radiant/layout_block.cpp",
+        "radiant/layout_text.cpp",
+        "radiant/layout_positioned.cpp",
+        "radiant/layout_flex.cpp",
+        "radiant/layout_flex_content.cpp",
+        "radiant/layout_nested.cpp",
+        "radiant/layout_table.cpp",
+        "radiant/layout_grid.cpp",
+        "radiant/grid_utils.cpp",
+        "radiant/grid_sizing.cpp",
+        "radiant/grid_positioning.cpp",
+        "radiant/layout_grid_content.cpp",
+        "radiant/grid_advanced.cpp",
+        "radiant/view_pool_new.cpp",
+        "radiant/resolve_style.cpp",
+        "radiant/scroller.cpp",
+        "radiant/view_pool.cpp",
+        "radiant/font.cpp",
+        "radiant/font_face.cpp",
+        "radiant/surface.cpp",
+        "radiant/render.cpp",
+        "radiant/event.cpp",
+        "radiant/window.cpp",
         "typeset/typeset.c",
         "typeset/view/view_tree.c",
         "typeset/integration/latex_bridge.cpp",
@@ -616,7 +644,6 @@ project "lambda"
     filter "platforms:native"
         links {
             "iconv",
-            "stdc++",
         }
     
         linkoptions {
@@ -702,7 +729,6 @@ project "test_strbuf_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
     }
     
 
@@ -753,7 +779,6 @@ project "test_stringbuf_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
     }
     
 
@@ -804,7 +829,6 @@ project "test_strview_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
     }
     
 
@@ -855,7 +879,6 @@ project "test_variable_pool_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
     }
     
 
@@ -906,7 +929,6 @@ project "test_num_stack_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
     }
     
 
@@ -957,7 +979,6 @@ project "test_datetime_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
     }
     
 
@@ -1008,7 +1029,6 @@ project "test_url_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
     }
     
 
@@ -1059,7 +1079,6 @@ project "test_url_extra_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
     }
     
 
@@ -1112,7 +1131,6 @@ project "test_cmdedit_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-DCMDEDIT_TESTING",
         "-Wno-implicit-function-declaration",
         "-DUTF8PROC_STATIC",
@@ -1178,7 +1196,6 @@ project "test_mime_detect_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -1201,12 +1218,9 @@ project "test_mime_detect_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -1276,7 +1290,6 @@ project "test_math_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -1299,12 +1312,9 @@ project "test_math_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -1374,7 +1384,6 @@ project "test_math_ascii_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -1397,12 +1406,9 @@ project "test_math_ascii_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -1472,7 +1478,6 @@ project "test_markup_roundtrip_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -1495,12 +1500,9 @@ project "test_markup_roundtrip_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -1570,7 +1572,6 @@ project "test_input_roundtrip_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -1593,12 +1594,9 @@ project "test_input_roundtrip_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -1668,7 +1666,6 @@ project "test_dir_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -1691,12 +1688,9 @@ project "test_dir_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -1766,7 +1760,6 @@ project "test_http_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -1789,12 +1782,9 @@ project "test_http_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -1864,7 +1854,6 @@ project "test_sysinfo_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -1887,12 +1876,9 @@ project "test_sysinfo_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -1962,7 +1948,6 @@ project "test_jsx_roundtrip_new_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -1985,12 +1970,9 @@ project "test_jsx_roundtrip_new_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -2060,7 +2042,6 @@ project "test_mdx_roundtrip_new_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -2083,12 +2064,9 @@ project "test_mdx_roundtrip_new_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -2158,7 +2136,6 @@ project "test_css_tokenizer_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -2181,12 +2158,9 @@ project "test_css_tokenizer_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -2256,7 +2230,6 @@ project "test_css_parser_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -2279,12 +2252,9 @@ project "test_css_parser_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -2354,7 +2324,6 @@ project "test_css_integration_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -2377,12 +2346,9 @@ project "test_css_integration_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -2452,7 +2418,6 @@ project "test_css_files_safe_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -2475,12 +2440,9 @@ project "test_css_files_safe_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -2550,7 +2512,6 @@ project "test_css_frameworks_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -2573,12 +2534,9 @@ project "test_css_frameworks_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -2648,7 +2606,6 @@ project "test_mdx_roundtrip_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -2671,12 +2628,9 @@ project "test_mdx_roundtrip_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -2746,7 +2700,6 @@ project "test_jsx_roundtrip_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -2769,12 +2722,9 @@ project "test_jsx_roundtrip_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-fms-extensions",
     }
     
@@ -2844,7 +2794,6 @@ project "test_validator_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -2867,12 +2816,9 @@ project "test_validator_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
     }
     
     filter {}
@@ -2941,7 +2887,6 @@ project "test_ast_validator_gtest"
     -- Add dynamic libraries
     links {
         "iconv",
-        "stdc++",
         "ncurses",
     }
     
@@ -2964,12 +2909,9 @@ project "test_ast_validator_gtest"
         "-framework Carbon",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
     }
     
     filter {}
@@ -3022,8 +2964,6 @@ project "test_lambda_gtest"
         "/opt/homebrew/lib/libgtest_main.a",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
@@ -3072,8 +3012,6 @@ project "test_lambda_repl_gtest"
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
     }
-    
-    links { "stdc++" }
     
     buildoptions {
         "-pedantic",
@@ -3124,8 +3062,6 @@ project "test_lambda_proc_gtest"
         "/opt/homebrew/lib/libgtest_main.a",
     }
     
-    links { "stdc++" }
-    
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
@@ -3174,7 +3110,6 @@ project "test_lambda_runner"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17",
         "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES",
         "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0",
     }

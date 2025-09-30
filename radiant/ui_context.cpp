@@ -21,7 +21,7 @@ void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_heig
     if (!uicon->surface) {
         fprintf(stderr, "Error: Could not create image surface.\n");
         return;
-    }         
+    }
 }
 
 int ui_context_init(UiContext* uicon, bool headless) {
@@ -70,12 +70,12 @@ int ui_context_init(UiContext* uicon, bool headless) {
         float scale_x = (float)pixel_w / window_width;
         float scale_y = (float)pixel_h / window_height;
         printf("Scale Factor: %.2f x %.2f\n", scale_x, scale_y);
-        uicon->pixel_ratio = scale_x;   
+        uicon->pixel_ratio = scale_x;
         uicon->window_width = pixel_w;  uicon->window_height = pixel_h;
     }
 
     // load default fonts
-    uicon->default_font = (FontProp){"Arial", 16 * uicon->pixel_ratio, 
+    uicon->default_font = (FontProp){"Arial", (int)(16 * uicon->pixel_ratio),
         LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NONE};
     uicon->fallback_fonts = fallback_fonts;
 
@@ -87,8 +87,8 @@ int ui_context_init(UiContext* uicon, bool headless) {
         tvg_font_load(font_path);  free(font_path);
     }
     // creates the surface for rendering
-    ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);  
-    return EXIT_SUCCESS; 
+    ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);
+    return EXIT_SUCCESS;
 }
 
 void free_document(Document* doc) {

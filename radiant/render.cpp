@@ -8,7 +8,7 @@
 void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
-void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound, 
+void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     int content_width, int content_height, Bound* clip);
 
 // draw a glyph bitmap into the doc surface
@@ -32,13 +32,13 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
                 // can further optimize if background is a fixed color
                 if (rdcon->color.c == 0xFF) { // black text color
                     p[0] = p[0] * v / 255;
-                    p[1] = p[1] * v / 255;  
+                    p[1] = p[1] * v / 255;
                     p[2] = p[2] * v / 255;
-                    p[3] = 0xFF;           
+                    p[3] = 0xFF;
                 }
                 else { // non-black text color
                     p[0] = (p[0] * v + rdcon->color.r * intensity) / 255;
-                    p[1] = (p[1] * v + rdcon->color.g * intensity) / 255;  
+                    p[1] = (p[1] * v + rdcon->color.g * intensity) / 255;
                     p[2] = (p[2] * v + rdcon->color.b * intensity) / 255;
                     p[3] = 0xFF;  // alpha channel
                 }
@@ -51,21 +51,21 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     if (!rdcon->font.face) {
         printf("font face is null\n");
         return;
-    }    
+    }
     float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
-    unsigned char* str = text->node->text_data();  
+    unsigned char* str = text->node->text_data();
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    // printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)\n", 
+    // printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)\n",
     //     str, text->start_index, text->length, text->x, text->y, text->width, text->height, x, y);
     bool has_space = false;  uint32_t codepoint;
     while (p < end) {
         // printf("draw character '%c'\n", *p);
-        if (is_space(*p)) { 
+        if (is_space(*p)) {
             if (!has_space) {  // add whitespace
                 has_space = true;
                 // printf("draw_space: %c, x:%f, end:%f\n", *p, x, x + rdcon->font.space_width);
-                x += rdcon->font.space_width;                
-            } 
+                x += rdcon->font.space_width;
+            }
             // else  // skip consecutive spaces
             p++;
         }
@@ -78,7 +78,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.face, &rdcon->font.style, codepoint);
             if (!glyph) {
                 // draw a square box for missing glyph
-                Rect rect = {x + 1, y, rdcon->font.space_width - 2, rdcon->font.face->size->metrics.y_ppem >> 6};
+                Rect rect = {(int)(x + 1), (int)(y), (int)(rdcon->font.space_width - 2), (int)(rdcon->font.face->size->metrics.y_ppem >> 6)};
                 fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip);
                 x += rdcon->font.space_width;
             }
@@ -98,8 +98,8 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         // todo: underline probably shoul draw below/before the text, and leaves a gap where text has descender
         if (rdcon->font.style.text_deco == LXB_CSS_VALUE_UNDERLINE) {
             // underline drawn at baseline, with a gap of thickness
-            rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y + 
-                (rdcon->font.face->size->metrics.ascender >> 6) + thinkness;      
+            rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y +
+                (rdcon->font.face->size->metrics.ascender >> 6) + thinkness;
         }
         else if (rdcon->font.style.text_deco == LXB_CSS_VALUE_OVERLINE) {
             rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y;
@@ -108,7 +108,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y + text->height / 2;
         }
         rect.width = text->width;  rect.height = thinkness; // corrected the variable name from h to height
-        printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font.style.text_deco, 
+        printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font.style.text_deco,
             rect.x, rect.y, rect.width, rect.height); // corrected w to width
         fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
     }
@@ -170,7 +170,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
     float ratio = rdcon->ui_context->pixel_ratio;
     if (rdcon->list.list_style_type == LXB_CSS_VALUE_DISC) {
         Rect rect;
-        rect.x = rdcon->block.x + list_item->x - 15 * ratio;  
+        rect.x = rdcon->block.x + list_item->x - 15 * ratio;
         rect.y = rdcon->block.y + list_item->y + 7 * ratio;
         rect.width = rect.height = 5 * ratio;
         fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
@@ -184,13 +184,13 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         // Initialize the lexbor text node structure properly
         memset(&lxb_node, 0, sizeof(lxb_dom_text_t));
         lxb_node.char_data.node.type = LXB_DOM_NODE_TYPE_TEXT;
-        lxb_node.char_data.data.data = (lxb_char_t *)num->str;  
+        lxb_node.char_data.data.data = (lxb_char_t *)num->str;
         lxb_node.char_data.data.length = num->length;
-        
+
         // Initialize the ViewText structure
         text.type = RDT_VIEW_TEXT;  text.next = NULL;  text.parent = NULL;
         text.start_index = 0;  text.length = num->length;
-        
+
         // Create DomNode wrapper
         DomNode dom_wrapper;
         memset(&dom_wrapper, 0, sizeof(DomNode));
@@ -210,14 +210,14 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
 }
 
 void render_litem_view(RenderContext* rdcon, ViewBlock* list_item) {
-    printf("view list item:%s\n", list_item->node->name()); 
+    printf("view list item:%s\n", list_item->node->name());
     rdcon->list.item_index++;
     render_block_view(rdcon, list_item);
 }
 
 void render_list_view(RenderContext* rdcon, ViewBlock* view) {
     ViewBlock* list = (ViewBlock*)view;
-    printf("view list:%s\n", list->node->name()); 
+    printf("view list:%s\n", list->node->name());
     ListBlot pa_list = rdcon->list;
     rdcon->list.item_index = 0;  rdcon->list.list_style_type = list->blk->list_style_type;
     render_block_view(rdcon, list);
@@ -225,18 +225,18 @@ void render_list_view(RenderContext* rdcon, ViewBlock* view) {
 }
 
 void render_bound(RenderContext* rdcon, ViewBlock* view) {
-    Rect rect;  
+    Rect rect;
     rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
     rect.width = view->width;  rect.height = view->height;
     // fill background, if bg-color is non-transparent
     if (view->bound->background && (view->bound->background->color.a)) {
-        if (view->bound->border && (view->bound->border->radius.top_left > 0 || 
-            view->bound->border->radius.top_right > 0 || view->bound->border->radius.bottom_left > 0 || 
+        if (view->bound->border && (view->bound->border->radius.top_left > 0 ||
+            view->bound->border->radius.top_right > 0 || view->bound->border->radius.bottom_left > 0 ||
             view->bound->border->radius.bottom_right > 0)) {
             // fill the background with rounded corners
             tvg_canvas_remove(rdcon->canvas, NULL);  // clear any existing shapes
             Tvg_Paint* bg_shape = tvg_shape_new();
-            tvg_shape_append_rect(bg_shape, rect.x, rect.y, rect.width, rect.height, 
+            tvg_shape_append_rect(bg_shape, rect.x, rect.y, rect.width, rect.height,
                 view->bound->border->radius.top_left, view->bound->border->radius.top_right);
             Color bgcolor = view->bound->background->color;
             tvg_shape_set_fill_color(bg_shape, bgcolor.r, bgcolor.g, bgcolor.b, bgcolor.a);
@@ -247,7 +247,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
             tvg_paint_set_mask_method(bg_shape, clip_rect, TVG_MASK_METHOD_ALPHA);
             tvg_canvas_push(rdcon->canvas, bg_shape);
             tvg_canvas_draw(rdcon->canvas, false);
-            tvg_canvas_sync(rdcon->canvas); 
+            tvg_canvas_sync(rdcon->canvas);
         } else {
             fill_surface_rect(rdcon->ui_context->surface, &rect, view->bound->background->color.c, &rdcon->block.clip);
         }
@@ -255,7 +255,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
     if (view->bound->border) {
         if (view->bound->border->left_color.a) {
             Rect border_rect = rect;
-            border_rect.width = view->bound->border->width.left;            
+            border_rect.width = view->bound->border->width.left;
             fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->left_color.c, &rdcon->block.clip);
         }
         if (view->bound->border->right_color.a) {
@@ -274,7 +274,7 @@ void render_bound(RenderContext* rdcon, ViewBlock* view) {
             border_rect.y = rect.y + rect.height - view->bound->border->width.bottom;
             border_rect.height = view->bound->border->width.bottom;
             fill_surface_rect(rdcon->ui_context->surface, &border_rect, view->bound->border->bottom_color.c, &rdcon->block.clip);
-        }        
+        }
     }
 }
 
@@ -290,7 +290,7 @@ void draw_debug_rect(Tvg_Canvas* canvas, Rect rect, Bound* clip) {
     tvg_shape_set_stroke_color(shape, 255, 0, 0, 100); // Red stroke color (RGBA)
     // define the dash pattern for a dotted line
     float dash_pattern[2] = {8.0f, 8.0f}; // 8 units on, 8 units off
-    tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0); 
+    tvg_shape_set_stroke_dash(shape, dash_pattern, 2, 0);
 
     // set clipping
     Tvg_Paint* clip_rect = tvg_shape_new();
@@ -300,7 +300,7 @@ void draw_debug_rect(Tvg_Canvas* canvas, Rect rect, Bound* clip) {
 
     tvg_canvas_push(canvas, shape);
     tvg_canvas_draw(canvas, false);
-    tvg_canvas_sync(canvas); 
+    tvg_canvas_sync(canvas);
 }
 
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
@@ -352,7 +352,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     rdcon->block.x = pa_block.x + block->x;  rdcon->block.y = pa_block.y + block->y;
     if (DEBUG_RENDER) {  // debugging outline around the block margin border
         Rect rc;
-        rc.x = rdcon->block.x - (block->bound ? block->bound->margin.left : 0);  
+        rc.x = rdcon->block.x - (block->bound ? block->bound->margin.left : 0);
         rc.y = rdcon->block.y - (block->bound ? block->bound->margin.top : 0);
         rc.width = block->width + (block->bound ? block->bound->margin.left + block->bound->margin.right : 0);
         rc.height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
@@ -390,7 +390,7 @@ void renderSvg(ImageSurface* surface) {
     Tvg_Canvas* canvas = tvg_swcanvas_create();
     if (!canvas) return;
 
-    uint32_t width = surface->max_render_width;  
+    uint32_t width = surface->max_render_width;
     uint32_t height = surface->max_render_width * surface->height / surface->width;
     surface->pixels = (uint32_t*)malloc(width * height * sizeof(uint32_t));
     if (!surface->pixels) {
@@ -399,7 +399,7 @@ void renderSvg(ImageSurface* surface) {
     }
 
     // Set the canvas target to the buffer
-    if (tvg_swcanvas_set_target(canvas, (uint32_t*)surface->pixels, width, width, height, 
+    if (tvg_swcanvas_set_target(canvas, (uint32_t*)surface->pixels, width, width, height,
         TVG_COLORSPACE_ABGR8888) != TVG_RESULT_SUCCESS) {
         printf("Failed to set canvas target\n");
         free(surface->pixels);  surface->pixels = NULL;
@@ -411,8 +411,8 @@ void renderSvg(ImageSurface* surface) {
     tvg_canvas_push(canvas, surface->pic);
     tvg_canvas_update(canvas);
     tvg_canvas_draw(canvas, true);
-    tvg_canvas_sync(canvas); 
-    
+    tvg_canvas_sync(canvas);
+
     // Step 4: Clean up canvas
     tvg_canvas_destroy(canvas); // this also frees pic
     surface->pic = NULL;
@@ -423,9 +423,9 @@ void renderSvg(ImageSurface* surface) {
 Tvg_Paint* load_picture(ImageSurface* surface) {
     Tvg_Paint* pic = tvg_picture_new();
     if (!pic) { return NULL; }
- 
+
     // Load the raw pixel data into the new Picture
-    if (tvg_picture_load_raw(pic, (uint32_t*)surface->pixels, surface->width, surface->height, 
+    if (tvg_picture_load_raw(pic, (uint32_t*)surface->pixels, surface->width, surface->height,
         TVG_COLORSPACE_ABGR8888, false) != TVG_RESULT_SUCCESS) {
         printf("Failed to load raw pixel data\n");
         tvg_paint_del(pic);
@@ -443,7 +443,7 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
         ImageSurface* img = view->embed->img;
         Rect rect;
         rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
-        rect.width = view->width;  rect.height = view->height;         
+        rect.width = view->width;  rect.height = view->height;
         if (img->format == IMAGE_FORMAT_SVG) {
             // render the SVG image
             if (!img->pixels) {
@@ -481,9 +481,9 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
     if (block->scroller) { setup_scroller(rdcon, block); }
     // render the embedded doc
     if (block->embed && block->embed->doc) {
-        Document* doc = block->embed->doc;       
+        Document* doc = block->embed->doc;
         // render html doc
-        if (doc && doc->view_tree && doc->view_tree->root) { 
+        if (doc && doc->view_tree && doc->view_tree->root) {
             View* root_view = doc->view_tree->root;
             if (root_view && root_view->type == RDT_VIEW_BLOCK) {
                 printf("render doc root view:\n");
@@ -491,10 +491,10 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
             }
             else {
                 printf("Invalid root view\n");
-            }            
-        }        
+            }
+        }
     }
-   
+
     // render scrollbars
     if (block->scroller) {
         render_scroller(rdcon, block, &pa_block);
@@ -518,7 +518,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     else {
         printf("view has no child\n");
     }
-    rdcon->font = pa_font;  rdcon->color = pa_color; 
+    rdcon->font = pa_font;  rdcon->color = pa_color;
 }
 
 void render_children(RenderContext* rdcon, View* view) {
@@ -550,7 +550,7 @@ void render_children(RenderContext* rdcon, View* view) {
         }
 
         else if (view->type == RDT_VIEW_INLINE) {
-            ViewSpan* span = (ViewSpan*)view;                
+            ViewSpan* span = (ViewSpan*)view;
             render_inline_view(rdcon, span);
         }
         else if (view->type == RDT_VIEW_TEXT) {
@@ -569,7 +569,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
     rdcon->ui_context = uicon;
     rdcon->canvas = tvg_swcanvas_create();
     tvg_swcanvas_set_target(rdcon->canvas, (uint32_t*)uicon->surface->pixels, uicon->surface->width,
-        uicon->surface->width, uicon->surface->height, TVG_COLORSPACE_ABGR8888); 
+        uicon->surface->width, uicon->surface->height, TVG_COLORSPACE_ABGR8888);
 
     // load default font Arial, size 16 px
     setup_font(uicon, &rdcon->font, uicon->default_font.family, &rdcon->ui_context->default_font);

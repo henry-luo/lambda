@@ -342,6 +342,50 @@ class PremakeGenerator:
 
         return 'native', platforms
 
+    def _get_language_info(self, target: Dict[str, Any] = None) -> tuple[str, str, bool]:
+        """Get language information from target or global configuration
+
+        Returns: (language_type, standard_version, needs_cpp_stdlib)
+        Examples: ("C++", "c++17", True), ("C", "c17", False)
+        """
+        # Get language from target first, then global config
+        lang = None
+        if target:
+            lang = target.get('lang')
+        if not lang:
+            lang = self.config.get('lang', 'c++17')
+
+        # Parse language and standard
+        if lang.startswith('c++'):
+            return "C++", lang, True
+        elif lang.startswith('c') and lang[1:].isdigit():
+            return "C", lang, False
+        else:
+            # Fallback: detect from source files if target provided
+            if target:
+                source_files = target.get('source_files', [])
+                has_cpp = any(f.endswith('.cpp') for f in source_files)
+                if has_cpp:
+                    return "C++", "c++17", True
+                else:
+                    return "C", "c17", False
+            else:
+                return "C++", "c++17", True
+
+    def _get_cpp_standard(self, target: Dict[str, Any] = None) -> str:
+        """Get the C++ standard version from configuration
+
+        Checks multiple sources in order of preference:
+        1. Target-specific lang field
+        2. Global lang field
+        3. Global cpp_flags for -std=c++XX
+        4. Platform-specific cpp_flags
+        5. Default to c++17
+        """
+        # Use the new language info function
+        _, standard, _ = self._get_language_info(target)
+        return standard
+
     def generate_workspace(self) -> None:
         """Generate the main workspace configuration"""
         print("DEBUG: Generating workspace configuration...")
@@ -726,6 +770,13 @@ class PremakeGenerator:
                                source_patterns: List[str], dependencies: List[str],
                                language: str, project_name: str) -> None:
         """Create a single-language project"""
+        # Get language info from the lib target configuration
+        detected_language, standard, needs_cpp_stdlib = self._get_language_info(lib)
+
+        # Use detected language if different from passed language
+        if detected_language != language:
+            language = detected_language
+
         # Determine library type based on link attribute
         link_type = lib.get('link', 'static')
 
@@ -829,8 +880,9 @@ class PremakeGenerator:
 
         if c_files_present and cpp_files_present and language == "C++":
             # Mixed project: use file-specific build options
-            c_build_opts = build_opts.copy()
-            cpp_build_opts = build_opts + ['-std=c++17']
+            c_build_opts = build_opts + ['-std=c17']  # Default C standard for mixed projects
+            cpp_standard = self._get_cpp_standard(lib)
+            cpp_build_opts = build_opts + [f'-std={cpp_standard}']
 
             # C file build options
             self.premake_content.extend([
@@ -856,7 +908,12 @@ class PremakeGenerator:
         else:
             # Pure language project: use global build options
             if language == "C++":
-                build_opts.append('-std=c++17')
+                cpp_standard = self._get_cpp_standard(lib)
+                build_opts.append(f'-std={cpp_standard}')
+            elif language == "C":
+                # Add C standard support
+                _, c_standard, _ = self._get_language_info(lib)
+                build_opts.append(f'-std={c_standard}')
 
             # Add Windows DLL export flags for lambda-input-full projects - moved to linkoptions
             # if (self.use_windows_config and link_type == 'dynamic' and
@@ -1087,6 +1144,18 @@ class PremakeGenerator:
                 '    '
             ])
 
+        # Automatically add C++ standard library for C++ library projects
+        if needs_cpp_stdlib and not self.use_windows_config:
+            # Add C++ standard library based on platform
+            cpp_stdlib = 'c++' if self.use_macos_config else 'stdc++'
+            self.premake_content.extend([
+                '    -- Automatically added C++ standard library',
+                '    links {',
+                f'        "{cpp_stdlib}",',
+                '    }',
+                '    '
+            ])
+
         self.premake_content.append('')
 
     def _generate_target_executable(self, target: Dict[str, Any]) -> None:
@@ -1106,24 +1175,22 @@ class PremakeGenerator:
 
         print(f"DEBUG: Generating executable target: {target_name} -> {output_file}")
 
+        # Get language info from the target configuration
+        language, standard, needs_cpp_stdlib = self._get_language_info(target)
+
         # Get target directory - default to project root for executables
         target_dir = target.get('target_dir', '.')
 
         self.premake_content.extend([
             f'project "{project_name}"',
             '    kind "ConsoleApp"',
-            '    language "C"',  # Default to C, will be overridden if C++ files are found
+            f'    language "{language}"',
             f'    targetname "{target_filename}"',
             f'    targetdir "{target_dir}"',
             f'    objdir "build/obj/%{{prj.name}}"',
             f'    -- {description}',
             '    ',
         ])
-
-        # Set language based on source files
-        has_cpp = any(f.endswith('.cpp') for f in source_files)
-        if has_cpp:
-            self.premake_content.append('    language "C++"')
 
         # Add source files
         if source_files:
@@ -1288,24 +1355,19 @@ class PremakeGenerator:
                     '    '
                 ])
 
-            # Add framework libraries (macOS)
-            if framework_libs:
-                self.premake_content.append('    linkoptions {')
-                for framework in framework_libs:
-                    self.premake_content.append(f'        "{framework}",')
+            # Automatically add C++ standard library for C++ projects
+            if needs_cpp_stdlib and not self.use_windows_config:
+                # Add C++ standard library based on platform
+                cpp_stdlib = 'c++' if self.use_macos_config else 'stdc++'
                 self.premake_content.extend([
-                    '    }',
-                    '    '
-                ])
-                self.premake_content.append('    links {')
-                for lib in system_libs:
-                    self.premake_content.append(f'        "{lib}",')
-                self.premake_content.extend([
+                    '    -- Automatically added C++ standard library',
+                    '    links {',
+                    f'        "{cpp_stdlib}",',
                     '    }',
                     '    '
                 ])
 
-            # Add framework libraries (macOS)
+            # Add framework libraries (macOS) - cleaned up duplication
             if framework_libs:
                 self.premake_content.append('    linkoptions {')
                 for framework in framework_libs:
@@ -2638,7 +2700,10 @@ class PremakeGenerator:
             '    ',
             '    -- C++ specific options',
             '    filter "files:**.cpp"',
-            '        buildoptions { "-std=c++17" }',
+        ])
+        cpp_standard = self._get_cpp_standard()
+        self.premake_content.extend([
+            f'        buildoptions {{ "-std={cpp_standard}" }}',
             '    ',
             '    -- C specific options',
             '    filter "files:**.c"',

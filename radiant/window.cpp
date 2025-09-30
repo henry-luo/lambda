@@ -29,13 +29,13 @@ Document* show_html_doc(lxb_url_t *base, char* doc_url) {
     printf("Showing HTML document %s\n", doc_url);
     Document* doc = load_html_doc(base, doc_url);
     ui_context.document = doc;
-    // layout html doc 
+    // layout html doc
     if (doc->dom_tree) {
         layout_html_doc(&ui_context, doc, false);
-    }    
+    }
     // render html doc
-    if (doc && doc->view_tree && doc->view_tree->root) { 
-        render_html_doc(&ui_context, doc->view_tree->root); 
+    if (doc && doc->view_tree && doc->view_tree->root) {
+        render_html_doc(&ui_context, doc->view_tree->root);
     }
     return doc;
 }
@@ -104,7 +104,7 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
     }
 }
 
-// handles mouse/touchpad scroll input 
+// handles mouse/touchpad scroll input
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     RdtEvent event;
     event.scroll.type = RDT_EVENT_SCROLL;
@@ -146,7 +146,7 @@ void repaint_window() {
     GLuint texture;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ui_context.surface->width, ui_context.surface->height, 0, 
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, ui_context.surface->width, ui_context.surface->height, 0,
         GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, ui_context.surface->pixels);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
@@ -184,7 +184,7 @@ void render(GLFWwindow* window) {
         ui_context_create_surface(&ui_context, width, height);
         // reflow the document
         if (ui_context.document) {
-            reflow_html_doc(ui_context.document);   
+            reflow_html_doc(ui_context.document);
         }
         printf("Reflow time: %.2f ms\n", (glfwGetTime() - start_time) * 1000);
     }
@@ -219,62 +219,62 @@ lxb_url_t* get_current_dir_lexbor() {
     if (getcwd(cwd, sizeof(cwd)) == NULL) {
         return NULL;
     }
-    
+
     // Convert to file:// URL format
     char file_url[1200];
     snprintf(file_url, sizeof(file_url), "file://%s/", cwd);
-    
+
     // Create memory pool for URL parsing
     lexbor_mraw_t *mraw = lexbor_mraw_create();
     if (!mraw) {
         return NULL;
     }
-    
+
     lxb_status_t status = lexbor_mraw_init(mraw, 1024 * 16);
     if (status != LXB_STATUS_OK) {
         lexbor_mraw_destroy(mraw, true);
         return NULL;
     }
-    
+
     lxb_url_parser_t *parser = lxb_url_parser_create();
     if (!parser) {
         lexbor_mraw_destroy(mraw, true);
         return NULL;
     }
-    
+
     status = lxb_url_parser_init(parser, mraw);
     if (status != LXB_STATUS_OK) {
         lxb_url_parser_destroy(parser, true);
         lexbor_mraw_destroy(mraw, true);
         return NULL;
     }
-    
+
     lxb_url_t *url = lxb_url_parse(parser, NULL, (const lxb_char_t*)file_url, strlen(file_url));
-    
+
     lxb_url_parser_destroy(parser, false);
     // Note: don't destroy mraw here as url depends on it
-    
+
     return url;
 }
 
 // Layout test function for headless testing
-int run_layout_test(const char* html_file) {
+int run_layout(const char* html_file) {
     printf("Radiant Layout Test Mode\n");
     printf("========================\n");
     printf("Testing file: %s\n\n", html_file);
-    
+
     // Initialize without GUI
     log_init_wrapper();
-    
+
     // Initialize UI context properly in headless mode
     if (ui_context_init(&ui_context, true) != 0) {
         fprintf(stderr, "Error: Failed to initialize UI context\n");
         return 1;
     }
-    
+
     // Create surface for layout calculations (no actual rendering)
     ui_context_create_surface(&ui_context, ui_context.window_width, ui_context.window_height);
-    
+
     // Get current directory for relative path resolution
     lxb_url_t* cwd = get_current_dir_lexbor();
     if (!cwd) {
@@ -282,7 +282,7 @@ int run_layout_test(const char* html_file) {
         ui_context_cleanup(&ui_context);
         return 1;
     }
-    
+
     // Load HTML document
     printf("Loading HTML document...\n");
     Document* doc = load_html_doc(cwd, (char*)html_file);
@@ -292,47 +292,32 @@ int run_layout_test(const char* html_file) {
         ui_context_cleanup(&ui_context);
         return 1;
     }
-    
+
     ui_context.document = doc;
-    
+
     // Layout the document
     printf("Performing layout...\n");
     layout_html_doc(&ui_context, doc, false);
-    
+
     printf("Layout completed successfully!\n\n");
-    
+
     // Print view tree (existing functionality)
     if (doc->view_tree && doc->view_tree->root) {
         print_view_tree((ViewGroup*)doc->view_tree->root, ui_context.pixel_ratio);
     } else {
         printf("Warning: No view tree generated\n");
     }
-    
+
     // Cleanup
     lxb_url_destroy(cwd);
     ui_context_cleanup(&ui_context);
     log_cleanup();
-    
+
     printf("\nLayout test completed successfully!\n");
     return 0;
 }
 
-int main(int argc, char* argv[]) {
-    // Check for layout sub-command
-    if (argc >= 3 && strcmp(argv[1], "layout") == 0) {
-        return run_layout_test(argv[2]);
-    }
-    
-    // Check for help
-    if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
-        printf("Radiant HTML/CSS Layout Engine\n");
-        printf("Usage:\n");
-        printf("  %s                    # Run GUI mode (default)\n", argv[0]);
-        printf("  %s layout <file.html> # Run layout test on HTML file\n", argv[0]);
-        printf("  %s --help            # Show this help\n", argv[0]);
-        return 0;
-    }
-    
+int window_main(int argc, char* argv[]) {
     // Original GUI mode
     log_init_wrapper();
     ui_context_init(&ui_context, false);
@@ -351,7 +336,7 @@ int main(int argc, char* argv[]) {
     glfwSetCharCallback(window, character_callback);  // receive character input
     glfwSetCursorPosCallback(window, cursor_position_callback);  // receive cursor/mouse position
     glfwSetMouseButtonCallback(window, mouse_button_callback);  // receive mouse button input
-    glfwSetScrollCallback(window, scroll_callback);  // receive mouse/touchpad scroll input    
+    glfwSetScrollCallback(window, scroll_callback);  // receive mouse/touchpad scroll input
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
     glfwSetWindowRefreshCallback(window, window_refresh_callback);
 
@@ -392,7 +377,7 @@ int main(int argc, char* argv[]) {
             glfwWaitEventsTimeout((1.0 / 60.0) - deltaTime);
         }
         frames++;
-    } 
+    }
 
     log_info("End of app");
     ui_context_cleanup(&ui_context);
