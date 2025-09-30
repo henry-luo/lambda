@@ -327,8 +327,20 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         result = (property == LXB_CSS_PROPERTY_MARGIN || property == LXB_CSS_PROPERTY_MARGIN_LEFT || 
             property == LXB_CSS_PROPERTY_MARGIN_RIGHT) ? LENGTH_AUTO : 0;
         break;
+    case 12:  // Handle actual parsed value for 'auto'
+        printf("DEBUG: Found auto value (type 12) for property %d\n", property);
+        if (property == LXB_CSS_PROPERTY_MARGIN || property == LXB_CSS_PROPERTY_MARGIN_LEFT || 
+            property == LXB_CSS_PROPERTY_MARGIN_RIGHT) {
+            result = LENGTH_AUTO;
+        } else if (property == LXB_CSS_PROPERTY_WIDTH || property == LXB_CSS_PROPERTY_HEIGHT) {
+            printf("DEBUG: Setting width/height auto to -1 (special marker)\n");
+            result = -1;  // Use -1 as a special marker for width/height auto
+        } else {
+            result = 0;
+        }
+        break;
     default:
-        log_warn("unknown length type: %d", value->type);
+        log_warn("unknown length type: %d (LXB_CSS_VALUE_AUTO=%d)", value->type, LXB_CSS_VALUE_AUTO);
         result = 0;
     }
     return (int)result;
@@ -505,6 +517,11 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
                     case LXB_CSS_VALUE_TABLE_CELL:
                         outer_display = LXB_CSS_VALUE_TABLE_CELL;
                         inner_display = LXB_CSS_VALUE_TABLE_CELL;
+                        break;
+                    case LXB_CSS_VALUE_NONE:
+                        printf("DEBUG: NONE case matched! Setting display=none\n");
+                        outer_display = LXB_CSS_VALUE_NONE;
+                        inner_display = LXB_CSS_VALUE_NONE;
                         break;
                     default:  // unknown display
                         printf("DEBUG: Unknown display value %d, defaulting to inline flow\n", display_decl->u.display->a);

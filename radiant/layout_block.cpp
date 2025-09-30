@@ -686,6 +686,17 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // flow the block in parent context
     log_debug("flow block in parent context\n");
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
+    
+    // Skip normal flow positioning for absolutely positioned elements
+    if (block->position && 
+        (block->position->position == 335 || block->position->position == 337)) {  // ABSOLUTE or FIXED
+        printf("DEBUG: Skipping normal flow positioning for absolutely positioned element\n");
+        // Absolutely positioned elements don't participate in normal flow
+        // Their position was already set by the positioning code above
+        lycon->prev_view = (View*)block;
+        return;
+    }
+    
     if (display.outer == LXB_CSS_VALUE_INLINE_BLOCK) {
         if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
         if (lycon->line.advance_x + block->width > lycon->line.right) { 

@@ -50,6 +50,10 @@ void layout_absolute_positioned(LayoutContext* lycon, ViewBlock* block) {
         return;
     }
     
+    printf("DEBUG: Found containing block: %p, width=%d, height=%d, content_width=%d, content_height=%d\n",
+           containing_block, containing_block->width, containing_block->height,
+           containing_block->content_width, containing_block->content_height);
+    
     // Calculate position based on offset properties and containing block
     calculate_absolute_position(block, containing_block);
     
@@ -146,14 +150,39 @@ void calculate_absolute_position(ViewBlock* block, ViewBlock* containing_block) 
     // Get containing block dimensions (content area)
     int cb_x = containing_block->x;
     int cb_y = containing_block->y;
-    int cb_width = containing_block->content_width;
-    int cb_height = containing_block->content_height;
     
-    // Account for containing block padding
+    // Calculate content dimensions directly since content_width/content_height may not be set yet
+    int cb_width = containing_block->width;
+    int cb_height = containing_block->height;
+    
+    // Subtract borders and padding to get content area dimensions
     if (containing_block->bound) {
+        if (containing_block->bound->border) {
+            cb_width -= (containing_block->bound->border->width.left + containing_block->bound->border->width.right);
+            cb_height -= (containing_block->bound->border->width.top + containing_block->bound->border->width.bottom);
+        }
+        cb_width -= (containing_block->bound->padding.left + containing_block->bound->padding.right);
+        cb_height -= (containing_block->bound->padding.top + containing_block->bound->padding.bottom);
+    }
+    
+    printf("DEBUG: Containing block initial position: (%d, %d) size (%d, %d)\n", 
+           cb_x, cb_y, cb_width, cb_height);
+    
+    // Account for containing block borders and padding to get content area position
+    if (containing_block->bound) {
+        if (containing_block->bound->border) {
+            printf("DEBUG: Containing block border: left=%d, top=%d\n", 
+                   containing_block->bound->border->width.left, containing_block->bound->border->width.top);
+            cb_x += containing_block->bound->border->width.left;
+            cb_y += containing_block->bound->border->width.top;
+        }
+        printf("DEBUG: Containing block padding: left=%d, top=%d\n", 
+               containing_block->bound->padding.left, containing_block->bound->padding.top);
         cb_x += containing_block->bound->padding.left;
         cb_y += containing_block->bound->padding.top;
     }
+    
+    printf("DEBUG: Final containing block content area: (%d, %d)\n", cb_x, cb_y);
     
     // Calculate horizontal position
     if (block->position->has_left && block->position->has_right) {
@@ -165,6 +194,7 @@ void calculate_absolute_position(ViewBlock* block, ViewBlock* containing_block) 
     } else if (block->position->has_left) {
         // Only left specified
         block->x = cb_x + block->position->left;
+        printf("DEBUG: Set x position: cb_x=%d + left=%d = %d\n", cb_x, block->position->left, block->x);
     } else if (block->position->has_right) {
         // Only right specified
         block->x = cb_x + cb_width - block->position->right - block->width;
@@ -183,6 +213,7 @@ void calculate_absolute_position(ViewBlock* block, ViewBlock* containing_block) 
     } else if (block->position->has_top) {
         // Only top specified
         block->y = cb_y + block->position->top;
+        printf("DEBUG: Set y position: cb_y=%d + top=%d = %d\n", cb_y, block->position->top, block->y);
     } else if (block->position->has_bottom) {
         // Only bottom specified
         block->y = cb_y + cb_height - block->position->bottom - block->height;
