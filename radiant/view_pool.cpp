@@ -617,25 +617,11 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     }
     strbuf_append_str(buf, ",\n");
     
-    // Layout properties - calculate absolute positions for browser compatibility
-    int abs_x = block->x;
-    int abs_y = block->y;
-    
-    // Calculate absolute position by traversing up the parent chain
-    ViewGroup* parent = block->parent;
-    while (parent && (parent->type == RDT_VIEW_BLOCK || parent->type == RDT_VIEW_INLINE_BLOCK ||
-                      parent->type == RDT_VIEW_LIST_ITEM || parent->type == RDT_VIEW_TABLE ||
-                      parent->type == RDT_VIEW_TABLE_ROW_GROUP || parent->type == RDT_VIEW_TABLE_ROW ||
-                      parent->type == RDT_VIEW_TABLE_CELL)) {
-        ViewBlock* parent_block = (ViewBlock*)parent;
-        abs_x += parent_block->x;
-        abs_y += parent_block->y;
-        parent = parent_block->parent;
-    }
-    
-    // CRITICAL FIX: Convert physical pixels to CSS pixels for test validation
-    int css_x = (int)round(abs_x / pixel_ratio);
-    int css_y = (int)round(abs_y / pixel_ratio);
+    // CRITICAL FIX: Use relative positioning for Radiant's coordinate system
+    // Radiant uses relative positioning where each element's x,y is relative to its parent
+    // Do NOT calculate absolute positions - this breaks the relative positioning system
+    int css_x = (int)round(block->x / pixel_ratio);
+    int css_y = (int)round(block->y / pixel_ratio);
     int css_width = (int)round(block->width / pixel_ratio);
     int css_height = (int)round(block->height / pixel_ratio);
     

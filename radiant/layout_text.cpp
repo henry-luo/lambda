@@ -22,7 +22,7 @@ void line_init(LayoutContext* lycon) {
     lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
     lycon->line.start_view = NULL;
     lycon->line.line_start_font = lycon->font;
-    
+
     // Phase 6: Apply line box adjustment for floats
     // Use the shared float context from the layout context
     FloatContext* float_ctx = get_current_float_context(lycon);
@@ -36,8 +36,8 @@ void line_init(LayoutContext* lycon) {
 
 void line_break(LayoutContext* lycon) {
     lycon->block.max_width = max(lycon->block.max_width, lycon->line.advance_x);
-    
-    if (lycon->line.max_ascender > lycon->block.init_ascender || 
+
+    if (lycon->line.max_ascender > lycon->block.init_ascender ||
         lycon->line.max_descender > lycon->block.init_descender) {
         // apply vertical alignment
         View* view = lycon->line.start_view;
@@ -63,11 +63,11 @@ void line_break(LayoutContext* lycon) {
     // For uniform text, prefer CSS line height for browser compatibility
     int font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
     int css_line_height = lycon->block.line_height;
-    
+
     // Check if we have mixed font sizes by comparing font height to CSS height
     bool has_mixed_fonts = (font_line_height > css_line_height + 2); // 2px tolerance
     int used_line_height;
-    
+
     if (has_mixed_fonts) {
         // Mixed font sizes - use max to accommodate larger fonts
         used_line_height = max(css_line_height, font_line_height);
@@ -75,8 +75,8 @@ void line_break(LayoutContext* lycon) {
         // Uniform font size - prefer CSS line height, but ensure minimum font height
         used_line_height = max(css_line_height, font_line_height - 1); // -1px adjustment for browser compatibility
     }
-    
-    // printf("DEBUG: Line advance - font: %d, css: %d, mixed: %s, used: %d\n", 
+
+    // printf("DEBUG: Line advance - font: %d, css: %d, mixed: %s, used: %d\n",
     //        font_line_height, css_line_height, has_mixed_fonts ? "yes" : "no", used_line_height);
     lycon->block.advance_y += used_line_height;
     // reset the new line
@@ -108,16 +108,16 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
     do {
         if (node->is_text()) {
             LineFillStatus result = text_has_line_filled(lycon, node);
-            if (result) { return result; }        
+            if (result) { return result; }
         }
         else if (node->is_element()) {
             lxb_html_element_t *elmt = node->as_element();
-            PropValue outer_display = resolve_display(elmt).outer;  
+            PropValue outer_display = resolve_display(elmt).outer;
             if (outer_display == LXB_CSS_VALUE_BLOCK) { return RDT_LINE_NOT_FILLED; }
             else if (outer_display == LXB_CSS_VALUE_INLINE) {
                 LineFillStatus result = span_has_line_filled(lycon, node);
                 if (result) { return result; }
-            }          
+            }
         }
         else {
             printf("unknown node type\n");
@@ -131,13 +131,13 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
 // This function was replaced by the DomNode version above
 
 LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNode* node) {
-    // note: this function navigates to parenets through laid out view tree, 
+    // note: this function navigates to parenets through laid out view tree,
     // and siblings through non-processed html nodes
     printf("check if view has line filled\n");
     node = node->next_sibling();
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
-        if (result) { return result; }        
+        if (result) { return result; }
     }
     // check at parent level
     view = (View*)view->parent;
@@ -164,7 +164,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     unsigned char* next_ch;
     unsigned char* text_start = text_node->text_data();
     if (!text_start) return;  // null check for text data
-    unsigned char* str = text_start;  
+    unsigned char* str = text_start;
     if ((lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) { // skip space at start of line
         do { str++; } while (is_space(*str));
         if (!*str) return;
@@ -172,7 +172,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     LAYOUT_TEXT:
     // assume style_text has at least one character
     ViewText* text = (ViewText*)alloc_view(lycon, RDT_VIEW_TEXT, text_node);
-    lycon->prev_view = (View*)text;    
+    lycon->prev_view = (View*)text;
     text->start_index = str - text_start;
     int font_height = lycon->font.face->size->metrics.height >> 6;
     text->x = lycon->line.advance_x;  text->height = lycon->block.line_height;
@@ -189,8 +189,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         text->y = lycon->block.advance_y;
     }
     else { // baseline
-        // text->y = lycon->block.advance_y + (lycon->block.line_height - (lycon->line.max_ascender + lycon->line.max_descender))/2 
-        //     + lycon->line.max_ascender - (lycon->font.face->size->metrics.ascender >> 6); 
+        // text->y = lycon->block.advance_y + (lycon->block.line_height - (lycon->line.max_ascender + lycon->line.max_descender))/2
+        //     + lycon->line.max_ascender - (lycon->font.face->size->metrics.ascender >> 6);
         text->y = lycon->block.advance_y;
     }
     // layout the text glyphs
@@ -208,7 +208,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 }
                 else { next_ch = str + bytes; }
             }
-            else { next_ch = str + 1; } 
+            else { next_ch = str + 1; }
             FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.face, &lycon->font.style, codepoint);
             wd = glyph ? (glyph->advance.x >> 6) : lycon->font.space_width;
         }
@@ -248,7 +248,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             lycon->line.last_space = str - 1;  lycon->line.last_space_pos = text->width;
             lycon->line.has_space = true;
         }
-        else { 
+        else {
             str = next_ch;  lycon->line.is_line_start = false;  lycon->line.has_space = false;
         }
     } while (*str);
@@ -259,7 +259,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
                 str = lycon->line.last_space + 1;
                 output_text(lycon, text, str - text_start - text->start_index, lycon->line.last_space_pos);
-                line_break(lycon);  
+                line_break(lycon);
                 if (*str) goto LAYOUT_TEXT;
                 else return;  // end of text
             }
