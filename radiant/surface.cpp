@@ -1,8 +1,6 @@
 #include "view.hpp"
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "../lib/stb_image.h"
-
+#include "../lib/image.h"
 #include "../lib/log.h"
 typedef struct ImageEntry {
     // ImageFormat format;
@@ -75,13 +73,13 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     }
     else {
         int width, height, channels;
-        unsigned char *data = stbi_load(file_path, &width, &height, &channels, 4);
+        unsigned char *data = image_load(file_path, &width, &height, &channels, 4);
         if (!data) {
             log_debug("failed to load image: %s", file_path);
             return NULL;
         }
         surface = image_surface_create_from(width, height, data);
-        if (!surface) { stbi_image_free(data);  return NULL; }
+        if (!surface) { image_free(data);  return NULL; }
         if (slen > 5 && strcmp(file_path + slen - 5, ".jpeg") == 0) {
             surface->format = IMAGE_FORMAT_JPEG;
         }
