@@ -12,7 +12,7 @@
 
 lxb_url_t* get_current_dir_lexbor();
 void render(GLFWwindow* window);
-void render_html_doc(UiContext* uicon, View* root_view);
+void render_html_doc(UiContext* uicon, View* root_view, const char* output_file);
 Document* load_html_doc(lxb_url_t *base, char* doc_filename);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
@@ -35,7 +35,7 @@ Document* show_html_doc(lxb_url_t *base, char* doc_url) {
     }
     // render html doc
     if (doc && doc->view_tree && doc->view_tree->root) {
-        render_html_doc(&ui_context, doc->view_tree->root);
+        render_html_doc(&ui_context, doc->view_tree->root, NULL);
     }
     return doc;
 }
@@ -48,7 +48,7 @@ void reflow_html_doc(Document* doc) {
     layout_html_doc(&ui_context, doc, true);
     // render html doc
     if (doc->view_tree->root) {
-        render_html_doc(&ui_context, doc->view_tree->root);
+        render_html_doc(&ui_context, doc->view_tree->root, NULL);
     }
 }
 
@@ -190,7 +190,7 @@ void render(GLFWwindow* window) {
     }
     // rerender if the document is dirty
     if (ui_context.document->state && ui_context.document->state->is_dirty) {
-        render_html_doc(&ui_context, ui_context.document->view_tree->root);
+        render_html_doc(&ui_context, ui_context.document->view_tree->root, NULL);
     }
 
     // repaint to screen

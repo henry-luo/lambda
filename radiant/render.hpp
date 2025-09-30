@@ -7,8 +7,11 @@ typedef struct {
     FontBox font;  // current font style
     BlockBlot block;
     ListBlot list;
-    Color color; 
+    Color color;
     Tvg_Canvas* canvas;   // ThorVG canvas
-    
+
     UiContext* ui_context;
 } RenderContext;
+
+// Function declarations
+void render_html_doc(UiContext* uicon, View* root_view, const char* output_file);
