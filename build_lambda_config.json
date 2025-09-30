@@ -28,6 +28,7 @@
         "lib/num_stack.c",
         "lib/string.c",
         "lib/datetime.c",
+        "lib/image.c",
         "lambda/lambda-data.cpp",
         "lambda/lambda-data-runtime.cpp",
         "lambda/runner.cpp",
@@ -384,7 +385,8 @@
                 "lib/file.c",
                 "lib/url.c",
                 "lib/url_parser.c",
-                "lib/utf.c"
+                "lib/utf.c",
+                "lib/image.c"
             ],
             "libraries": [
                 "lexbor",

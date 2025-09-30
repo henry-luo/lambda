@@ -357,6 +357,7 @@ project "radiant"
         "lib/url.c",
         "lib/url_parser.c",
         "lib/utf.c",
+        "lib/image.c",
     }
     
     includedirs {
@@ -474,6 +475,7 @@ project "lambda"
         "lib/num_stack.c",
         "lib/string.c",
         "lib/datetime.c",
+        "lib/image.c",
         "lambda/lambda-data.cpp",
         "lambda/lambda-data-runtime.cpp",
         "lambda/runner.cpp",
