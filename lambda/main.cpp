@@ -43,6 +43,9 @@ int run_layout(const char* html_file);
 // SVG rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_svg(const char* html_file, const char* svg_file);
 
+// PDF rendering function from radiant (available since radiant sources are included in lambda.exe)
+int render_html_to_pdf(const char* html_file, const char* pdf_file);
+
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
 extern void lambda_repl_cleanup();
@@ -671,17 +674,21 @@ int main(int argc, char *argv[]) {
 
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
-            printf("Lambda HTML to SVG Renderer v1.0\n\n");
-            printf("Usage: %s render <input.html> -o <output.svg>\n", argv[0]);
+            printf("Lambda HTML Renderer v1.0\n\n");
+            printf("Usage: %s render <input.html> -o <output.svg|output.pdf>\n", argv[0]);
             printf("\nDescription:\n");
-            printf("  The 'render' command layouts an HTML file and renders the result as SVG.\n");
+            printf("  The 'render' command layouts an HTML file and renders the result as SVG or PDF.\n");
             printf("  It parses the HTML, applies CSS styles, calculates layout, and generates\n");
-            printf("  a scalable vector graphics representation of the rendered page.\n");
+            printf("  output in the specified format based on file extension.\n");
+            printf("\nSupported Output Formats:\n");
+            printf("  .svg    Scalable Vector Graphics (SVG)\n");
+            printf("  .pdf    Portable Document Format (PDF)\n");
             printf("\nOptions:\n");
-            printf("  -o <output.svg>    Output SVG file path (required)\n");
+            printf("  -o <output>        Output file path (required, format detected by extension)\n");
             printf("  -h, --help         Show this help message\n");
             printf("\nExamples:\n");
             printf("  %s render index.html -o output.svg        # Render HTML to SVG\n", argv[0]);
+            printf("  %s render index.html -o output.pdf        # Render HTML to PDF\n", argv[0]);
             printf("  %s render test/page.html -o result.svg    # Render with relative paths\n", argv[0]);
             log_finish();  // Cleanup logging before exit
             return 0;
@@ -719,7 +726,7 @@ int main(int argc, char *argv[]) {
         // Validate required arguments
         if (!html_file) {
             printf("Error: render command requires an HTML input file\n");
-            printf("Usage: %s render <input.html> -o <output.svg>\n", argv[0]);
+            printf("Usage: %s render <input.html> -o <output.svg|output.pdf>\n", argv[0]);
             printf("Use '%s render --help' for more information\n", argv[0]);
             log_finish();
             return 1;
@@ -727,7 +734,7 @@ int main(int argc, char *argv[]) {
 
         if (!output_file) {
             printf("Error: render command requires an output file (-o option)\n");
-            printf("Usage: %s render <input.html> -o <output.svg>\n", argv[0]);
+            printf("Usage: %s render <input.html> -o <output.svg|output.pdf>\n", argv[0]);
             printf("Use '%s render --help' for more information\n", argv[0]);
             log_finish();
             return 1;
@@ -740,10 +747,26 @@ int main(int argc, char *argv[]) {
             return 1;
         }
 
-        log_debug("Rendering HTML '%s' to SVG '%s'", html_file, output_file);
+        log_debug("Rendering HTML '%s' to output '%s'", html_file, output_file);
 
-        // Call the SVG rendering function
-        int exit_code = render_html_to_svg(html_file, output_file);
+        // Determine output format based on file extension
+        const char* ext = strrchr(output_file, '.');
+        int exit_code;
+
+        if (ext && strcmp(ext, ".pdf") == 0) {
+            // Call the PDF rendering function
+            log_debug("Detected PDF output format");
+            exit_code = render_html_to_pdf(html_file, output_file);
+        } else if (ext && strcmp(ext, ".svg") == 0) {
+            // Call the SVG rendering function
+            log_debug("Detected SVG output format");
+            exit_code = render_html_to_svg(html_file, output_file);
+        } else {
+            printf("Error: Unsupported output format. Use .svg or .pdf extension\n");
+            printf("Supported formats: .svg (SVG), .pdf (PDF)\n");
+            log_finish();
+            return 1;
+        }
 
         log_debug("render completed with result: %d", exit_code);
         log_finish();  // Cleanup logging before exit
