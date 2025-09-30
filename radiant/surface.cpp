@@ -36,9 +36,9 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     }
 
     if (uicon->image_cache == NULL) {
-        // create a new hash map. 2nd argument is the initial capacity. 
+        // create a new hash map. 2nd argument is the initial capacity.
         // 3rd and 4th arguments are optional seeds that are passed to the following hash function.
-        uicon->image_cache = hashmap_new(sizeof(ImageEntry), 10, 0, 0, 
+        uicon->image_cache = hashmap_new(sizeof(ImageEntry), 10, 0, 0,
             image_hash, image_compare, NULL, NULL);
     }
     ImageEntry search_key = {.path = (char*)file_path, .image = NULL};
@@ -87,7 +87,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
         }
         else if (slen > 4 && strcmp(file_path + slen - 4, ".jpg") == 0) {
             surface->format = IMAGE_FORMAT_JPEG;
-        }        
+        }
         else if (slen > 4 && strcmp(file_path + slen - 4, ".png") == 0) {
             surface->format = IMAGE_FORMAT_PNG;
         }
@@ -95,7 +95,7 @@ ImageSurface* load_image(UiContext* uicon, const char *img_url) {
     surface->url = abs_url;
 
     ImageEntry new_entry = {.path = (char*)file_path, .image = surface};
-    hashmap_set(uicon->image_cache, &new_entry);     
+    hashmap_set(uicon->image_cache, &new_entry);
     return surface;
 }
 
@@ -175,8 +175,8 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
         rect = (Rect){0, 0, src->width, src->height};
         src_rect = &rect;
     }
-    printf("blit surface: src(%d, %d, %d, %d) to dst(%d, %d, %d, %d)\n", 
-        src_rect->x, src_rect->y, src_rect->width, src_rect->height, 
+    printf("blit surface: src(%d, %d, %d, %d) to dst(%d, %d, %d, %d)\n",
+        src_rect->x, src_rect->y, src_rect->width, src_rect->height,
         dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height);
     float x_ratio = (float)src_rect->width / dst_rect->width;
     float y_ratio = (float)src_rect->height / dst_rect->height;
