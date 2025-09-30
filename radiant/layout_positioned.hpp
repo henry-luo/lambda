@@ -45,18 +45,22 @@ void layout_absolute_positioned(LayoutContext* lycon, ViewBlock* block);
 
 // Utility functions
 bool element_has_positioning(ViewBlock* block);
-bool element_has_float(ViewBlock* block);
 ViewBlock* find_containing_block(ViewBlock* element, PropValue position_type);
 void calculate_relative_offset(ViewBlock* block, int* offset_x, int* offset_y);
 void calculate_absolute_position(ViewBlock* block, ViewBlock* containing_block);
 
-// Float layout functions (Phase 4)
-void layout_float_element(LayoutContext* lycon, ViewBlock* block);
+// Float context functions (Phase 4)
 FloatContext* create_float_context(ViewBlock* container);
 void add_float_to_context(FloatContext* ctx, ViewBlock* element, PropValue float_side);
 void position_float_element(FloatContext* ctx, ViewBlock* element, PropValue float_side);
+void layout_float_element(LayoutContext* lycon, ViewBlock* block);
 void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx);
 int find_clear_position(FloatContext* ctx, PropValue clear_value);
+
+// Float context lifecycle management
+void init_float_context_for_block(LayoutContext* lycon, ViewBlock* block);
+void cleanup_float_context(LayoutContext* lycon);
+FloatContext* get_current_float_context(LayoutContext* lycon);
 
 // Clear property functions (Phase 5)
 void layout_clear_element(LayoutContext* lycon, ViewBlock* block);

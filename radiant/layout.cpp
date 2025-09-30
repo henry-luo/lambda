@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "layout_flex.hpp"
 #include "layout_table.hpp"
+#include "layout_positioned.hpp"
 #include "font_face.h"
 
 #include "../lib/log.h"
@@ -491,9 +492,15 @@ void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
     // default font size in HTML is 16 px for most browsers
     setup_font(uicon, &lycon->font, uicon->default_font.family, &lycon->ui_context->default_font);
+    
+    // Initialize float context to NULL - will be created when needed
+    lycon->current_float_context = NULL;
+    printf("DEBUG: Layout context initialized with NULL float context\n");
 }
 
 void layout_cleanup(LayoutContext* lycon) {
+    // Clean up float context if it exists
+    cleanup_float_context(lycon);
 }
 
 void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {

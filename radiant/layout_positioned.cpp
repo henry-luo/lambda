@@ -259,43 +259,74 @@ void layout_float_element(LayoutContext* lycon, ViewBlock* block) {
     
     printf("DEBUG: Applying float layout to element (float_prop=%d)\n", block->position->float_prop);
     
-    // Get or create float context for the containing block
-    ViewBlock* containing_block = find_containing_block(block, 333); // LXB_CSS_VALUE_STATIC for normal flow
-    if (!containing_block) {
-        containing_block = (ViewBlock*)lycon->view; // fallback to current context
+    // Get the shared float context from layout context
+    FloatContext* float_ctx = get_current_float_context(lycon);
+    if (!float_ctx) {
+        // If no float context exists, create one for the current containing block
+        ViewBlock* containing_block = find_containing_block(block, 333); // LXB_CSS_VALUE_STATIC for normal flow
+        if (!containing_block) {
+            containing_block = (ViewBlock*)lycon->view; // fallback to current context
+        }
+        init_float_context_for_block(lycon, containing_block);
+        float_ctx = get_current_float_context(lycon);
     }
     
-    // For now, create a simple float context (in production this would be cached)
-    FloatContext* float_ctx = create_float_context(containing_block);
-    
-    // Position the float element
-    position_float_element(float_ctx, block, block->position->float_prop);
-    
-    printf("DEBUG: Float element positioned at (%d, %d) size (%d, %d)\n", 
-           block->x, block->y, block->width, block->height);
+    if (float_ctx) {
+        // Position the float element
+        position_float_element(float_ctx, block, block->position->float_prop);
+        printf("DEBUG: Float element positioned at (%d, %d) size (%d, %d) using shared context %p\n", 
+               block->x, block->y, block->width, block->height, (void*)float_ctx);
+    } else {
+        printf("DEBUG: ERROR - Could not create or get float context for float element\n");
+    }
 }
 
 /**
  * Create a new float context for a containing block
  */
 FloatContext* create_float_context(ViewBlock* container) {
+    if (!container) {
+        printf("DEBUG: ERROR - create_float_context called with NULL container!\n");
+        return NULL;
+    }
+    
     FloatContext* ctx = (FloatContext*)malloc(sizeof(FloatContext));
+    if (!ctx) {
+        printf("DEBUG: ERROR - Failed to allocate memory for FloatContext!\n");
+        return NULL;
+    }
+    
+    // Initialize all fields to ensure clean state
+    memset(ctx, 0, sizeof(FloatContext));
     ctx->left_floats = NULL;
     ctx->right_floats = NULL;
     ctx->left_count = 0;
     ctx->right_count = 0;
+    ctx->current_y = 0;
+    ctx->container = NULL;
     
     // Initialize current_y to container's content area top
     ctx->current_y = container->y;
-    if (container->bound) {
-        if (container->bound->border) {
+    printf("DEBUG: Container %p, bound=%p\n", (void*)container, (void*)(container ? container->bound : NULL));
+    
+    // Check if container->bound is a reasonable pointer (not NULL and not a small value that suggests corruption)
+    if (container && container->bound && (uintptr_t)container->bound > 0x1000) {
+        printf("DEBUG: Container bound exists, border=%p\n", (void*)container->bound->border);
+        if (container->bound->border && (uintptr_t)container->bound->border > 0x1000) {
             ctx->current_y += container->bound->border->width.top;
+            printf("DEBUG: Added border top: %d\n", container->bound->border->width.top);
         }
         ctx->current_y += container->bound->padding.top;
+        printf("DEBUG: Added padding top: %d\n", container->bound->padding.top);
+    } else if (container && container->bound) {
+        printf("DEBUG: WARNING - container->bound looks invalid: %p (skipping bound access)\n", (void*)container->bound);
     }
     
     ctx->container = container;
-    printf("DEBUG: Created float context with current_y=%d\n", ctx->current_y);
+    printf("DEBUG: Created float context %p with current_y=%d, container=%p\n", 
+           (void*)ctx, ctx->current_y, (void*)container);
+    printf("DEBUG: Float context initialized - left_count=%d, right_count=%d, left_floats=%p, right_floats=%p\n",
+           ctx->left_count, ctx->right_count, (void*)ctx->left_floats, (void*)ctx->right_floats);
     return ctx;
 }
 
@@ -303,7 +334,17 @@ FloatContext* create_float_context(ViewBlock* container) {
  * Add a float element to the float context
  */
 void add_float_to_context(FloatContext* ctx, ViewBlock* element, PropValue float_side) {
+    if (!ctx || !element) {
+        printf("DEBUG: ERROR - add_float_to_context called with NULL ctx or element\n");
+        return;
+    }
+    
     FloatBox* float_box = (FloatBox*)malloc(sizeof(FloatBox));
+    if (!float_box) {
+        printf("DEBUG: ERROR - Failed to allocate memory for FloatBox\n");
+        return;
+    }
+    
     float_box->element = element;
     float_box->x = element->x;
     float_box->y = element->y;
@@ -311,13 +352,33 @@ void add_float_to_context(FloatContext* ctx, ViewBlock* element, PropValue float
     float_box->height = element->height;
     float_box->float_side = float_side;
     
-    // Add to appropriate list (simplified - in production would maintain sorted order)
+    printf("DEBUG: Adding float to context - side=%d, position=(%d,%d), size=(%d,%d)\n",
+           float_side, float_box->x, float_box->y, float_box->width, float_box->height);
+    
+    // Add to appropriate list (simplified - for now just store the first float)
     if (float_side == 47) {  // LXB_CSS_VALUE_LEFT
-        // Add to left floats list
+        // For simplicity, just store one left float (in production would use dynamic arrays)
+        if (ctx->left_count == 0) {
+            ctx->left_floats = float_box;
+        } else {
+            printf("DEBUG: WARNING - Multiple left floats not fully supported yet\n");
+            free(float_box); // Don't leak memory
+        }
         ctx->left_count++;
+        printf("DEBUG: Added left float, count now: %d\n", ctx->left_count);
     } else if (float_side == 48) {  // LXB_CSS_VALUE_RIGHT
-        // Add to right floats list  
+        // For simplicity, just store one right float
+        if (ctx->right_count == 0) {
+            ctx->right_floats = float_box;
+        } else {
+            printf("DEBUG: WARNING - Multiple right floats not fully supported yet\n");
+            free(float_box); // Don't leak memory
+        }
         ctx->right_count++;
+        printf("DEBUG: Added right float, count now: %d\n", ctx->right_count);
+    } else {
+        printf("DEBUG: ERROR - Unknown float side: %d\n", float_side);
+        free(float_box);
     }
 }
 
@@ -334,9 +395,9 @@ void position_float_element(FloatContext* ctx, ViewBlock* element, PropValue flo
     int content_y = container->y;
     int content_width = container->width;
     
-    if (container->bound) {
+    if (container->bound && (uintptr_t)container->bound > 0x1000) {
         // Account for borders
-        if (container->bound->border) {
+        if (container->bound->border && (uintptr_t)container->bound->border > 0x1000) {
             content_x += container->bound->border->width.left;
             content_y += container->bound->border->width.top;
             content_width -= (container->bound->border->width.left + container->bound->border->width.right);
@@ -345,16 +406,20 @@ void position_float_element(FloatContext* ctx, ViewBlock* element, PropValue flo
         content_x += container->bound->padding.left;
         content_y += container->bound->padding.top;
         content_width -= (container->bound->padding.left + container->bound->padding.right);
+    } else if (container->bound) {
+        printf("DEBUG: WARNING - container->bound looks invalid in position_float_element: %p\n", (void*)container->bound);
     }
     
     printf("DEBUG: Container content area: (%d, %d) width=%d\n", content_x, content_y, content_width);
     
     // Apply float margins
     int margin_left = 0, margin_top = 0, margin_right = 0;
-    if (element->bound) {
+    if (element->bound && (uintptr_t)element->bound > 0x1000) {
         margin_left = element->bound->margin.left;
         margin_top = element->bound->margin.top;
         margin_right = element->bound->margin.right;
+    } else if (element->bound) {
+        printf("DEBUG: WARNING - element->bound looks invalid: %p\n", (void*)element->bound);
     }
     
     // Calculate initial position based on float side
@@ -491,6 +556,49 @@ void adjust_line_for_floats(LayoutContext* lycon, FloatContext* float_ctx) {
     
     printf("DEBUG: Final line boundaries: left=%d, right=%d, available_width=%d\n", 
            lycon->line.left, lycon->line.right, lycon->line.right - lycon->line.left);
+}
+
+/**
+ * Initialize float context for a block layout
+ */
+void init_float_context_for_block(LayoutContext* lycon, ViewBlock* block) {
+    if (!lycon || !block) return;
+    
+    // Only create float context for blocks that establish new formatting contexts
+    // For now, create for all blocks - in production would be more selective
+    if (!lycon->current_float_context) {
+        lycon->current_float_context = create_float_context(block);
+        printf("DEBUG: Initialized float context %p for block %p\n", 
+               (void*)lycon->current_float_context, (void*)block);
+    }
+}
+
+/**
+ * Get the current float context from layout context
+ */
+FloatContext* get_current_float_context(LayoutContext* lycon) {
+    return lycon ? lycon->current_float_context : NULL;
+}
+
+/**
+ * Clean up float context when layout is complete
+ */
+void cleanup_float_context(LayoutContext* lycon) {
+    if (!lycon || !lycon->current_float_context) return;
+    
+    FloatContext* ctx = lycon->current_float_context;
+    printf("DEBUG: Cleaning up float context %p\n", (void*)ctx);
+    
+    // Free any allocated float boxes
+    if (ctx->left_floats) {
+        free(ctx->left_floats);
+    }
+    if (ctx->right_floats) {
+        free(ctx->right_floats);
+    }
+    
+    free(ctx);
+    lycon->current_float_context = NULL;
 }
 
 /**

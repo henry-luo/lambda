@@ -24,14 +24,13 @@ void line_init(LayoutContext* lycon) {
     lycon->line.line_start_font = lycon->font;
     
     // Phase 6: Apply line box adjustment for floats
-    // Create a temporary float context to check for intersecting floats
-    ViewBlock* current_block = (ViewBlock*)lycon->view;
-    if (current_block && current_block->type != RDT_VIEW_INLINE) {
-        FloatContext* float_ctx = create_float_context(current_block);
-        if (float_ctx) {
-            adjust_line_for_floats(lycon, float_ctx);
-            free(float_ctx);
-        }
+    // Use the shared float context from the layout context
+    FloatContext* float_ctx = get_current_float_context(lycon);
+    if (float_ctx) {
+        adjust_line_for_floats(lycon, float_ctx);
+        printf("DEBUG: Used shared float context %p for line adjustment\n", (void*)float_ctx);
+    } else {
+        printf("DEBUG: No float context available for line adjustment\n");
     }
 }
 
