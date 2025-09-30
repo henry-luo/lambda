@@ -1,6 +1,7 @@
 {
     "name": "lambda",
     "description": "Lambda: A modern functional scripting language for data processing and editing",
+    "lang": "c++17",
     "compiler": "clang",
     "output": "lambda.exe",
     "source_dirs": [
@@ -49,6 +50,32 @@
         "lambda/input/css_tokenizer.c",
         "lambda/input/css_properties.c",
         "lambda/input/css_parser.c",
+        "radiant/ui_context.cpp",
+        "radiant/parse_html.cpp",
+        "radiant/layout.cpp",
+        "radiant/layout_block.cpp",
+        "radiant/layout_text.cpp",
+        "radiant/layout_positioned.cpp",
+        "radiant/layout_flex.cpp",
+        "radiant/layout_flex_content.cpp",
+        "radiant/layout_nested.cpp",
+        "radiant/layout_table.cpp",
+        "radiant/layout_grid.cpp",
+        "radiant/grid_utils.cpp",
+        "radiant/grid_sizing.cpp",
+        "radiant/grid_positioning.cpp",
+        "radiant/layout_grid_content.cpp",
+        "radiant/grid_advanced.cpp",
+        "radiant/view_pool_new.cpp",
+        "radiant/resolve_style.cpp",
+        "radiant/scroller.cpp",
+        "radiant/view_pool.cpp",
+        "radiant/font.cpp",
+        "radiant/font_face.cpp",
+        "radiant/surface.cpp",
+        "radiant/render.cpp",
+        "radiant/event.cpp",
+        "radiant/window.cpp",
         "typeset/typeset.c",
         "typeset/view/view_tree.c",
         "typeset/integration/latex_bridge.cpp",
@@ -206,12 +233,6 @@
             "include": null,
             "lib": "-liconv",
             "link": "dynamic"
-        },
-        {
-            "name": "stdc++",
-            "include": null,
-            "lib": "stdc++",
-            "link": "dynamic"
         }
     ],
     "dev_libraries": [
@@ -232,6 +253,7 @@
         {
             "name": "lambda-lib",
             "description": "Unified runtime with all basic libraries for tests",
+            "lang": "c17",
             "includes": [
                 "lib/mem-pool/include",
                 "/opt/homebrew/include"
@@ -267,6 +289,7 @@
         {
             "name": "lambda-input-full",
             "description": "Complete input parsing, formatting and validation with all dependencies",
+            "lang": "c++17",
             "source_patterns": [
                 "lambda/input/input*.cpp",
                 "lambda/format/format*.cpp"
@@ -309,12 +332,12 @@
             "defines": [
                 "SIMPLE_SCHEMA_PARSER"
             ],
-            "special_flags": "-lstdc++",
             "link": "dynamic"
         },
         {
             "name": "radiant",
             "description": "Native HTML/CSS/SVG rendering engine",
+            "lang": "c++17",
             "output": "radiant.exe",
             "source_files": [
                 "radiant/window.cpp",
@@ -343,6 +366,7 @@
                 "radiant/surface.cpp",
                 "radiant/render.cpp",
                 "radiant/event.cpp",
+                "radiant/radiant.cpp",
                 "lib/strview.c",
                 "lib/strbuf.c",
                 "lib/hashmap.c",
@@ -408,7 +432,6 @@
                 "pedantic",
                 "fdiagnostics-color=auto"
             ],
-            "cpp_flags": "-std=c++17",
             "defines": [
                 "_POSIX_C_SOURCE=200809L",
                 "_GNU_SOURCE"
@@ -800,7 +823,6 @@
                 }
             ],
             "flags": [
-                "std=c++17",
                 "fno-omit-frame-pointer",
                 "g"
             ],
@@ -1010,8 +1032,7 @@
                         "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -DUTF8PROC_STATIC"
                     }
                 ],
-                "type": "library",
-                "cpp_flags": "-std=c++17"
+                "type": "library"
             },
             {
                 "suite": "input",
@@ -1223,8 +1244,7 @@
                     }
                 ],
                 "type": "input",
-                "special_flags": "-fms-extensions -lstdc++",
-                "cpp_flags": "-std=c++17",
+                "special_flags": "-fms-extensions",
                 "parallel": true
             },
             {
@@ -1257,7 +1277,6 @@
                     }
                 ],
                 "type": "validator",
-                "special_flags": "-std=c++17 -lstdc++",
                 "uses_build_config": true,
                 "environment": {
                     "TEST_DIR_PATH": "$PWD/test/lambda/validator",
@@ -1303,7 +1322,6 @@
                     }
                 ],
                 "type": "lambda",
-                "special_flags": "-lstdc++",
                 "uses_build_config": true,
                 "requires_lambda_exe": true,
                 "parallel": true
@@ -1321,14 +1339,13 @@
                             "c++fs"
                         ],
                         "cxx_flags": [
-                            "-std=c++17",
                             "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES",
                             "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0"
                         ]
                     }
                 ],
                 "type": "lambda-std",
-                "special_flags": "-std=c++17 -D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES -D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0",
+                "special_flags": "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES -D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0",
                 "uses_build_config": true,
                 "requires_jq": false,
                 "requires_lambda_exe": true,
@@ -1339,7 +1356,6 @@
                             "c++fs"
                         ],
                         "cxx_flags": [
-                            "-std=c++17",
                             "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES",
                             "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0"
                         ]
