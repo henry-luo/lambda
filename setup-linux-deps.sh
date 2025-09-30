@@ -25,8 +25,6 @@ ALL_LIBS=(
 # Note: lexbor is built from submodule instead of system package
 # Note: ThorVG is built from source (see build_thorvg_v1_0_pre11_for_linux function)
 RADIANT_DEPS=(
-    "libsdl2-dev"            # Cross-platform multimedia library
-    "libsdl2-image-dev"      # SDL2 image loading support
     "libglfw3-dev"           # OpenGL window and context management
     "libfreetype6-dev"       # FreeType font rendering library
     "libfontconfig1-dev"     # Font configuration library
@@ -1223,8 +1221,6 @@ echo "- coreutils: $(command -v timeout >/dev/null 2>&1 && echo "✓ Available" 
 echo "- premake5: $(command -v premake5 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
 echo ""
 echo "Radiant project dependencies:"
-echo "- SDL2: $(dpkg -l | grep -q libsdl2-dev && echo "✓ Available" || echo "✗ Missing")"
-echo "- SDL2-image: $(dpkg -l | grep -q libsdl2-image-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- GLFW: $(dpkg -l | grep -q libglfw3-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- FreeType: $(dpkg -l | grep -q libfreetype6-dev && echo "✓ Available" || echo "✗ Missing")"
 echo "- fontconfig: $(dpkg -l | grep -q libfontconfig1-dev && echo "✓ Available" || echo "✗ Missing")"

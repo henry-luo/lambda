@@ -60,8 +60,15 @@ project "lambda-lib"
     }
     
     includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
+        "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
     }
     
     libdirs {
@@ -102,18 +109,17 @@ project "lambda-input-full-c"
     }
     
     includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter/lib/include",
+        "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
         "mac-deps/curl-8.10.1/include",
         "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
     }
     
     buildoptions {
@@ -136,11 +142,15 @@ project "lambda-input-full-c"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
+        "/opt/homebrew/opt/zlib/lib/libz.a",
     }
     
     links {
-        "z",
         "lambda-lib",
+    }
+    
+    defines {
+        "SIMPLE_SCHEMA_PARSER",
     }
     
     -- Add macOS frameworks
@@ -151,6 +161,11 @@ project "lambda-input-full-c"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
 
@@ -192,18 +207,17 @@ project "lambda-input-full-cpp"
     }
     
     includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lambda/tree-sitter/lib/include",
+        "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
         "mac-deps/curl-8.10.1/include",
         "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
     }
     
     filter "files:**.c"
@@ -236,11 +250,15 @@ project "lambda-input-full-cpp"
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
+        "/opt/homebrew/opt/zlib/lib/libz.a",
     }
     
     links {
-        "z",
         "lambda-lib",
+    }
+    
+    defines {
+        "SIMPLE_SCHEMA_PARSER",
     }
     
     -- Add macOS frameworks
@@ -251,6 +269,11 @@ project "lambda-input-full-cpp"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
 
@@ -323,48 +346,66 @@ project "radiant"
     
     includedirs {
         ".",
-        "lib",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lib/mem-pool/include",
         "lexbor/source",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
-        "/opt/homebrew/opt/sdl2/include/SDL2",
-        "/opt/homebrew/opt/sdl2_image/include",
-        "/usr/local/include",
         "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib",
+        "/usr/local/include",
     }
     
     libdirs {
         "/opt/homebrew/lib",
         "/usr/local/lib",
         "build/lib",
-        "/opt/homebrew/opt/sdl2_image/lib",
-    }
-    
-    links {
-        "SDL2_image",
-        "iconv",
-        "stdc++",
     }
     
     linkoptions {
-        "../../lexbor/liblexbor_static.a",
+        "/Users/henryluo/Projects/Jubily/lexbor/liblexbor_static.a",
         "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
-        "/opt/homebrew/lib/libpng.a",
-        "/opt/homebrew/opt/bzip2/lib/libbz2.a",
         "/opt/homebrew/lib/libfontconfig.a",
-        "/opt/homebrew/opt/expat/lib/libexpat.a",
-        "/usr/local/lib/libthorvg.a",
-        "/opt/homebrew/opt/zlib/lib/libz.a",
-        "/opt/homebrew/lib/libintl.a",
         "/opt/homebrew/lib/libglfw3.a",
+        "/usr/local/lib/libthorvg.a",
         "/opt/homebrew/lib/libturbojpeg.a",
+        "/opt/homebrew/lib/libintl.a",
+        "/opt/homebrew/opt/zlib/lib/libz.a",
+        "/opt/homebrew/opt/bzip2/lib/libbz2.a",
+        "/opt/homebrew/lib/libpng.a",
+        "/opt/homebrew/opt/expat/lib/libexpat.a",
+    }
+    
+    links {
+        "iconv",
     }
     
     linkoptions {
         "-framework OpenGL",
-        "-framework Cocoa",
-        "-framework IOKit",
+        "-framework CoreFoundation",
         "-framework CoreVideo",
+        "-framework IOKit",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
+    }
+    
+    links {
+        "iconv",
+    }
+    
+    linkoptions {
+        "-framework OpenGL",
+        "-framework CoreFoundation",
+        "-framework CoreVideo",
+        "-framework IOKit",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     disablewarnings {
@@ -523,18 +564,14 @@ project "lambda"
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -554,7 +591,17 @@ project "lambda"
         "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/lib/libhpdf.a",
         "/opt/homebrew/lib/libnghttp2.a",
-        "../../lexbor/liblexbor_static.a",
+        "/opt/homebrew/opt/zlib/lib/libz.a",
+        "/Users/henryluo/Projects/Jubily/lexbor/liblexbor_static.a",
+        "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
+        "/opt/homebrew/lib/libpng.a",
+        "/opt/homebrew/opt/bzip2/lib/libbz2.a",
+        "/opt/homebrew/lib/libfontconfig.a",
+        "/opt/homebrew/opt/expat/lib/libexpat.a",
+        "/usr/local/lib/libthorvg.a",
+        "/opt/homebrew/lib/libglfw3.a",
+        "/opt/homebrew/lib/libturbojpeg.a",
+        "/opt/homebrew/lib/libintl.a",
         "/opt/homebrew/lib/libmpdec.a",
         "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
@@ -568,7 +615,8 @@ project "lambda"
     -- Dynamic libraries
     filter "platforms:native"
         links {
-            "z",
+            "iconv",
+            "stdc++",
         }
     
         linkoptions {
@@ -578,6 +626,11 @@ project "lambda"
             "-framework Cocoa",
             "-framework IOKit",
             "-framework CoreVideo",
+            "-framework OpenGL",
+            "-framework Foundation",
+            "-framework CoreGraphics",
+            "-framework AppKit",
+            "-framework Carbon",
         }
     
     filter {}
@@ -614,23 +667,18 @@ project "test_strbuf_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -670,23 +718,18 @@ project "test_stringbuf_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -726,23 +769,18 @@ project "test_strview_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -782,23 +820,18 @@ project "test_variable_pool_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -838,23 +871,18 @@ project "test_num_stack_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -894,23 +922,18 @@ project "test_datetime_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -950,23 +973,18 @@ project "test_url_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1006,23 +1024,18 @@ project "test_url_extra_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1062,23 +1075,18 @@ project "test_cmdedit_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1123,23 +1131,18 @@ project "test_mime_detect_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1174,7 +1177,8 @@ project "test_mime_detect_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -1190,6 +1194,11 @@ project "test_mime_detect_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -1220,23 +1229,18 @@ project "test_math_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1271,7 +1275,8 @@ project "test_math_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -1287,6 +1292,11 @@ project "test_math_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -1317,23 +1327,18 @@ project "test_math_ascii_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1368,7 +1373,8 @@ project "test_math_ascii_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -1384,6 +1390,11 @@ project "test_math_ascii_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -1414,23 +1425,18 @@ project "test_markup_roundtrip_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1465,7 +1471,8 @@ project "test_markup_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -1481,6 +1488,11 @@ project "test_markup_roundtrip_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -1511,23 +1523,18 @@ project "test_input_roundtrip_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1562,7 +1569,8 @@ project "test_input_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -1578,6 +1586,11 @@ project "test_input_roundtrip_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -1608,23 +1621,18 @@ project "test_dir_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1659,7 +1667,8 @@ project "test_dir_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -1675,6 +1684,11 @@ project "test_dir_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -1705,23 +1719,18 @@ project "test_http_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1756,7 +1765,8 @@ project "test_http_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -1772,6 +1782,11 @@ project "test_http_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -1802,23 +1817,18 @@ project "test_sysinfo_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1853,7 +1863,8 @@ project "test_sysinfo_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -1869,6 +1880,11 @@ project "test_sysinfo_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -1899,23 +1915,18 @@ project "test_jsx_roundtrip_new_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1950,7 +1961,8 @@ project "test_jsx_roundtrip_new_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -1966,6 +1978,11 @@ project "test_jsx_roundtrip_new_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -1996,23 +2013,18 @@ project "test_mdx_roundtrip_new_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2047,7 +2059,8 @@ project "test_mdx_roundtrip_new_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -2063,6 +2076,11 @@ project "test_mdx_roundtrip_new_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -2093,23 +2111,18 @@ project "test_css_tokenizer_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2144,7 +2157,8 @@ project "test_css_tokenizer_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -2160,6 +2174,11 @@ project "test_css_tokenizer_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -2190,23 +2209,18 @@ project "test_css_parser_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2241,7 +2255,8 @@ project "test_css_parser_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -2257,6 +2272,11 @@ project "test_css_parser_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -2287,23 +2307,18 @@ project "test_css_integration_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2338,7 +2353,8 @@ project "test_css_integration_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -2354,6 +2370,11 @@ project "test_css_integration_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -2384,23 +2405,18 @@ project "test_css_files_safe_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2435,7 +2451,8 @@ project "test_css_files_safe_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -2451,6 +2468,11 @@ project "test_css_files_safe_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -2481,23 +2503,18 @@ project "test_css_frameworks_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2532,7 +2549,8 @@ project "test_css_frameworks_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -2548,6 +2566,11 @@ project "test_css_frameworks_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -2578,23 +2601,18 @@ project "test_mdx_roundtrip_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2629,7 +2647,8 @@ project "test_mdx_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -2645,6 +2664,11 @@ project "test_mdx_roundtrip_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -2675,23 +2699,18 @@ project "test_jsx_roundtrip_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2726,7 +2745,8 @@ project "test_jsx_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -2742,6 +2762,11 @@ project "test_jsx_roundtrip_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -2760,403 +2785,6 @@ project "test_jsx_roundtrip_gtest"
     }
     
 
-project "test_radiant_flex_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_radiant_flex_gtest.cpp",
-        "radiant/layout_flex.cpp",
-        "radiant/layout_test_support.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "lexbor/source",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-    
-    defines {
-        "FLEX_TEST_MODE",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-        "lexbor_static",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libgtest.a",
-        "/opt/homebrew/lib/libgtest_main.a",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-std=c++17",
-    }
-    
-
-project "test_radiant_flex_algorithm_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_radiant_flex_algorithm_gtest.cpp",
-        "radiant/layout_flex.cpp",
-        "radiant/layout_test_support.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "lexbor/source",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-    
-    defines {
-        "FLEX_TEST_MODE",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-        "lexbor_static",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libgtest.a",
-        "/opt/homebrew/lib/libgtest_main.a",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-std=c++17",
-    }
-    
-
-project "test_radiant_flex_integration_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_radiant_flex_integration_gtest.cpp",
-        "radiant/layout_flex.cpp",
-        "radiant/layout_test_support.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "lexbor/source",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-    
-    defines {
-        "FLEX_TEST_MODE",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-        "lexbor_static",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libgtest.a",
-        "/opt/homebrew/lib/libgtest_main.a",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-std=c++17",
-    }
-    
-
-project "test_radiant_text_flow_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_radiant_text_flow_gtest.cpp",
-        "radiant/layout_test_support.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "lexbor/source",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-    
-    defines {
-        "FLEX_TEST_MODE",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-        "lexbor_static",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libgtest.a",
-        "/opt/homebrew/lib/libgtest_main.a",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-std=c++17",
-    }
-    
-
-project "test_radiant_font_face_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_radiant_font_face_gtest.cpp",
-        "radiant/layout_test_support.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "lexbor/source",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-    
-    defines {
-        "FLEX_TEST_MODE",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-        "lexbor_static",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libgtest.a",
-        "/opt/homebrew/lib/libgtest_main.a",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-std=c++17",
-    }
-    
-
-project "test_radiant_layout_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_radiant_layout_gtest.cpp",
-        "radiant/layout.cpp",
-        "radiant/layout_flex.cpp",
-        "radiant/layout_text.cpp",
-        "radiant/font_face.cpp",
-        "radiant/layout_test_support.cpp",
-    }
-    
-    includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-        "lexbor/source",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-    }
-    
-    defines {
-        "FLEX_TEST_MODE",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-        "lexbor_static",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libgtest.a",
-        "/opt/homebrew/lib/libgtest_main.a",
-    }
-    
-    links { "stdc++" }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-        "-std=c++17",
-        "-std=c++17",
-    }
-    
-
 project "test_validator_gtest"
     kind "ConsoleApp"
     language "C++"
@@ -3169,23 +2797,18 @@ project "test_validator_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3220,7 +2843,8 @@ project "test_validator_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -3236,6 +2860,11 @@ project "test_validator_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -3265,23 +2894,18 @@ project "test_ast_validator_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3316,7 +2940,8 @@ project "test_ast_validator_gtest"
     
     -- Add dynamic libraries
     links {
-        "z",
+        "iconv",
+        "stdc++",
         "ncurses",
     }
     
@@ -3332,6 +2957,11 @@ project "test_ast_validator_gtest"
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
     }
     
     links { "stdc++" }
@@ -3361,23 +2991,18 @@ project "test_lambda_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3417,23 +3042,18 @@ project "test_lambda_repl_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3473,23 +3093,18 @@ project "test_lambda_proc_gtest"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3529,23 +3144,18 @@ project "test_lambda_runner"
     }
     
     includedirs {
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
+        ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "/usr/local/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include/openssl",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include",
-        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
+        "lib/mem-pool/include",
         "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include",
+        "/opt/homebrew/include/openssl",
     }
     
     libdirs {

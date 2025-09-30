@@ -60,6 +60,13 @@
         "lambda/main-repl.cpp",
         "lambda/main.cpp"
     ],
+    "includes": [
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lib/mem-pool/include",
+        "lexbor/source"
+    ],
     "libraries": [
         {
             "name": "curl",
@@ -125,17 +132,86 @@
             "link": "static"
         },
         {
-            "name": "z",
-            "include": "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
-            "lib": "-lz",
-            "link": "dynamic"
+            "name": "zlib",
+            "include": null,
+            "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
+            "link": "static"
         },
         {
             "name": "lexbor",
             "description": "Fast HTML/CSS parser and manipulation library (custom build)",
             "include": "lexbor/source",
-            "lib": "lexbor/liblexbor_static.a",
+            "lib": "/Users/henryluo/Projects/Jubily/lexbor/liblexbor_static.a",
             "link": "static"
+        },
+        {
+            "name": "freetype",
+            "include": "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+            "lib": "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
+            "link": "static"
+        },
+        {
+            "name": "png",
+            "include": null,
+            "lib": "/opt/homebrew/lib/libpng.a",
+            "link": "static"
+        },
+        {
+            "name": "bzip2",
+            "include": null,
+            "lib": "/opt/homebrew/opt/bzip2/lib/libbz2.a",
+            "link": "static"
+        },
+        {
+            "name": "fontconfig",
+            "include": "/opt/homebrew/include/fontconfig",
+            "lib": "/opt/homebrew/lib/libfontconfig.a",
+            "link": "static"
+        },
+        {
+            "name": "expat",
+            "include": null,
+            "lib": "/opt/homebrew/opt/expat/lib/libexpat.a",
+            "link": "static"
+        },
+        {
+            "name": "ThorVG",
+            "include": "/usr/local/include",
+            "lib": "/usr/local/lib/libthorvg.a",
+            "link": "static",
+            "version": "v1.0-pre11"
+        },
+        {
+            "name": "glfw",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libglfw3.a",
+            "link": "static"
+        },
+        {
+            "name": "turbojpeg",
+            "include": null,
+            "lib": "/opt/homebrew/lib/libturbojpeg.a",
+            "link": "static"
+        },
+        {
+            "name": "intl",
+            "note": "FontConfig depends on libintl for localization",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libintl.a",
+            "link": "static"
+        },
+        {
+            "name": "iconv",
+            "note": "libintl depends on iconv",
+            "include": null,
+            "lib": "-liconv",
+            "link": "dynamic"
+        },
+        {
+            "name": "stdc++",
+            "include": null,
+            "lib": "stdc++",
+            "link": "dynamic"
         }
     ],
     "dev_libraries": [
@@ -227,7 +303,7 @@
                 "curl",
                 "ssl",
                 "crypto",
-                "z"
+                "zlib"
             ],
             "include": "lib/mem-pool/include",
             "defines": [
@@ -240,17 +316,6 @@
             "name": "radiant",
             "description": "Native HTML/CSS/SVG rendering engine",
             "output": "radiant.exe",
-            "includes": [
-                ".",
-                "lambda/tree-sitter/lib/include",
-                "lambda/tree-sitter-lambda/bindings/c",
-                "lib/mem-pool/include",
-                "lexbor/source",
-                "/usr/include/freetype2",
-                "/usr/include/fontconfig",
-                "/usr/include",
-                "/usr/include/libpng16"
-            ],
             "source_files": [
                 "radiant/window.cpp",
                 "radiant/ui_context.cpp",
@@ -292,123 +357,31 @@
                 "lib/utf.c"
             ],
             "libraries": [
-                {
-                    "name": "lexbor",
-                    "_include_original": "/opt/homebrew/opt/lexbor/include",
-                    "_lib_original": "/opt/homebrew/opt/lexbor/lib/liblexbor_static.a",
-                    "include": "lexbor/source",
-                    "lib": "../../lexbor/liblexbor_static.a",
-                    "link": "static"
-                },
-                {
-                    "name": "freetype",
-                    "include": "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
-                    "lib": "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
-                    "link": "static"
-                },
-                {
-                    "name": "png",
-                    "include": null,
-                    "lib": "/opt/homebrew/lib/libpng.a",
-                    "link": "static"
-                },
-                {
-                    "name": "bzip2",
-                    "include": null,
-                    "lib": "/opt/homebrew/opt/bzip2/lib/libbz2.a",
-                    "link": "static"
-                },
-                {
-                    "name": "fontconfig",
-                    "include": "/opt/homebrew/include/fontconfig",
-                    "lib": "/opt/homebrew/lib/libfontconfig.a",
-                    "link": "static"
-                },
-                {
-                    "name": "expat",
-                    "include": null,
-                    "lib": "/opt/homebrew/opt/expat/lib/libexpat.a",
-                    "link": "static"
-                },
-                {
-                    "name": "SDL2_image",
-                    "include": "/opt/homebrew/opt/sdl2/include/SDL2 -I/opt/homebrew/opt/sdl2_image/include",
-                    "lib": "SDL2_image",
-                    "link": "dynamic"
-                },
-                {
-                    "name": "ThorVG",
-                    "include": "/usr/local/include",
-                    "lib": "/usr/local/lib/libthorvg.a",
-                    "link": "static",
-                    "version": "v1.0-pre11"
-                },
-                {
-                    "name": "zlib",
-                    "include": null,
-                    "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
-                    "link": "static"
-                },
-                {
-                    "name": "intl",
-                    "include": "/opt/homebrew/include",
-                    "lib": "/opt/homebrew/lib/libintl.a",
-                    "link": "static"
-                },
-                {
-                    "name": "glfw",
-                    "include": "/opt/homebrew/include",
-                    "lib": "/opt/homebrew/lib/libglfw3.a",
-                    "link": "static"
-                },
-                {
-                    "name": "GL",
-                    "include": null,
-                    "lib": "-framework OpenGL",
-                    "link": "dynamic"
-                },
-                {
-                    "name": "Cocoa",
-                    "include": null,
-                    "lib": "-framework Cocoa",
-                    "link": "dynamic"
-                },
-                {
-                    "name": "IOKit",
-                    "include": null,
-                    "lib": "-framework IOKit",
-                    "link": "dynamic"
-                },
-                {
-                    "name": "CoreVideo",
-                    "include": null,
-                    "lib": "-framework CoreVideo",
-                    "link": "dynamic"
-                },
-                {
-                    "name": "iconv",
-                    "include": null,
-                    "lib": "iconv",
-                    "link": "dynamic"
-                },
-                {
-                    "name": "stdc++",
-                    "include": null,
-                    "lib": "stdc++",
-                    "link": "dynamic"
-                },
-                {
-                    "name": "turbojpeg",
-                    "include": null,
-                    "lib": "/opt/homebrew/lib/libturbojpeg.a",
-                    "link": "static"
-                }
+                "lexbor",
+                "freetype",
+                "fontconfig",
+                "glfw",
+                "ThorVG",
+                "GL",
+                "CoreFoundation",
+                "CoreVideo",
+                "IOKit",
+                "Foundation",
+                "CoreGraphics",
+                "AppKit",
+                "Carbon",
+                "turbojpeg",
+                "intl",
+                "iconv",
+                "zlib",
+                "bzip2",
+                "png",
+                "expat"
             ],
             "lib_dirs": [
                 "/opt/homebrew/lib",
                 "/usr/local/lib",
-                "build/lib",
-                "/opt/homebrew/opt/sdl2_image/lib"
+                "build/lib"
             ],
             "warnings": [
                 "incompatible-pointer-types",
@@ -544,11 +517,6 @@
                     "include": "/mingw64/include",
                     "lib": "/mingw64/lib/libcrypto.a",
                     "link": "static"
-                },
-                {
-                    "name": "z",
-                    "lib": "-lz",
-                    "link": "dynamic"
                 },
                 {
                     "name": "clock_compat",
@@ -732,6 +700,12 @@
         "linux": {
             "output": "lambda.exe",
             "compiler": "gcc",
+            "includes": [
+                "/usr/include/freetype2",
+                "/usr/include/fontconfig",
+                "/usr/include",
+                "/usr/include/libpng16"
+            ],
             "libraries": [
                 {
                     "name": "tree-sitter",
@@ -834,7 +808,7 @@
                 "lpthread",
                 "lm",
                 "ldl",
-                "lz",
+                "lzlib",
                 "lstdc++fs"
             ],
             "build_dir": "build",
@@ -842,6 +816,12 @@
             "disable_sanitizer": true
         },
         "macos": {
+            "includes": [
+                "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+                "/opt/homebrew/include/fontconfig",
+                "/opt/homebrew/include",
+                "/opt/homebrew/include/libpng16"
+            ],
             "libraries": [
                 {
                     "name": "CoreFoundation",
@@ -877,6 +857,36 @@
                     "name": "CoreVideo",
                     "include": null,
                     "lib": "-framework CoreVideo",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "GL",
+                    "include": null,
+                    "lib": "-framework OpenGL",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "Foundation",
+                    "include": null,
+                    "lib": "-framework Foundation",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "CoreGraphics",
+                    "include": null,
+                    "lib": "-framework CoreGraphics",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "AppKit",
+                    "include": null,
+                    "lib": "-framework AppKit",
+                    "link": "dynamic"
+                },
+                {
+                    "name": "Carbon",
+                    "include": null,
+                    "lib": "-framework Carbon",
                     "link": "dynamic"
                 }
             ]

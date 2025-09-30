@@ -898,8 +898,6 @@ HOMEBREW_DEPS=(
 # Note: freetype is handled separately to ensure specific version 2.13.3
 # Note: lexbor is built from submodule instead of Homebrew
 RADIANT_DEPS=(
-    "sdl2"       # Cross-platform multimedia library
-    "sdl2_image" # SDL2 image loading support
     "glfw"       # OpenGL window and context management
     "libpng"     # PNG image format support
     "fontconfig" # Font configuration library
@@ -1003,8 +1001,6 @@ if command -v brew >/dev/null 2>&1; then
     echo "Radiant project dependencies:"
     echo "- lexbor (submodule): $([ -f "lexbor/liblexbor_static.a" ] && echo "✓ Built" || echo "✗ Missing")"
     echo "- freetype: $(brew list freetype >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
-    echo "- SDL2: $(brew list sdl2 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
-    echo "- SDL2_image: $(brew list sdl2_image >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- GLFW: $(brew list glfw >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- libpng: $(brew list libpng >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"

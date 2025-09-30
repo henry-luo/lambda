@@ -9,28 +9,28 @@ workspace "Lambda"
     location "build/premake"
     startproject "lambda"
     toolset "gcc"
-    
+
     -- Global settings
     cppdialect "C++17"
     cdialect "C99"
     warnings "Extra"
-    
+
     filter "configurations:Debug"
         defines { "DEBUG" }
         symbols "On"
         optimize "Off"
-    
+
     -- AddressSanitizer disabled for Linux platform
-    
+
     filter "configurations:Release"
         defines { "NDEBUG" }
         optimize "On"
-    
+
     -- Native Linux build settings
     toolset "gcc"
     defines { "LINUX", "_GNU_SOURCE", "NATIVE_LINUX_BUILD" }
-    
-    
+
+
     filter {}
 
 project "lambda-lib"
@@ -38,7 +38,7 @@ project "lambda-lib"
     language "C"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
-    
+
     -- Meta-library: combines source files from dependencies
     files {
         "lib/mem-pool/src/variable.c",
@@ -58,37 +58,37 @@ project "lambda-lib"
         "lambda/input/mime-detect.c",
         "lambda/input/mime-types.c",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/usr/local/lib",
     }
-    
+
     links {
         "utf8proc",
     }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
     }
-    
+
     defines {
         "UTF8PROC_STATIC",
     }
-    
+
 
 project "lambda-input-full-c"
     kind "SharedLib"
     language "C"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
-    
+
     files {
         "lambda/parse.c",
         "lambda/input/css_tokenizer.c",
@@ -100,7 +100,7 @@ project "lambda-input-full-c"
         "lib/log.c",
         "lib/utf.c",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "lambda/tree-sitter/lib/include",
@@ -115,18 +115,18 @@ project "lambda-input-full-c"
         "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
     }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto"
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
@@ -135,21 +135,21 @@ project "lambda-input-full-c"
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
     }
-    
+
     links {
         "mpdec",
         "curl",
         "z",
         "lambda-lib",
     }
-    
+
 
 project "lambda-input-full-cpp"
     kind "SharedLib"
     language "C++"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
-    
+
     files {
         "lambda/print.cpp",
         "lambda/utf_string.cpp",
@@ -172,15 +172,15 @@ project "lambda-input-full-cpp"
         "lib/log.c",
         "lib/utf.c",
     }
-    
+
     files {
         "lambda/input/input*.cpp",
     }
-    
+
     files {
         "lambda/format/format*.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "lambda/tree-sitter/lib/include",
@@ -195,28 +195,28 @@ project "lambda-input-full-cpp"
         "/usr/include/openssl",
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
     }
-    
+
     filter "files:**.c"
         buildoptions {
             "-pedantic",
             "-fdiagnostics-color=auto",
         }
-    
+
     filter "files:**.cpp"
         buildoptions {
             "-pedantic",
             "-fdiagnostics-color=auto",
             "-std=c++17",
         }
-    
+
     filter {}
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     linkoptions {
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "../../lambda/tree-sitter/libtree-sitter.a",
@@ -225,31 +225,31 @@ project "lambda-input-full-cpp"
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
     }
-    
+
     links {
         "mpdec",
         "curl",
         "z",
         "lambda-lib",
     }
-    
+
 
 project "lambda-input-full"
     kind "SharedLib"
     language "C++"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
-    
+
     -- Wrapper library with empty source file
     files {
         "utils/empty.cpp",
     }
-    
+
     links {
         "lambda-input-full-c",
         "lambda-input-full-cpp",
     }
-    
+
 
 project "radiant"
     kind "ConsoleApp"
@@ -258,7 +258,7 @@ project "radiant"
     targetdir "."
     objdir "build/obj/%{prj.name}"
     -- Native HTML/CSS/SVG rendering engine
-    
+
     language "C++"
     files {
         "radiant/window.cpp",
@@ -300,32 +300,28 @@ project "radiant"
         "lib/url_parser.c",
         "lib/utf.c",
     }
-    
+
     includedirs {
         ".",
         "lib",
         "lexbor/source",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
-        "/opt/homebrew/opt/sdl2/include/SDL2",
-        "/opt/homebrew/opt/sdl2_image/include",
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/usr/local/lib",
         "build/lib",
-        "/opt/homebrew/opt/sdl2_image/lib",
     }
-    
+
     links {
-        "SDL2_image",
         "iconv",
         "stdc++",
     }
-    
+
     linkoptions {
         "../../lexbor/liblexbor_static.a",
         "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
@@ -339,14 +335,14 @@ project "radiant"
         "/opt/homebrew/lib/libglfw3.a",
         "/opt/homebrew/lib/libturbojpeg.a",
     }
-    
+
     linkoptions {
         "-framework OpenGL",
         "-framework Cocoa",
         "-framework IOKit",
         "-framework CoreVideo",
     }
-    
+
     disablewarnings {
         "incompatible-pointer-types",
         "undef",
@@ -366,19 +362,19 @@ project "radiant"
         "pointer-to-int-cast",
         "microsoft-anon-tag",
     }
-    
+
     buildoptions {
         "-fwrapv",
         "-fms-extensions",
         "-pedantic",
         "-fdiagnostics-color=auto",
     }
-    
+
     defines {
         "_POSIX_C_SOURCE=200809L",
         "_GNU_SOURCE",
     }
-    
+
 
 project "lambda"
     kind "ConsoleApp"
@@ -387,7 +383,7 @@ project "lambda"
     objdir "build/obj/%{prj.name}"
     targetname "lambda"
     targetextension ".exe"
-    
+
     files {
         "lambda/parse.c",
         "lib/strbuf.c",
@@ -497,7 +493,7 @@ project "lambda"
         "lambda/format/format-json.cpp",
         "lambda/format/format-wiki.cpp",
     }
-    
+
     includedirs {
         ".",
         "lambda/tree-sitter/lib/include",
@@ -516,13 +512,13 @@ project "lambda"
         "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include",
         "/usr/local/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     linkoptions {
         "../../lambda/tree-sitter/libtree-sitter.a",
         "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
@@ -538,7 +534,7 @@ project "lambda"
         "/usr/lib/aarch64-linux-gnu/libssl.a",
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
     }
-    
+
     -- Dynamic libraries
     filter "platforms:native"
         links {
@@ -547,28 +543,28 @@ project "lambda"
             "hpdf",
             "z",
         }
-    
+
     filter {}
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
     }
-    
+
     -- C++ specific options
     filter "files:**.cpp"
         buildoptions { "-std=c++17" }
-    
+
     -- C specific options
     filter "files:**.c"
         buildoptions { "-std=c99" }
-    
+
     filter {}
-    
+
     defines {
         "_GNU_SOURCE",
     }
-    
+
 
 project "test_strbuf_gtest"
     kind "ConsoleApp"
@@ -576,11 +572,11 @@ project "test_strbuf_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_strbuf_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -600,31 +596,31 @@ project "test_strbuf_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
     }
-    
+
 
 project "test_stringbuf_gtest"
     kind "ConsoleApp"
@@ -632,11 +628,11 @@ project "test_stringbuf_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_stringbuf_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -656,31 +652,31 @@ project "test_stringbuf_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
     }
-    
+
 
 project "test_strview_gtest"
     kind "ConsoleApp"
@@ -688,11 +684,11 @@ project "test_strview_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_strview_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -712,31 +708,31 @@ project "test_strview_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
     }
-    
+
 
 project "test_variable_pool_gtest"
     kind "ConsoleApp"
@@ -744,11 +740,11 @@ project "test_variable_pool_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_variable_pool_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -768,31 +764,31 @@ project "test_variable_pool_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
     }
-    
+
 
 project "test_num_stack_gtest"
     kind "ConsoleApp"
@@ -800,11 +796,11 @@ project "test_num_stack_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_num_stack_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -824,31 +820,31 @@ project "test_num_stack_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
     }
-    
+
 
 project "test_datetime_gtest"
     kind "ConsoleApp"
@@ -856,11 +852,11 @@ project "test_datetime_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_datetime_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -880,31 +876,31 @@ project "test_datetime_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
     }
-    
+
 
 project "test_url_gtest"
     kind "ConsoleApp"
@@ -912,11 +908,11 @@ project "test_url_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_url_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -936,31 +932,31 @@ project "test_url_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
     }
-    
+
 
 project "test_url_extra_gtest"
     kind "ConsoleApp"
@@ -968,11 +964,11 @@ project "test_url_extra_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_url_extra_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -992,31 +988,31 @@ project "test_url_extra_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
     }
-    
+
 
 project "test_cmdedit_gtest"
     kind "ConsoleApp"
@@ -1024,11 +1020,11 @@ project "test_cmdedit_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_cmdedit_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -1048,27 +1044,27 @@ project "test_cmdedit_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
         "utf8proc",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
     }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
@@ -1077,7 +1073,7 @@ project "test_cmdedit_gtest"
         "-Wno-implicit-function-declaration",
         "-DUTF8PROC_STATIC",
     }
-    
+
 
 project "test_mime_detect_gtest"
     kind "ConsoleApp"
@@ -1085,11 +1081,11 @@ project "test_mime_detect_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_mime_detect_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -1109,14 +1105,14 @@ project "test_mime_detect_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1124,12 +1120,12 @@ project "test_mime_detect_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -1139,7 +1135,7 @@ project "test_mime_detect_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -1150,24 +1146,24 @@ project "test_mime_detect_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1175,7 +1171,7 @@ project "test_mime_detect_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_math_gtest"
     kind "ConsoleApp"
@@ -1183,11 +1179,11 @@ project "test_math_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_math_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -1207,14 +1203,14 @@ project "test_math_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1222,12 +1218,12 @@ project "test_math_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -1237,7 +1233,7 @@ project "test_math_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -1248,24 +1244,24 @@ project "test_math_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1273,7 +1269,7 @@ project "test_math_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_math_ascii_gtest"
     kind "ConsoleApp"
@@ -1281,11 +1277,11 @@ project "test_math_ascii_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_math_ascii_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -1305,14 +1301,14 @@ project "test_math_ascii_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1320,12 +1316,12 @@ project "test_math_ascii_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -1335,7 +1331,7 @@ project "test_math_ascii_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -1346,24 +1342,24 @@ project "test_math_ascii_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1371,7 +1367,7 @@ project "test_math_ascii_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_markup_roundtrip_gtest"
     kind "ConsoleApp"
@@ -1379,11 +1375,11 @@ project "test_markup_roundtrip_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_markup_roundtrip_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -1403,14 +1399,14 @@ project "test_markup_roundtrip_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1418,12 +1414,12 @@ project "test_markup_roundtrip_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -1433,7 +1429,7 @@ project "test_markup_roundtrip_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -1444,24 +1440,24 @@ project "test_markup_roundtrip_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1469,7 +1465,7 @@ project "test_markup_roundtrip_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_input_roundtrip_gtest"
     kind "ConsoleApp"
@@ -1477,11 +1473,11 @@ project "test_input_roundtrip_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_input_roundtrip_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -1501,14 +1497,14 @@ project "test_input_roundtrip_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1516,12 +1512,12 @@ project "test_input_roundtrip_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -1531,7 +1527,7 @@ project "test_input_roundtrip_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -1542,24 +1538,24 @@ project "test_input_roundtrip_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1567,7 +1563,7 @@ project "test_input_roundtrip_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_dir_gtest"
     kind "ConsoleApp"
@@ -1575,11 +1571,11 @@ project "test_dir_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_dir_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -1599,14 +1595,14 @@ project "test_dir_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1614,12 +1610,12 @@ project "test_dir_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -1629,7 +1625,7 @@ project "test_dir_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -1640,24 +1636,24 @@ project "test_dir_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1665,7 +1661,7 @@ project "test_dir_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_http_gtest"
     kind "ConsoleApp"
@@ -1673,11 +1669,11 @@ project "test_http_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_http_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -1697,14 +1693,14 @@ project "test_http_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1712,12 +1708,12 @@ project "test_http_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -1727,7 +1723,7 @@ project "test_http_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -1738,24 +1734,24 @@ project "test_http_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1763,7 +1759,7 @@ project "test_http_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_sysinfo_gtest"
     kind "ConsoleApp"
@@ -1771,11 +1767,11 @@ project "test_sysinfo_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_sysinfo_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -1795,14 +1791,14 @@ project "test_sysinfo_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1810,12 +1806,12 @@ project "test_sysinfo_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -1825,7 +1821,7 @@ project "test_sysinfo_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -1836,24 +1832,24 @@ project "test_sysinfo_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1861,7 +1857,7 @@ project "test_sysinfo_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_jsx_roundtrip_new_gtest"
     kind "ConsoleApp"
@@ -1869,11 +1865,11 @@ project "test_jsx_roundtrip_new_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_jsx_roundtrip_new_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -1893,14 +1889,14 @@ project "test_jsx_roundtrip_new_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -1908,12 +1904,12 @@ project "test_jsx_roundtrip_new_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -1923,7 +1919,7 @@ project "test_jsx_roundtrip_new_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -1934,24 +1930,24 @@ project "test_jsx_roundtrip_new_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -1959,7 +1955,7 @@ project "test_jsx_roundtrip_new_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_mdx_roundtrip_new_gtest"
     kind "ConsoleApp"
@@ -1967,11 +1963,11 @@ project "test_mdx_roundtrip_new_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_mdx_roundtrip_new_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -1991,14 +1987,14 @@ project "test_mdx_roundtrip_new_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2006,12 +2002,12 @@ project "test_mdx_roundtrip_new_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -2021,7 +2017,7 @@ project "test_mdx_roundtrip_new_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -2032,24 +2028,24 @@ project "test_mdx_roundtrip_new_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2057,7 +2053,7 @@ project "test_mdx_roundtrip_new_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_css_tokenizer_gtest"
     kind "ConsoleApp"
@@ -2065,11 +2061,11 @@ project "test_css_tokenizer_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_css_tokenizer_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -2089,14 +2085,14 @@ project "test_css_tokenizer_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2104,12 +2100,12 @@ project "test_css_tokenizer_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -2119,7 +2115,7 @@ project "test_css_tokenizer_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -2130,24 +2126,24 @@ project "test_css_tokenizer_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2155,7 +2151,7 @@ project "test_css_tokenizer_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_css_parser_gtest"
     kind "ConsoleApp"
@@ -2163,11 +2159,11 @@ project "test_css_parser_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_css_parser_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -2187,14 +2183,14 @@ project "test_css_parser_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2202,12 +2198,12 @@ project "test_css_parser_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -2217,7 +2213,7 @@ project "test_css_parser_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -2228,24 +2224,24 @@ project "test_css_parser_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2253,7 +2249,7 @@ project "test_css_parser_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_css_integration_gtest"
     kind "ConsoleApp"
@@ -2261,11 +2257,11 @@ project "test_css_integration_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_css_integration_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -2285,14 +2281,14 @@ project "test_css_integration_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2300,12 +2296,12 @@ project "test_css_integration_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -2315,7 +2311,7 @@ project "test_css_integration_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -2326,24 +2322,24 @@ project "test_css_integration_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2351,7 +2347,7 @@ project "test_css_integration_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_css_files_safe_gtest"
     kind "ConsoleApp"
@@ -2359,11 +2355,11 @@ project "test_css_files_safe_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_css_files_safe_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -2383,14 +2379,14 @@ project "test_css_files_safe_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2398,12 +2394,12 @@ project "test_css_files_safe_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -2413,7 +2409,7 @@ project "test_css_files_safe_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -2424,24 +2420,24 @@ project "test_css_files_safe_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2449,7 +2445,7 @@ project "test_css_files_safe_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_css_frameworks_gtest"
     kind "ConsoleApp"
@@ -2457,11 +2453,11 @@ project "test_css_frameworks_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_css_frameworks_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -2481,14 +2477,14 @@ project "test_css_frameworks_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2496,12 +2492,12 @@ project "test_css_frameworks_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -2511,7 +2507,7 @@ project "test_css_frameworks_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -2522,24 +2518,24 @@ project "test_css_frameworks_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2547,7 +2543,7 @@ project "test_css_frameworks_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_mdx_roundtrip_gtest"
     kind "ConsoleApp"
@@ -2555,11 +2551,11 @@ project "test_mdx_roundtrip_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_mdx_roundtrip_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -2579,14 +2575,14 @@ project "test_mdx_roundtrip_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2594,12 +2590,12 @@ project "test_mdx_roundtrip_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -2609,7 +2605,7 @@ project "test_mdx_roundtrip_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -2620,24 +2616,24 @@ project "test_mdx_roundtrip_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2645,7 +2641,7 @@ project "test_mdx_roundtrip_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_jsx_roundtrip_gtest"
     kind "ConsoleApp"
@@ -2653,11 +2649,11 @@ project "test_jsx_roundtrip_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_jsx_roundtrip_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -2677,14 +2673,14 @@ project "test_jsx_roundtrip_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -2692,12 +2688,12 @@ project "test_jsx_roundtrip_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -2707,7 +2703,7 @@ project "test_jsx_roundtrip_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -2718,24 +2714,24 @@ project "test_jsx_roundtrip_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-fms-extensions",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -2743,7 +2739,7 @@ project "test_jsx_roundtrip_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_radiant_flex_gtest"
     kind "ConsoleApp"
@@ -2751,13 +2747,13 @@ project "test_radiant_flex_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_radiant_flex_gtest.cpp",
         "radiant/layout_flex.cpp",
         "radiant/layout_test_support.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -2777,39 +2773,39 @@ project "test_radiant_flex_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     defines {
         "FLEX_TEST_MODE",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
         "lexbor_static",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-std=c++17",
     }
-    
+
 
 project "test_radiant_flex_algorithm_gtest"
     kind "ConsoleApp"
@@ -2817,13 +2813,13 @@ project "test_radiant_flex_algorithm_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_radiant_flex_algorithm_gtest.cpp",
         "radiant/layout_flex.cpp",
         "radiant/layout_test_support.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -2843,39 +2839,39 @@ project "test_radiant_flex_algorithm_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     defines {
         "FLEX_TEST_MODE",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
         "lexbor_static",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-std=c++17",
     }
-    
+
 
 project "test_radiant_flex_integration_gtest"
     kind "ConsoleApp"
@@ -2883,13 +2879,13 @@ project "test_radiant_flex_integration_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_radiant_flex_integration_gtest.cpp",
         "radiant/layout_flex.cpp",
         "radiant/layout_test_support.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -2909,39 +2905,39 @@ project "test_radiant_flex_integration_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     defines {
         "FLEX_TEST_MODE",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
         "lexbor_static",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-std=c++17",
     }
-    
+
 
 project "test_radiant_text_flow_gtest"
     kind "ConsoleApp"
@@ -2949,12 +2945,12 @@ project "test_radiant_text_flow_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_radiant_text_flow_gtest.cpp",
         "radiant/layout_test_support.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -2974,39 +2970,39 @@ project "test_radiant_text_flow_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     defines {
         "FLEX_TEST_MODE",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
         "lexbor_static",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-std=c++17",
     }
-    
+
 
 project "test_radiant_font_face_gtest"
     kind "ConsoleApp"
@@ -3014,12 +3010,12 @@ project "test_radiant_font_face_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_radiant_font_face_gtest.cpp",
         "radiant/layout_test_support.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -3039,39 +3035,39 @@ project "test_radiant_font_face_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     defines {
         "FLEX_TEST_MODE",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
         "lexbor_static",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-std=c++17",
     }
-    
+
 
 project "test_radiant_layout_gtest"
     kind "ConsoleApp"
@@ -3079,7 +3075,7 @@ project "test_radiant_layout_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_radiant_layout_gtest.cpp",
         "radiant/layout.cpp",
@@ -3088,7 +3084,7 @@ project "test_radiant_layout_gtest"
         "radiant/font_face.cpp",
         "radiant/layout_test_support.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -3108,39 +3104,39 @@ project "test_radiant_layout_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     defines {
         "FLEX_TEST_MODE",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-lib",
         "gtest",
         "gtest_main",
         "lexbor_static",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
         "-std=c++17",
     }
-    
+
 
 project "test_validator_gtest"
     kind "ConsoleApp"
@@ -3148,11 +3144,11 @@ project "test_validator_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_validator_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -3172,14 +3168,14 @@ project "test_validator_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -3187,12 +3183,12 @@ project "test_validator_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -3202,7 +3198,7 @@ project "test_validator_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -3213,23 +3209,23 @@ project "test_validator_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -3237,7 +3233,7 @@ project "test_validator_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_ast_validator_gtest"
     kind "ConsoleApp"
@@ -3245,11 +3241,11 @@ project "test_ast_validator_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_ast_validator_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -3269,14 +3265,14 @@ project "test_ast_validator_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "lambda-input-full-cpp",
         "lambda-input-full-c",
@@ -3284,12 +3280,12 @@ project "test_ast_validator_gtest"
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     linkoptions {
         "-Wl,--start-group",
         "/usr/lib/aarch64-linux-gnu/libutf8proc.a",
@@ -3299,7 +3295,7 @@ project "test_ast_validator_gtest"
         "/usr/lib/aarch64-linux-gnu/libcrypto.a",
         "-Wl,--end-group",
     }
-    
+
     -- Add dynamic libraries
     links {
         "curl",
@@ -3310,23 +3306,23 @@ project "test_ast_validator_gtest"
         "stdc++fs",
         "ncurses",
     }
-    
+
     -- Add tree-sitter libraries using linkoptions to append to LIBS section
     linkoptions {
     }
-    
+
     -- Add macOS frameworks
     linkoptions {
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
         "-std=c++17",
     }
-    
+
     filter {}
     linkoptions {
         "-Wl,--whole-archive",
@@ -3334,7 +3330,7 @@ project "test_ast_validator_gtest"
         "../../lambda/tree-sitter/libtree-sitter.a",
         "-Wl,--no-whole-archive",
     }
-    
+
 
 project "test_lambda_gtest"
     kind "ConsoleApp"
@@ -3342,11 +3338,11 @@ project "test_lambda_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_lambda_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -3366,31 +3362,31 @@ project "test_lambda_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
     }
-    
+
 
 project "test_lambda_repl_gtest"
     kind "ConsoleApp"
@@ -3398,11 +3394,11 @@ project "test_lambda_repl_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_lambda_repl_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -3422,31 +3418,31 @@ project "test_lambda_repl_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
     }
-    
+
 
 project "test_lambda_proc_gtest"
     kind "ConsoleApp"
@@ -3454,11 +3450,11 @@ project "test_lambda_proc_gtest"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/test_lambda_proc_gtest.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -3478,31 +3474,31 @@ project "test_lambda_proc_gtest"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "gtest",
         "gtest_main",
     }
-    
+
     linkoptions {
         "/usr/local/lib/libgtest.a",
         "/usr/local/lib/libgtest_main.a",
     }
-    
+
     links { "stdc++" }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
     }
-    
+
 
 project "test_lambda_runner"
     kind "ConsoleApp"
@@ -3510,11 +3506,11 @@ project "test_lambda_runner"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
-    
+
     files {
         "test/lambda_test_runner.cpp",
     }
-    
+
     includedirs {
         "lib/mem-pool/include",
         "/usr/include",
@@ -3534,20 +3530,20 @@ project "test_lambda_runner"
         "/usr/local/include",
         "/opt/homebrew/include",
     }
-    
+
     libdirs {
         "/opt/homebrew/lib",
         "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
         "/usr/local/lib",
         "build/lib",
     }
-    
+
     links {
         "criterion",
         "nanomsg",
         "git2",
     }
-    
+
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
@@ -3555,4 +3551,3 @@ project "test_lambda_runner"
         "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES",
         "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0",
     }
-    
