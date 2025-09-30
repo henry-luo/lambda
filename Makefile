@@ -326,7 +326,8 @@ clean-tree-sitter-minimal:
 	    build-tree-sitter clean-tree-sitter-minimal tree-sitter-libs \
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
 	    generate-premake clean-premake build-test build-test-linux \
-	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant build-radiant-tests test-radiant
+	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant build-radiant-tests \
+	    test-radiant capture-browser-layout test-layout
 
 # Help target - shows available commands
 help:
@@ -411,6 +412,15 @@ help:
 	@echo "  format        - Format source code with clang-format"
 	@echo "  lint          - Run linter (cppcheck) on source files"
 	@echo "  analyze-size  - Analyze executable size breakdown by components"
+	@echo "  test-layout              - Run Radiant layout integration tests (all categories)"
+	@echo "                             Usage: make test-layout SUITE=baseline (run specific suite)"
+	@echo "                             Usage: make test-layout TEST=table_simple (run specific test)"
+	@echo "                             Available suites: auto-detected from test/layout/data/"
+	@echo "  capture-browser-layout   - Extract browser layout references using Puppeteer"
+	@echo "                             Usage: make capture-browser-layout (all categories, skip existing)"
+	@echo "                             Usage: make capture-browser-layout CATEGORY=baseline"
+	@echo "                             Usage: make capture-browser-layout FORCE=1 (regenerate all)"
+	@echo "                             Usage: make capture-browser-layout FILE=path/to/test.html"
 	@echo ""
 	@echo "Options:"
 	@echo "  JOBS=N        - Set number of parallel compilation jobs (default: $(JOBS))"
@@ -1471,3 +1481,57 @@ build-test: build-lambda-input
 	@mkdir -p build/premake
 	$(MAKE) generate-premake
 	cd build/premake && premake5 gmake --file=../../premake5.lua && $(MAKE) config=debug_native -j$(JOBS)
+
+# Capture browser layout references using Puppeteer
+# Usage:
+#   make capture-browser-layout                           # captures all categories (skips existing files)
+#   make capture-browser-layout CATEGORY=baseline        # captures only baseline category
+#   make capture-browser-layout FILE=path/to/test.html   # captures a single file
+#   make capture-browser-layout FORCE=1                  # force regenerate all existing references
+#   make capture-browser-layout CATEGORY=basic FORCE=1   # force regenerate specific category
+capture-browser-layout:
+	@echo "🧭 Capturing browser layout references..."
+	@if [ -d "test/layout/tools" ]; then \
+	    cd test/layout/tools && \
+	    if [ ! -d node_modules ]; then \
+	        echo "📦 Installing test tools dependencies..."; \
+	        npm install; \
+	    fi; \
+	    FORCE_FLAG=""; \
+	    if [ -n "$(FORCE)" ] && [ "$(FORCE)" != "0" ]; then \
+	        FORCE_FLAG="--force"; \
+	        echo "🔄 Force regeneration enabled"; \
+	    fi; \
+	    if [ -n "$(FILE)" ]; then \
+	        echo "📄 Single file: $(FILE)"; \
+	        node extract_browser_references.js $$FORCE_FLAG $(FILE); \
+	    elif [ -n "$(CATEGORY)" ]; then \
+	        echo "📂 Category: $(CATEGORY)"; \
+	        node extract_browser_references.js $$FORCE_FLAG --category $(CATEGORY); \
+	    else \
+	        echo "📚 All available categories (auto-discovered)"; \
+	        node extract_browser_references.js $$FORCE_FLAG; \
+	    fi; \
+	else \
+	    echo "❌ Error: Tools directory not found at test/layout/tools"; \
+	    exit 1; \
+	fi
+
+test-layout:
+	@echo "🎨 Running Radiant Layout Engine Tests"
+	@echo "======================================"
+	@if [ -f "test/layout/tools/test_layout.js" ]; then \
+		if [ -n "$(TEST)" ]; then \
+			echo "🎯 Running single test: $(TEST)"; \
+			node test/layout/tools/test_layout.js --radiant-exe ./radiant.exe --test $(TEST) -v; \
+		elif [ -n "$(SUITE)" ]; then \
+			echo "📂 Running test suite: $(SUITE)"; \
+			node test/layout/tools/test_layout.js --radiant-exe ./radiant.exe --category $(SUITE) -v; \
+		else \
+			echo "🎯 Running all layout tests"; \
+			node test/layout/tools/test_layout.js --radiant-exe ./radiant.exe -v; \
+		fi; \
+	else \
+		echo "❌ Error: Layout test script not found at test/layout/tools/test_layout.js"; \
+		exit 1; \
+	fi
