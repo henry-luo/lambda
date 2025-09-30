@@ -1,6 +1,7 @@
 #include "render.hpp"
-#include "render_png.hpp"
+#include "render_img.hpp"
 #include "../lib/log.h"
+#include <string.h>
 // #define STB_IMAGE_WRITE_IMPLEMENTATION
 // #include "lib/stb_image_write.h"
 
@@ -609,9 +610,14 @@ void render_html_doc(UiContext* uicon, View* root_view, const char* output_file)
     // tvg_canvas_draw(rdcon.canvas, false); // no clearing of the buffer
     tvg_canvas_sync(rdcon.canvas);  // wait for async draw operation to complete
 
-    // save the rendered surface to PNG file
+    // save the rendered surface to image file (PNG or JPEG based on extension)
     if (output_file) {
-        save_surface_to_png(rdcon.ui_context->surface, output_file);
+        const char* ext = strrchr(output_file, '.');
+        if (ext && (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0)) {
+            save_surface_to_jpeg(rdcon.ui_context->surface, output_file, 85); // Default quality 85
+        } else {
+            save_surface_to_png(rdcon.ui_context->surface, output_file);
+        }
     } else {
         save_surface_to_png(rdcon.ui_context->surface, "output.png");
     }

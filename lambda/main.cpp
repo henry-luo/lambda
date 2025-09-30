@@ -49,6 +49,9 @@ int render_html_to_pdf(const char* html_file, const char* pdf_file);
 // PNG rendering function from radiant (available since radiant sources are included in lambda.exe)
 int render_html_to_png(const char* html_file, const char* png_file);
 
+// JPEG rendering function from radiant (available since radiant sources are included in lambda.exe)
+int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int quality);
+
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
 extern void lambda_repl_cleanup();
@@ -678,7 +681,7 @@ int main(int argc, char *argv[]) {
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda HTML Renderer v1.0\n\n");
-            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png>\n", argv[0]);
+            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
             printf("\nDescription:\n");
             printf("  The 'render' command layouts an HTML file and renders the result as SVG, PDF, or PNG.\n");
             printf("  It parses the HTML, applies CSS styles, calculates layout, and generates\n");
@@ -687,6 +690,8 @@ int main(int argc, char *argv[]) {
             printf("  .svg    Scalable Vector Graphics (SVG)\n");
             printf("  .pdf    Portable Document Format (PDF)\n");
             printf("  .png    Portable Network Graphics (PNG)\n");
+            printf("  .jpg    Joint Photographic Experts Group (JPEG)\n");
+            printf("  .jpeg   Joint Photographic Experts Group (JPEG)\n");
             printf("\nOptions:\n");
             printf("  -o <output>        Output file path (required, format detected by extension)\n");
             printf("  -h, --help         Show this help message\n");
@@ -694,6 +699,7 @@ int main(int argc, char *argv[]) {
             printf("  %s render index.html -o output.svg        # Render HTML to SVG\n", argv[0]);
             printf("  %s render index.html -o output.pdf        # Render HTML to PDF\n", argv[0]);
             printf("  %s render index.html -o output.png        # Render HTML to PNG\n", argv[0]);
+            printf("  %s render index.html -o output.jpg        # Render HTML to JPEG\n", argv[0]);
             printf("  %s render test/page.html -o result.svg    # Render with relative paths\n", argv[0]);
             log_finish();  // Cleanup logging before exit
             return 0;
@@ -731,7 +737,7 @@ int main(int argc, char *argv[]) {
         // Validate required arguments
         if (!html_file) {
             printf("Error: render command requires an HTML input file\n");
-            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png>\n", argv[0]);
+            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
             printf("Use '%s render --help' for more information\n", argv[0]);
             log_finish();
             return 1;
@@ -739,7 +745,7 @@ int main(int argc, char *argv[]) {
 
         if (!output_file) {
             printf("Error: render command requires an output file (-o option)\n");
-            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png>\n", argv[0]);
+            printf("Usage: %s render <input.html> -o <output.svg|output.pdf|output.png|output.jpg>\n", argv[0]);
             printf("Use '%s render --help' for more information\n", argv[0]);
             log_finish();
             return 1;
@@ -770,9 +776,13 @@ int main(int argc, char *argv[]) {
             // Call the PNG rendering function
             log_debug("Detected PNG output format");
             exit_code = render_html_to_png(html_file, output_file);
+        } else if (ext && (strcmp(ext, ".jpg") == 0 || strcmp(ext, ".jpeg") == 0)) {
+            // Call the JPEG rendering function with default quality of 85
+            log_debug("Detected JPEG output format");
+            exit_code = render_html_to_jpeg(html_file, output_file, 85);
         } else {
-            printf("Error: Unsupported output format. Use .svg, .pdf, or .png extension\n");
-            printf("Supported formats: .svg (SVG), .pdf (PDF), .png (PNG)\n");
+            printf("Error: Unsupported output format. Use .svg, .pdf, .png, .jpg, or .jpeg extension\n");
+            printf("Supported formats: .svg (SVG), .pdf (PDF), .png (PNG), .jpg/.jpeg (JPEG)\n");
             log_finish();
             return 1;
         }
