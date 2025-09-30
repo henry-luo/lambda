@@ -157,8 +157,7 @@ static ViewTableCell* create_table_cell(LayoutContext* lycon, DomNode* cellNode)
     // Parse cell attributes
     parse_cell_attributes(cellNode, cell);
     
-    // Resolve CSS styles
-    dom_node_resolve_style(cellNode, lycon);
+    // Note: CSS styles should already be resolved by the layout system
     
     return cell;
 }
@@ -168,8 +167,7 @@ static ViewTableRow* create_table_row(LayoutContext* lycon, DomNode* rowNode) {
     ViewTableRow* row = (ViewTableRow*)alloc_view(lycon, RDT_VIEW_TABLE_ROW, rowNode);
     if (!row) return nullptr;
     
-    // Resolve CSS styles
-    dom_node_resolve_style(rowNode, lycon);
+    // Note: CSS styles should already be resolved by the layout system
     
     return row;
 }
@@ -179,8 +177,7 @@ static ViewTableRowGroup* create_table_row_group(LayoutContext* lycon, DomNode* 
     ViewTableRowGroup* group = (ViewTableRowGroup*)alloc_view(lycon, RDT_VIEW_TABLE_ROW_GROUP, groupNode);
     if (!group) return nullptr;
     
-    // Resolve CSS styles
-    dom_node_resolve_style(groupNode, lycon);
+    // Note: CSS styles should already be resolved by the layout system
     
     return group;
 }
@@ -222,14 +219,18 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
     
     // Process table children
     for (DomNode* child = first_element_child(tableNode); child; child = next_element_sibling(child)) {
+        // Get display property (styles should already be resolved by layout system)
+        DisplayValue child_display = resolve_display(child->as_element());
+        
         uintptr_t tag = child->tag();
         
-        if (tag == LXB_TAG_CAPTION) {
+        printf("DEBUG: Processing table child - tag=%s, display.outer=%d, display.inner=%d\n", 
+               child->name(), child_display.outer, child_display.inner);
+        
+        if (tag == LXB_TAG_CAPTION || child_display.inner == LXB_CSS_VALUE_TABLE_CAPTION) {
             // Create caption as block
             ViewBlock* caption = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, child);
             if (caption) {
-                dom_node_resolve_style(child, lycon);
-                
                 // Layout caption content
                 ViewGroup* cap_saved_parent = lycon->parent;
                 View* cap_saved_prev = lycon->prev_view;
@@ -246,7 +247,10 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                 lycon->elmt = tableNode;
             }
         }
-        else if (tag == LXB_TAG_THEAD || tag == LXB_TAG_TBODY || tag == LXB_TAG_TFOOT) {
+        else if (tag == LXB_TAG_THEAD || tag == LXB_TAG_TBODY || tag == LXB_TAG_TFOOT || 
+                 child_display.inner == LXB_CSS_VALUE_TABLE_ROW_GROUP ||
+                 child_display.inner == LXB_CSS_VALUE_TABLE_HEADER_GROUP ||
+                 child_display.inner == LXB_CSS_VALUE_TABLE_FOOTER_GROUP) {
             // Create row group
             ViewTableRowGroup* group = create_table_row_group(lycon, child);
             if (group) {
@@ -258,7 +262,13 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                 lycon->elmt = child;
                 
                 for (DomNode* rowNode = first_element_child(child); rowNode; rowNode = next_element_sibling(rowNode)) {
-                    if (rowNode->tag() == LXB_TAG_TR) {
+                    // Check for table row by CSS display property or HTML tag
+                    DisplayValue row_display = resolve_display(rowNode->as_element());
+                    
+                    printf("DEBUG: Processing row candidate - tag=%s, display.outer=%d, display.inner=%d\n", 
+                           rowNode->name(), row_display.outer, row_display.inner);
+                    
+                    if (rowNode->tag() == LXB_TAG_TR || row_display.inner == LXB_CSS_VALUE_TABLE_ROW) {
                         ViewTableRow* row = create_table_row(lycon, rowNode);
                         if (row) {
                             // Process cells in row
@@ -269,8 +279,15 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                             lycon->elmt = rowNode;
                             
                             for (DomNode* cellNode = first_element_child(rowNode); cellNode; cellNode = next_element_sibling(cellNode)) {
+                                // Check for table cell by CSS display property or HTML tag
+                                DisplayValue cell_display = resolve_display(cellNode->as_element());
+                                
+                                printf("DEBUG: Processing cell candidate - tag=%s, display.outer=%d, display.inner=%d\n", 
+                                       cellNode->name(), cell_display.outer, cell_display.inner);
+                                
                                 uintptr_t ctag = cellNode->tag();
-                                if (ctag == LXB_TAG_TD || ctag == LXB_TAG_TH) {
+                                if (ctag == LXB_TAG_TD || ctag == LXB_TAG_TH || 
+                                    cell_display.inner == LXB_CSS_VALUE_TABLE_CELL) {
                                     ViewTableCell* cell = create_table_cell(lycon, cellNode);
                                     if (cell) {
                                         // Layout cell content
@@ -303,7 +320,7 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                 lycon->elmt = tableNode;
             }
         }
-        else if (tag == LXB_TAG_TR) {
+        else if (tag == LXB_TAG_TR || child_display.inner == LXB_CSS_VALUE_TABLE_ROW) {
             // Direct table row (create implicit tbody)
             ViewTableRow* row = create_table_row(lycon, child);
             if (row) {
@@ -315,8 +332,15 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                 lycon->elmt = child;
                 
                 for (DomNode* cellNode = first_element_child(child); cellNode; cellNode = next_element_sibling(cellNode)) {
+                    // Check for table cell by CSS display property or HTML tag
+                    DisplayValue cell_display = resolve_display(cellNode->as_element());
+                    
+                    printf("DEBUG: Processing direct cell candidate - tag=%s, display.outer=%d, display.inner=%d\n", 
+                           cellNode->name(), cell_display.outer, cell_display.inner);
+                    
                     uintptr_t ctag = cellNode->tag();
-                    if (ctag == LXB_TAG_TD || ctag == LXB_TAG_TH) {
+                    if (ctag == LXB_TAG_TD || ctag == LXB_TAG_TH || 
+                        cell_display.inner == LXB_CSS_VALUE_TABLE_CELL) {
                         ViewTableCell* cell = create_table_cell(lycon, cellNode);
                         if (cell) {
                             // Layout cell content
@@ -453,7 +477,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         } else if (child->type == RDT_VIEW_TABLE_ROW) {
             rows++;
             int row_cells = 0;
-            for (ViewBlock* cell = child->first_child; cell; cell = child->next_sibling) {
+            for (ViewBlock* cell = child->first_child; cell; cell = cell->next_sibling) {
                 if (cell->type == RDT_VIEW_TABLE_CELL) {
                     ViewTableCell* tcell = (ViewTableCell*)cell;
                     row_cells += tcell->col_span;
@@ -542,7 +566,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             }
         } else if (child->type == RDT_VIEW_TABLE_ROW) {
             int col = 0;
-            for (ViewBlock* cell = child->first_child; cell; cell = child->next_sibling) {
+            for (ViewBlock* cell = child->first_child; cell; cell = cell->next_sibling) {
                 if (cell->type == RDT_VIEW_TABLE_CELL) {
                     ViewTableCell* tcell = (ViewTableCell*)cell;
                     
