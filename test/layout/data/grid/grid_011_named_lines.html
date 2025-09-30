@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Named Lines</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            grid-template-columns: [start] 1fr [middle] 2fr [end];
+            grid-template-rows: [top] 100px [center] 1fr [bottom];
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+        }
+        .header { 
+            background-color: #ffcccc; 
+            grid-column: start / end;
+            grid-row: top / center;
+        }
+        .sidebar { 
+            background-color: #ccffcc; 
+            grid-column: start / middle;
+            grid-row: center / bottom;
+        }
+        .main { 
+            background-color: #ccccff; 
+            grid-column: middle / end;
+            grid-row: center / bottom;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item header">Header (start/end)</div>
+        <div class="item sidebar">Sidebar (start/middle)</div>
+        <div class="item main">Main (middle/end)</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_011_named_lines",
+        "category": "advanced",
+        "features": ["named-lines", "grid-line-names", "semantic-placement"],
+        "description": "Grid layout using named grid lines for semantic positioning",
+        "spec_references": ["https://www.w3.org/TR/css-grid-1/#named-lines"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

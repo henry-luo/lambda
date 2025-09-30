@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Fixed Size Block</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .fixed-container {
+            width: 200px;
+            height: 120px;
+            background-color: #ffeecc;
+            overflow: hidden;
+        }
+        .oversized-content {
+            width: 300px;
+            height: 180px;
+            background-color: #ff6600;
+        }
+    </style>
+</head>
+<body>
+    <div class="fixed-container">
+        <div class="oversized-content"></div>
+    </div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_401_fixed_size_overflow",
+        "category": "baseline",
+        "features": ["overflow-hidden", "fixed-dimensions", "clipping"],
+        "description": "Fixed size container with oversized content and overflow hidden",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visufx.html#overflow"],
+        "complexity": "basic",
+        "expected_behavior": "Orange content clipped by beige 200x120px container with overflow hidden"
+    }
+    </script>
+</body>
+</html>

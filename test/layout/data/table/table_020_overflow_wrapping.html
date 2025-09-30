@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Overflow and Text Wrapping</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            overflow: auto;
+        }
+        table {
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+            font-size: 12px;
+            border: 1px solid #666;
+            vertical-align: top;
+        }
+        th {
+            background-color: #e0e0e0;
+            font-weight: bold;
+        }
+        .nowrap-col { 
+            white-space: nowrap; 
+            overflow: hidden;
+            text-overflow: ellipsis;
+            background-color: #ffcccc;
+            width: 25%;
+        }
+        .wrap-col { 
+            word-wrap: break-word;
+            background-color: #ccffcc;
+            width: 35%;
+        }
+        .hidden-col { 
+            overflow: hidden;
+            background-color: #ccccff;
+            width: 40%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <table>
+            <thead>
+                <tr>
+                    <th class="nowrap-col">No Wrap + Ellipsis</th>
+                    <th class="wrap-col">Word Wrap</th>
+                    <th class="hidden-col">Hidden Overflow</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="nowrap-col">This is a very long text that should be truncated with ellipsis</td>
+                    <td class="wrap-col">This is a very long text that should wrap to multiple lines properly</td>
+                    <td class="hidden-col">This is a very long text that will be hidden when it overflows the cell boundaries</td>
+                </tr>
+                <tr>
+                    <td class="nowrap-col">Another long text example for testing</td>
+                    <td class="wrap-col">Another wrapping text example with multiple words</td>
+                    <td class="hidden-col">Another overflow text example that gets cut off</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_020_overflow_wrapping",
+        "category": "intermediate",
+        "features": ["text-overflow", "white-space", "word-wrap", "overflow-hidden", "ellipsis"],
+        "description": "Table cells with different text overflow and wrapping behaviors",
+        "spec_references": ["https://www.w3.org/TR/CSS2/text.html#white-space-prop"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Display Types</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test container */
+        .test-container {
+            width: 800px;
+            height: 900px;
+            border: 2px solid #333;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        /* Test-specific CSS */
+        .display-test {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px dashed #999;
+            background-color: white;
+        }
+        
+        .test-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .element {
+            margin: 5px;
+            padding: 10px;
+            border: 1px solid #666;
+            background-color: #f0f0f0;
+        }
+        
+        /* Block elements */
+        .block {
+            display: block;
+            background-color: #ffcccc;
+        }
+        
+        /* Inline elements */
+        .inline {
+            display: inline;
+            background-color: #ccffcc;
+        }
+        
+        /* Inline-block elements */
+        .inline-block {
+            display: inline-block;
+            width: 120px;
+            height: 60px;
+            background-color: #ccccff;
+            text-align: center;
+            line-height: 60px;
+        }
+        
+        /* None display */
+        .none {
+            display: none;
+            background-color: #ffffcc;
+        }
+        
+        /* Table display types */
+        .table {
+            display: table;
+            width: 100%;
+            background-color: #ffccff;
+            border-collapse: separate;
+            border-spacing: 2px;
+        }
+        
+        .table-row {
+            display: table-row;
+            background-color: #ccffff;
+        }
+        
+        .table-cell {
+            display: table-cell;
+            padding: 10px;
+            border: 1px solid #666;
+            background-color: #ffccaa;
+            text-align: center;
+        }
+        
+        /* List display types */
+        .list-item {
+            display: list-item;
+            margin-left: 20px;
+            background-color: #aaffcc;
+        }
+        
+        /* Flex display (basic) */
+        .flex {
+            display: flex;
+            gap: 10px;
+            background-color: #aaccff;
+            padding: 10px;
+        }
+        
+        .flex-item {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #666;
+            background-color: #ffaacc;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="display-test">
+            <div class="test-title">Block elements (display: block)</div>
+            <div class="element block">Block 1 - Takes full width</div>
+            <div class="element block">Block 2 - Stacks vertically</div>
+            <div class="element block">Block 3 - Cannot be inline</div>
+        </div>
+        
+        <div class="display-test">
+            <div class="test-title">Inline elements (display: inline)</div>
+            <span class="element inline">Inline 1</span>
+            <span class="element inline">Inline 2</span>
+            <span class="element inline">Inline 3</span>
+            <span class="element inline">Flow horizontally</span>
+        </div>
+        
+        <div class="display-test">
+            <div class="test-title">Inline-block elements (display: inline-block)</div>
+            <div class="element inline-block">Block 1</div>
+            <div class="element inline-block">Block 2</div>
+            <div class="element inline-block">Block 3</div>
+        </div>
+        
+        <div class="display-test">
+            <div class="test-title">Table display types</div>
+            <div class="table">
+                <div class="table-row">
+                    <div class="table-cell">Cell 1</div>
+                    <div class="table-cell">Cell 2</div>
+                    <div class="table-cell">Cell 3</div>
+                </div>
+                <div class="table-row">
+                    <div class="table-cell">Cell 4</div>
+                    <div class="table-cell">Cell 5</div>
+                    <div class="table-cell">Cell 6</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="display-test">
+            <div class="test-title">List items (display: list-item)</div>
+            <div class="element list-item">List item 1</div>
+            <div class="element list-item">List item 2</div>
+            <div class="element list-item">List item 3</div>
+        </div>
+        
+        <div class="display-test">
+            <div class="test-title">Flex container (display: flex)</div>
+            <div class="flex">
+                <div class="flex-item">Flex 1</div>
+                <div class="flex-item">Flex 2</div>
+                <div class="flex-item">Flex 3</div>
+            </div>
+        </div>
+        
+        <div class="display-test">
+            <div class="test-title">Hidden element (display: none)</div>
+            <div class="element block">Visible before</div>
+            <div class="element none">This is hidden</div>
+            <div class="element block">Visible after (no gap)</div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "box_011_display_types",
+        "category": "advanced",
+        "features": ["display", "block", "inline", "inline-block", "table", "table-row", "table-cell", "list-item", "flex", "none"],
+        "description": "Various display property values and their layout behavior",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#display-prop"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

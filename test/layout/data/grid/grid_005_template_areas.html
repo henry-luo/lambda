@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Template Areas</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            grid-template-columns: 1fr 2fr 1fr;
+            grid-template-rows: 60px 1fr 60px;
+            grid-template-areas: 
+                "header header header"
+                "sidebar main aside"
+                "footer footer footer";
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+        }
+        .header { 
+            grid-area: header; 
+            background-color: #ffcccc; 
+        }
+        .sidebar { 
+            grid-area: sidebar; 
+            background-color: #ccffcc; 
+        }
+        .main { 
+            grid-area: main; 
+            background-color: #ccccff; 
+        }
+        .aside { 
+            grid-area: aside; 
+            background-color: #ffffcc; 
+        }
+        .footer { 
+            grid-area: footer; 
+            background-color: #ffccff; 
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item header">Header</div>
+        <div class="item sidebar">Sidebar</div>
+        <div class="item main">Main</div>
+        <div class="item aside">Aside</div>
+        <div class="item footer">Footer</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_005_template_areas",
+        "category": "basic",
+        "features": ["grid-template-areas", "grid-area", "named-areas"],
+        "description": "Grid layout using named template areas for semantic layout structure",
+        "spec_references": ["https://www.w3.org/TR/css-grid-1/#grid-template-areas-property"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

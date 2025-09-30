@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Complex Template Areas</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            grid-template-columns: 80px 1fr 100px 80px;
+            grid-template-rows: 60px 1fr 80px 50px;
+            grid-template-areas: 
+                "nav    header  header  ads"
+                "nav    main    aside   ads"
+                "nav    main    aside   ads"
+                "footer footer  footer  footer";
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 12px;
+        }
+        .nav { 
+            grid-area: nav; 
+            background-color: #ffcccc; 
+        }
+        .header { 
+            grid-area: header; 
+            background-color: #ccffcc; 
+        }
+        .main { 
+            grid-area: main; 
+            background-color: #ccccff; 
+        }
+        .aside { 
+            grid-area: aside; 
+            background-color: #ffffcc; 
+        }
+        .ads { 
+            grid-area: ads; 
+            background-color: #ffccff; 
+        }
+        .footer { 
+            grid-area: footer; 
+            background-color: #ccffff; 
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item nav">Nav</div>
+        <div class="item header">Header</div>
+        <div class="item main">Main Content</div>
+        <div class="item aside">Aside</div>
+        <div class="item ads">Ads</div>
+        <div class="item footer">Footer</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_020_complex_areas",
+        "category": "advanced",
+        "features": ["complex-template-areas", "multi-span-areas", "layout-regions"],
+        "description": "Complex layout using grid template areas with multiple spanning regions",
+        "spec_references": ["https://www.w3.org/TR/css-grid-1/#grid-template-areas-property"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

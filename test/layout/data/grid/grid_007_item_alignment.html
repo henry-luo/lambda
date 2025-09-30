@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Item Alignment</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            grid-template-rows: repeat(2, 1fr);
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            border: 2px dashed #666;
+            text-align: center;
+            font-size: 14px;
+            width: 80px;
+            height: 60px;
+        }
+        .item:nth-child(1) { 
+            background-color: #ffcccc; 
+            justify-self: start;
+            align-self: start;
+        }
+        .item:nth-child(2) { 
+            background-color: #ccffcc; 
+            justify-self: end;
+            align-self: start;
+        }
+        .item:nth-child(3) { 
+            background-color: #ccccff; 
+            justify-self: center;
+            align-self: center;
+        }
+        .item:nth-child(4) { 
+            background-color: #ffffcc; 
+            justify-self: stretch;
+            align-self: stretch;
+            width: auto;
+            height: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Start/Start</div>
+        <div class="item">End/Start</div>
+        <div class="item">Center</div>
+        <div class="item">Stretch</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_007_item_alignment",
+        "category": "basic",
+        "features": ["justify-self", "align-self", "item-alignment"],
+        "description": "Individual grid item alignment using justify-self and align-self properties",
+        "spec_references": ["https://www.w3.org/TR/css-grid-1/#self-alignment"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

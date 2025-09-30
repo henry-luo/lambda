@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Line Numbers</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 12px;
+        }
+        .item:nth-child(1) { 
+            background-color: #ffcccc; 
+            grid-column: 1 / 3;
+            grid-row: 1 / 2;
+        }
+        .item:nth-child(2) { 
+            background-color: #ccffcc; 
+            grid-column: 3 / 5;
+            grid-row: 1 / 3;
+        }
+        .item:nth-child(3) { 
+            background-color: #ccccff; 
+            grid-column: 1 / 2;
+            grid-row: 2 / 4;
+        }
+        .item:nth-child(4) { 
+            background-color: #ffffcc; 
+            grid-column: 2 / 4;
+            grid-row: 3 / 4;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">1/3, 1/2</div>
+        <div class="item">3/5, 1/3</div>
+        <div class="item">1/2, 2/4</div>
+        <div class="item">2/4, 3/4</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_008_line_numbers",
+        "category": "basic",
+        "features": ["grid-column", "grid-row", "line-numbers", "explicit-placement"],
+        "description": "Grid items positioned using explicit line numbers for precise placement",
+        "spec_references": ["https://www.w3.org/TR/css-grid-1/#line-placement"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

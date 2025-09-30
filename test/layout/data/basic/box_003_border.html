@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Border Box Model Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            width: 400px;
+            height: 300px;
+            background-color: #f0f0f0;
+            border: 2px solid #333333;
+        }
+        .box {
+            width: 100px;
+            height: 100px;
+            background-color: #ccccff;
+            border: 1px solid #666666;
+            margin: 10px;
+            padding: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="box">Content</div>
+    </div>
+    
+    <script id="test-metadata" style="display: none;">
+    {
+        "test_name": "box_003_border",
+        "description": "Test border behavior - container has 2px border, box has 1px border + 10px margin + 5px padding",
+        "expected_elements": [
+            {"selector": ".container", "expected": "400x300 content + 2px border on all sides"},
+            {"selector": ".box", "expected": "100x100 content + 5px padding + 1px border, positioned 10px from container content area"}
+        ]
+    }
+    </script>
+</body>
+</html>

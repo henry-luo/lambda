@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Basic Image Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.5;
+            padding: 20px;
+            max-width: 700px;
+        }
+        
+        /* Image styles */
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 16px 0;
+        }
+        
+        .image-placeholder {
+            width: 300px;
+            height: 200px;
+            background-color: #e1e5e9;
+            border: 2px dashed #9ca3af;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6b7280;
+            font-size: 14px;
+            margin: 16px 0;
+        }
+        
+        .image-center {
+            margin: 16px auto;
+        }
+        
+        h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            font-weight: bold;
+        }
+        
+        p {
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h3>Image Layout</h3>
+    <p>Here is a paragraph before the image.</p>
+    
+    <div class="image-placeholder">
+        [Image Placeholder 300x200]
+    </div>
+    
+    <p>This paragraph follows the image. Images should have proper margins and responsive sizing.</p>
+    
+    <div class="image-placeholder image-center">
+        [Centered Image 300x200]
+    </div>
+    
+    <p>This paragraph follows a centered image.</p>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "image_001_basic_layout",
+        "category": "image",
+        "features": ["image-display", "responsive-width", "block-layout", "centering", "margins"],
+        "description": "Basic image layout with responsive sizing and centering options",
+        "markdown_equivalent": "### Image Layout\n\nHere is a paragraph before the image.\n\n![Image](placeholder.jpg)\n\nThis paragraph follows the image...",
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

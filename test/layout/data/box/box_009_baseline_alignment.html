@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Text Baseline Alignment</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test container */
+        .test-container {
+            width: 800px;
+            height: 700px;
+            border: 2px solid #333;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        /* Test-specific CSS */
+        .baseline-test {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px dashed #999;
+            background-color: white;
+            line-height: 3; /* Generous line-height to show baseline clearly */
+        }
+        
+        .test-title {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 10px;
+            line-height: normal;
+        }
+        
+        /* Different font sizes */
+        .small-text {
+            font-size: 12px;
+            background-color: #ffcccc;
+            vertical-align: baseline;
+        }
+        
+        .medium-text {
+            font-size: 16px;
+            background-color: #ccffcc;
+            vertical-align: baseline;
+        }
+        
+        .large-text {
+            font-size: 24px;
+            background-color: #ccccff;
+            vertical-align: baseline;
+        }
+        
+        .xlarge-text {
+            font-size: 32px;
+            background-color: #ffffcc;
+            vertical-align: baseline;
+        }
+        
+        /* Inline blocks with different heights */
+        .inline-block {
+            display: inline-block;
+            padding: 5px 10px;
+            margin: 0 5px;
+            border: 1px solid #666;
+            text-align: center;
+        }
+        
+        .short-block {
+            height: 30px;
+            line-height: 20px;
+            background-color: #ffccff;
+            vertical-align: baseline;
+        }
+        
+        .medium-block {
+            height: 50px;
+            line-height: 40px;
+            background-color: #ccffff;
+            vertical-align: baseline;
+        }
+        
+        .tall-block {
+            height: 70px;
+            line-height: 60px;
+            background-color: #ffccaa;
+            vertical-align: baseline;
+        }
+        
+        /* Different vertical alignments for comparison */
+        .align-top {
+            vertical-align: top;
+            background-color: #aaffcc;
+        }
+        
+        .align-middle {
+            vertical-align: middle;
+            background-color: #aaccff;
+        }
+        
+        .align-bottom {
+            vertical-align: bottom;
+            background-color: #ffaacc;
+        }
+        
+        /* Visual baseline indicator */
+        .baseline-indicator {
+            border-bottom: 2px solid red;
+            display: inline;
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="baseline-test">
+            <span class="test-title">Mixed font sizes on baseline:</span>
+            <span class="small-text">Small</span>
+            <span class="medium-text">Medium</span>
+            <span class="large-text">Large</span>
+            <span class="xlarge-text">XL</span>
+            <span class="baseline-indicator">baseline</span>
+        </div>
+        
+        <div class="baseline-test">
+            <span class="test-title">Inline-block elements with different heights (baseline aligned):</span>
+            <span class="inline-block short-block">Short</span>
+            <span class="inline-block medium-block">Medium</span>
+            <span class="inline-block tall-block">Tall</span>
+            <span class="baseline-indicator">text baseline</span>
+        </div>
+        
+        <div class="baseline-test">
+            <span class="test-title">Mixed vertical alignments for comparison:</span>
+            <span class="inline-block short-block align-top">Top</span>
+            <span class="inline-block medium-block align-middle">Middle</span>
+            <span class="inline-block tall-block align-bottom">Bottom</span>
+            <span class="inline-block medium-block">Baseline</span>
+        </div>
+        
+        <div class="baseline-test">
+            <span class="test-title">Images and text baseline alignment:</span>
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDAiIGhlaWdodD0iNDAiIHZpZXdCb3g9IjAgMCA0MCA0MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSIjRkZDQ0NDIi8+Cjx0ZXh0IHg9IjIwIiB5PSIyNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzMzMzMzMyI+SW1nPC90ZXh0Pgo8L3N2Zz4K" alt="Image" style="vertical-align: baseline; margin: 0 5px;">
+            <span>Text after image</span>
+            <img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCAyMCA2MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjIwIiBoZWlnaHQ9IjYwIiBmaWxsPSIjQ0NGRkNDIi8+Cjx0ZXh0IHg9IjEwIiB5PSIzNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzMzMzMzMyI+VGFsbDwvdGV4dD4KPC9zdmc+Cg==" alt="Tall Image" style="vertical-align: baseline; margin: 0 5px;">
+            <span class="baseline-indicator">baseline</span>
+        </div>
+        
+        <div class="baseline-test">
+            <span class="test-title">Sub and superscript baseline behavior:</span>
+            <span>Normal text</span>
+            <sub style="background-color: #ffcccc;">subscript</sub>
+            <span>and</span>
+            <sup style="background-color: #ccffcc;">superscript</sup>
+            <span class="baseline-indicator">baseline</span>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "box_009_baseline_alignment",
+        "category": "baseline",
+        "features": ["baseline-alignment", "font-size-mixing", "inline-block-baseline", "image-baseline", "sub-sup-baseline", "vertical-align-baseline"],
+        "description": "Text and inline element baseline alignment with various font sizes, heights, and element types",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visudet.html#leading"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

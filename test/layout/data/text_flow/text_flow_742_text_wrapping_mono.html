@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Font Text Wrapping Test - Monospace</title>
+    <style>
+        @font-face {
+            font-family: 'Liberation Mono';
+            src: url('../../font/LiberationMono-Regular.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        
+        body {
+            font-family: 'Liberation Mono', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+            margin: 20px;
+            background-color: white;
+            color: black;
+        }
+        
+        .code-container {
+            width: 400px;
+            padding: 15px;
+            border: 2px solid #555;
+            background-color: #f8f8f8;
+            margin-bottom: 20px;
+            overflow-x: auto;
+        }
+        
+        .narrow-code {
+            width: 250px;
+            padding: 10px;
+            border: 1px solid #888;
+            background-color: #f0f0f0;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .preserve-format {
+            white-space: pre;
+            background-color: #e8e8e8;
+            padding: 10px;
+            border-left: 3px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>Font Text Wrapping Test - Monospace</h1>
+    
+    <h2>Code Container - Normal Wrapping</h2>
+    <div class="code-container">
+// This is a test of monospace text wrapping
+function longFunctionNameThatMightWrapInNarrowContainers() {
+    const veryLongVariableNameThatDemonstratesWrapping = "test";
+    return veryLongVariableNameThatDemonstratesWrapping.length;
+}
+    </div>
+    
+    <h2>Narrow Container - Force Breaking</h2>
+    <div class="narrow-code">const reallyLongVariableNameThatWillDefinitelyWrapInThisNarrowContainer = 42;</div>
+    
+    <h2>Preserved Formatting</h2>
+    <div class="preserve-format">Table Layout Test:
+Name        | Value    | Status
+------------|----------|--------
+short       | 123      | OK     
+mediumname  | 456789   | PENDING
+verylongname| 1000000  | ERROR  </div>
+    
+    <h2>ASCII Art - Character Alignment</h2>
+    <div class="preserve-format">
+┌─────────────────┐
+│ Monospace Box   │
+│ i=1 W=2 M=3     │
+│ Every char same │
+│ width: |i|W|M|  │
+└─────────────────┘
+    </div>
+</body>
+</html>

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Basic Width and Height</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test container */
+        .test-container {
+            width: 500px;
+            height: 400px;
+            border: 2px solid #333;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        /* Test-specific CSS */
+        .box {
+            border: 1px solid #666;
+            margin: 10px 0;
+            background-color: white;
+            position: relative;
+        }
+        
+        .box-fixed {
+            width: 200px;
+            height: 100px;
+            background-color: #ffcccc;
+        }
+        
+        .box-percentage {
+            width: 50%;
+            height: 80px;
+            background-color: #ccffcc;
+        }
+        
+        .box-auto {
+            width: auto;
+            height: 60px;
+            background-color: #ccccff;
+        }
+        
+        .content {
+            padding: 10px;
+            text-align: center;
+            line-height: 1.2;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="box box-fixed">
+            <div class="content">Fixed: 200px × 100px</div>
+        </div>
+        <div class="box box-percentage">
+            <div class="content">Percentage: 50% × 80px</div>
+        </div>
+        <div class="box box-auto">
+            <div class="content">Auto width × 60px height</div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "box_001_width_height",
+        "category": "basic",
+        "features": ["width", "height", "fixed-dimensions", "percentage-width", "auto-width"],
+        "description": "Basic width and height properties with fixed, percentage, and auto values",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visudet.html#the-width-property"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

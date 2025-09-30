@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Font Text Wrapping Test - Sans Serif</title>
+    <style>
+        @font-face {
+            font-family: 'Liberation Sans';
+            src: url('../../font/LiberationSans-Regular.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        
+        body {
+            font-family: 'Liberation Sans', Arial, sans-serif;
+            font-size: 16px;
+            line-height: 1.5;
+            margin: 20px;
+            background-color: white;
+            color: black;
+        }
+        
+        .narrow-container {
+            width: 200px;
+            padding: 15px;
+            border: 2px solid #333;
+            margin-bottom: 20px;
+            word-wrap: break-word;
+        }
+        
+        .medium-container {
+            width: 350px;
+            padding: 15px;
+            border: 2px dashed #666;
+            margin-bottom: 20px;
+        }
+        
+        .long-words {
+            background-color: #f0f0f0;
+            padding: 10px;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Font Text Wrapping Test - Sans Serif</h1>
+    
+    <h2>Narrow Container (200px) - Word Wrapping Test</h2>
+    <div class="narrow-container">
+        This is a test of text wrapping behavior in Liberation Sans font with a narrow container. The quick brown fox jumps over the lazy dog. This sentence will wrap multiple times due to the narrow width constraint.
+    </div>
+    
+    <h2>Medium Container (350px) - Normal Flow</h2>
+    <div class="medium-container">
+        This paragraph tests text flow in Liberation Sans with a medium-width container. The text should wrap naturally at word boundaries, maintaining good readability while demonstrating how the font handles line breaks and spacing.
+        
+        <div class="long-words">
+            Long words test: antidisestablishmentarianism supercalifragilisticexpialidocious pneumonoultramicroscopicsilicovolcanoconiosishyphenated-compound-words
+        </div>
+    </div>
+    
+    <h2>Different Line Heights</h2>
+    <div class="medium-container" style="line-height: 1.2;">
+        <strong>Tight line height (1.2):</strong> This text has reduced line spacing to test how Liberation Sans handles compressed vertical spacing. The quick brown fox jumps over the lazy dog repeatedly.
+    </div>
+    
+    <div class="medium-container" style="line-height: 2.0;">
+        <strong>Loose line height (2.0):</strong> This text has expanded line spacing to test how Liberation Sans handles increased vertical spacing. The quick brown fox jumps over the lazy dog repeatedly.
+    </div>
+</body>
+</html>

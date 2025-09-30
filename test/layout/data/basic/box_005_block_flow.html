@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Block Flow Layout Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            width: 400px;
+            background-color: #f0f0f0;
+        }
+        .block1 {
+            width: 200px;
+            height: 50px;
+            background-color: #ccccff;
+            margin: 10px;
+        }
+        .block2 {
+            width: 150px;
+            height: 60px;
+            background-color: #ffcccc;
+            margin: 15px;
+        }
+        .block3 {
+            width: 180px;
+            height: 40px;
+            background-color: #ccffcc;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="block1">Block 1</div>
+        <div class="block2">Block 2</div>
+        <div class="block3">Block 3</div>
+    </div>
+    
+    <script id="test-metadata" style="display: none;">
+    {
+        "test_name": "box_005_block_flow",
+        "description": "Test normal block flow - blocks should stack vertically with proper margin collapse",
+        "expected_elements": [
+            {"selector": ".block1", "expected": "First block at top with 10px margin"},
+            {"selector": ".block2", "expected": "Second block below first, margins should collapse (15px > 10px)"},
+            {"selector": ".block3", "expected": "Third block below second, margins should collapse (15px > 5px)"}
+        ]
+    }
+    </script>
+</body>
+</html>

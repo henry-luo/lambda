@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Border Variations</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .box1 {
+            width: 100px;
+            height: 60px;
+            background-color: #ffdddd;
+            border: 2px solid #ff0000;
+        }
+        .box2 {
+            width: 120px;
+            height: 50px;
+            background-color: #ddffdd;
+            border: 4px solid #00aa00;
+        }
+        .box3 {
+            width: 80px;
+            height: 70px;
+            background-color: #ddddff;
+            border: 1px solid #0000ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="box1"></div>
+    <div class="box2"></div>
+    <div class="box3"></div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_105_border_variations",
+        "category": "baseline",
+        "features": ["border", "border-width", "border-color", "block-flow"],
+        "description": "Three containers with different border widths and colors",
+        "spec_references": ["https://www.w3.org/TR/CSS22/box.html#border-properties"],
+        "complexity": "basic",
+        "expected_behavior": "Three boxes stacked vertically with different colored borders"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Empty Cells</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: table;
+            empty-cells: show;
+            border: 2px solid #333;
+            padding: 10px;
+            border-spacing: 10px;
+        }
+        .row {
+            display: table-row;
+        }
+        .cell {
+            display: table-cell;
+            padding: 15px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+            border: 1px solid #666;
+        }
+        .cell:nth-child(1) { background-color: #ffcccc; }
+        .cell:nth-child(2) { background-color: #ccffcc; }
+        .cell:nth-child(3) { background-color: #ccccff; }
+        .cell:nth-child(4) { background-color: #ffffcc; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row">
+            <div class="cell">Content</div>
+            <div class="cell"></div>
+            <div class="cell">Content</div>
+        </div>
+        <div class="row">
+            <div class="cell"></div>
+            <div class="cell">Content</div>
+            <div class="cell"></div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_007_empty_cells",
+        "category": "basic",
+        "features": ["empty-cells", "show-empty", "cell-visibility"],
+        "description": "Table with empty cells shown with borders and backgrounds",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#empty-cells"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Link and Text Formatting</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 700px;
+        }
+        
+        /* Typography */
+        h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            font-weight: bold;
+        }
+        
+        p {
+            margin-bottom: 16px;
+        }
+        
+        /* Links */
+        a {
+            color: #0066cc;
+            text-decoration: underline;
+        }
+        
+        a:hover {
+            color: #004499;
+        }
+        
+        a:visited {
+            color: #6611cc;
+        }
+        
+        /* Text formatting */
+        .strong {
+            font-weight: bold;
+        }
+        
+        .emphasis {
+            font-style: italic;
+        }
+        
+        .code {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            background-color: #f3f4f6;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        
+        .strikethrough {
+            text-decoration: line-through;
+        }
+        
+        /* Special formatting combinations */
+        .highlight {
+            background-color: #ffeb3b;
+            padding: 1px 2px;
+        }
+    </style>
+</head>
+<body>
+    <h3>Text Formatting Examples</h3>
+    
+    <p>This paragraph contains various inline formatting: <span class="strong">bold text</span>, <span class="emphasis">italic text</span>, and <code class="code">inline code</code>.</p>
+    
+    <p>Links can be formatted too: <a href="#" class="strong">bold link</a>, <a href="#" class="emphasis">italic link</a>, and <a href="#">regular link</a>.</p>
+    
+    <p>More advanced formatting includes <span class="strikethrough">strikethrough text</span> and <span class="highlight">highlighted text</span>.</p>
+    
+    <p>Complex combinations: <span class="strong emphasis">bold italic</span>, <a href="#" class="strong code">bold code link</a>, and <span class="emphasis"><code class="code">italic code</code></span>.</p>
+    
+    <p>Reference links: See the <a href="#documentation">documentation</a> for more details, or check the <a href="#api-reference">API reference</a>.</p>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "text_002_formatting_links",
+        "category": "text",
+        "features": ["links", "text-decoration", "bold", "italic", "inline-code", "strikethrough", "text-combinations"],
+        "description": "Text formatting with links, emphasis, code, and various combinations of inline styles",
+        "markdown_equivalent": "### Text Formatting Examples\n\nThis paragraph contains various inline formatting: **bold text**, *italic text*, and `inline code`.\n\nLinks can be formatted too: [**bold link**](#), [*italic link*](#), and [regular link](#).\n\nMore advanced formatting includes ~~strikethrough text~~ and highlighted text.\n\nComplex combinations: ***bold italic***, [**`bold code link`**](#), and *`italic code`*.",
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

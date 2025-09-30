@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Cell Alignment</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: table;
+            border: 2px solid #333;
+            padding: 10px;
+            border-spacing: 10px;
+        }
+        .row {
+            display: table-row;
+            height: 120px;
+        }
+        .cell {
+            display: table-cell;
+            padding: 10px;
+            box-sizing: border-box;
+            font-size: 14px;
+            border: 1px solid #666;
+        }
+        .cell:nth-child(1) { 
+            background-color: #ffcccc; 
+            vertical-align: top;
+            text-align: left;
+        }
+        .cell:nth-child(2) { 
+            background-color: #ccffcc; 
+            vertical-align: middle;
+            text-align: center;
+        }
+        .cell:nth-child(3) { 
+            background-color: #ccccff; 
+            vertical-align: bottom;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row">
+            <div class="cell">Top Left</div>
+            <div class="cell">Middle Center</div>
+            <div class="cell">Bottom Right</div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_002_cell_alignment",
+        "category": "basic",
+        "features": ["vertical-align", "text-align", "table-cell-alignment"],
+        "description": "Table cells with different vertical and horizontal alignment properties",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#height-layout"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

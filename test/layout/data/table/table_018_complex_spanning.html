@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Complex Spanning</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            overflow: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 8px;
+            text-align: center;
+            font-size: 12px;
+            border: 1px solid #666;
+            vertical-align: middle;
+        }
+        th {
+            background-color: #e0e0e0;
+            font-weight: bold;
+        }
+        .header-span { background-color: #d0d0d0 !important; }
+        .data1 { background-color: #ffcccc; }
+        .data2 { background-color: #ccffcc; }
+        .data3 { background-color: #ccccff; }
+        .data4 { background-color: #ffffcc; }
+        .span-cell { background-color: #ffccff !important; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <table>
+            <thead>
+                <tr>
+                    <th colspan="4" class="header-span">Complex Table Layout</th>
+                </tr>
+                <tr>
+                    <th>A</th>
+                    <th>B</th>
+                    <th>C</th>
+                    <th>D</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td rowspan="3" class="span-cell">Rowspan 3</td>
+                    <td class="data2">B1</td>
+                    <td colspan="2" class="span-cell">Colspan 2</td>
+                </tr>
+                <tr>
+                    <td class="data2">B2</td>
+                    <td rowspan="2" class="span-cell">Rowspan 2</td>
+                    <td class="data4">D2</td>
+                </tr>
+                <tr>
+                    <td class="data2">B3</td>
+                    <td class="data4">D3</td>
+                </tr>
+                <tr>
+                    <td class="data1">A4</td>
+                    <td colspan="3" class="span-cell">Colspan 3</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_018_complex_spanning",
+        "category": "advanced",
+        "features": ["complex-colspan", "complex-rowspan", "mixed-spanning", "advanced-layout"],
+        "description": "Complex table with mixed colspan and rowspan creating intricate cell layouts",
+        "spec_references": ["https://www.w3.org/TR/html52/tabular-data.html#table-model"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Column Groups</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: table;
+            border: 2px solid #333;
+            padding: 10px;
+            border-spacing: 5px;
+        }
+        .col-group {
+            display: table-column-group;
+        }
+        .col {
+            display: table-column;
+        }
+        .col:nth-child(1) { 
+            background-color: #ffe0e0; 
+            width: 100px;
+        }
+        .col:nth-child(2) { 
+            background-color: #e0ffe0; 
+            width: 150px;
+        }
+        .col:nth-child(3) { 
+            background-color: #e0e0ff; 
+            width: 100px;
+        }
+        .row {
+            display: table-row;
+        }
+        .cell {
+            display: table-cell;
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+            border: 1px solid #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="col-group">
+            <div class="col"></div>
+            <div class="col"></div>
+            <div class="col"></div>
+        </div>
+        <div class="row">
+            <div class="cell">Col 1</div>
+            <div class="cell">Col 2</div>
+            <div class="cell">Col 3</div>
+        </div>
+        <div class="row">
+            <div class="cell">Data 1</div>
+            <div class="cell">Data 2</div>
+            <div class="cell">Data 3</div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_008_column_groups",
+        "category": "intermediate",
+        "features": ["table-column-group", "table-column", "column-styling", "column-width"],
+        "description": "Table with column groups for styling and sizing entire columns",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#columns"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

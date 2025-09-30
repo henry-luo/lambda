@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Empty Cells Hide</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            overflow: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 5px;
+            empty-cells: hide;
+        }
+        th, td {
+            padding: 15px;
+            text-align: center;
+            font-size: 14px;
+            border: 2px solid #666;
+        }
+        th {
+            background-color: #e0e0e0;
+            font-weight: bold;
+        }
+        td:nth-child(1) { background-color: #ffcccc; }
+        td:nth-child(2) { background-color: #ccffcc; }
+        td:nth-child(3) { background-color: #ccccff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Header 1</th>
+                    <th>Header 2</th>
+                    <th>Header 3</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Content</td>
+                    <td></td>
+                    <td>Content</td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td>Content</td>
+                    <td></td>
+                </tr>
+                <tr>
+                    <td>Content</td>
+                    <td></td>
+                    <td>Content</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_016_empty_cells_hide",
+        "category": "basic",
+        "features": ["empty-cells-hide", "cell-visibility", "hidden-borders"],
+        "description": "Table with empty-cells: hide property making empty cells invisible",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#empty-cells"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

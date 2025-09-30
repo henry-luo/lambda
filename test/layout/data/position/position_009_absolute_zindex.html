@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Absolute Position Z-Index</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            position: relative;
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            background-color: #f8f8f8;
+        }
+        .layer-1 {
+            position: absolute;
+            top: 50px;
+            left: 50px;
+            width: 150px;
+            height: 100px;
+            background-color: #ffcccc;
+            z-index: 1;
+            padding: 10px;
+        }
+        .layer-2 {
+            position: absolute;
+            top: 80px;
+            left: 80px;
+            width: 150px;
+            height: 100px;
+            background-color: #ccffcc;
+            z-index: 2;
+            padding: 10px;
+        }
+        .layer-3 {
+            position: absolute;
+            top: 110px;
+            left: 110px;
+            width: 150px;
+            height: 100px;
+            background-color: #ccccff;
+            z-index: 3;
+            padding: 10px;
+        }
+        .behind {
+            position: absolute;
+            top: 30px;
+            left: 120px;
+            width: 100px;
+            height: 80px;
+            background-color: #ffffcc;
+            z-index: 0;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="layer-1">Layer 1 (z:1)</div>
+        <div class="layer-2">Layer 2 (z:2)</div>
+        <div class="layer-3">Layer 3 (z:3)</div>
+        <div class="behind">Behind (z:0)</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "position_009_absolute_zindex",
+        "category": "absolute",
+        "features": ["position-absolute", "z-index", "stacking-context", "layering"],
+        "description": "Multiple overlapping absolutely positioned elements with different z-index values",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#z-index"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Rowspan</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: table;
+            border: 2px solid #333;
+            padding: 10px;
+            border-spacing: 5px;
+        }
+        .row {
+            display: table-row;
+        }
+        .cell {
+            display: table-cell;
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+            border: 1px solid #666;
+            vertical-align: middle;
+        }
+        .cell:nth-child(1) { background-color: #ffcccc; }
+        .cell:nth-child(2) { background-color: #ccffcc; }
+        .cell:nth-child(3) { background-color: #ccccff; }
+        .rowspan-2 { 
+            background-color: #ffccff !important;
+            height: calc(200% + 5px);
+            position: relative;
+        }
+        .rowspan-3 { 
+            background-color: #ccffff !important;
+            height: calc(300% + 10px);
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row">
+            <div class="cell rowspan-2">Rowspan 2</div>
+            <div class="cell">Cell 2</div>
+            <div class="cell rowspan-3">Rowspan 3</div>
+        </div>
+        <div class="row">
+            <div class="cell">Cell 5</div>
+        </div>
+        <div class="row">
+            <div class="cell">Cell 7</div>
+            <div class="cell">Cell 8</div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_012_rowspan",
+        "category": "intermediate",
+        "features": ["rowspan", "row-spanning", "vertical-merge"],
+        "description": "Table cells spanning multiple rows using CSS table layout simulation",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#table-layout"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

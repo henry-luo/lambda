@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Table Border Collapse Test</title>
+  <style>
+    body { margin: 16px; font-family: Arial, sans-serif; }
+    .separate { 
+      border-collapse: separate; 
+      border-spacing: 2px; 
+      margin-bottom: 30px;
+    }
+    .collapse { 
+      border-collapse: collapse; 
+      margin-bottom: 30px;
+    }
+    th, td { 
+      padding: 8px 12px; 
+      border: 2px solid #666; 
+      background: #fff; 
+    }
+    .separate th, .separate td {
+      border: 2px solid #999;
+    }
+    .collapse th, .collapse td {
+      border: 2px solid #333;
+    }
+    thead th { background: #f0f0f0; }
+    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <table class="separate">
+    <caption>Border Collapse: Separate (with 2px spacing)</caption>
+    <thead>
+      <tr>
+        <th>Header 1</th>
+        <th>Header 2</th>
+        <th>Header 3</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Cell A1</td>
+        <td>Cell B1</td>
+        <td>Cell C1</td>
+      </tr>
+      <tr>
+        <td>Cell A2</td>
+        <td>Cell B2</td>
+        <td>Cell C2</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <table class="collapse">
+    <caption>Border Collapse: Collapse (borders merged)</caption>
+    <thead>
+      <tr>
+        <th>Header 1</th>
+        <th>Header 2</th>
+        <th>Header 3</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Cell A1</td>
+        <td>Cell B1</td>
+        <td>Cell C1</td>
+      </tr>
+      <tr>
+        <td>Cell A2</td>
+        <td>Cell B2</td>
+        <td>Cell C2</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>

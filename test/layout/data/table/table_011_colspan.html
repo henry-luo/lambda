@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Colspan</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: table;
+            border: 2px solid #333;
+            padding: 10px;
+            border-spacing: 5px;
+        }
+        .row {
+            display: table-row;
+        }
+        .cell {
+            display: table-cell;
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+            border: 1px solid #666;
+        }
+        .cell:nth-child(1) { background-color: #ffcccc; }
+        .cell:nth-child(2) { background-color: #ccffcc; }
+        .cell:nth-child(3) { background-color: #ccccff; }
+        .cell:nth-child(4) { background-color: #ffffcc; }
+        .colspan-2 { 
+            background-color: #ffccff !important;
+        }
+        .colspan-3 { 
+            background-color: #ccffff !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row">
+            <div class="cell">Cell 1</div>
+            <div class="cell">Cell 2</div>
+            <div class="cell">Cell 3</div>
+            <div class="cell">Cell 4</div>
+        </div>
+        <div class="row">
+            <div class="cell colspan-2" style="width: calc(50% - 2.5px);">Colspan 2</div>
+            <div class="cell">Cell 6</div>
+            <div class="cell">Cell 7</div>
+        </div>
+        <div class="row">
+            <div class="cell">Cell 8</div>
+            <div class="cell colspan-3" style="width: calc(75% - 3.75px);">Colspan 3</div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_011_colspan",
+        "category": "intermediate",
+        "features": ["colspan", "cell-spanning", "column-merge"],
+        "description": "Table cells spanning multiple columns using CSS table layout simulation",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#table-layout"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

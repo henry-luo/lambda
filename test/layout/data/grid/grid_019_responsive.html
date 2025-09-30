@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Responsive Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+            grid-template-rows: minmax(80px, auto) 1fr minmax(60px, auto);
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+        }
+        .header { 
+            background-color: #ffcccc; 
+            grid-column: 1 / -1;
+        }
+        .item:nth-child(2) { background-color: #ccffcc; }
+        .item:nth-child(3) { background-color: #ccccff; }
+        .item:nth-child(4) { background-color: #ffffcc; }
+        .footer { 
+            background-color: #ffccff; 
+            grid-column: 1 / -1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item header">Responsive Header</div>
+        <div class="item">Auto 1</div>
+        <div class="item">Auto 2</div>
+        <div class="item">Auto 3</div>
+        <div class="item footer">Responsive Footer</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_019_responsive",
+        "category": "advanced",
+        "features": ["auto-fit", "minmax", "responsive-design", "flexible-layout"],
+        "description": "Responsive grid layout that adapts to container size with flexible columns",
+        "spec_references": ["https://www.w3.org/TR/css-grid-1/#repeat-notation"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

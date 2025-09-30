@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: All Position Types Together</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            position: relative;
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            background-color: #f8f8f8;
+        }
+        .static-element {
+            background-color: #f0f0f0;
+            padding: 8px;
+            margin: 3px;
+            border: 1px solid #ccc;
+        }
+        .relative-element {
+            position: relative;
+            top: 10px;
+            left: 20px;
+            background-color: #ccffcc;
+            padding: 8px;
+            margin: 3px;
+            border: 1px solid #999;
+        }
+        .float-element {
+            float: right;
+            width: 80px;
+            height: 60px;
+            background-color: #ffccff;
+            padding: 5px;
+            margin: 3px;
+            border: 1px solid #999;
+            font-size: 12px;
+            text-align: center;
+        }
+        .absolute-element {
+            position: absolute;
+            top: 100px;
+            left: 100px;
+            width: 120px;
+            height: 40px;
+            background-color: #ffffcc;
+            border: 1px solid #666;
+            padding: 5px;
+            text-align: center;
+            z-index: 10;
+        }
+        .clear-element {
+            clear: both;
+            background-color: #ccccff;
+            padding: 8px;
+            margin: 3px;
+            border: 1px solid #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="static-element">Static (normal flow)</div>
+        <div class="float-element">Float Right</div>
+        <div class="relative-element">Relative positioned</div>
+        <div class="absolute-element">Absolute overlay</div>
+        <div class="static-element">More static content that flows around float</div>
+        <div class="clear-element">Cleared element (below all floats)</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "position_015_all_types_combined",
+        "category": "combined",
+        "features": ["position-static", "position-relative", "position-absolute", "float", "clear", "z-index", "comprehensive"],
+        "description": "Comprehensive test combining static, relative, absolute, float, and clear positioning",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#positioning-scheme"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

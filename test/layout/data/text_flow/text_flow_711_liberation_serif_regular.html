@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liberation Serif Regular Font Test</title>
+    <style>
+        @font-face {
+            font-family: 'Liberation Serif';
+            src: url('../../font/LiberationSerif-Regular.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        
+        body {
+            font-family: 'Liberation Serif', 'Times New Roman', serif;
+            font-size: 16px;
+            line-height: 1.6;
+            margin: 20px;
+            background-color: white;
+            color: black;
+        }
+        
+        .test-container {
+            max-width: 600px;
+            padding: 20px;
+            border: 1px solid #999;
+        }
+        
+        .article-text {
+            text-align: justify;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Liberation Serif Regular Font Test</h1>
+        <div class="article-text">
+            This paragraph tests the Liberation Serif regular font with traditional serif styling. The quick brown fox jumps over the lazy dog. Serif fonts are traditionally used for body text in printed materials due to their enhanced readability.
+        </div>
+        <div class="article-text">
+            Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+        </div>
+        <div>Serif Numbers: 1234567890</div>
+        <div>Serif Punctuation: !@#$%^&*()_+-={}[]|;':\",./<>?</div>
+    </div>
+</body>
+</html>

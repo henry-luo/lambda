@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Line Height and Leading</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test container */
+        .test-container {
+            width: 700px;
+            height: 800px;
+            border: 2px solid #333;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        /* Test-specific CSS */
+        .line-height-test {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px dashed #999;
+            background-color: white;
+            width: 400px;
+        }
+        
+        .test-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .text-sample {
+            border: 1px solid #ccc;
+            padding: 5px;
+            margin: 10px 0;
+        }
+        
+        .line-height-normal {
+            line-height: normal;
+            background-color: #ffcccc;
+        }
+        
+        .line-height-1 {
+            line-height: 1;
+            background-color: #ccffcc;
+        }
+        
+        .line-height-1-5 {
+            line-height: 1.5;
+            background-color: #ccccff;
+        }
+        
+        .line-height-2 {
+            line-height: 2;
+            background-color: #ffffcc;
+        }
+        
+        .line-height-px {
+            line-height: 40px;
+            background-color: #ffccff;
+        }
+        
+        .line-height-percent {
+            line-height: 120%;
+            background-color: #ccffff;
+        }
+        
+        /* Inline mixing demonstration */
+        .inline-mix {
+            line-height: 1.5;
+        }
+        
+        .inline-large {
+            font-size: 24px;
+            background-color: #ffaaaa;
+        }
+        
+        .inline-small {
+            font-size: 12px;
+            background-color: #aaffaa;
+        }
+        
+        .inline-normal {
+            font-size: 16px;
+            background-color: #aaaaff;
+        }
+        
+        /* Baseline grid visualization */
+        .baseline-grid {
+            background-image: linear-gradient(to bottom, transparent 0px, transparent 15px, #ff000020 15px, #ff000020 16px, transparent 16px, transparent 31px, #ff000020 31px, #ff000020 32px);
+            background-size: 100% 32px;
+            line-height: 2; /* 32px line height for 16px font */
+            padding: 10px;
+            border: 1px solid #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="line-height-test">
+            <div class="test-title">Line-height: normal</div>
+            <div class="text-sample line-height-normal">
+                This text uses the normal line-height, which is typically around 1.2 times the font size. This creates comfortable reading spacing.
+            </div>
+        </div>
+        
+        <div class="line-height-test">
+            <div class="test-title">Line-height: 1 (no leading)</div>
+            <div class="text-sample line-height-1">
+                This text uses line-height: 1, meaning no extra space between lines. Text may appear cramped with descenders touching ascenders.
+            </div>
+        </div>
+        
+        <div class="line-height-test">
+            <div class="test-title">Line-height: 1.5</div>
+            <div class="text-sample line-height-1-5">
+                This text uses line-height: 1.5, providing generous spacing between lines for improved readability.
+            </div>
+        </div>
+        
+        <div class="line-height-test">
+            <div class="test-title">Line-height: 2 (double spacing)</div>
+            <div class="text-sample line-height-2">
+                This text uses line-height: 2, creating double-spaced text like traditional typewritten documents.
+            </div>
+        </div>
+        
+        <div class="line-height-test">
+            <div class="test-title">Line-height: 40px (fixed)</div>
+            <div class="text-sample line-height-px">
+                This text uses a fixed line-height of 40px, regardless of font size changes.
+            </div>
+        </div>
+        
+        <div class="line-height-test">
+            <div class="test-title">Mixed font sizes with line-height: 1.5</div>
+            <div class="text-sample inline-mix">
+                <span class="inline-small">Small text</span> and 
+                <span class="inline-normal">normal text</span> and 
+                <span class="inline-large">large text</span> all sharing the same line-height multiplier.
+            </div>
+        </div>
+        
+        <div class="line-height-test">
+            <div class="test-title">Baseline grid visualization</div>
+            <div class="baseline-grid">
+                This text is laid out on a baseline grid. The red lines show where the baselines should align for consistent vertical rhythm.
+            </div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "box_010_line_height",
+        "category": "baseline",
+        "features": ["line-height", "leading", "baseline-grid", "vertical-rhythm", "font-size-interaction"],
+        "description": "Line-height property behavior with various values and its interaction with baseline alignment",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visudet.html#line-height"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

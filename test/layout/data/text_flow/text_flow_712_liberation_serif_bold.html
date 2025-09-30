@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liberation Serif Bold Font Test</title>
+    <style>
+        @font-face {
+            font-family: 'Liberation Serif';
+            src: url('../../font/LiberationSerif-Bold.ttf') format('truetype');
+            font-weight: bold;
+            font-style: normal;
+        }
+        
+        body {
+            font-family: 'Liberation Serif', 'Times New Roman', serif;
+            font-size: 16px;
+            font-weight: bold;
+            line-height: 1.6;
+            margin: 20px;
+            background-color: white;
+            color: black;
+        }
+        
+        .test-container {
+            max-width: 600px;
+            padding: 20px;
+            border: 2px solid #666;
+        }
+        
+        .bold-heading {
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1 class="bold-heading">Liberation Serif Bold Font Test</h1>
+        <p>This paragraph tests the Liberation Serif bold font with heavyweight serif rendering. The quick brown fox jumps over the lazy dog. Bold serif fonts maintain their traditional character shapes while adding emphasis through increased stroke weight.</p>
+        <p>This text demonstrates how bold serif fonts affect reading rhythm and visual hierarchy in document layout. The increased weight should be clearly visible while preserving serif characteristics.</p>
+        <div>Bold Serif Numbers: 1234567890</div>
+        <div>Bold Serif Symbols: !@#$%^&*()_+-={}[]|;':\",./<>?</div>
+    </div>
+</body>
+</html>

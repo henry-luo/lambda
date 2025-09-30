@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Basic Typography</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.5;
+            padding: 20px;
+            max-width: 800px;
+        }
+        
+        /* Basic typography styles */
+        h1 {
+            font-size: 32px;
+            margin-bottom: 16px;
+            font-weight: bold;
+        }
+        
+        h2 {
+            font-size: 24px;
+            margin-bottom: 12px;
+            margin-top: 24px;
+            font-weight: bold;
+        }
+        
+        p {
+            margin-bottom: 16px;
+            line-height: 1.6;
+        }
+        
+        .emphasis {
+            font-style: italic;
+        }
+        
+        .strong {
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Main Heading</h1>
+    <p>This is a regular paragraph with some <span class="emphasis">italic text</span> and <span class="strong">bold text</span>.</p>
+    
+    <h2>Secondary Heading</h2>
+    <p>Another paragraph that should have proper spacing and line height for readability.</p>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "text_001_basic_typography",
+        "category": "text",
+        "features": ["typography", "headings", "paragraphs", "line-height", "margins"],
+        "description": "Basic text typography with headings, paragraphs, and inline formatting",
+        "markdown_equivalent": "# Main Heading\n\nThis is a regular paragraph with some *italic text* and **bold text**.\n\n## Secondary Heading\n\nAnother paragraph...",
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

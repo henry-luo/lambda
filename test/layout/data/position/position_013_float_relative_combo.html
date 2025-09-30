@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Float with Relative Positioning</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            background-color: #f8f8f8;
+        }
+        .float-relative {
+            float: left;
+            position: relative;
+            top: 20px;
+            left: 15px;
+            width: 120px;
+            height: 80px;
+            background-color: #ffcccc;
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #999;
+            text-align: center;
+        }
+        .content {
+            background-color: #f0f0f0;
+            padding: 10px;
+            line-height: 1.5;
+        }
+        .another-float {
+            float: right;
+            position: relative;
+            top: -10px;
+            right: 20px;
+            width: 100px;
+            height: 60px;
+            background-color: #ccffcc;
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #999;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="float-relative">Float Left + Relative</div>
+        <div class="another-float">Float Right + Relative</div>
+        <div class="content">
+            This content flows around the floated elements that also have relative positioning applied. The relative positioning moves the floated elements from their normal float position.
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "position_013_float_relative_combo",
+        "category": "combined",
+        "features": ["float", "position-relative", "float-left", "float-right", "combined-positioning"],
+        "description": "Combination of float and relative positioning on the same elements",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#float-position", "https://www.w3.org/TR/CSS22/visuren.html#relative-positioning"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

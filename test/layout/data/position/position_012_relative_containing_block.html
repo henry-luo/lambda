@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Relative Position as Containing Block</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            background-color: #f8f8f8;
+        }
+        .relative-container {
+            position: relative;
+            width: 300px;
+            height: 200px;
+            background-color: #e0e0e0;
+            border: 2px dashed #666;
+            margin: 20px;
+            padding: 10px;
+        }
+        .absolute-child {
+            position: absolute;
+            top: 30px;
+            right: 20px;
+            width: 100px;
+            height: 60px;
+            background-color: #ffcccc;
+            border: 1px solid #999;
+            padding: 5px;
+            text-align: center;
+        }
+        .normal-child {
+            background-color: #ccffcc;
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="relative-container">
+            Relative Container (establishes containing block)
+            <div class="normal-child">Normal child element</div>
+            <div class="absolute-child">Absolute child positioned relative to this container</div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "position_012_relative_containing_block",
+        "category": "relative",
+        "features": ["position-relative", "containing-block", "position-absolute", "parent-child"],
+        "description": "Relative positioned element serving as containing block for absolute child",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visudet.html#containing-block-details"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

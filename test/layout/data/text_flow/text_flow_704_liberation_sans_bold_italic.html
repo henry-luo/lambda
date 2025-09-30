@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liberation Sans Bold Italic Font Test</title>
+    <style>
+        @font-face {
+            font-family: 'Liberation Sans';
+            src: url('../../font/LiberationSans-BoldItalic.ttf') format('truetype');
+            font-weight: bold;
+            font-style: italic;
+        }
+        
+        body {
+            font-family: 'Liberation Sans', Arial, sans-serif;
+            font-size: 16px;
+            font-weight: bold;
+            font-style: italic;
+            line-height: 1.5;
+            margin: 20px;
+            background-color: white;
+            color: black;
+        }
+        
+        .test-container {
+            max-width: 600px;
+            padding: 20px;
+            border: 2px dashed #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Liberation Sans Bold Italic Font Test</h1>
+        <p>This paragraph tests the Liberation Sans bold italic font combining both weight and style. The quick brown fox jumps over the lazy dog. Bold italic text should appear both thick and slanted, providing maximum emphasis.</p>
+        <p>This is a second paragraph demonstrating how bold italic affects text density and visual prominence in layout calculations.</p>
+        <div>Bold Italic Numbers: 1234567890</div>
+        <div>Bold Italic Special: !@#$%^&*()_+-={}[]|;':\",./<>?</div>
+    </div>
+</body>
+</html>

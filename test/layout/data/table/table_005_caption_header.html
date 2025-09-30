@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table with Caption and Header</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: table;
+            border: 2px solid #333;
+            padding: 10px;
+            border-spacing: 5px;
+        }
+        .caption {
+            display: table-caption;
+            caption-side: top;
+            font-weight: bold;
+            padding: 10px;
+            background-color: #f0f0f0;
+            text-align: center;
+        }
+        .header-group {
+            display: table-header-group;
+        }
+        .body-group {
+            display: table-row-group;
+        }
+        .row {
+            display: table-row;
+        }
+        .cell {
+            display: table-cell;
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+            border: 1px solid #ccc;
+        }
+        .header-group .cell {
+            background-color: #e0e0e0;
+            font-weight: bold;
+        }
+        .body-group .cell:nth-child(1) { background-color: #ffcccc; }
+        .body-group .cell:nth-child(2) { background-color: #ccffcc; }
+        .body-group .cell:nth-child(3) { background-color: #ccccff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="caption">Table Caption</div>
+        <div class="header-group">
+            <div class="row">
+                <div class="cell">Header 1</div>
+                <div class="cell">Header 2</div>
+                <div class="cell">Header 3</div>
+            </div>
+        </div>
+        <div class="body-group">
+            <div class="row">
+                <div class="cell">Data 1</div>
+                <div class="cell">Data 2</div>
+                <div class="cell">Data 3</div>
+            </div>
+            <div class="row">
+                <div class="cell">Data 4</div>
+                <div class="cell">Data 5</div>
+                <div class="cell">Data 6</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_005_caption_header",
+        "category": "basic",
+        "features": ["table-caption", "table-header-group", "table-row-group", "caption-side"],
+        "description": "Table with caption and header group showing structured table layout",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#table-display"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

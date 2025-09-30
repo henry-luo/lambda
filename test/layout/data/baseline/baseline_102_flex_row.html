@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Flex Row Layout</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .flex-container {
+            display: flex;
+            width: 300px;
+            height: 100px;
+            background-color: #f0f0f0;
+        }
+        .flex-item1 {
+            width: 80px;
+            height: 60px;
+            background-color: #ff6666;
+        }
+        .flex-item2 {
+            width: 80px;
+            height: 60px;
+            background-color: #6666ff;
+        }
+        .flex-item3 {
+            width: 80px;
+            height: 60px;
+            background-color: #66ff66;
+        }
+    </style>
+</head>
+<body>
+    <div class="flex-container">
+        <div class="flex-item1"></div>
+        <div class="flex-item2"></div>
+        <div class="flex-item3"></div>
+    </div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_102_flex_row",
+        "category": "baseline",
+        "features": ["display-flex", "flex-direction-row"],
+        "description": "Flexbox with three items in row direction",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#flex-direction-property"],
+        "complexity": "basic",
+        "expected_behavior": "Three colored 80x60px boxes in horizontal row within gray container"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Table Mixed Spans</title>
+  <style>
+    body { margin: 16px; font-family: Arial, sans-serif; }
+    table { border-collapse: separate; border-spacing: 0; }
+    td, th { padding: 8px; border: 1px solid #666; background: #fff; }
+  </style>
+</head>
+<body>
+  <table>
+    <tr>
+      <th colspan="3">Header spans 3 columns</th>
+    </tr>
+    <tr>
+      <td rowspan="2">Tall cell</td>
+      <td>B1</td>
+      <td>C1</td>
+    </tr>
+    <tr>
+      <td>B2</td>
+      <td>C2</td>
+    </tr>
+    <tr>
+      <td>A3</td>
+      <td colspan="2">Footer spans 2 columns</td>
+    </tr>
+  </table>
+</body>
+</html>

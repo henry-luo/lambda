@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Dense Packing</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-auto-rows: 60px;
+            grid-auto-flow: row dense;
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+        }
+        .item:nth-child(1) { 
+            background-color: #ffcccc; 
+            grid-column: span 2;
+        }
+        .item:nth-child(2) { background-color: #ccffcc; }
+        .item:nth-child(3) { background-color: #ccccff; }
+        .item:nth-child(4) { 
+            background-color: #ffffcc; 
+            grid-column: span 3;
+        }
+        .item:nth-child(5) { background-color: #ffccff; }
+        .item:nth-child(6) { background-color: #ccffff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Span 2</div>
+        <div class="item">Item 2</div>
+        <div class="item">Item 3</div>
+        <div class="item">Span 3</div>
+        <div class="item">Item 5</div>
+        <div class="item">Item 6</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_013_dense_packing",
+        "category": "advanced",
+        "features": ["grid-auto-flow", "dense", "auto-placement"],
+        "description": "Grid with dense packing algorithm to fill gaps in the grid",
+        "spec_references": ["https://www.w3.org/TR/css-grid-1/#grid-auto-flow-property"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

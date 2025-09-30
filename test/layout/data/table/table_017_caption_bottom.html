@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Caption Positioning</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            overflow: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        caption {
+            caption-side: bottom;
+            font-weight: bold;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            font-size: 14px;
+        }
+        th, td {
+            padding: 8px;
+            text-align: center;
+            font-size: 12px;
+            border: 1px solid #666;
+        }
+        th {
+            background-color: #e0e0e0;
+            font-weight: bold;
+        }
+        td:nth-child(1) { background-color: #ffcccc; }
+        td:nth-child(2) { background-color: #ccffcc; }
+        td:nth-child(3) { background-color: #ccccff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <table>
+            <caption>Bottom Caption</caption>
+            <thead>
+                <tr>
+                    <th>Col 1</th>
+                    <th>Col 2</th>
+                    <th>Col 3</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Data 1</td>
+                    <td>Data 2</td>
+                    <td>Data 3</td>
+                </tr>
+                <tr>
+                    <td>Data 4</td>
+                    <td>Data 5</td>
+                    <td>Data 6</td>
+                </tr>
+                <tr>
+                    <td>Data 7</td>
+                    <td>Data 8</td>
+                    <td>Data 9</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_017_caption_bottom",
+        "category": "basic",
+        "features": ["caption-side-bottom", "table-caption", "caption-positioning"],
+        "description": "Table with caption positioned at the bottom using caption-side property",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#caption-position"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

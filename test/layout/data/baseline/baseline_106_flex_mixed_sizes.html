@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Flex Mixed Sizes</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .flex-container {
+            display: flex;
+            width: 400px;
+            height: 120px;
+            background-color: #f5f5f5;
+        }
+        .small-item {
+            width: 60px;
+            height: 40px;
+            background-color: #ff9999;
+        }
+        .medium-item {
+            width: 100px;
+            height: 60px;
+            background-color: #99ff99;
+        }
+        .large-item {
+            width: 140px;
+            height: 80px;
+            background-color: #9999ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="flex-container">
+        <div class="small-item"></div>
+        <div class="medium-item"></div>
+        <div class="large-item"></div>
+    </div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_106_flex_mixed_sizes",
+        "category": "baseline",
+        "features": ["display-flex", "flex-direction-row", "mixed-sizes"],
+        "description": "Flexbox with three items of different sizes",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#flex-direction-property"],
+        "complexity": "basic",
+        "expected_behavior": "Three differently sized colored boxes arranged horizontally in gray container"
+    }
+    </script>
+</body>
+</html>

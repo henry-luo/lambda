@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liberation Sans Regular Font Test</title>
+    <style>
+        @font-face {
+            font-family: 'Liberation Sans';
+            src: url('../../font/LiberationSans-Regular.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        
+        body {
+            font-family: 'Liberation Sans', Arial, sans-serif;
+            font-size: 16px;
+            line-height: 1.5;
+            margin: 20px;
+            background-color: white;
+            color: black;
+        }
+        
+        .test-container {
+            max-width: 600px;
+            padding: 20px;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Liberation Sans Regular Font Test</h1>
+        <p>This paragraph tests the Liberation Sans regular font with normal text rendering. The quick brown fox jumps over the lazy dog. This sentence contains all letters of the alphabet to test character rendering.</p>
+        <p>This is a second paragraph to test multiple paragraph spacing and consistent font rendering across different text blocks.</p>
+        <div>Numbers: 1234567890</div>
+        <div>Special characters: !@#$%^&*()_+-={}[]|;':\",./<>?</div>
+    </div>
+</body>
+</html>

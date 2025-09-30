@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liberation Mono Bold Font Test</title>
+    <style>
+        @font-face {
+            font-family: 'Liberation Mono';
+            src: url('../../font/LiberationMono-Bold.ttf') format('truetype');
+            font-weight: bold;
+            font-style: normal;
+        }
+        
+        body {
+            font-family: 'Liberation Mono', 'Courier New', monospace;
+            font-size: 14px;
+            font-weight: bold;
+            line-height: 1.4;
+            margin: 20px;
+            background-color: white;
+            color: black;
+        }
+        
+        .test-container {
+            max-width: 700px;
+            padding: 20px;
+            border: 2px solid #555;
+        }
+        
+        .terminal-block {
+            background-color: #000;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        
+        .data-table {
+            white-space: pre;
+            font-size: 12px;
+            border: 1px solid #999;
+            padding: 10px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Liberation Mono Bold Font Test</h1>
+        <p>Bold monospace maintains equal character width with increased stroke weight.</p>
+        
+        <div class="terminal-block">
+$ ls -la
+drwxr-xr-x  12 user  staff   384 Sep 29 10:30 .
+drwxr-xr-x   6 user  staff   192 Sep 29 09:15 ..
+-rw-r--r--   1 user  staff  1024 Sep 29 10:29 data.txt
+-rwxr-xr-x   1 user  staff  2048 Sep 29 10:30 script.sh
+        </div>
+        
+        <div class="data-table">Data Alignment Test:
+Name      | Size  | Type | Status
+----------|-------|------|--------
+file1.txt |  1024 | TEXT | READY  
+data.json | 65536 | JSON | PROC   
+app.exe   |  4096 | EXEC | DONE   </div>
+        
+        <div>Bold Mono Numbers: 1234567890</div>
+        <div>Bold Mono Special: !@#$%^&*()_+-={}[]|;':\",./<>?</div>
+        <div>Bold Width Test: |i|W|1|!|@|m|M|8|0|(|)|[|]|</div>
+    </div>
+</body>
+</html>

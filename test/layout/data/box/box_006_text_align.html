@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Horizontal Text Alignment</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test container */
+        .test-container {
+            width: 600px;
+            height: 500px;
+            border: 2px solid #333;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        /* Test-specific CSS */
+        .box {
+            width: 300px;
+            height: 80px;
+            margin: 10px 0;
+            padding: 20px;
+            border: 1px solid #666;
+            background-color: white;
+            line-height: 1.2;
+        }
+        
+        .align-left {
+            text-align: left;
+            background-color: #ffcccc;
+        }
+        
+        .align-center {
+            text-align: center;
+            background-color: #ccffcc;
+        }
+        
+        .align-right {
+            text-align: right;
+            background-color: #ccccff;
+        }
+        
+        .align-justify {
+            text-align: justify;
+            background-color: #ffffcc;
+        }
+        
+        .align-start {
+            text-align: start;
+            background-color: #ffccff;
+        }
+        
+        .align-end {
+            text-align: end;
+            background-color: #ccffff;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="box align-left">
+            <strong>Left:</strong> This text is aligned to the left side of the container.
+        </div>
+        <div class="box align-center">
+            <strong>Center:</strong> This text is centered within the container.
+        </div>
+        <div class="box align-right">
+            <strong>Right:</strong> This text is aligned to the right side of the container.
+        </div>
+        <div class="box align-justify">
+            <strong>Justify:</strong> This text is justified to fill the entire width of the container with even spacing.
+        </div>
+        <div class="box align-start">
+            <strong>Start:</strong> This text uses logical start alignment.
+        </div>
+        <div class="box align-end">
+            <strong>End:</strong> This text uses logical end alignment.
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "box_006_text_align",
+        "category": "alignment",
+        "features": ["text-align", "horizontal-alignment", "left", "center", "right", "justify", "start", "end"],
+        "description": "Horizontal text alignment using text-align property with various values",
+        "spec_references": ["https://www.w3.org/TR/CSS22/text.html#alignment-prop"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

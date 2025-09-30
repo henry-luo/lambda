@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Font Fallback and Weight Variations Test</title>
+    <style>
+        @font-face {
+            font-family: 'Liberation Sans';
+            src: url('../../font/LiberationSans-Regular.ttf') format('truetype');
+            font-weight: 400;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Liberation Sans';
+            src: url('../../font/LiberationSans-Bold.ttf') format('truetype');
+            font-weight: 700;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Liberation Sans';
+            src: url('../../font/LiberationSans-Italic.ttf') format('truetype');
+            font-weight: 400;
+            font-style: italic;
+        }
+        @font-face {
+            font-family: 'Roboto';
+            src: url('../../font/Roboto-Regular.ttf') format('truetype');
+            font-weight: 400;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Roboto';
+            src: url('../../font/Roboto-Bold.ttf') format('truetype');
+            font-weight: 700;
+            font-style: normal;
+        }
+        
+        body {
+            margin: 20px;
+            background-color: white;
+            color: black;
+        }
+        
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+        }
+        
+        .primary-font {
+            font-family: 'Liberation Sans', Arial, sans-serif;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+        
+        .fallback-test {
+            font-family: 'NonExistentFont', 'Liberation Sans', Arial, sans-serif;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+        
+        .weight-100 { font-weight: 100; }
+        .weight-200 { font-weight: 200; }
+        .weight-300 { font-weight: 300; }
+        .weight-400 { font-weight: 400; }
+        .weight-500 { font-weight: 500; }
+        .weight-600 { font-weight: 600; }
+        .weight-700 { font-weight: 700; }
+        .weight-800 { font-weight: 800; }
+        .weight-900 { font-weight: 900; }
+        
+        .roboto-mixed {
+            font-family: 'Roboto', 'Liberation Sans', system-ui, sans-serif;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <h1>Font Fallback and Weight Variations Test</h1>
+    
+    <div class="test-section">
+        <h2>Primary Font - Liberation Sans</h2>
+        <div class="primary-font">
+            This text uses Liberation Sans as the primary font family with Arial as fallback. The quick brown fox jumps over the lazy dog.
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Fallback Test - NonExistent → Liberation Sans</h2>
+        <div class="fallback-test">
+            This text requests a non-existent font first, then falls back to Liberation Sans. The rendering should be identical to the previous example.
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Font Weight Variations (Liberation Sans)</h2>
+        <div class="primary-font weight-100">Font Weight 100 (Thin) - May fallback to regular</div>
+        <div class="primary-font weight-200">Font Weight 200 (Extra Light) - May fallback to regular</div>
+        <div class="primary-font weight-300">Font Weight 300 (Light) - May fallback to regular</div>
+        <div class="primary-font weight-400">Font Weight 400 (Regular) - Should display correctly</div>
+        <div class="primary-font weight-500">Font Weight 500 (Medium) - May display as bold</div>
+        <div class="primary-font weight-600">Font Weight 600 (Semi Bold) - May display as bold</div>
+        <div class="primary-font weight-700">Font Weight 700 (Bold) - Should display correctly</div>
+        <div class="primary-font weight-800">Font Weight 800 (Extra Bold) - May display as bold</div>
+        <div class="primary-font weight-900">Font Weight 900 (Black) - May display as bold</div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Mixed Font Stack - Roboto + Liberation Sans</h2>
+        <div class="roboto-mixed weight-400">
+            Roboto Regular: This text should display in Roboto with Liberation Sans as fallback.
+        </div>
+        <div class="roboto-mixed weight-700">
+            Roboto Bold: This text should display in bold Roboto with bold Liberation Sans as fallback.
+        </div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Font Style Variations</h2>
+        <div class="primary-font" style="font-style: normal;">Normal style text</div>
+        <div class="primary-font" style="font-style: italic;">Italic style text - should use Liberation Sans Italic</div>
+        <div class="primary-font" style="font-style: oblique;">Oblique style text - may synthesize from regular</div>
+    </div>
+</body>
+</html>

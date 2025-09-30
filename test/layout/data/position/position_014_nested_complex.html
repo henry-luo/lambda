@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Complex Nested Positioning</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            background-color: #f8f8f8;
+        }
+        .float-left {
+            float: left;
+            width: 180px;
+            height: 120px;
+            background-color: #e0e0e0;
+            border: 2px dashed #666;
+            margin: 5px;
+            padding: 5px;
+        }
+        .relative-container {
+            position: relative;
+            width: 160px;
+            height: 80px;
+            background-color: #ccffcc;
+            border: 1px solid #999;
+            padding: 5px;
+            margin: 5px;
+        }
+        .absolute-child {
+            position: absolute;
+            top: 10px;
+            right: -20px;
+            width: 60px;
+            height: 40px;
+            background-color: #ffcccc;
+            border: 1px solid #666;
+            text-align: center;
+            font-size: 12px;
+            padding: 2px;
+        }
+        .content {
+            background-color: #f0f0f0;
+            padding: 10px;
+            line-height: 1.5;
+            clear: left;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="float-left">
+            Floated Container
+            <div class="relative-container">
+                Relative
+                <div class="absolute-child">Abs</div>
+            </div>
+        </div>
+        <div class="content">
+            Content below the floated container with nested positioning. The absolute element is positioned relative to the relative container within the float.
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "position_014_nested_complex",
+        "category": "combined",
+        "features": ["float", "position-relative", "position-absolute", "nested-positioning", "clear"],
+        "description": "Complex nested positioning: absolute within relative within float, with clear",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#float-position", "https://www.w3.org/TR/CSS22/visudet.html#containing-block-details"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

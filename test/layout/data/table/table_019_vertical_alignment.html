@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Vertical Alignment</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            overflow: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 5px;
+        }
+        th, td {
+            padding: 10px;
+            text-align: center;
+            font-size: 14px;
+            border: 1px solid #666;
+            height: 80px;
+        }
+        th {
+            background-color: #e0e0e0;
+            font-weight: bold;
+            vertical-align: middle;
+        }
+        .top-align { 
+            vertical-align: top; 
+            background-color: #ffcccc;
+        }
+        .middle-align { 
+            vertical-align: middle; 
+            background-color: #ccffcc;
+        }
+        .bottom-align { 
+            vertical-align: bottom; 
+            background-color: #ccccff;
+        }
+        .baseline-align { 
+            vertical-align: baseline; 
+            background-color: #ffffcc;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Top</th>
+                    <th>Middle</th>
+                    <th>Bottom</th>
+                    <th>Baseline</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="top-align">Top<br/>Aligned<br/>Content</td>
+                    <td class="middle-align">Middle<br/>Aligned</td>
+                    <td class="bottom-align">Bottom<br/>Aligned<br/>Content</td>
+                    <td class="baseline-align">Baseline<br/>Text</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_019_vertical_alignment",
+        "category": "basic",
+        "features": ["vertical-align", "cell-alignment", "top-middle-bottom", "baseline"],
+        "description": "Table cells demonstrating different vertical alignment options",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#height-layout"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

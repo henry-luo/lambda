@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Border Collapse</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: table;
+            border-collapse: collapse;
+            border: 2px solid #333;
+            margin: 10px;
+        }
+        .row {
+            display: table-row;
+        }
+        .cell {
+            display: table-cell;
+            padding: 15px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+            border: 2px solid #666;
+        }
+        .cell:nth-child(1) { background-color: #ffcccc; }
+        .cell:nth-child(2) { background-color: #ccffcc; }
+        .cell:nth-child(3) { background-color: #ccccff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row">
+            <div class="cell">Collapsed 1</div>
+            <div class="cell">Collapsed 2</div>
+            <div class="cell">Collapsed 3</div>
+        </div>
+        <div class="row">
+            <div class="cell">Collapsed 4</div>
+            <div class="cell">Collapsed 5</div>
+            <div class="cell">Collapsed 6</div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_006_border_collapse",
+        "category": "basic",
+        "features": ["border-collapse", "collapsed-borders", "border-model"],
+        "description": "Table with collapsed border model where adjacent borders are merged",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#borders"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Block Centering</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test container */
+        .test-container {
+            width: 600px;
+            height: 700px;
+            border: 2px solid #333;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        /* Common box styles */
+        .example-section {
+            margin: 20px 0;
+            border: 1px dashed #999;
+            padding: 15px;
+            background-color: white;
+            position: relative;
+        }
+        
+        .section-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .box {
+            width: 200px;
+            height: 60px;
+            border: 1px solid #666;
+            text-align: center;
+            line-height: 60px;
+            font-size: 14px;
+        }
+        
+        /* Horizontal centering */
+        .margin-auto {
+            margin: 10px auto;
+            background-color: #ffcccc;
+        }
+        
+        /* Absolute positioning centering */
+        .absolute-container {
+            position: relative;
+            height: 100px;
+            background-color: #f0f0f0;
+        }
+        
+        .absolute-center {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #ccffcc;
+        }
+        
+        .absolute-horizontal {
+            position: absolute;
+            left: 50%;
+            top: 20px;
+            transform: translateX(-50%);
+            background-color: #ccccff;
+        }
+        
+        .absolute-vertical {
+            position: absolute;
+            top: 50%;
+            left: 20px;
+            transform: translateY(-50%);
+            background-color: #ffffcc;
+        }
+        
+        /* Table-cell centering */
+        .table-container {
+            display: table-cell;
+            width: 300px;
+            height: 100px;
+            vertical-align: middle;
+            text-align: center;
+            border: 1px solid #ccc;
+            background-color: #f0f0f0;
+        }
+        
+        .table-centered {
+            display: inline-block;
+            background-color: #ffccff;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="example-section">
+            <div class="section-title">Horizontal centering with margin: auto</div>
+            <div class="box margin-auto">Margin auto</div>
+        </div>
+        
+        <div class="example-section">
+            <div class="section-title">Absolute positioning centering</div>
+            <div class="absolute-container">
+                <div class="box absolute-center">Both centered</div>
+            </div>
+        </div>
+        
+        <div class="example-section">
+            <div class="section-title">Horizontal only (absolute)</div>
+            <div class="absolute-container">
+                <div class="box absolute-horizontal">H-centered</div>
+            </div>
+        </div>
+        
+        <div class="example-section">
+            <div class="section-title">Vertical only (absolute)</div>
+            <div class="absolute-container">
+                <div class="box absolute-vertical">V-centered</div>
+            </div>
+        </div>
+        
+        <div class="example-section">
+            <div class="section-title">Table-cell centering</div>
+            <div class="table-container">
+                <div class="box table-centered">Table center</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "box_008_centering",
+        "category": "alignment",
+        "features": ["centering", "margin-auto", "absolute-positioning", "transform", "table-cell", "horizontal-centering", "vertical-centering"],
+        "description": "Various techniques for centering block elements horizontally and vertically",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visudet.html#Computing_widths_and_margins"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

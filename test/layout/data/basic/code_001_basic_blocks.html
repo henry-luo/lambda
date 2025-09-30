@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Code Block Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.5;
+            padding: 20px;
+            max-width: 700px;
+        }
+        
+        /* Code block styles */
+        pre {
+            background-color: #f6f8fa;
+            border: 1px solid #d1d9e0;
+            border-radius: 6px;
+            padding: 16px;
+            margin: 16px 0;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        
+        code {
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            background-color: #f3f4f6;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        
+        p {
+            margin-bottom: 16px;
+        }
+        
+        h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h3>Code Examples</h3>
+    <p>This paragraph contains inline <code>code snippets</code> for testing.</p>
+    
+    <pre><code>function hello() {
+    console.log("Hello, world!");
+    return true;
+}</code></pre>
+    
+    <p>The above code block should have proper padding and background styling.</p>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "code_001_basic_blocks",
+        "category": "code",
+        "features": ["code-blocks", "pre-formatting", "inline-code", "monospace", "background"],
+        "description": "Basic code blocks and inline code with monospace fonts and background styling",
+        "markdown_equivalent": "### Code Examples\n\nThis paragraph contains inline `code snippets` for testing.\n\n```javascript\nfunction hello() {\n    console.log(\"Hello, world!\");\n    return true;\n}\n```",
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

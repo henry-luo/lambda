@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Open Sans Regular Font Test</title>
+    <style>
+        @font-face {
+            font-family: 'Open Sans';
+            src: url('../../font/OpenSans-Regular.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        
+        body {
+            font-family: 'Open Sans', 'Helvetica Neue', Arial, sans-serif;
+            font-size: 16px;
+            line-height: 1.5;
+            margin: 20px;
+            background-color: white;
+            color: #333;
+        }
+        
+        .test-container {
+            max-width: 600px;
+            padding: 25px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .modern-heading {
+            color: #2c3e50;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        
+        .ui-text {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1 class="modern-heading">Open Sans Regular Font Test</h1>
+        <p>Open Sans is a humanist sans-serif typeface designed by Steve Matteson and commissioned by Google. This paragraph demonstrates its clean, modern appearance and excellent web readability. The quick brown fox jumps over the lazy dog.</p>
+        
+        <div class="ui-text">
+            This section simulates modern web interface text using Open Sans. The font provides excellent readability at various sizes and is optimized for both screen and print display.
+        </div>
+        
+        <p>Open Sans features friendly and open curves with excellent character distinction. It works well for both body text and user interface elements in modern web applications.</p>
+        
+        <div>Open Sans Numbers: 1234567890</div>
+        <div>Open Sans Special: !@#$%^&*()_+-={}[]|;':\",./<>?</div>
+        <div>Unicode Test: áéíóú ñ ç ü ß € £ ¥</div>
+    </div>
+</body>
+</html>

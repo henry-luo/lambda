@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mixed Font Family Document Test</title>
+    <style>
+        @font-face {
+            font-family: 'Liberation Sans';
+            src: url('../../font/LiberationSans-Regular.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Liberation Sans';
+            src: url('../../font/LiberationSans-Bold.ttf') format('truetype');
+            font-weight: bold;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Liberation Serif';
+            src: url('../../font/LiberationSerif-Regular.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Liberation Mono';
+            src: url('../../font/LiberationMono-Regular.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        @font-face {
+            font-family: 'Open Sans';
+            src: url('../../font/OpenSans-Regular.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        
+        body {
+            font-family: 'Liberation Sans', Arial, sans-serif;
+            font-size: 16px;
+            line-height: 1.6;
+            margin: 20px;
+            background-color: white;
+            color: black;
+        }
+        
+        .document-container {
+            max-width: 700px;
+            padding: 30px;
+            border: 1px solid #ccc;
+        }
+        
+        .header {
+            font-family: 'Open Sans', sans-serif;
+            font-size: 28px;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .article-content {
+            font-family: 'Liberation Serif', 'Times New Roman', serif;
+            font-size: 16px;
+            text-align: justify;
+            margin-bottom: 20px;
+        }
+        
+        .code-section {
+            font-family: 'Liberation Mono', 'Courier New', monospace;
+            font-size: 14px;
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-left: 4px solid #007acc;
+            margin: 20px 0;
+            white-space: pre-wrap;
+        }
+        
+        .sidebar-note {
+            font-family: 'Liberation Sans', Arial, sans-serif;
+            font-size: 14px;
+            background-color: #fff3cd;
+            padding: 15px;
+            border: 1px solid #ffeaa7;
+            border-radius: 5px;
+            margin: 15px 0;
+        }
+        
+        .tech-specs {
+            font-family: 'Liberation Mono', monospace;
+            font-size: 12px;
+            background-color: #e9ecef;
+            padding: 10px;
+            border: 1px solid #ced4da;
+        }
+    </style>
+</head>
+<body>
+    <div class="document-container">
+        <h1 class="header">Mixed Font Family Layout Test</h1>
+        
+        <div class="article-content">
+            This document demonstrates the integration of multiple font families within a single layout. The body text uses Liberation Serif for optimal reading comfort, while maintaining clear typographic hierarchy through strategic font selection. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+        </div>
+        
+        <div class="sidebar-note">
+            <strong>Design Note:</strong> This sidebar uses Liberation Sans for user interface elements and notifications. Sans-serif fonts provide excellent clarity for supplementary information and interactive elements.
+        </div>
+        
+        <div class="article-content">
+            The following code example demonstrates how different font families can coexist within the same document while maintaining visual harmony and functional distinctions.
+        </div>
+        
+        <div class="code-section">// Code Block - Liberation Mono
+function mixedFontExample() {
+    const fonts = ['Liberation Sans', 'Liberation Serif', 'Liberation Mono'];
+    fonts.forEach(font => {
+        console.log(`Testing ${font} integration`);
+    });
+    return 'Font mixing successful';
+}</div>
+        
+        <div class="tech-specs">
+Technical Specifications:
+Sans-Serif: Liberation Sans (UI elements, headers)
+Serif:      Liberation Serif (body text, articles)  
+Monospace:  Liberation Mono (code, data tables)
+Modern:     Open Sans (contemporary headings)
+        </div>
+        
+        <div class="article-content">
+            This mixed approach allows each font family to serve its optimal purpose: serif fonts enhance reading flow in long-form content, sans-serif fonts provide clarity in interface elements, and monospace fonts ensure perfect alignment in code and data presentations.
+        </div>
+    </div>
+</body>
+</html>

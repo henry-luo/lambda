@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Text Wrapping</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; font-size: 16px; }
+        .narrow-container {
+            width: 150px;
+            background-color: #fff0f0;
+            padding: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="narrow-container">
+        This is a long sentence that should wrap across multiple lines when the container width is constrained to be narrow.
+    </div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_502_text_wrapping",
+        "category": "baseline", 
+        "features": ["text-wrapping", "word-break", "constrained-width"],
+        "description": "Long text content that wraps within narrow container",
+        "spec_references": ["https://www.w3.org/TR/CSS22/text.html#white-space-prop"],
+        "complexity": "basic",
+        "expected_behavior": "Multi-line text wrapping within 150px wide container with padding"
+    }
+    </script>
+</body>
+</html>

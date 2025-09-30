@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Basic Div Box Model Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        .container {
+            width: 400px;
+            height: 300px;
+            background-color: #f0f0f0;
+        }
+        .box {
+            width: 100px;
+            height: 100px;
+            background-color: #ccccff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="box">Content</div>
+    </div>
+    
+    <script id="test-metadata" style="display: none;">
+    {
+        "test_name": "box_001_basic_div",
+        "description": "Basic div with simple width/height - no margins, borders, or padding",
+        "expected_elements": [
+            {"selector": "html", "expected": "full viewport width"},
+            {"selector": "body", "expected": "full width, auto height"},
+            {"selector": ".container", "expected": "400x300 at top-left"},
+            {"selector": ".box", "expected": "100x100 inside container"}
+        ]
+    }
+    </script>
+</body>
+</html>

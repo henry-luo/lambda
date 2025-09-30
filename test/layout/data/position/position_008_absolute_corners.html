@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Absolute Position All Corners</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            position: relative;
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            background-color: #f8f8f8;
+        }
+        .top-left {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            width: 80px;
+            height: 60px;
+            background-color: #ffcccc;
+            text-align: center;
+            padding: 5px;
+        }
+        .top-right {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 80px;
+            height: 60px;
+            background-color: #ccffcc;
+            text-align: center;
+            padding: 5px;
+        }
+        .bottom-left {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            width: 80px;
+            height: 60px;
+            background-color: #ccccff;
+            text-align: center;
+            padding: 5px;
+        }
+        .bottom-right {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            width: 80px;
+            height: 60px;
+            background-color: #ffffcc;
+            text-align: center;
+            padding: 5px;
+        }
+        .center-content {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #ffccff;
+            padding: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="top-left">Top Left</div>
+        <div class="top-right">Top Right</div>
+        <div class="bottom-left">Bottom Left</div>
+        <div class="bottom-right">Bottom Right</div>
+        <div class="center-content">Centered</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "position_008_absolute_corners",
+        "category": "absolute",
+        "features": ["position-absolute", "top", "right", "bottom", "left", "transform", "centering"],
+        "description": "Absolute positioning in all four corners and center of container",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#absolute-positioning"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

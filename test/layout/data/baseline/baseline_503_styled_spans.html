@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Styled Text Spans</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; font-size: 16px; }
+        .text-container {
+            width: 400px;
+            background-color: #f5f5f5;
+            padding: 20px;
+        }
+        .bold-text {
+            font-weight: bold;
+        }
+        .colored-text {
+            color: #ff0000;
+        }
+        .larger-text {
+            font-size: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="text-container">
+        This is <span class="bold-text">bold text</span> and this is <span class="colored-text">red text</span> and this is <span class="larger-text">larger text</span> in a paragraph.
+    </div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_503_styled_spans",
+        "category": "baseline",
+        "features": ["inline-spans", "font-weight", "color", "mixed-styling"],
+        "description": "Text with inline spans having different font styles and colors",
+        "spec_references": ["https://www.w3.org/TR/CSS22/fonts.html", "https://www.w3.org/TR/CSS22/colors.html"],
+        "complexity": "basic",
+        "expected_behavior": "Paragraph with bold, red, and larger text spans inline"
+    }
+    </script>
+</body>
+</html>

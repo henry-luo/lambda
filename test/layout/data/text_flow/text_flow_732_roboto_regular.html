@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roboto Regular Font Test</title>
+    <style>
+        @font-face {
+            font-family: 'Roboto';
+            src: url('../../font/Roboto-Regular.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+        
+        body {
+            font-family: 'Roboto', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            font-size: 16px;
+            line-height: 1.6;
+            margin: 20px;
+            background-color: #fafafa;
+            color: #212121;
+        }
+        
+        .test-container {
+            max-width: 600px;
+            padding: 24px;
+            background-color: white;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .material-heading {
+            color: #1976d2;
+            font-size: 28px;
+            font-weight: 400;
+            margin-bottom: 16px;
+        }
+        
+        .card-content {
+            background-color: #f5f5f5;
+            padding: 16px;
+            border-radius: 4px;
+            margin: 16px 0;
+            border-left: 4px solid #2196f3;
+        }
+        
+        .caption-text {
+            font-size: 12px;
+            color: #757575;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1 class="material-heading">Roboto Regular Font Test</h1>
+        <p>Roboto is a neo-grotesque sans-serif typeface family developed by Google as the system font for Android. This paragraph demonstrates its mechanical skeleton and largely geometric forms. The quick brown fox jumps over the lazy dog.</p>
+        
+        <div class="card-content">
+            This content area showcases Roboto in a Material Design context. The font balances natural reading rhythm with geometric structure, making it ideal for digital interfaces and mobile applications.
+        </div>
+        
+        <p>Roboto allows letters to be settled into their natural width, creating a more natural reading rhythm compared to purely geometric sans-serif fonts. It maintains excellent legibility across different screen densities.</p>
+        
+        <div>Roboto Numbers: 1234567890</div>
+        <div>Roboto Special: !@#$%^&*()_+-={}[]|;':\",./<>?</div>
+        <div>Material Icons Context: ★ ♥ ⚙ ⚡ ☁ ⌘ ⬆ ⬇ ⬅ ➡</div>
+        <div class="caption-text">Caption text in Roboto - optimized for small sizes</div>
+    </div>
+</body>
+</html>

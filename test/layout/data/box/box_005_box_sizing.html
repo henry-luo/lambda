@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Box-Sizing Property</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test container */
+        .test-container {
+            width: 600px;
+            height: 400px;
+            border: 2px solid #333;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        /* Common box styles */
+        .box {
+            width: 200px;
+            height: 100px;
+            margin: 20px;
+            padding: 20px;
+            border: 10px solid #666;
+            background-color: white;
+            text-align: center;
+            line-height: 1.2;
+            font-size: 14px;
+            display: inline-block;
+            vertical-align: top;
+        }
+        
+        .content-box {
+            box-sizing: content-box;
+            background-color: #ffcccc;
+        }
+        
+        .border-box {
+            box-sizing: border-box;
+            background-color: #ccffcc;
+        }
+        
+        .comparison-container {
+            border: 1px dashed #999;
+            margin: 10px 0;
+            background-color: #f0f0f0;
+            position: relative;
+        }
+        
+        .size-label {
+            position: absolute;
+            top: -15px;
+            left: 5px;
+            background-color: #f9f9f9;
+            padding: 2px 5px;
+            font-size: 11px;
+            border: 1px solid #ccc;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="comparison-container">
+            <div class="size-label">Content-box: Total = 200 + 20*2 + 10*2 = 260px wide</div>
+            <div class="box content-box">
+                Content-box<br>
+                200×100 + padding + border
+            </div>
+        </div>
+        
+        <div class="comparison-container">
+            <div class="size-label">Border-box: Total = 200px wide (includes padding + border)</div>
+            <div class="box border-box">
+                Border-box<br>
+                200×100 total
+            </div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "box_005_box_sizing",
+        "category": "intermediate",
+        "features": ["box-sizing", "content-box", "border-box", "width-calculation"],
+        "description": "Box-sizing property demonstration showing content-box vs border-box behavior",
+        "spec_references": ["https://www.w3.org/TR/css-ui-3/#box-sizing"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

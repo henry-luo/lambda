@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Masonry-like Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-auto-rows: 40px;
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+        }
+        .item:nth-child(1) { 
+            background-color: #ffcccc; 
+            grid-row: span 2;
+        }
+        .item:nth-child(2) { 
+            background-color: #ccffcc; 
+            grid-row: span 1;
+        }
+        .item:nth-child(3) { 
+            background-color: #ccccff; 
+            grid-row: span 3;
+        }
+        .item:nth-child(4) { 
+            background-color: #ffffcc; 
+            grid-row: span 1;
+        }
+        .item:nth-child(5) { 
+            background-color: #ffccff; 
+            grid-row: span 2;
+        }
+        .item:nth-child(6) { 
+            background-color: #ccffff; 
+            grid-row: span 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Height 2</div>
+        <div class="item">Height 1</div>
+        <div class="item">Height 3</div>
+        <div class="item">Height 1</div>
+        <div class="item">Height 2</div>
+        <div class="item">Height 1</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_017_masonry_like",
+        "category": "advanced",
+        "features": ["variable-heights", "masonry-simulation", "grid-row-span"],
+        "description": "Masonry-like layout using grid with variable row spans for different item heights",
+        "spec_references": ["https://www.w3.org/TR/css-grid-1/#auto-repeat"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Implicit vs Explicit</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            grid-template-columns: repeat(2, 100px);
+            grid-template-rows: repeat(2, 80px);
+            grid-auto-columns: 120px;
+            grid-auto-rows: 60px;
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 12px;
+            border: 2px dashed #666;
+        }
+        /* Explicit grid items */
+        .item:nth-child(1) { background-color: #ffcccc; }
+        .item:nth-child(2) { background-color: #ccffcc; }
+        .item:nth-child(3) { background-color: #ccccff; }
+        .item:nth-child(4) { background-color: #ffffcc; }
+        
+        /* Implicit grid items */
+        .item:nth-child(5) { 
+            background-color: #ffccff; 
+            grid-column: 3;
+            grid-row: 1;
+        }
+        .item:nth-child(6) { 
+            background-color: #ccffff; 
+            grid-column: 1;
+            grid-row: 3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Explicit 1</div>
+        <div class="item">Explicit 2</div>
+        <div class="item">Explicit 3</div>
+        <div class="item">Explicit 4</div>
+        <div class="item">Implicit Col</div>
+        <div class="item">Implicit Row</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_018_implicit_explicit",
+        "category": "advanced",
+        "features": ["implicit-tracks", "explicit-tracks", "grid-auto-columns", "grid-auto-rows"],
+        "description": "Demonstration of explicit vs implicit grid tracks with auto-sizing",
+        "spec_references": ["https://www.w3.org/TR/css-grid-1/#implicit-grids"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

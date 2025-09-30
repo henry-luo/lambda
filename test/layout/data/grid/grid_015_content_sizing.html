@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Mixed Content Sizing</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            grid-template-columns: min-content max-content 1fr;
+            grid-template-rows: auto 1fr auto;
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+        }
+        .item:nth-child(1) { 
+            background-color: #ffcccc; 
+            white-space: nowrap;
+        }
+        .item:nth-child(2) { 
+            background-color: #ccffcc; 
+        }
+        .item:nth-child(3) { 
+            background-color: #ccccff; 
+        }
+        .item:nth-child(4) { 
+            background-color: #ffffcc; 
+            height: 80px;
+        }
+        .item:nth-child(5) { 
+            background-color: #ffccff; 
+        }
+        .item:nth-child(6) { 
+            background-color: #ccffff; 
+        }
+        .item:nth-child(7) { 
+            background-color: #ffeedd; 
+        }
+        .item:nth-child(8) { 
+            background-color: #ddffee; 
+        }
+        .item:nth-child(9) { 
+            background-color: #eeddff; 
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Min Content</div>
+        <div class="item">Maximum Content Width</div>
+        <div class="item">Flexible</div>
+        <div class="item">Auto Height</div>
+        <div class="item">Center</div>
+        <div class="item">Flexible</div>
+        <div class="item">Auto</div>
+        <div class="item">Bottom</div>
+        <div class="item">Auto</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_015_content_sizing",
+        "category": "advanced",
+        "features": ["min-content", "max-content", "auto", "content-based-sizing"],
+        "description": "Grid using content-based sizing keywords for flexible layouts",
+        "spec_references": ["https://www.w3.org/TR/css-grid-1/#track-sizes"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

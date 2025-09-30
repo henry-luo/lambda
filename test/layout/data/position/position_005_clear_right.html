@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Clear Right</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .float-right {
+            float: right;
+            width: 120px;
+            height: 60px;
+            background-color: #ccffcc;
+            margin: 5px;
+            padding: 10px;
+            text-align: center;
+        }
+        .clear-right {
+            clear: right;
+            background-color: #ccccff;
+            padding: 10px;
+            margin: 5px;
+        }
+        .normal-flow {
+            background-color: #f0f0f0;
+            padding: 10px;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="float-right">Float 1</div>
+        <div class="float-right">Float 2</div>
+        <div class="normal-flow">This element flows normally around floats.</div>
+        <div class="clear-right">This element clears right floats and appears below them.</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "position_005_clear_right",
+        "category": "clear",
+        "features": ["clear", "clear-right", "float-interaction"],
+        "description": "Element with clear:right moves below all right-floated elements",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#flow-control"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

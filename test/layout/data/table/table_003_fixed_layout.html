@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Fixed Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: table;
+            table-layout: fixed;
+            border: 2px solid #333;
+            padding: 10px;
+            border-spacing: 10px;
+        }
+        .row {
+            display: table-row;
+        }
+        .cell {
+            display: table-cell;
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 14px;
+            overflow: hidden;
+        }
+        .cell:nth-child(1) { 
+            background-color: #ffcccc; 
+            width: 100px;
+        }
+        .cell:nth-child(2) { 
+            background-color: #ccffcc; 
+            width: 150px;
+        }
+        .cell:nth-child(3) { 
+            background-color: #ccccff; 
+            width: 100px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row">
+            <div class="cell">Fixed 100px</div>
+            <div class="cell">Fixed 150px</div>
+            <div class="cell">Fixed 100px</div>
+        </div>
+        <div class="row">
+            <div class="cell">Cell 4</div>
+            <div class="cell">Cell 5</div>
+            <div class="cell">Cell 6</div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_003_fixed_layout",
+        "category": "basic",
+        "features": ["table-layout-fixed", "fixed-width-columns", "overflow-hidden"],
+        "description": "Table with fixed layout algorithm and predefined column widths",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#fixed-table-layout"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

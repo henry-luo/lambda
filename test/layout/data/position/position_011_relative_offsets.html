@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Relative Position Negative Offsets</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            background-color: #f8f8f8;
+        }
+        .normal {
+            background-color: #f0f0f0;
+            padding: 10px;
+            margin: 15px 5px;
+            border: 1px solid #ccc;
+        }
+        .relative-negative {
+            position: relative;
+            top: -10px;
+            left: -20px;
+            background-color: #ccffcc;
+            padding: 10px;
+            margin: 15px 5px;
+            border: 1px solid #999;
+        }
+        .relative-positive {
+            position: relative;
+            top: 15px;
+            right: 25px;
+            background-color: #ccccff;
+            padding: 10px;
+            margin: 15px 5px;
+            border: 1px solid #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="normal">Element 1 - Normal</div>
+        <div class="relative-negative">Element 2 - Negative offsets (up 10px, left 20px)</div>
+        <div class="normal">Element 3 - Normal</div>
+        <div class="relative-positive">Element 4 - Mixed offsets (down 15px, right 25px)</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "position_011_relative_offsets",
+        "category": "relative",
+        "features": ["position-relative", "negative-offsets", "top", "left", "right"],
+        "description": "Relative positioning with negative and mixed direction offsets",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#relative-positioning"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

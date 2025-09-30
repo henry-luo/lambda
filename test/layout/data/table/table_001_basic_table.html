@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Basic Table Layout</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            font-size: 16px; 
+            line-height: 1.5;
+            padding: 20px;
+            max-width: 800px;
+        }
+        
+        /* Table styles */
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 16px 0;
+        }
+        
+        th, td {
+            border: 1px solid #d1d9e0;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        
+        th {
+            background-color: #f6f8fa;
+            font-weight: bold;
+        }
+        
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        
+        h3 {
+            font-size: 20px;
+            margin-bottom: 12px;
+            font-weight: bold;
+        }
+        
+        p {
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h3>Data Table</h3>
+    <p>The following table demonstrates basic table layout:</p>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Age</th>
+                <th>City</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>John Doe</td>
+                <td>30</td>
+                <td>New York</td>
+            </tr>
+            <tr>
+                <td>Jane Smith</td>
+                <td>25</td>
+                <td>Los Angeles</td>
+            </tr>
+            <tr>
+                <td>Bob Johnson</td>
+                <td>35</td>
+                <td>Chicago</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_001_basic_table",
+        "category": "table",
+        "features": ["table-layout", "border-collapse", "cell-padding", "alternating-rows", "thead-tbody"],
+        "description": "Basic table with headers, borders, and alternating row colors",
+        "markdown_equivalent": "### Data Table\n\n| Name | Age | City |\n|------|-----|------|\n| John Doe | 30 | New York |\n| Jane Smith | 25 | Los Angeles |\n| Bob Johnson | 35 | Chicago |",
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

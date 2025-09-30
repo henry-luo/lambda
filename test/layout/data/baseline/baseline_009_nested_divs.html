@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Nested Divs</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .outer {
+            width: 200px;
+            height: 150px;
+            background-color: #ffff00;
+            padding: 20px;
+        }
+        .inner {
+            width: 100px;
+            height: 80px;
+            background-color: #ff8000;
+        }
+    </style>
+</head>
+<body>
+    <div class="outer">
+        <div class="inner"></div>
+    </div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_009_nested_divs",
+        "category": "baseline",
+        "features": ["nested-elements", "padding", "containment"],
+        "description": "Nested div structure with parent padding",
+        "spec_references": ["https://www.w3.org/TR/CSS22/box.html"],
+        "complexity": "basic",
+        "expected_behavior": "Orange 100x80px box inside yellow 200x150px container with 20px padding"
+    }
+    </script>
+</body>
+</html>

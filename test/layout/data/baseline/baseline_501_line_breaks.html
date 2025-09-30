@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Line Break Element</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; font-size: 16px; }
+        .text-container {
+            width: 300px;
+            background-color: #f0fff0;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="text-container">
+        First line of text<br>Second line after break<br>Third line here
+    </div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_501_line_breaks",
+        "category": "baseline",
+        "features": ["br-element", "line-breaks", "text-content"],
+        "description": "Text content with explicit line breaks using br elements",
+        "spec_references": ["https://html.spec.whatwg.org/multipage/text-level-semantics.html#the-br-element"],
+        "complexity": "basic",
+        "expected_behavior": "Three lines of text separated by br elements in padded container"
+    }
+    </script>
+</body>
+</html>

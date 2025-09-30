@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Float Left Basic</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .float-left {
+            float: left;
+            width: 120px;
+            height: 80px;
+            background-color: #ffcccc;
+            margin: 10px;
+            padding: 10px;
+            text-align: center;
+        }
+        .content {
+            background-color: #f0f0f0;
+            padding: 10px;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="float-left">Floated Left</div>
+        <div class="content">
+            This content should wrap around the floated element. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "position_001_float_left",
+        "category": "float",
+        "features": ["float", "float-left", "text-wrapping"],
+        "description": "Basic float left with text content wrapping around the floated element",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#float-position"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

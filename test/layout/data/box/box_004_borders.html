@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Border Properties</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test container */
+        .test-container {
+            width: 700px;
+            height: 600px;
+            border: 2px solid #333;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        /* Test-specific CSS */
+        .box {
+            width: 150px;
+            height: 80px;
+            margin: 15px;
+            padding: 10px;
+            background-color: white;
+            text-align: center;
+            line-height: 1.2;
+            font-size: 12px;
+            display: inline-block;
+            vertical-align: top;
+        }
+        
+        .border-none {
+            border: none;
+            background-color: #ffcccc;
+        }
+        
+        .border-solid {
+            border: 3px solid #ff0000;
+            background-color: #ccffcc;
+        }
+        
+        .border-dashed {
+            border: 2px dashed #00aa00;
+            background-color: #ccccff;
+        }
+        
+        .border-dotted {
+            border: 4px dotted #0000ff;
+            background-color: #ffffcc;
+        }
+        
+        .border-double {
+            border: 6px double #aa00aa;
+            background-color: #ffccff;
+        }
+        
+        .border-individual {
+            border-top: 2px solid #ff0000;
+            border-right: 4px dashed #00aa00;
+            border-bottom: 3px dotted #0000ff;
+            border-left: 5px double #aa00aa;
+            background-color: #ccffaa;
+        }
+        
+        .border-radius {
+            border: 2px solid #666;
+            border-radius: 10px;
+            background-color: #aaccff;
+        }
+        
+        .border-radius-individual {
+            border: 2px solid #666;
+            border-top-left-radius: 20px;
+            border-top-right-radius: 5px;
+            border-bottom-right-radius: 15px;
+            border-bottom-left-radius: 0px;
+            background-color: #ffaacc;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="box border-none">No border</div>
+        <div class="box border-solid">Solid 3px</div>
+        <div class="box border-dashed">Dashed 2px</div>
+        <div class="box border-dotted">Dotted 4px</div>
+        <div class="box border-double">Double 6px</div>
+        <div class="box border-individual">Individual sides</div>
+        <div class="box border-radius">Radius 10px</div>
+        <div class="box border-radius-individual">Individual radius</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "box_004_borders",
+        "category": "basic",
+        "features": ["border", "border-style", "border-width", "border-color", "border-radius", "border-individual-sides"],
+        "description": "Border properties including styles, widths, individual sides, and border-radius",
+        "spec_references": ["https://www.w3.org/TR/CSS22/box.html#border-properties"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table with Actual HTML Table</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            overflow: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            border-spacing: 0;
+        }
+        th, td {
+            padding: 10px;
+            text-align: center;
+            font-size: 14px;
+            border: 1px solid #666;
+        }
+        th {
+            background-color: #e0e0e0;
+            font-weight: bold;
+        }
+        td:nth-child(1) { background-color: #ffcccc; }
+        td:nth-child(2) { background-color: #ccffcc; }
+        td:nth-child(3) { background-color: #ccccff; }
+        .colspan-cell { background-color: #ffccff !important; }
+        .rowspan-cell { background-color: #ccffff !important; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Header 1</th>
+                    <th>Header 2</th>
+                    <th>Header 3</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td colspan="2" class="colspan-cell">Colspan 2</td>
+                    <td rowspan="2" class="rowspan-cell">Rowspan 2</td>
+                </tr>
+                <tr>
+                    <td>Cell 4</td>
+                    <td>Cell 5</td>
+                </tr>
+                <tr>
+                    <td>Cell 7</td>
+                    <td colspan="2" class="colspan-cell">Colspan 2</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_013_html_table",
+        "category": "basic",
+        "features": ["html-table", "thead", "tbody", "colspan", "rowspan"],
+        "description": "Actual HTML table element with proper colspan and rowspan attributes",
+        "spec_references": ["https://www.w3.org/TR/html52/tabular-data.html"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

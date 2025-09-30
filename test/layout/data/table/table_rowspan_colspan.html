@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Table Rowspan/Colspan</title>
+  <style>
+    body { margin: 16px; font-family: Arial, sans-serif; }
+    table { border-collapse: separate; border-spacing: 0; }
+    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; }
+    thead th { background: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <table>
+    <caption>Rowspan and Colspan</caption>
+    <thead>
+      <tr>
+        <th>Col 1</th>
+        <th>Col 2</th>
+        <th>Col 3</th>
+        <th>Col 4</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td rowspan="2">R1C1 (rowspan=2)</td>
+        <td colspan="2">R1C2-3 (colspan=2)</td>
+        <td>R1C4</td>
+      </tr>
+      <tr>
+        <td>R2C2</td>
+        <td>R2C3</td>
+        <td>R2C4</td>
+      </tr>
+      <tr>
+        <td>R3C1</td>
+        <td colspan="3">R3C2-4 (colspan=3)</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>

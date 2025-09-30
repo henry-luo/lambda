@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Vertical Alignment</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test container */
+        .test-container {
+            width: 700px;
+            height: 600px;
+            border: 2px solid #333;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        /* Test-specific CSS */
+        .alignment-group {
+            border: 1px dashed #999;
+            margin: 20px 0;
+            padding: 10px;
+            background-color: white;
+            height: 120px;
+            line-height: 120px; /* For baseline demonstration */
+        }
+        
+        .inline-element {
+            display: inline-block;
+            width: 80px;
+            height: 60px;
+            margin: 0 10px;
+            border: 1px solid #666;
+            text-align: center;
+            line-height: 60px;
+            font-size: 12px;
+        }
+        
+        .baseline {
+            vertical-align: baseline;
+            background-color: #ffcccc;
+        }
+        
+        .top {
+            vertical-align: top;
+            background-color: #ccffcc;
+        }
+        
+        .middle {
+            vertical-align: middle;
+            background-color: #ccccff;
+        }
+        
+        .bottom {
+            vertical-align: bottom;
+            background-color: #ffffcc;
+        }
+        
+        .text-top {
+            vertical-align: text-top;
+            background-color: #ffccff;
+        }
+        
+        .text-bottom {
+            vertical-align: text-bottom;
+            background-color: #ccffff;
+        }
+        
+        .super {
+            vertical-align: super;
+            background-color: #ffaaaa;
+            font-size: 10px;
+        }
+        
+        .sub {
+            vertical-align: sub;
+            background-color: #aaffaa;
+            font-size: 10px;
+        }
+        
+        .percentage {
+            vertical-align: 20%;
+            background-color: #aaaaff;
+        }
+        
+        .group-label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 10px;
+            line-height: normal;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="alignment-group">
+            <span class="group-label">Vertical-align values with inline-block elements:</span>
+            <span class="inline-element baseline">baseline</span>
+            <span class="inline-element top">top</span>
+            <span class="inline-element middle">middle</span>
+            <span class="inline-element bottom">bottom</span>
+        </div>
+        
+        <div class="alignment-group">
+            <span class="group-label">Text-relative alignments:</span>
+            <span class="inline-element text-top">text-top</span>
+            <span class="inline-element text-bottom">text-bottom</span>
+            <span class="inline-element super">super</span>
+            <span class="inline-element sub">sub</span>
+        </div>
+        
+        <div class="alignment-group">
+            <span class="group-label">Percentage alignment:</span>
+            <span class="inline-element percentage">20%</span>
+            <span class="inline-element baseline">baseline</span>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "box_007_vertical_align",
+        "category": "alignment",
+        "features": ["vertical-align", "baseline", "top", "middle", "bottom", "text-top", "text-bottom", "super", "sub", "percentage"],
+        "description": "Vertical alignment using vertical-align property with various values for inline and inline-block elements",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visudet.html#propdef-vertical-align"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

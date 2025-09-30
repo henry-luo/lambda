@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Two Divs</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .box1 {
+            width: 100px;
+            height: 50px;
+            background-color: #ff0000;
+        }
+        .box2 {
+            width: 80px;
+            height: 60px;
+            background-color: #00ff00;
+        }
+    </style>
+</head>
+<body>
+    <div class="box1"></div>
+    <div class="box2"></div>
+    
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_004_two_divs",
+        "category": "baseline",
+        "features": ["block-flow", "multiple-elements", "background-color"],
+        "description": "Two block divs stacked vertically (normal block flow)",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visuren.html#block-formatting"],
+        "complexity": "trivial",
+        "expected_behavior": "Red box (100x50) on top, green box (80x60) below"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Inline Table</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; padding: 20px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 20px;
+            position: relative;
+        }
+        .inline-table {
+            display: inline-table;
+            border: 2px solid #666;
+            border-spacing: 5px;
+            margin: 10px;
+            vertical-align: top;
+        }
+        .row {
+            display: table-row;
+        }
+        .cell {
+            display: table-cell;
+            padding: 8px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 12px;
+            border: 1px solid #999;
+        }
+        .table1 .cell:nth-child(1) { background-color: #ffcccc; }
+        .table1 .cell:nth-child(2) { background-color: #ccffcc; }
+        .table2 .cell:nth-child(1) { background-color: #ccccff; }
+        .table2 .cell:nth-child(2) { background-color: #ffffcc; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <span>Text before</span>
+        <div class="inline-table table1">
+            <div class="row">
+                <div class="cell">A1</div>
+                <div class="cell">A2</div>
+            </div>
+            <div class="row">
+                <div class="cell">B1</div>
+                <div class="cell">B2</div>
+            </div>
+        </div>
+        <span>between</span>
+        <div class="inline-table table2">
+            <div class="row">
+                <div class="cell">C1</div>
+                <div class="cell">C2</div>
+            </div>
+            <div class="row">
+                <div class="cell">D1</div>
+                <div class="cell">D2</div>
+            </div>
+        </div>
+        <span>after</span>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_010_inline_table",
+        "category": "intermediate",
+        "features": ["inline-table", "inline-flow", "vertical-align"],
+        "description": "Inline tables that flow with text content and can be vertically aligned",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#table-display"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

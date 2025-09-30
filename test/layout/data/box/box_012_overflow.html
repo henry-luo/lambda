@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Overflow Behavior</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test container */
+        .test-container {
+            width: 800px;
+            height: 900px;
+            border: 2px solid #333;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        /* Test-specific CSS */
+        .overflow-test {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px dashed #999;
+            background-color: white;
+        }
+        
+        .test-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .overflow-box {
+            width: 200px;
+            height: 100px;
+            border: 2px solid #666;
+            background-color: #f0f0f0;
+            padding: 10px;
+            margin: 10px;
+            display: inline-block;
+            vertical-align: top;
+        }
+        
+        .content {
+            background-color: #ffcccc;
+            padding: 5px;
+            border: 1px solid #999;
+        }
+        
+        .long-content {
+            width: 300px;
+            height: 150px;
+            background-color: #ccffcc;
+            border: 1px solid #666;
+            padding: 10px;
+        }
+        
+        /* Overflow behaviors */
+        .overflow-visible {
+            overflow: visible;
+            background-color: #ffffcc;
+        }
+        
+        .overflow-hidden {
+            overflow: hidden;
+            background-color: #ffccff;
+        }
+        
+        .overflow-scroll {
+            overflow: scroll;
+            background-color: #ccffff;
+        }
+        
+        .overflow-auto {
+            overflow: auto;
+            background-color: #ccccff;
+        }
+        
+        /* Individual axis overflow */
+        .overflow-x-scroll {
+            overflow-x: scroll;
+            overflow-y: hidden;
+            background-color: #ffccaa;
+        }
+        
+        .overflow-y-scroll {
+            overflow-x: hidden;
+            overflow-y: scroll;
+            background-color: #ccffaa;
+        }
+        
+        /* Text overflow */
+        .text-overflow-test {
+            width: 150px;
+            height: 30px;
+            border: 1px solid #666;
+            background-color: white;
+            padding: 5px;
+            margin: 5px;
+            display: inline-block;
+            line-height: 20px;
+        }
+        
+        .text-ellipsis {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            background-color: #ffeecc;
+        }
+        
+        .text-clip {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: clip;
+            background-color: #eeffcc;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <div class="overflow-test">
+            <div class="test-title">Overflow: visible (default)</div>
+            <div class="overflow-box overflow-visible">
+                <div class="long-content">
+                    This content is larger than its container and will overflow visibly outside the bounds.
+                </div>
+            </div>
+        </div>
+        
+        <div class="overflow-test">
+            <div class="test-title">Overflow: hidden</div>
+            <div class="overflow-box overflow-hidden">
+                <div class="long-content">
+                    This content is larger than its container but will be clipped and hidden.
+                </div>
+            </div>
+        </div>
+        
+        <div class="overflow-test">
+            <div class="test-title">Overflow: scroll</div>
+            <div class="overflow-box overflow-scroll">
+                <div class="long-content">
+                    This content is larger than its container and will have scrollbars (always visible).
+                </div>
+            </div>
+        </div>
+        
+        <div class="overflow-test">
+            <div class="test-title">Overflow: auto</div>
+            <div class="overflow-box overflow-auto">
+                <div class="long-content">
+                    This content is larger than its container and will have scrollbars only when needed.
+                </div>
+            </div>
+        </div>
+        
+        <div class="overflow-test">
+            <div class="test-title">Axis-specific overflow</div>
+            <div class="overflow-box overflow-x-scroll">
+                <div class="long-content">
+                    Horizontal scroll only - vertical content is clipped.
+                </div>
+            </div>
+            <div class="overflow-box overflow-y-scroll">
+                <div class="long-content">
+                    Vertical scroll only - horizontal content is clipped.
+                </div>
+            </div>
+        </div>
+        
+        <div class="overflow-test">
+            <div class="test-title">Text overflow behavior</div>
+            <div class="text-overflow-test text-ellipsis">
+                This is a very long text that will be truncated with ellipsis
+            </div>
+            <div class="text-overflow-test text-clip">
+                This is a very long text that will be clipped without ellipsis
+            </div>
+        </div>
+        
+        <div class="overflow-test">
+            <div class="test-title">No overflow (content fits)</div>
+            <div class="overflow-box overflow-auto">
+                <div class="content">
+                    This content fits nicely within its container bounds.
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "box_012_overflow",
+        "category": "advanced",
+        "features": ["overflow", "overflow-visible", "overflow-hidden", "overflow-scroll", "overflow-auto", "overflow-x", "overflow-y", "text-overflow", "ellipsis", "clip"],
+        "description": "Overflow property behavior with various values and axis-specific controls",
+        "spec_references": ["https://www.w3.org/TR/CSS22/visufx.html#overflow"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

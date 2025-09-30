@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Table Width and Height</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            border: 2px solid #333;
+            padding: 10px;
+            overflow: auto;
+        }
+        table {
+            width: 100%;
+            height: 250px;
+            border-collapse: separate;
+            border-spacing: 5px;
+        }
+        th, td {
+            padding: 10px;
+            text-align: center;
+            font-size: 14px;
+            border: 1px solid #666;
+            vertical-align: middle;
+        }
+        th {
+            background-color: #e0e0e0;
+            font-weight: bold;
+            height: 50px;
+        }
+        .col1 { width: 25%; background-color: #ffcccc; }
+        .col2 { width: 50%; background-color: #ccffcc; }
+        .col3 { width: 25%; background-color: #ccccff; }
+        .tall-row td { height: 60px; }
+        .short-row td { height: 30px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <table>
+            <thead>
+                <tr>
+                    <th class="col1">25% Width</th>
+                    <th class="col2">50% Width</th>
+                    <th class="col3">25% Width</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="tall-row">
+                    <td class="col1">Tall Row (60px)</td>
+                    <td class="col2">Cell 2</td>
+                    <td class="col3">Cell 3</td>
+                </tr>
+                <tr class="short-row">
+                    <td class="col1">Short Row (30px)</td>
+                    <td class="col2">Cell 5</td>
+                    <td class="col3">Cell 6</td>
+                </tr>
+                <tr>
+                    <td class="col1">Auto Height</td>
+                    <td class="col2">Cell 8</td>
+                    <td class="col3">Cell 9</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "table_014_width_height",
+        "category": "basic",
+        "features": ["table-width", "table-height", "column-width", "row-height"],
+        "description": "Table with explicit width and height constraints on columns and rows",
+        "spec_references": ["https://www.w3.org/TR/CSS2/tables.html#width-layout"],
+        "complexity": "basic"
+    }
+    </script>
+</body>
+</html>

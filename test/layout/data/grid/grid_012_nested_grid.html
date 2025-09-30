@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Grid Subgrid Simulation</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 10px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 12px;
+        }
+        .nested-grid {
+            background-color: #ffffcc;
+            grid-column: 2 / 4;
+            grid-row: 1 / 3;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 5px;
+            padding: 5px;
+        }
+        .nested-item {
+            padding: 5px;
+            font-size: 10px;
+            text-align: center;
+        }
+        .item:nth-child(1) { background-color: #ffcccc; }
+        .item:nth-child(3) { background-color: #ccffcc; }
+        .item:nth-child(4) { background-color: #ccccff; }
+        .nested-item:nth-child(1) { background-color: #ffeedd; }
+        .nested-item:nth-child(2) { background-color: #ddffee; }
+        .nested-item:nth-child(3) { background-color: #eeddff; }
+        .nested-item:nth-child(4) { background-color: #ffddee; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Item 1</div>
+        <div class="nested-grid">
+            <div class="nested-item">Sub 1</div>
+            <div class="nested-item">Sub 2</div>
+            <div class="nested-item">Sub 3</div>
+            <div class="nested-item">Sub 4</div>
+        </div>
+        <div class="item">Item 3</div>
+        <div class="item">Item 4</div>
+    </div>
+    
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "grid_012_nested_grid",
+        "category": "advanced",
+        "features": ["nested-grid", "grid-in-grid", "complex-layout"],
+        "description": "Grid container with a nested grid item spanning multiple cells",
+        "spec_references": ["https://www.w3.org/TR/css-grid-1/#grid-containers"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>
