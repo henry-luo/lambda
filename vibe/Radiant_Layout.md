@@ -77,40 +77,6 @@ typedef struct {
 3. **Value Calculation**: Length values resolved to pixels
 4. **Property Storage**: Values stored in appropriate data structures
 
-## Box Model Implementation
-
-### Box-Sizing Calculation
-
-The box model is implemented in `layout_block.cpp` with proper `box-sizing` support:
-
-```cpp
-// Box-sizing calculation for width
-int content_width = 0;
-if (lycon->block.given_width >= 0) { 
-    content_width = lycon->block.given_width;
-    
-    // Apply box-sizing calculation
-    if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
-        // For border-box, subtract padding and borders from given width
-        int padding_and_border = 0;
-        if (block->bound) {
-            padding_and_border += block->bound->padding.left + block->bound->padding.right;
-            if (block->bound->border) {
-                padding_and_border += block->bound->border->width.left + block->bound->border->width.right;
-            }
-        }
-        content_width = max(content_width - padding_and_border, 0);
-    }
-}
-```
-
-### Critical Design Decision
-
-**Box-sizing is calculated in the block layout phase, NOT in the flex algorithm.** This ensures:
-- Consistent dimensions across layout phases
-- No double-subtraction bugs
-- Proper integration with CSS box model
-
 ## Automated Layout Integration Tests
 
 ### Test Architecture
@@ -128,29 +94,9 @@ The layout testing system consists of:
 ./radiant.exe layout test/layout/data/basic/flex_001_basic_layout.html
 ```
 
-**Process Flow**:
-1. Parse HTML and CSS using Lexbor
-2. Build DOM tree structure
-3. Resolve CSS styles and properties
-4. Execute layout algorithms (block, flex, etc.)
-5. Generate view tree output
-6. Write JSON layout data
-
 ### View Tree Output
 
 The view tree provides detailed debugging information:
-
-```
-[view-block:div, x:2, y:2, wd:100, hg:100
-  {line-hg:0.000000 txt-align:center txt-indent:0.000000 ls-sty-type:0
-  min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 
-  box-sizing:border-box given-wd:100 given-hg:100 }
-  {flex-container: row-gap:10 column-gap:10 main-axis:396 cross-axis:296}
-  {bgcolor:#ffccccff margin:{left:0, right:0, top:0, bottom:0} 
-   padding:{left:10, right:10, top:10, bottom:10}}
-  text:'Item 1', start:0, len:6, x:28, y:10, wd:43, hg:18
-]
-```
 
 **Key Information**:
 - **Position**: `x:2, y:2` (includes border offset)
@@ -163,39 +109,6 @@ The view tree provides detailed debugging information:
 
 The automated testing system uses **Puppeteer** to capture browser rendering results as reference data:
 
-```javascript
-// Puppeteer browser automation for reference data
-const puppeteer = require('puppeteer');
-
-async function captureBrowserLayout(htmlFile) {
-    const browser = await puppeteer.launch();
-    const page = await browser.newPage();
-    
-    // Load the test HTML file
-    await page.goto(`file://${htmlFile}`);
-    
-    // Execute JavaScript to extract element positions and dimensions
-    const layoutData = await page.evaluate(() => {
-        const elements = [];
-        document.querySelectorAll('*').forEach(el => {
-            const rect = el.getBoundingClientRect();
-            elements.push({
-                tag: el.tagName.toLowerCase(),
-                x: Math.round(rect.left),
-                y: Math.round(rect.top),
-                width: Math.round(rect.width),
-                height: Math.round(rect.height),
-                text: el.textContent?.trim() || ''
-            });
-        });
-        return elements;
-    });
-    
-    await browser.close();
-    return layoutData;
-}
-```
-
 **Browser Capture Process**:
 1. **HTML Loading**: Puppeteer loads test HTML files in headless Chrome
 2. **Style Application**: Browser applies CSS styles and performs layout
@@ -205,19 +118,6 @@ async function captureBrowserLayout(htmlFile) {
 
 ### Test Comparison System
 
-```javascript
-// Element matching criteria
-function elementsMatch(radiant, browser) {
-    return (
-        radiant.tag === browser.tag &&
-        Math.abs(radiant.x - browser.x) <= tolerance &&
-        Math.abs(radiant.y - browser.y) <= tolerance &&
-        Math.abs(radiant.width - browser.width) <= tolerance &&
-        Math.abs(radiant.height - browser.height) <= tolerance
-    );
-}
-```
-
 **Matching Process**:
 1. Parse both Radiant and browser reference data
 2. Extract element positions and dimensions
@@ -225,64 +125,18 @@ function elementsMatch(radiant, browser) {
 4. Calculate match percentage
 5. Generate detailed failure reports
 
-### Test Results Interpretation
-
-**Success Metrics**:
-- **Element Match Rate**: Percentage of elements with correct position/size
-- **Layout Accuracy**: Pixel-perfect positioning within tolerance
-- **Property Compliance**: Correct CSS property application
-
-**Common Failure Patterns**:
-- **Position Offset**: Missing border/padding calculations
-- **Size Mismatch**: Box-sizing calculation errors
-- **Missing Elements**: Layout algorithm not creating expected elements
-- **Spacing Issues**: Gap or margin/padding miscalculations
-
 ### Key Make Targets
 
 The Radiant layout engine provides several make targets for development and testing:
 
 #### `make build-radiant`
 ```bash
-make build-radiant
+make build-radiant      # Build the Radiant layout engine executable 
+make radiant            # Alias for build-radiant
+make build-radiant-test # Build Radiant C/C++ unit tests
+make test-radiant       # Run Radiant C/C++ unit tests
+make test-layout        # Run Radiant automated integration test
 ```
-**Purpose**: Build the Radiant layout engine executable and test suites
-**Process**:
-1. Generates platform-specific Premake configuration
-2. Compiles `radiant.exe` with all layout algorithms
-3. Builds GTest-based test executables
-4. Compiles standalone test executables for additional coverage
-
-**Output**: Ready-to-run Radiant executable and comprehensive test suite
-
-#### `make test-radiant`
-```bash
-make test-radiant
-```
-**Purpose**: Execute all Radiant-specific unit and integration tests
-
-#### `make test-layout`
-```bash
-make test-layout
-```
-**Purpose**: Run comprehensive layout integration tests against browser reference data
-**Test Process**:
-1. **HTML Test Execution**: Processes all test files in `test/layout/data/basic/`
-2. **Layout Calculation**: Runs Radiant layout engine on each test case
-3. **Reference Comparison**: Compares results against Puppeteer-captured browser data
-4. **Element Matching**: Performs tolerance-based position/dimension matching
-5. **Report Generation**: Creates detailed pass/fail reports with match percentages
-
-**Test Categories**:
-- **Block Layout Tests**: `block_001_margin_padding`, basic div positioning
-- **Box Model Tests**: `box_001_basic_div`, `box_004_box_sizing`, border-box calculations
-- **Flexbox Tests**: `flex_001_basic_layout`, `flex_002_wrap`, `flex_004_column_direction`
-- **Advanced Features**: Gap properties, alignment, wrapping, direction changes
-
-**Success Metrics**:
-- **Element Match Rate**: Percentage of elements with correct position/size
-- **Test Pass Rate**: Overall percentage of tests achieving acceptable match rates
-- **Regression Detection**: Identifies layout changes that break existing functionality
 
 ## Performance Considerations
 
