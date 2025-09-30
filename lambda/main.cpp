@@ -37,6 +37,12 @@ extern "C" {
 extern "C" AstValidationResult* exec_validation(int argc, char* argv[]);
 int exec_convert(int argc, char* argv[]);
 
+// Layout function from radiant (available since radiant sources are included in lambda.exe)
+int run_layout(const char* html_file);
+
+// SVG rendering function from radiant (available since radiant sources are included in lambda.exe)
+int render_html_to_svg(const char* html_file, const char* svg_file);
+
 // REPL functions from main-repl.cpp
 extern int lambda_repl_init();
 extern void lambda_repl_cleanup();
@@ -107,58 +113,58 @@ extern "C" bool fn_typeset_latex_standalone(const char* input_file, const char* 
 void run_repl(Runtime *runtime, bool use_mir) {
     printf("Lambda Script REPL v1.0%s\n", use_mir ? " (MIR JIT)" : "");
     printf("Type .help for commands, .quit to exit\n");
-    
+
     // Initialize command line editor
     if (lambda_repl_init() != 0) {
         printf("Warning: Failed to initialize readline, using basic input\n");
     }
-    
+
     // Get the best prompt for this system
     const char* prompt = get_repl_prompt();
-    
+
     StrBuf *repl_history = strbuf_new_cap(1024);
     char *line;
     int exec_count = 0;
-    
+
     while ((line = lambda_repl_readline(prompt)) != NULL) {
         // Skip empty lines
         if (strlen(line) == 0) {
             free(line);
             continue;
         }
-        
+
         // Add to command history
         lambda_repl_add_history(line);
-        
+
         // Handle REPL commands
         if (strcmp(line, ".quit") == 0 || strcmp(line, ".q") == 0 || strcmp(line, ".exit") == 0) {
             free(line);
             break;
         }
-        
+
         if (strcmp(line, ".help") == 0 || strcmp(line, ".h") == 0) {
             print_help();
             free(line);
             continue;
         }
-        
+
         if (strcmp(line, ".clear") == 0) {
             strbuf_reset(repl_history);
             printf("REPL history cleared\n");
             free(line);
             continue;
         }
-        
+
         // Add current line to REPL history
         if (repl_history->length > 0) {
             strbuf_append_str(repl_history, "\n");
         }
         strbuf_append_str(repl_history, line);
-        
+
         // Create a unique script path for each execution
         char script_path[64];
         snprintf(script_path, sizeof(script_path), "<repl-%d>", ++exec_count);
-        
+
         // Run the accumulated script
         Item result;
         if (use_mir) {
@@ -166,20 +172,20 @@ void run_repl(Runtime *runtime, bool use_mir) {
         } else {
             result = run_script(runtime, repl_history->str, script_path, false);
         }
-        
+
         // Print result
         StrBuf *output = strbuf_new_cap(256);
         print_root_item(output, result);
         printf("%s", output->str);
         strbuf_free(output);
-        
+
         free(line);
     }
     printf("\n");  // print one last '\n', otherwise, may see '%' at the end of the line
-    
+
     // Cleanup command line editor
     lambda_repl_cleanup();
-    
+
     strbuf_free(repl_history);
 }
 
@@ -190,7 +196,7 @@ void run_script_file(Runtime *runtime, const char *script_path, bool use_mir, bo
     } else {
         result = run_script_with_run_main(runtime, (char*)script_path, false, run_main);
     }
-    
+
     StrBuf *output = strbuf_new_cap(256);
     print_root_item(output, result);
     log_debug("Script '%s' executed ====================", script_path);
@@ -238,20 +244,20 @@ void run_assertions() {
 // Convert command implementation
 int exec_convert(int argc, char* argv[]) {
     log_debug("exec_convert called with %d arguments", argc);
-    
+
     if (argc < 2) {
         printf("Error: convert command requires input file\n");
         printf("Usage: lambda convert <input> [-f <from>] -t <to> -o <output>\n");
         printf("Use 'lambda convert --help' for more information\n");
         return 1;
     }
-    
+
     // Parse arguments
     const char* input_file = NULL;
     const char* from_format = NULL;  // Optional, will auto-detect if not provided
     const char* to_format = NULL;    // Required
     const char* output_file = NULL;  // Required
-    
+
     // Skip "convert" and parse remaining arguments
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--from") == 0) {
@@ -288,7 +294,7 @@ int exec_convert(int argc, char* argv[]) {
             return 1;
         }
     }
-    
+
     // Validate required arguments
     if (!input_file) {
         printf("Error: Input file is required\n");
@@ -302,19 +308,19 @@ int exec_convert(int argc, char* argv[]) {
         printf("Error: Output file (-o) is required\n");
         return 1;
     }
-    
+
     // Check if input file exists
     if (access(input_file, F_OK) != 0) {
         printf("Error: Input file '%s' does not exist\n", input_file);
         return 1;
     }
-    
-    log_debug("Converting '%s' from '%s' to '%s', output: '%s'", 
+
+    log_debug("Converting '%s' from '%s' to '%s', output: '%s'",
               input_file, from_format ? from_format : "auto", to_format, output_file);
-    
-    log_debug("Converting '%s' from '%s' to '%s', output: '%s'", 
+
+    log_debug("Converting '%s' from '%s' to '%s', output: '%s'",
               input_file, from_format ? from_format : "auto", to_format, output_file);
-    
+
     // Create a temporary memory pool for string creation
     VariableMemPool* temp_pool;
     MemPoolError err = pool_variable_init(&temp_pool, 1024, 20);
@@ -322,10 +328,10 @@ int exec_convert(int argc, char* argv[]) {
         printf("Error: Failed to initialize temporary memory pool\n");
         return 1;
     }
-    
+
     // Step 1: Parse the input file using Lambda's input system
     printf("Reading input file: %s\n", input_file);
-    
+
     // Create absolute URL for the input file
     char cwd_path[PATH_MAX];
     if (!getcwd(cwd_path, sizeof(cwd_path))) {
@@ -333,7 +339,7 @@ int exec_convert(int argc, char* argv[]) {
         pool_variable_destroy(temp_pool);
         return 1;
     }
-    
+
     // Create file URL
     char file_url[PATH_MAX + 8];
     if (input_file[0] == '/') {
@@ -343,7 +349,7 @@ int exec_convert(int argc, char* argv[]) {
         // Relative path
         snprintf(file_url, sizeof(file_url), "file://%s/%s", cwd_path, input_file);
     }
-    
+
     // Create URL string
     String* url_string = create_string(temp_pool, file_url);
     if (!url_string) {
@@ -351,7 +357,7 @@ int exec_convert(int argc, char* argv[]) {
         pool_variable_destroy(temp_pool);
         return 1;
     }
-    
+
     // Create type string
     String* type_string = NULL;
     if (from_format) {
@@ -359,13 +365,13 @@ int exec_convert(int argc, char* argv[]) {
     } else {
         type_string = create_string(temp_pool, "auto");
     }
-    
+
     if (!type_string) {
         printf("Error: Failed to create type string\n");
         pool_variable_destroy(temp_pool);
         return 1;
     }
-        
+
         // Parse using Lambda's input system
         Input* input = input_from_url(url_string, type_string, NULL, NULL);
         if (!input) {
@@ -373,21 +379,21 @@ int exec_convert(int argc, char* argv[]) {
             pool_variable_destroy(temp_pool);
             return 1;
         }
-        
+
         // Check if parsing was successful
         if (input->root.type_id == LMD_TYPE_ERROR) {
             printf("Error: Failed to parse input file\n");
             pool_variable_destroy(temp_pool);
             return 1;
         }
-        
+
         printf("Successfully parsed input file\n");
-        
+
         // Step 2: Format the parsed data to the target format
         printf("Converting to format: %s\n", to_format);
-        
+
         String* formatted_output = NULL;
-        
+
         // Use the existing format functions based on target format
         if (strcmp(to_format, "json") == 0) {
             formatted_output = format_json(input->pool, input->root);
@@ -445,22 +451,22 @@ int exec_convert(int argc, char* argv[]) {
             pool_variable_destroy(temp_pool);
             return 1;
         }
-        
+
         if (!formatted_output) {
             printf("Error: Failed to format output\n");
             pool_variable_destroy(temp_pool);
             return 1;
         }
-        
+
         // Step 3: Write the output to file
         printf("Writing output to: %s\n", output_file);
         write_text_file(output_file, formatted_output->chars);
-        
+
     printf("Conversion completed successfully!\n");
     printf("Input:  %s\n", input_file);
     printf("Output: %s\n", output_file);
     printf("Format: %s → %s\n", from_format ? from_format : "auto-detected", to_format);
-    
+
     // Cleanup
     pool_variable_destroy(temp_pool);
     return 0;
@@ -481,15 +487,15 @@ int main(int argc, char *argv[]) {
         }
     }
     log_init("");  // Initialize with parsed config or defaults
-    
+
     // Add trace statement at start of main
     log_debug("main() started with %d arguments", argc);
-    
+
     // Run basic assertions
     log_debug("About to run assertions");
     run_assertions();
     log_debug("Assertions completed");
-    
+
     // Parse command line arguments
     log_debug("Parsing command line arguments");
     if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
@@ -497,7 +503,7 @@ int main(int argc, char *argv[]) {
         log_finish();  // Cleanup logging before exit
         return 0;
     }
-    
+
     // Initialize runtime (needed for all operations)
     log_debug("About to initialize runtime");
     Runtime runtime;
@@ -514,7 +520,7 @@ int main(int argc, char *argv[]) {
     log_debug("Checking for validate command");
     if (argc >= 2 && strcmp(argv[1], "validate") == 0) {
         log_debug("Entering validate command handler");
-        
+
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Validator v1.0\n\n");
@@ -545,30 +551,30 @@ int main(int argc, char *argv[]) {
             log_finish();  // Cleanup logging before exit
             return 0;
         }
-        
+
         // Prepare arguments for exec_validation (skip the "validate" command)
         int validation_argc = argc - 1;  // Remove the program name
         char** validation_argv = argv + 1;  // Skip the program name, start from "validate"
-        
+
         // Call the extracted validation function
         AstValidationResult* validation_result = exec_validation(validation_argc, validation_argv);
-        
+
         // Convert ValidationResult to exit code
         int exit_code = 1; // Default to failure
         if (validation_result) {
             exit_code = validation_result->valid ? 0 : 1;
         }
-        
+
         log_debug("exec_validation completed with result: %d", exit_code);
         log_finish();  // Cleanup logging before exit
         return exit_code;
     }
-    
+
     // Handle convert command
     log_debug("Checking for convert command");
     if (argc >= 2 && strcmp(argv[1], "convert") == 0) {
         log_debug("Entering convert command handler");
-        
+
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Format Converter v1.0\n\n");
@@ -595,24 +601,160 @@ int main(int argc, char *argv[]) {
             log_finish();  // Cleanup logging before exit
             return 0;
         }
-        
+
         // Prepare arguments for exec_convert (skip the "convert" command)
         int convert_argc = argc - 1;  // Remove the program name
         char** convert_argv = argv + 1;  // Skip the program name, start from "convert"
-        
+
         // Call the convert function
         int exit_code = exec_convert(convert_argc, convert_argv);
-        
+
         log_debug("exec_convert completed with result: %d", exit_code);
         log_finish();  // Cleanup logging before exit
         return exit_code;
     }
-    
+
+    // Handle layout command
+    log_debug("Checking for layout command");
+    if (argc >= 2 && strcmp(argv[1], "layout") == 0) {
+        log_debug("Entering layout command handler");
+
+        // Check for help first
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda HTML/CSS Layout Engine v1.0\n\n");
+            printf("Usage: %s layout <file.html>\n", argv[0]);
+            printf("\nDescription:\n");
+            printf("  The 'layout' command performs HTML/CSS layout analysis on an HTML file.\n");
+            printf("  It parses the HTML, applies CSS styles, calculates layout, and displays\n");
+            printf("  the resulting view tree structure for debugging and analysis.\n");
+            printf("\nOptions:\n");
+            printf("  -h, --help     Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s layout index.html              # Analyze layout of HTML file\n", argv[0]);
+            printf("  %s layout test/sample.html        # Analyze relative path HTML file\n", argv[0]);
+            log_finish();  // Cleanup logging before exit
+            return 0;
+        }
+
+        // Validate arguments
+        if (argc < 3) {
+            printf("Error: layout command requires an HTML file\n");
+            printf("Usage: %s layout <file.html>\n", argv[0]);
+            printf("Use '%s layout --help' for more information\n", argv[0]);
+            log_finish();
+            return 1;
+        }
+
+        const char* html_file = argv[2];
+
+        // Check if HTML file exists
+        if (access(html_file, F_OK) != 0) {
+            printf("Error: HTML file '%s' does not exist\n", html_file);
+            log_finish();
+            return 1;
+        }
+
+        log_debug("Running layout analysis on '%s'", html_file);
+
+        // Call the layout function (same as radiant's layout subcommand)
+        int exit_code = run_layout(html_file);
+
+        log_debug("layout analysis completed with result: %d", exit_code);
+        log_finish();  // Cleanup logging before exit
+        return exit_code;
+    }
+
+    // Handle render command
+    log_debug("Checking for render command");
+    if (argc >= 2 && strcmp(argv[1], "render") == 0) {
+        log_debug("Entering render command handler");
+
+        // Check for help first
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda HTML to SVG Renderer v1.0\n\n");
+            printf("Usage: %s render <input.html> -o <output.svg>\n", argv[0]);
+            printf("\nDescription:\n");
+            printf("  The 'render' command layouts an HTML file and renders the result as SVG.\n");
+            printf("  It parses the HTML, applies CSS styles, calculates layout, and generates\n");
+            printf("  a scalable vector graphics representation of the rendered page.\n");
+            printf("\nOptions:\n");
+            printf("  -o <output.svg>    Output SVG file path (required)\n");
+            printf("  -h, --help         Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s render index.html -o output.svg        # Render HTML to SVG\n", argv[0]);
+            printf("  %s render test/page.html -o result.svg    # Render with relative paths\n", argv[0]);
+            log_finish();  // Cleanup logging before exit
+            return 0;
+        }
+
+        // Parse arguments
+        const char* html_file = NULL;
+        const char* output_file = NULL;
+
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
+                if (i + 1 < argc) {
+                    output_file = argv[++i];
+                } else {
+                    printf("Error: -o option requires an output file argument\n");
+                    log_finish();
+                    return 1;
+                }
+            } else if (argv[i][0] != '-') {
+                // This should be the HTML input file
+                if (html_file == NULL) {
+                    html_file = argv[i];
+                } else {
+                    printf("Error: Multiple input files not supported\n");
+                    log_finish();
+                    return 1;
+                }
+            } else {
+                printf("Error: Unknown render option '%s'\n", argv[i]);
+                log_finish();
+                return 1;
+            }
+        }
+
+        // Validate required arguments
+        if (!html_file) {
+            printf("Error: render command requires an HTML input file\n");
+            printf("Usage: %s render <input.html> -o <output.svg>\n", argv[0]);
+            printf("Use '%s render --help' for more information\n", argv[0]);
+            log_finish();
+            return 1;
+        }
+
+        if (!output_file) {
+            printf("Error: render command requires an output file (-o option)\n");
+            printf("Usage: %s render <input.html> -o <output.svg>\n", argv[0]);
+            printf("Use '%s render --help' for more information\n", argv[0]);
+            log_finish();
+            return 1;
+        }
+
+        // Check if HTML file exists
+        if (access(html_file, F_OK) != 0) {
+            printf("Error: HTML file '%s' does not exist\n", html_file);
+            log_finish();
+            return 1;
+        }
+
+        log_debug("Rendering HTML '%s' to SVG '%s'", html_file, output_file);
+
+        // Call the SVG rendering function
+        int exit_code = render_html_to_svg(html_file, output_file);
+
+        log_debug("render completed with result: %d", exit_code);
+        log_finish();  // Cleanup logging before exit
+        return exit_code;
+    }
+
     // Handle run command
     log_debug("Checking for run command");
     if (argc >= 2 && strcmp(argv[1], "run") == 0) {
         log_debug("Entering run command handler");
-        
+
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
             printf("Lambda Script Runner v1.0\n\n");
@@ -630,11 +772,11 @@ int main(int argc, char *argv[]) {
             log_finish();  // Cleanup logging before exit
             return 0;
         }
-        
+
         // Parse run command arguments
         bool use_mir = false;
         char* script_file = NULL;
-        
+
         for (int i = 2; i < argc; i++) {
             if (strcmp(argv[i], "--mir") == 0) {
                 use_mir = true;
@@ -652,30 +794,30 @@ int main(int argc, char *argv[]) {
                 return 1;
             }
         }
-        
+
         if (!script_file) {
             printf("Error: run command requires a script file\n");
             printf("Usage: %s run [--mir] <script>\n", argv[0]);
             log_finish();
             return 1;
         }
-        
+
         // Check if script file exists
         if (access(script_file, F_OK) != 0) {
             printf("Error: Script file '%s' does not exist\n", script_file);
             log_finish();
             return 1;
         }
-        
+
         log_debug("Running script '%s' with run_main=true, use_mir=%s", script_file, use_mir ? "true" : "false");
-        
+
         // Execute script with run_main enabled
         run_script_file(&runtime, script_file, use_mir, false, true);  // true for run_main
-        
+
         log_finish();
         return 0;
     }
-    
+
     bool use_mir = false;
     bool transpile_only = false;
     bool help_only = false;
@@ -692,12 +834,12 @@ int main(int argc, char *argv[]) {
         }
         else if (strcmp(argv[i], "--transpile-only") == 0) {
             transpile_only = true;
-        } 
+        }
         else if (argv[i][0] != '-') {
             // This is a script file
             script_file = argv[i];
-            
-        } 
+
+        }
         else {
             // Unknown option
             printf("Error: Unknown option '%s'\n", argv[i]);
@@ -705,7 +847,7 @@ int main(int argc, char *argv[]) {
             ret_code = 1;
         }
     }
-    
+
     if (help_only) {
         print_help();
     }
@@ -721,7 +863,7 @@ int main(int argc, char *argv[]) {
         // start REPL mode by default (with or without MIR)
         run_repl(&runtime, use_mir);
     }
-    
+
     cleanup_utf8proc_support();
     log_finish();
     return ret_code;

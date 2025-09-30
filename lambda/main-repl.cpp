@@ -44,6 +44,8 @@ void print_help() {
     printf("  lambda run [--mir] <script.ls>      - Run script with main function execution\n");
     printf("  lambda validate <file> -s <schema.ls>  - Validate file against schema\n");
     printf("  lambda convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
+    printf("  lambda layout <file.html>    - Analyze HTML/CSS layout structure\n");
+    printf("  lambda render <input.html> -o <output.svg>  - Render HTML to SVG\n");
     printf("  lambda --help                - Show this help message\n");
     printf("\nScript Commands:\n");
     printf("  run [--mir] <script>         - Execute script with run_main enabled\n");
@@ -58,6 +60,10 @@ void print_help() {
     printf("\nConversion Commands:\n");
     printf("  convert <input> -f <from> -t <to> -o <output>  - Convert between formats\n");
     printf("  convert <input> -t <to> -o <output>           - Auto-detect input format\n");
+    printf("\nLayout Commands:\n");
+    printf("  layout <file.html>             - Analyze HTML/CSS layout and display view tree\n");
+    printf("\nRendering Commands:\n");
+    printf("  render <input.html> -o <output.svg>  - Layout HTML and render to SVG format\n");
 }
 
 // Function to determine the best REPL prompt based on system capabilities
@@ -71,7 +77,7 @@ const char* get_repl_prompt() {
     // Check if LANG/LC_ALL suggests UTF-8 support
     const char* lang = getenv("LANG");
     const char* lc_all = getenv("LC_ALL");
-    
+
     if ((lang && strstr(lang, "UTF-8")) || (lc_all && strstr(lc_all, "UTF-8"))) {
         return "λ> ";
     } else {
