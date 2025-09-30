@@ -319,6 +319,9 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
             result = value->u.percentage.num * lycon->font.style.font_size / 100;
         } else {
             // todo: handle % based on property
+            printf("DEBUG: Percentage calculation: %.2f%% of parent width %d = %.2f\n", 
+                   value->u.percentage.num, lycon->block.pa_block->width, 
+                   value->u.percentage.num * lycon->block.pa_block->width / 100);
             result = value->u.percentage.num * lycon->block.pa_block->width / 100;
         }
         break;
