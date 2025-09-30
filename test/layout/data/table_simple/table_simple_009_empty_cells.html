@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Table Simple: Empty Cells</title>
+    <style>
+        body { margin: 16px; }
+        .show-empty {
+            empty-cells: show;
+            border: 2px solid #000;
+            border-collapse: separate;
+            border-spacing: 4px;
+            margin-bottom: 20px;
+        }
+        .hide-empty {
+            empty-cells: hide;
+            border: 2px solid #000;
+            border-collapse: separate;
+            border-spacing: 4px;
+        }
+        td {
+            border: 1px solid #666;
+            padding: 0;
+            width: 60px;
+            height: 40px;
+        }
+        .cell-content {
+            width: 50px;
+            height: 30px;
+            margin: 0;
+        }
+        .red { background-color: #ff6666; }
+        .blue { background-color: #6666ff; }
+        .green { background-color: #66ff66; }
+        .yellow { background-color: #ffff66; }
+    </style>
+</head>
+<body>
+    <table class="show-empty">
+        <tr>
+            <td><div class="cell-content red"></div></td>
+            <td></td>
+            <td><div class="cell-content blue"></div></td>
+        </tr>
+        <tr>
+            <td></td>
+            <td><div class="cell-content green"></div></td>
+            <td></td>
+        </tr>
+    </table>
+
+    <table class="hide-empty">
+        <tr>
+            <td><div class="cell-content red"></div></td>
+            <td></td>
+            <td><div class="cell-content blue"></div></td>
+        </tr>
+        <tr>
+            <td></td>
+            <td><div class="cell-content green"></div></td>
+            <td></td>
+        </tr>
+    </table>
+</body>
+</html>

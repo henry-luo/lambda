@@ -415,6 +415,7 @@ help:
 	@echo "  test-layout              - Run Radiant layout integration tests (all categories)"
 	@echo "                             Usage: make test-layout SUITE=baseline (run specific suite)"
 	@echo "                             Usage: make test-layout TEST=table_simple (run specific test)"
+	@echo "                             Usage: make test-layout PATTERN=table_simple (run all matching tests)"
 	@echo "                             Available suites: auto-detected from test/layout/data/"
 	@echo "  capture-browser-layout   - Extract browser layout references using Puppeteer"
 	@echo "                             Usage: make capture-browser-layout (all categories, skip existing)"
@@ -1524,6 +1525,9 @@ test-layout:
 		if [ -n "$(TEST)" ]; then \
 			echo "🎯 Running single test: $(TEST)"; \
 			node test/layout/tools/test_layout.js --radiant-exe ./radiant.exe --test $(TEST) -v; \
+		elif [ -n "$(PATTERN)" ]; then \
+			echo "🔍 Running tests matching pattern: $(PATTERN)"; \
+			node test/layout/tools/test_layout.js --radiant-exe ./radiant.exe --pattern $(PATTERN) -v; \
 		elif [ -n "$(SUITE)" ]; then \
 			echo "📂 Running test suite: $(SUITE)"; \
 			node test/layout/tools/test_layout.js --radiant-exe ./radiant.exe --category $(SUITE) -v; \

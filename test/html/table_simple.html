@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Table Simple Test Cases</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        h2 {
+            margin-top: 0px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+        .test-case {
+            margin-bottom: 40px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            display: inline-block;
+            width: 400px;
+            vertical-align: top;
+            margin-right: 20px;
+        }
+        .container {
+            border: 2px solid #333;
+            margin-top: 20px;
+            position: relative;
+        }
+        .explanation {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #e9f7fe;
+            border-radius: 4px;
+        }
+        .intro {
+            background-color: #e8f4fd;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        .intro h2 {
+            margin-top: 0;
+            color: #2c5aa0;
+        }
+
+        /* Basic table test styles */
+        .basic-test table {
+            border: 2px solid #000;
+        }
+        .basic-test td {
+            border: 1px solid #666;
+            padding: 0;
+        }
+        .basic-test .cell-content {
+            width: 60px;
+            height: 40px;
+            margin: 0;
+        }
+        .basic-test .red { background-color: #ff6666; }
+        .basic-test .blue { background-color: #6666ff; }
+        .basic-test .green { background-color: #66ff66; }
+        .basic-test .yellow { background-color: #ffff66; }
+
+        /* Border collapse test styles */
+        .border-collapse-test table {
+            border-collapse: collapse;
+            border: 3px solid #000;
+        }
+        .border-collapse-test td {
+            border: 2px solid #666;
+            padding: 0;
+        }
+        .border-collapse-test .cell-content {
+            width: 50px;
+            height: 35px;
+            margin: 0;
+        }
+        .border-collapse-test .red { background-color: #ff6666; }
+        .border-collapse-test .blue { background-color: #6666ff; }
+        .border-collapse-test .green { background-color: #66ff66; }
+        .border-collapse-test .yellow { background-color: #ffff66; }
+
+        /* Border spacing test styles */
+        .border-spacing-test table {
+            border-collapse: separate;
+            border-spacing: 8px 12px;
+            border: 2px solid #000;
+            padding: 5px;
+        }
+        .border-spacing-test td {
+            border: 1px solid #666;
+            padding: 0;
+        }
+        .border-spacing-test .cell-content {
+            width: 45px;
+            height: 30px;
+            margin: 0;
+        }
+        .border-spacing-test .red { background-color: #ff6666; }
+        .border-spacing-test .blue { background-color: #6666ff; }
+        .border-spacing-test .green { background-color: #66ff66; }
+        .border-spacing-test .yellow { background-color: #ffff66; }
+        .border-spacing-test .orange { background-color: #ffaa66; }
+        .border-spacing-test .purple { background-color: #aa66ff; }
+
+        /* Fixed layout test styles */
+        .fixed-layout-test table {
+            table-layout: fixed;
+            width: 300px;
+            border: 2px solid #000;
+            border-collapse: collapse;
+        }
+        .fixed-layout-test td {
+            border: 1px solid #666;
+            padding: 0;
+        }
+        .fixed-layout-test .narrow { width: 60px; }
+        .fixed-layout-test .medium { width: 120px; }
+        .fixed-layout-test .wide { width: 120px; }
+        .fixed-layout-test .cell-content {
+            height: 40px;
+            margin: 0;
+        }
+        .fixed-layout-test .red { background-color: #ff6666; }
+        .fixed-layout-test .blue { background-color: #6666ff; }
+        .fixed-layout-test .green { background-color: #66ff66; }
+        .fixed-layout-test .yellow { background-color: #ffff66; }
+        .fixed-layout-test .orange { background-color: #ffaa66; }
+        .fixed-layout-test .purple { background-color: #aa66ff; }
+
+        /* Colspan test styles */
+        .colspan-test table {
+            border: 2px solid #000;
+            border-collapse: collapse;
+        }
+        .colspan-test td {
+            border: 1px solid #666;
+            padding: 0;
+        }
+        .colspan-test .cell-content {
+            height: 35px;
+            margin: 0;
+        }
+        .colspan-test .wide-content {
+            width: 120px;
+            height: 35px;
+            margin: 0;
+        }
+        .colspan-test .narrow-content {
+            width: 55px;
+            height: 35px;
+            margin: 0;
+        }
+        .colspan-test .red { background-color: #ff6666; }
+        .colspan-test .blue { background-color: #6666ff; }
+        .colspan-test .green { background-color: #66ff66; }
+        .colspan-test .yellow { background-color: #ffff66; }
+        .colspan-test .orange { background-color: #ffaa66; }
+
+        /* Rowspan test styles */
+        .rowspan-test table {
+            border: 2px solid #000;
+            border-collapse: collapse;
+        }
+        .rowspan-test td {
+            border: 1px solid #666;
+            padding: 0;
+        }
+        .rowspan-test .cell-content {
+            width: 50px;
+            height: 30px;
+            margin: 0;
+        }
+        .rowspan-test .tall-content {
+            width: 50px;
+            height: 65px;
+            margin: 0;
+        }
+        .rowspan-test .red { background-color: #ff6666; }
+        .rowspan-test .blue { background-color: #6666ff; }
+        .rowspan-test .green { background-color: #66ff66; }
+        .rowspan-test .yellow { background-color: #ffff66; }
+        .rowspan-test .orange { background-color: #ffaa66; }
+        .rowspan-test .purple { background-color: #aa66ff; }
+
+        /* Percentage width test styles */
+        .percentage-width-test table {
+            width: 400px;
+            border: 2px solid #000;
+            border-collapse: collapse;
+        }
+        .percentage-width-test td {
+            border: 1px solid #666;
+            padding: 0;
+        }
+        .percentage-width-test .col1 { width: 25%; }
+        .percentage-width-test .col2 { width: 50%; }
+        .percentage-width-test .col3 { width: 25%; }
+        .percentage-width-test .cell-content {
+            height: 40px;
+            margin: 0;
+        }
+        .percentage-width-test .red { background-color: #ff6666; }
+        .percentage-width-test .blue { background-color: #6666ff; }
+        .percentage-width-test .green { background-color: #66ff66; }
+        .percentage-width-test .yellow { background-color: #ffff66; }
+        .percentage-width-test .orange { background-color: #ffaa66; }
+        .percentage-width-test .purple { background-color: #aa66ff; }
+
+        /* Vertical alignment test styles */
+        .vertical-align-test table {
+            border: 2px solid #000;
+            border-collapse: collapse;
+        }
+        .vertical-align-test td {
+            border: 1px solid #666;
+            padding: 0;
+            height: 80px;
+            width: 60px;
+        }
+        .vertical-align-test .top { vertical-align: top; }
+        .vertical-align-test .middle { vertical-align: middle; }
+        .vertical-align-test .bottom { vertical-align: bottom; }
+        .vertical-align-test .cell-content {
+            width: 50px;
+            height: 20px;
+            margin: 0;
+        }
+        .vertical-align-test .red { background-color: #ff6666; }
+        .vertical-align-test .blue { background-color: #6666ff; }
+        .vertical-align-test .green { background-color: #66ff66; }
+        .vertical-align-test .yellow { background-color: #ffff66; }
+        .vertical-align-test .orange { background-color: #ffaa66; }
+        .vertical-align-test .purple { background-color: #aa66ff; }
+
+        /* Empty cells test styles */
+        .empty-cells-test .show-empty {
+            empty-cells: show;
+            border: 2px solid #000;
+            border-collapse: separate;
+            border-spacing: 4px;
+            margin-bottom: 20px;
+        }
+        .empty-cells-test .hide-empty {
+            empty-cells: hide;
+            border: 2px solid #000;
+            border-collapse: separate;
+            border-spacing: 4px;
+        }
+        .empty-cells-test td {
+            border: 1px solid #666;
+            padding: 0;
+            width: 60px;
+            height: 40px;
+        }
+        .empty-cells-test .cell-content {
+            width: 50px;
+            height: 30px;
+            margin: 0;
+        }
+        .empty-cells-test .red { background-color: #ff6666; }
+        .empty-cells-test .blue { background-color: #6666ff; }
+        .empty-cells-test .green { background-color: #66ff66; }
+        .empty-cells-test .yellow { background-color: #ffff66; }
+    </style>
+</head>
+<body>
+    <h1>Table Simple Test Cases</h1>
+
+    <div class="intro">
+        <h2>About This Test Suite</h2>
+        <p>This collection contains simplified HTML table tests focused purely on table layout mechanics.
+        All tests avoid text content and instead use colored div and span elements to isolate
+        table layout behavior from text rendering concerns. Each test demonstrates a specific
+        table feature or property.</p>
+    </div>
+
+    <div class="test-case basic-test">
+        <h2>001 - Basic Table Structure</h2>
+        <div class="explanation">A simple 2x2 table with colored div blocks demonstrating basic table cell layout.</div>
+        <div class="container">
+            <table>
+                <tr>
+                    <td><div class="cell-content red"></div></td>
+                    <td><div class="cell-content blue"></div></td>
+                </tr>
+                <tr>
+                    <td><div class="cell-content green"></div></td>
+                    <td><div class="cell-content yellow"></div></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case border-collapse-test">
+        <h2>002 - Border Collapse</h2>
+        <div class="explanation">Tests the border-collapse property with adjacent cell borders merging into a single border.</div>
+        <div class="container">
+            <table>
+                <tr>
+                    <td><div class="cell-content red"></div></td>
+                    <td><div class="cell-content blue"></div></td>
+                    <td><div class="cell-content green"></div></td>
+                </tr>
+                <tr>
+                    <td><div class="cell-content yellow"></div></td>
+                    <td><div class="cell-content red"></div></td>
+                    <td><div class="cell-content blue"></div></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case border-spacing-test">
+        <h2>003 - Border Spacing</h2>
+        <div class="explanation">Demonstrates the border-spacing property with separate cell borders and custom spacing.</div>
+        <div class="container">
+            <table>
+                <tr>
+                    <td><div class="cell-content red"></div></td>
+                    <td><div class="cell-content blue"></div></td>
+                    <td><div class="cell-content green"></div></td>
+                </tr>
+                <tr>
+                    <td><div class="cell-content yellow"></div></td>
+                    <td><div class="cell-content orange"></div></td>
+                    <td><div class="cell-content purple"></div></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case fixed-layout-test">
+        <h2>004 - Fixed Layout</h2>
+        <div class="explanation">Tests table-layout: fixed with predefined column widths that don't adjust to content.</div>
+        <div class="container">
+            <table>
+                <tr>
+                    <td class="narrow"><div class="cell-content red"></div></td>
+                    <td class="medium"><div class="cell-content blue"></div></td>
+                    <td class="wide"><div class="cell-content green"></div></td>
+                </tr>
+                <tr>
+                    <td><div class="cell-content yellow"></div></td>
+                    <td><div class="cell-content orange"></div></td>
+                    <td><div class="cell-content purple"></div></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case colspan-test">
+        <h2>005 - Colspan</h2>
+        <div class="explanation">Demonstrates the colspan attribute with cells spanning multiple columns using span elements.</div>
+        <div class="container">
+            <table>
+                <tr>
+                    <td colspan="2"><span class="wide-content red"></span></td>
+                    <td><div class="narrow-content blue"></div></td>
+                </tr>
+                <tr>
+                    <td><div class="narrow-content green"></div></td>
+                    <td><div class="narrow-content yellow"></div></td>
+                    <td><div class="narrow-content orange"></div></td>
+                </tr>
+                <tr>
+                    <td><div class="narrow-content blue"></div></td>
+                    <td colspan="2"><span class="wide-content green"></span></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case rowspan-test">
+        <h2>006 - Rowspan</h2>
+        <div class="explanation">Tests the rowspan attribute with cells spanning multiple rows using sized div elements.</div>
+        <div class="container">
+            <table>
+                <tr>
+                    <td rowspan="2"><div class="tall-content red"></div></td>
+                    <td><div class="cell-content blue"></div></td>
+                    <td><div class="cell-content green"></div></td>
+                </tr>
+                <tr>
+                    <td><div class="cell-content yellow"></div></td>
+                    <td><div class="cell-content orange"></div></td>
+                </tr>
+                <tr>
+                    <td><div class="cell-content purple"></div></td>
+                    <td rowspan="2"><div class="tall-content blue"></div></td>
+                    <td><div class="cell-content red"></div></td>
+                </tr>
+                <tr>
+                    <td><div class="cell-content green"></div></td>
+                    <td><div class="cell-content yellow"></div></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case percentage-width-test">
+        <h2>007 - Percentage Width</h2>
+        <div class="explanation">Tests percentage-based column widths within a fixed-width table container.</div>
+        <div class="container">
+            <table>
+                <tr>
+                    <td class="col1"><div class="cell-content red"></div></td>
+                    <td class="col2"><div class="cell-content blue"></div></td>
+                    <td class="col3"><div class="cell-content green"></div></td>
+                </tr>
+                <tr>
+                    <td><div class="cell-content yellow"></div></td>
+                    <td><div class="cell-content orange"></div></td>
+                    <td><div class="cell-content purple"></div></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case vertical-align-test">
+        <h2>008 - Vertical Alignment</h2>
+        <div class="explanation">Demonstrates vertical-align property behavior (top, middle, bottom) in table cells.</div>
+        <div class="container">
+            <table>
+                <tr>
+                    <td class="top"><div class="cell-content red"></div></td>
+                    <td class="middle"><div class="cell-content blue"></div></td>
+                    <td class="bottom"><div class="cell-content green"></div></td>
+                </tr>
+                <tr>
+                    <td class="bottom"><div class="cell-content yellow"></div></td>
+                    <td class="top"><div class="cell-content orange"></div></td>
+                    <td class="middle"><div class="cell-content purple"></div></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+    <div class="test-case empty-cells-test">
+        <h2>009 - Empty Cells</h2>
+        <div class="explanation">Tests the empty-cells property showing the difference between 'show' and 'hide' values.</div>
+        <div class="container">
+            <table class="show-empty">
+                <tr>
+                    <td><div class="cell-content red"></div></td>
+                    <td></td>
+                    <td><div class="cell-content blue"></div></td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td><div class="cell-content green"></div></td>
+                    <td></td>
+                </tr>
+            </table>
+
+            <table class="hide-empty">
+                <tr>
+                    <td><div class="cell-content red"></div></td>
+                    <td></td>
+                    <td><div class="cell-content blue"></div></td>
+                </tr>
+                <tr>
+                    <td></td>
+                    <td><div class="cell-content green"></div></td>
+                    <td></td>
+                </tr>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

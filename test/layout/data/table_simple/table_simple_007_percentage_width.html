@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Table Simple: Percentage Width</title>
+    <style>
+        body { margin: 16px; }
+        table {
+            width: 400px;
+            border: 2px solid #000;
+            border-collapse: collapse;
+        }
+        td {
+            border: 1px solid #666;
+            padding: 0;
+        }
+        .col1 { width: 25%; }
+        .col2 { width: 50%; }
+        .col3 { width: 25%; }
+
+        .cell-content {
+            height: 40px;
+            margin: 0;
+        }
+        .red { background-color: #ff6666; }
+        .blue { background-color: #6666ff; }
+        .green { background-color: #66ff66; }
+        .yellow { background-color: #ffff66; }
+        .orange { background-color: #ffaa66; }
+        .purple { background-color: #aa66ff; }
+    </style>
+</head>
+<body>
+    <table>
+        <tr>
+            <td class="col1"><div class="cell-content red"></div></td>
+            <td class="col2"><div class="cell-content blue"></div></td>
+            <td class="col3"><div class="cell-content green"></div></td>
+        </tr>
+        <tr>
+            <td><div class="cell-content yellow"></div></td>
+            <td><div class="cell-content orange"></div></td>
+            <td><div class="cell-content purple"></div></td>
+        </tr>
+    </table>
+</body>
+</html>

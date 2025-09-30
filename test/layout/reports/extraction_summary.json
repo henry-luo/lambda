@@ -1,7 +1,7 @@
 {
-  "total_files": 159,
-  "generated": 15,
-  "skipped": 144,
+  "total_files": 168,
+  "generated": 9,
+  "skipped": 159,
   "failed": 0,
   "success_rate": 100,
   "browser_info": {
@@ -187,6 +187,38 @@
       "success": true,
       "was_skipped": true,
       "element_count": 14,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "flex_001_basic_layout.html",
+      "success": true,
+      "was_skipped": true,
+      "element_count": 12,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "flex_001_row_space_between.html",
+      "success": true,
+      "was_skipped": true,
+      "element_count": 8,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "flex_004_column_direction.html",
+      "success": true,
+      "was_skipped": true,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "flex_010_wrap_reverse.html",
+      "success": true,
+      "was_skipped": true,
+      "element_count": 12,
       "error": null
     },
     {
@@ -391,22 +423,6 @@
     },
     {
       "category": "flex",
-      "file": "flex_001_basic_layout.html",
-      "success": true,
-      "was_skipped": true,
-      "element_count": 12,
-      "error": null
-    },
-    {
-      "category": "flex",
-      "file": "flex_001_row_space_between.html",
-      "success": true,
-      "was_skipped": true,
-      "element_count": 8,
-      "error": null
-    },
-    {
-      "category": "flex",
       "file": "flex_002_wrap.html",
       "success": true,
       "was_skipped": true,
@@ -416,14 +432,6 @@
     {
       "category": "flex",
       "file": "flex_003_align_items.html",
-      "success": true,
-      "was_skipped": true,
-      "element_count": 11,
-      "error": null
-    },
-    {
-      "category": "flex",
-      "file": "flex_004_column_direction.html",
       "success": true,
       "was_skipped": true,
       "element_count": 11,
@@ -467,14 +475,6 @@
       "success": true,
       "was_skipped": true,
       "element_count": 10,
-      "error": null
-    },
-    {
-      "category": "flex",
-      "file": "flex_010_wrap_reverse.html",
-      "success": true,
-      "was_skipped": true,
-      "element_count": 12,
       "error": null
     },
     {
@@ -697,7 +697,7 @@
       "category": "position",
       "file": "position_001_float_left.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 11,
       "error": null
     },
@@ -705,7 +705,7 @@
       "category": "position",
       "file": "position_002_float_right.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 11,
       "error": null
     },
@@ -713,7 +713,7 @@
       "category": "position",
       "file": "position_003_float_both.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 12,
       "error": null
     },
@@ -721,7 +721,7 @@
       "category": "position",
       "file": "position_004_clear_left.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 13,
       "error": null
     },
@@ -729,7 +729,7 @@
       "category": "position",
       "file": "position_005_clear_right.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 13,
       "error": null
     },
@@ -737,7 +737,7 @@
       "category": "position",
       "file": "position_006_clear_both.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 13,
       "error": null
     },
@@ -745,7 +745,7 @@
       "category": "position",
       "file": "position_007_absolute_basic.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 12,
       "error": null
     },
@@ -753,7 +753,7 @@
       "category": "position",
       "file": "position_008_absolute_corners.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 14,
       "error": null
     },
@@ -761,7 +761,7 @@
       "category": "position",
       "file": "position_009_absolute_zindex.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 13,
       "error": null
     },
@@ -769,7 +769,7 @@
       "category": "position",
       "file": "position_010_relative_basic.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 12,
       "error": null
     },
@@ -777,7 +777,7 @@
       "category": "position",
       "file": "position_011_relative_offsets.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 13,
       "error": null
     },
@@ -785,7 +785,7 @@
       "category": "position",
       "file": "position_012_relative_containing_block.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 12,
       "error": null
     },
@@ -793,7 +793,7 @@
       "category": "position",
       "file": "position_013_float_relative_combo.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 12,
       "error": null
     },
@@ -801,7 +801,7 @@
       "category": "position",
       "file": "position_014_nested_complex.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 13,
       "error": null
     },
@@ -809,7 +809,7 @@
       "category": "position",
       "file": "position_015_all_types_combined.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 15,
       "error": null
     },
@@ -1171,6 +1171,78 @@
       "success": true,
       "was_skipped": true,
       "element_count": 54,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_001_basic.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 18,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_002_border_collapse.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 22,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_003_border_spacing.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 22,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_004_fixed_layout.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 22,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_005_colspan.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 25,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_006_rowspan.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 32,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_007_percentage_width.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 22,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_008_vertical_align.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 22,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_009_empty_cells.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 32,
       "error": null
     },
     {

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Table Simple: Rowspan</title>
+    <style>
+        body { margin: 16px; }
+        table {
+            border: 2px solid #000;
+            border-collapse: collapse;
+        }
+        td {
+            border: 1px solid #666;
+            padding: 0;
+        }
+        .cell-content {
+            width: 50px;
+            height: 30px;
+            margin: 0;
+        }
+        .tall-content {
+            width: 50px;
+            height: 65px;
+            margin: 0;
+        }
+        .red { background-color: #ff6666; }
+        .blue { background-color: #6666ff; }
+        .green { background-color: #66ff66; }
+        .yellow { background-color: #ffff66; }
+        .orange { background-color: #ffaa66; }
+        .purple { background-color: #aa66ff; }
+    </style>
+</head>
+<body>
+    <table>
+        <tr>
+            <td rowspan="2"><div class="tall-content red"></div></td>
+            <td><div class="cell-content blue"></div></td>
+            <td><div class="cell-content green"></div></td>
+        </tr>
+        <tr>
+            <td><div class="cell-content yellow"></div></td>
+            <td><div class="cell-content orange"></div></td>
+        </tr>
+        <tr>
+            <td><div class="cell-content purple"></div></td>
+            <td rowspan="2"><div class="tall-content blue"></div></td>
+            <td><div class="cell-content red"></div></td>
+        </tr>
+        <tr>
+            <td><div class="cell-content green"></div></td>
+            <td><div class="cell-content yellow"></div></td>
+        </tr>
+    </table>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Table Simple: Border Collapse</title>
+    <style>
+        body { margin: 16px; }
+        table {
+            border-collapse: collapse;
+            border: 3px solid #000;
+        }
+        td {
+            border: 2px solid #666;
+            padding: 0;
+        }
+        .cell-content {
+            width: 50px;
+            height: 35px;
+            margin: 0;
+        }
+        .red { background-color: #ff6666; }
+        .blue { background-color: #6666ff; }
+        .green { background-color: #66ff66; }
+        .yellow { background-color: #ffff66; }
+    </style>
+</head>
+<body>
+    <table>
+        <tr>
+            <td><div class="cell-content red"></div></td>
+            <td><div class="cell-content blue"></div></td>
+            <td><div class="cell-content green"></div></td>
+        </tr>
+        <tr>
+            <td><div class="cell-content yellow"></div></td>
+            <td><div class="cell-content red"></div></td>
+            <td><div class="cell-content blue"></div></td>
+        </tr>
+    </table>
+</body>
+</html>
