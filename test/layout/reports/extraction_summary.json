@@ -1,7 +1,7 @@
 {
-  "total_files": 168,
-  "generated": 9,
-  "skipped": 159,
+  "total_files": 216,
+  "generated": 48,
+  "skipped": 168,
   "failed": 0,
   "success_rate": 100,
   "browser_info": {
@@ -187,6 +187,166 @@
       "success": true,
       "was_skipped": true,
       "element_count": 14,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_801_display_block.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 12,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_802_display_inline.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_803_basic_margin.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 9,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_804_basic_padding.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 9,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_805_width_height.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 9,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_806_float_left.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_807_position_absolute.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_808_position_relative.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_809_text_align.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 14,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_810_overflow.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 14,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_811_basic_border.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_812_background_color.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 12,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_813_float_right.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 11,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_814_clear_float.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 12,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_815_font_size.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 13,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_816_line_height.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 12,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_817_vertical_align.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 14,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_818_white_space.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 16,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_819_visibility.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 13,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_820_inline_block.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 13,
       "error": null
     },
     {
@@ -419,6 +579,230 @@
       "success": true,
       "was_skipped": true,
       "element_count": 40,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-1.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 148,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-10.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 10704,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-11.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 1397,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-12.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 5603,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-13.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 1007,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-14.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 9187,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-15.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 3688,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-16.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 5555,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-17.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 8942,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-18.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 3334,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-2.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 55,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-3.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 58,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-4.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 4011,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-5.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 6496,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-6.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 1203,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-7.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 240,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-8.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 20641,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-9.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 10870,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-A.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 104,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-B.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 29,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-C.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 19,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-D.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 19,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-E.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 168,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-F.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 19,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-G.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 43,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "chapter-I.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 19,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "reftest-toc.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 3218,
+      "error": null
+    },
+    {
+      "category": "css2.1",
+      "file": "toc.html",
+      "success": true,
+      "was_skipped": false,
+      "element_count": 142,
       "error": null
     },
     {
@@ -1177,7 +1561,7 @@
       "category": "table_simple",
       "file": "table_simple_001_basic.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 18,
       "error": null
     },
@@ -1185,7 +1569,7 @@
       "category": "table_simple",
       "file": "table_simple_002_border_collapse.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 22,
       "error": null
     },
@@ -1193,7 +1577,7 @@
       "category": "table_simple",
       "file": "table_simple_003_border_spacing.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 22,
       "error": null
     },
@@ -1201,7 +1585,7 @@
       "category": "table_simple",
       "file": "table_simple_004_fixed_layout.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 22,
       "error": null
     },
@@ -1209,7 +1593,7 @@
       "category": "table_simple",
       "file": "table_simple_005_colspan.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 25,
       "error": null
     },
@@ -1217,7 +1601,7 @@
       "category": "table_simple",
       "file": "table_simple_006_rowspan.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 32,
       "error": null
     },
@@ -1225,7 +1609,7 @@
       "category": "table_simple",
       "file": "table_simple_007_percentage_width.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 22,
       "error": null
     },
@@ -1233,7 +1617,7 @@
       "category": "table_simple",
       "file": "table_simple_008_vertical_align.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 22,
       "error": null
     },
@@ -1241,7 +1625,7 @@
       "category": "table_simple",
       "file": "table_simple_009_empty_cells.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "element_count": 32,
       "error": null
     },
