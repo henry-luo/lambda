@@ -268,8 +268,17 @@ static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPoo
         else if (strcmp(cmd_name, "item") == 0) {
             process_item(html_buf, elem, pool, depth);
         }
+        else if (strcmp(cmd_name, "itemize") == 0) {
+            printf("DEBUG: Processing itemize environment directly\n");
+            process_itemize(html_buf, elem, pool, depth);
+        }
+        else if (strcmp(cmd_name, "enumerate") == 0) {
+            printf("DEBUG: Processing enumerate environment directly\n");
+            process_enumerate(html_buf, elem, pool, depth);
+        }
         else {
             // Generic element - process children
+            printf("DEBUG: Processing generic element: %s\n", cmd_name);
             process_element_content(html_buf, elem, pool, depth);
         }
     }
@@ -524,8 +533,8 @@ static void process_itemize(StringBuf* html_buf, Element* elem, VariableMemPool*
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<ul class=\"latex-itemize\">\n");
 
-    // Process items
-    process_element_content(html_buf, elem, pool, depth + 1);
+    // Process items without paragraph wrapping
+    process_element_content_simple(html_buf, elem, pool, depth + 1);
 
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "</ul>\n");
@@ -536,8 +545,8 @@ static void process_enumerate(StringBuf* html_buf, Element* elem, VariableMemPoo
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<ol class=\"latex-enumerate\">\n");
 
-    // Process items
-    process_element_content(html_buf, elem, pool, depth + 1);
+    // Process items without paragraph wrapping
+    process_element_content_simple(html_buf, elem, pool, depth + 1);
 
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "</ol>\n");
@@ -590,9 +599,9 @@ static void process_text_command(StringBuf* html_buf, Element* elem, VariableMem
 // Process item command
 static void process_item(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
     append_indent(html_buf, depth);
-    stringbuf_append_str(html_buf, "<li class=\"latex-item\">");
+    stringbuf_append_str(html_buf, "<li>");
 
-    process_element_content(html_buf, elem, pool, depth);
+    process_element_content_simple(html_buf, elem, pool, depth);
 
     stringbuf_append_str(html_buf, "</li>\n");
 }
