@@ -1,0 +1,146 @@
+** itemize environment
+.
+\begin{itemize}
+\item First item
+\item Second item
+\item Third item
+\end{itemize}
+.
+<div class="latex-document">
+<ul class="latex-itemize">
+<li>First item</li>
+<li>Second item</li>
+<li>Third item</li>
+</ul>
+</div>
+.
+
+
+** enumerate environment
+.
+\begin{enumerate}
+\item First numbered item
+\item Second numbered item
+\item Third numbered item
+\end{enumerate}
+.
+<div class="latex-document">
+<ol class="latex-enumerate">
+<li>First numbered item</li>
+<li>Second numbered item</li>
+<li>Third numbered item</li>
+</ol>
+</div>
+.
+
+
+** nested lists
+.
+\begin{itemize}
+\item First level item
+\begin{itemize}
+\item Second level item
+\item Another second level item
+\end{itemize}
+\item Back to first level
+\end{itemize}
+.
+<div class="latex-document">
+<ul class="latex-itemize">
+<li>First level item
+<ul class="latex-itemize">
+<li>Second level item</li>
+<li>Another second level item</li>
+</ul>
+</li>
+<li>Back to first level</li>
+</ul>
+</div>
+.
+
+
+** quote environment
+.
+This is regular text.
+
+\begin{quote}
+This is a quoted paragraph that should be indented and styled differently from regular text.
+\end{quote}
+
+Back to regular text.
+.
+<div class="latex-document">
+<p>This is regular text.</p>
+<div class="latex-quote">
+<p>This is a quoted paragraph that should be indented and styled differently from regular text.</p>
+</div>
+<p>Back to regular text.</p>
+</div>
+.
+
+
+** verbatim environment
+.
+Here is some code:
+
+\begin{verbatim}
+def hello_world():
+    print("Hello, World!")
+    return True
+\end{verbatim}
+
+That was the code.
+.
+<div class="latex-document">
+<p>Here is some code:</p>
+<pre class="latex-verbatim">def hello_world():
+    print("Hello, World!")
+    return True</pre>
+<p>That was the code.</p>
+</div>
+.
+
+
+** center environment
+.
+\begin{center}
+This text is centered.
+
+This paragraph is also centered.
+\end{center}
+.
+<div class="latex-document">
+<div class="latex-center">
+<p>This text is centered.</p>
+<p>This paragraph is also centered.</p>
+</div>
+</div>
+.
+
+
+** mixed environments
+.
+\section{Lists and Quotes}
+
+\begin{itemize}
+\item First item
+\item Second item with a quote:
+\begin{quote}
+This is a quoted text within a list item.
+\end{quote}
+\item Third item
+\end{itemize}
+.
+<div class="latex-document">
+<div class="latex-section">Lists and Quotes</div>
+<ul class="latex-itemize">
+<li>First item</li>
+<li>Second item with a quote:
+<div class="latex-quote">
+<p>This is a quoted text within a list item.</p>
+</div>
+</li>
+<li>Third item</li>
+</ul>
+</div>
+.
