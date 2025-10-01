@@ -107,8 +107,11 @@ bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
         new_str->ref_cnt = 0;
         new_str->chars[0] = '\0';
     } else {
-        // Realloc existing buffer
-        new_str = (String*)pool_variable_realloc(sb->pool, sb->str, sb->capacity, new_capacity);
+        // Realloc existing buffer - copy String header + actual string data
+        size_t string_header_size = sizeof(String);
+        size_t data_to_copy = string_header_size + sb->length + 1; // +1 for null terminator
+
+        new_str = (String*)pool_variable_realloc(sb->pool, sb->str, data_to_copy, new_capacity);
         if (!new_str) {
             return false;
         }
