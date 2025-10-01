@@ -22,6 +22,7 @@ extern "C" {
     char *strncpy(char *dest, const char *src, size_t n);
     char *strdup(const char *s);
     char *strstr(const char *target, const char *source);
+    char *strrchr(const char *s, int c);
     char *strtok(char *str, const char *delim);
 #ifdef __cplusplus
 }
@@ -44,6 +45,7 @@ extern "C" {
 #include "../lib/arraylist.h"
 #include "../lib/utf.h"
 #include "../lib/file.h"
+#include "../lambda/lambda.h"
 #ifdef __cplusplus
 }
 #endif
@@ -70,6 +72,8 @@ typedef struct DomNode {
     union {
         lxb_dom_node_t* lxb_node;  // base node
         lxb_html_element_t *lxb_elmt;
+        Element* mark_element;     // Lambda mark element
+        String* mark_text;         // Lambda mark text/string
     };
     struct Style* style;  // associated style
     DomNode* parent;
@@ -84,6 +88,12 @@ typedef struct DomNode {
         else if (type == LEXBOR_NODE && lxb_node) {
             return (char*)"#text";
         }
+        else if (type == MARK_ELEMENT && mark_element) {
+            return (char*)"#mark-element";
+        }
+        else if (type == MARK_TEXT && mark_text) {
+            return (char*)"#mark-text";
+        }
         return (char*)"#null";
     }
     uintptr_t tag() {
@@ -94,10 +104,11 @@ typedef struct DomNode {
     }
 
     bool is_element() {
-        return (type == LEXBOR_ELEMENT);
+        return (type == LEXBOR_ELEMENT || type == MARK_ELEMENT);
     }
 
     bool is_text() {
+        if (type == MARK_TEXT) return true;
         if (type != LEXBOR_NODE) return false;
 
         // Use Lexbor API to distinguish between text nodes and comment nodes
@@ -110,24 +121,19 @@ typedef struct DomNode {
     }
 
     // Text node data access
-    unsigned char* text_data() {
-        if (is_text()) {
-            lxb_dom_text_t* text = lxb_dom_interface_text(lxb_node);
-            return text ? text->char_data.data.data : nullptr;
-        }
-        return nullptr;
-    }
+    unsigned char* text_data();
 
     // Element attribute access
-    const lxb_char_t* get_attribute(const char* attr_name, size_t* value_len = nullptr) {
-        if (type == LEXBOR_ELEMENT && lxb_elmt) {
-            size_t len;
-            if (!value_len) value_len = &len;
-            return lxb_dom_element_get_attribute((lxb_dom_element_t*)lxb_elmt,
-                (lxb_char_t*)attr_name, strlen(attr_name), value_len);
-        }
-        return nullptr;
-    }
+    const lxb_char_t* get_attribute(const char* attr_name, size_t* value_len = nullptr);
+
+    // Mark-specific methods
+    char* mark_text_data();
+    Item mark_get_attribute(const char* attr_name);
+    Item mark_get_content();
+
+    // Mark node constructors
+    static DomNode* create_mark_element(Element* element);
+    static DomNode* create_mark_text(String* text);
 
     // Access to underlying lexbor objects for transition period
     lxb_html_element_t* as_element() {
@@ -137,56 +143,8 @@ typedef struct DomNode {
     lxb_dom_node_t* as_node() {
         return lxb_node;
     }
-    DomNode* first_child() {
-        if (child) {
-            printf("Found cached child %p for node %p\n", child, this);
-            return child;
-        }
-        printf("Looking for first child of node %p (type %d)\n", this, type);
-        if (type == LEXBOR_ELEMENT && lxb_elmt) {
-            lxb_dom_node_t* chd = lxb_dom_node_first_child(lxb_dom_interface_node(lxb_elmt));
-            if (chd) {
-                DomNode* dn = (DomNode*)calloc(1, sizeof(DomNode));
-                if (chd->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-                    dn->type = LEXBOR_ELEMENT;
-                    dn->lxb_elmt = (lxb_html_element_t*)chd;
-                } else {
-                    dn->type = LEXBOR_NODE;
-                    dn->lxb_node = chd;
-                }
-                this->child = dn;  dn->parent = this;
-                printf("Created new child %p for node %p\n", dn, this);
-                return dn;
-            }
-        }
-        return NULL;
-    }
-    DomNode* next_sibling() {
-        if (next) { return next; }
-        lxb_dom_node_t* current_node = nullptr;
-        if (type == LEXBOR_ELEMENT && lxb_elmt) {
-            current_node = lxb_dom_interface_node(lxb_elmt);
-        } else if (type == LEXBOR_NODE && lxb_node) {
-            current_node = lxb_node;
-        }
-
-        if (current_node) {
-            lxb_dom_node_t* nxt = lxb_dom_node_next(current_node);
-            if (nxt) {
-                DomNode* dn = (DomNode*)calloc(1, sizeof(DomNode));
-                if (nxt->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-                    dn->type = LEXBOR_ELEMENT;
-                    dn->lxb_elmt = (lxb_html_element_t*)nxt;
-                } else {
-                    dn->type = LEXBOR_NODE;
-                    dn->lxb_node = nxt;
-                }
-                this->next = dn;  dn->parent = this->parent;
-                return dn;
-            }
-        }
-        return NULL;
-    }
+    DomNode* first_child();
+    DomNode* next_sibling();
 } DomNode;
 
 typedef struct {
