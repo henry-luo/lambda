@@ -53,7 +53,12 @@ String* create_input_string(Input* input, const char* text, int start, int len) 
 
 String* input_create_string(Input *input, const char* text) {
     if (!text) return NULL;
-    return create_input_string(input, text, 0, strlen(text));
+    
+    // Add safety check for valid string pointer
+    size_t len = strlen(text);
+    if (len == 0) return &EMPTY_STRING;
+    
+    return create_input_string(input, text, 0, len);
 }
 
 ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
