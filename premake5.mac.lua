@@ -1233,124 +1233,7 @@ project "test_cmdedit_gtest"
     filter {}
     
 
-project "test_basic_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_basic_gtest.cpp",
-    }
-    
-    includedirs {
-        ".",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lib/mem-pool/include",
-        "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
-        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
-        "/opt/homebrew/include/fontconfig",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/libpng16",
-        "mac-deps/curl-8.10.1/include",
-        "/usr/local/include",
-        "/opt/homebrew/include/openssl",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "gtest",
-        "gtest_main",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libgtest.a",
-        "/opt/homebrew/lib/libgtest_main.a",
-    }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-    }
-    
-    -- AddressSanitizer for test projects only
-    filter { "configurations:Debug", "not platforms:Linux_x64" }
-        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
-        linkoptions { "-fsanitize=address" }
-    
-    filter {}
-    
-
-project "test_mempool_simple_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_mempool_simple_gtest.cpp",
-        "lib/mempool.c",
-    }
-    
-    includedirs {
-        ".",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lib/mem-pool/include",
-        "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
-        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
-        "/opt/homebrew/include/fontconfig",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/libpng16",
-        "mac-deps/curl-8.10.1/include",
-        "/usr/local/include",
-        "/opt/homebrew/include/openssl",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "gtest",
-        "gtest_main",
-        "jemalloc",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libgtest.a",
-        "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
-    }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-    }
-    
-    -- AddressSanitizer for test projects only
-    filter { "configurations:Debug", "not platforms:Linux_x64" }
-        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
-        linkoptions { "-fsanitize=address" }
-    
-    filter {}
-    
-
-project "test_mempool_standalone"
+project "test_mempool"
     kind "ConsoleApp"
     language "C"
     targetdir "test"
@@ -1358,7 +1241,7 @@ project "test_mempool_standalone"
     targetextension ".exe"
     
     files {
-        "test/test_mempool_standalone.c",
+        "test/test_mempool.c",
         "lib/mempool.c",
     }
     
