@@ -2753,6 +2753,104 @@ project "test_jsx_roundtrip_gtest"
     }
     
 
+project "test_latex_html_fixtures_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/latex/test_latex_html_fixtures.cpp",
+        "test/latex/fixture_loader.cpp",
+        "test/latex/html_comparison.cpp",
+        "lambda/input/input-latex.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lib/mem-pool/include",
+        "lexbor/source",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/opt/homebrew/include/openssl",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "lambda-input-full-cpp",
+        "lambda-input-full-c",
+        "lambda-lib",
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
+        "/usr/local/lib/libmir.a",
+        "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
+        "../../mac-deps/curl-8.10.1/lib/libcurl.a",
+        "/opt/homebrew/lib/libssl.a",
+        "/opt/homebrew/lib/libcrypto.a",
+    }
+    
+    -- Add dynamic libraries
+    links {
+        "iconv",
+        "ncurses",
+    }
+    
+    -- Add tree-sitter libraries using linkoptions to append to LIBS section
+    linkoptions {
+    }
+    
+    -- Add macOS frameworks
+    linkoptions {
+        "-framework CoreFoundation",
+        "-framework CoreServices",
+        "-framework SystemConfiguration",
+        "-framework Cocoa",
+        "-framework IOKit",
+        "-framework CoreVideo",
+        "-framework OpenGL",
+        "-framework Foundation",
+        "-framework CoreGraphics",
+        "-framework AppKit",
+        "-framework Carbon",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c++17",
+        "-I/opt/homebrew/include",
+    }
+    
+    filter {}
+    linkoptions {
+        "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
+    }
+    
+
 project "test_validator_gtest"
     kind "ConsoleApp"
     language "C++"

@@ -41,28 +41,36 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
     if (!html_buf || !css_buf || !pool) {
         return;
     }
-    
+
     // Initialize document state
     memset(&doc_state, 0, sizeof(DocumentState));
-    
-    // Process the LaTeX AST using the same pattern as format-latex.cpp
-    
+
     // Start HTML document container
     stringbuf_append_str(html_buf, "<div class=\"latex-document\">\n");
-    
-    // Process the LaTeX AST
-    process_latex_element(html_buf, latex_ast, pool, 1);
-    
+
+    // Check if we have a valid AST
+    if (latex_ast.item == ITEM_NULL) {
+        stringbuf_append_str(html_buf, "<p>No content</p>\n");
+    } else {
+        // Process the LaTeX AST
+        process_latex_element(html_buf, latex_ast, pool, 1);
+    }
+
     // Close document container
     stringbuf_append_str(html_buf, "</div>\n");
-    
+
     // Generate CSS
     generate_latex_css(css_buf);
 }
 
 // Generate comprehensive CSS for LaTeX documents
 static void generate_latex_css(StringBuf* css_buf) {
-    stringbuf_append_str(css_buf, 
+    if (!css_buf) {
+        return;
+    }
+
+    // Generate basic CSS for LaTeX documents
+    stringbuf_append_str(css_buf,
         ".latex-document {\n"
         "  font-family: 'Computer Modern', 'Latin Modern', serif;\n"
         "  max-width: 800px;\n"
@@ -71,26 +79,26 @@ static void generate_latex_css(StringBuf* css_buf) {
         "  line-height: 1.6;\n"
         "  color: #333;\n"
         "}\n"
-        
+
         ".latex-title {\n"
         "  text-align: center;\n"
         "  font-size: 2.5em;\n"
         "  font-weight: bold;\n"
         "  margin: 2rem 0;\n"
         "}\n"
-        
+
         ".latex-author {\n"
         "  text-align: center;\n"
         "  font-size: 1.2em;\n"
         "  margin: 1rem 0;\n"
         "}\n"
-        
+
         ".latex-date {\n"
         "  text-align: center;\n"
         "  font-style: italic;\n"
         "  margin: 1rem 0 2rem 0;\n"
         "}\n"
-        
+
         ".latex-section {\n"
         "  font-size: 1.8em;\n"
         "  font-weight: bold;\n"
@@ -98,33 +106,33 @@ static void generate_latex_css(StringBuf* css_buf) {
         "  border-bottom: 1px solid #ccc;\n"
         "  padding-bottom: 0.5rem;\n"
         "}\n"
-        
+
         ".latex-subsection {\n"
         "  font-size: 1.4em;\n"
         "  font-weight: bold;\n"
         "  margin: 1.5rem 0 1rem 0;\n"
         "}\n"
-        
+
         ".latex-subsubsection {\n"
         "  font-size: 1.2em;\n"
         "  font-weight: bold;\n"
         "  margin: 1rem 0 0.5rem 0;\n"
         "}\n"
-        
+
         ".latex-paragraph {\n"
         "  margin: 1rem 0;\n"
         "  text-align: justify;\n"
         "}\n"
-        
+
         ".latex-itemize, .latex-enumerate {\n"
         "  margin: 1rem 0;\n"
         "  padding-left: 2rem;\n"
         "}\n"
-        
+
         ".latex-item {\n"
         "  margin: 0.5rem 0;\n"
         "}\n"
-        
+
         ".latex-quote {\n"
         "  margin: 1rem 2rem;\n"
         "  padding: 1rem;\n"
@@ -132,7 +140,7 @@ static void generate_latex_css(StringBuf* css_buf) {
         "  background-color: #f9f9f9;\n"
         "  font-style: italic;\n"
         "}\n"
-        
+
         ".latex-verbatim {\n"
         "  font-family: 'Courier New', monospace;\n"
         "  background-color: #f5f5f5;\n"
@@ -142,42 +150,57 @@ static void generate_latex_css(StringBuf* css_buf) {
         "  white-space: pre;\n"
         "  overflow-x: auto;\n"
         "}\n"
-        
+
         ".latex-textbf {\n"
         "  font-weight: bold;\n"
         "}\n"
-        
+
         ".latex-textit {\n"
         "  font-style: italic;\n"
         "}\n"
-        
+
         ".latex-emph {\n"
         "  font-style: italic;\n"
-        "}\n"
     );
 }
 
 // Process a LaTeX element and convert to HTML
 static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPool* pool, int depth) {
+    printf("DEBUG: process_latex_element called with item=%llu, depth=%d\n", (unsigned long long)item.item, depth);
+
+    if (item.item == ITEM_NULL) {
+        printf("DEBUG: Item is null, returning\n");
+        return;
+    }
+
+    printf("DEBUG: About to call get_type_id\n");
     TypeId type = get_type_id(item);
-    
+    printf("DEBUG: get_type_id returned %d\n", type);
+
     if (type == LMD_TYPE_ELEMENT) {
-        Element* elem = (Element*)item.pointer;
-        if (!elem || !elem->type) return;
-        
+        printf("DEBUG: Processing LMD_TYPE_ELEMENT\n");
+        Element* elem = item.element;
+        if (!elem || !elem->type) {
+            printf("DEBUG: Element or element type is null\n");
+            return;
+        }
+
         TypeElmt* elmt_type = (TypeElmt*)elem->type;
-        if (!elmt_type) return;
-        
+        if (!elmt_type) {
+            printf("DEBUG: elmt_type is null\n");
+            return;
+        }
+
         StrView name = elmt_type->name;
         if (!name.str || name.length == 0 || name.length > 100) return;
-        
+
         // Convert name to null-terminated string for easier comparison
         char cmd_name[64];
         int name_len = name.length < 63 ? name.length : 63;
         strncpy(cmd_name, name.str, name_len);
         cmd_name[name_len] = '\0';
-        
-        
+
+
         // Handle different LaTeX commands
         if (strcmp(cmd_name, "documentclass") == 0) {
             // Skip documentclass - it's metadata
@@ -233,7 +256,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPoo
     }
     else if (item.type_id == LMD_TYPE_ARRAY) {
         // Process array of elements
-        Array* arr = (Array*)item.pointer;
+        Array* arr = item.array;
         if (arr && arr->items) {
             for (int i = 0; i < arr->length; i++) {
                 process_latex_element(html_buf, arr->items[i], pool, depth);
@@ -245,7 +268,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPoo
 // Process element content (based on format-latex.cpp pattern)
 static void process_element_content(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
     if (!elem || !elem->items) return;
-    
+
     // Process element items with safety checks
     if (elem->length > 0 && elem->length < 1000) { // Reasonable limit
         for (int i = 0; i < elem->length; i++) {
@@ -258,7 +281,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Variable
 // Process title command
 static void process_title(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
     if (!elem) return;
-    
+
     // Store title for later use in maketitle
     if (elem->items && elem->length > 0) {
         TypeId content_type = get_type_id(elem->items[0]);
@@ -274,7 +297,7 @@ static void process_title(StringBuf* html_buf, Element* elem, VariableMemPool* p
 // Process author command
 static void process_author(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
     if (!elem) return;
-    
+
     // Store author for later use in maketitle
     if (elem->items && elem->length > 0) {
         TypeId content_type = get_type_id(elem->items[0]);
@@ -290,7 +313,7 @@ static void process_author(StringBuf* html_buf, Element* elem, VariableMemPool* 
 // Process date command
 static void process_date(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
     if (!elem) return;
-    
+
     // Store date for later use in maketitle
     if (elem->items && elem->length > 0) {
         TypeId content_type = get_type_id(elem->items[0]);
@@ -306,20 +329,20 @@ static void process_date(StringBuf* html_buf, Element* elem, VariableMemPool* po
 // Process maketitle command
 static void process_maketitle(StringBuf* html_buf, VariableMemPool* pool, int depth) {
     append_indent(html_buf, depth);
-    
+
     if (doc_state.title) {
         stringbuf_append_str(html_buf, "<div class=\"latex-title\">");
         append_escaped_text(html_buf, doc_state.title);
         stringbuf_append_str(html_buf, "</div>\n");
     }
-    
+
     if (doc_state.author) {
         append_indent(html_buf, depth);
         stringbuf_append_str(html_buf, "<div class=\"latex-author\">");
         append_escaped_text(html_buf, doc_state.author);
         stringbuf_append_str(html_buf, "</div>\n");
     }
-    
+
     if (doc_state.date) {
         append_indent(html_buf, depth);
         stringbuf_append_str(html_buf, "<div class=\"latex-date\">");
@@ -331,22 +354,22 @@ static void process_maketitle(StringBuf* html_buf, VariableMemPool* pool, int de
 // Process section commands
 static void process_section(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth, const char* css_class) {
     if (!elem) return;
-    
+
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<div class=\"");
     stringbuf_append_str(html_buf, css_class);
     stringbuf_append_str(html_buf, "\">");
-    
+
     // Process section title
     process_element_content(html_buf, elem, pool, depth);
-    
+
     stringbuf_append_str(html_buf, "</div>\n");
 }
 
 // Process environments (begin/end blocks)
 static void process_environment(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
     if (!elem) return;
-    
+
     // Get environment name from first child
     if (elem->items && elem->length > 0) {
         TypeId content_type = get_type_id(elem->items[0]);
@@ -380,10 +403,10 @@ static void process_environment(StringBuf* html_buf, Element* elem, VariableMemP
 static void process_itemize(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<ul class=\"latex-itemize\">\n");
-    
+
     // Process items
     process_element_content(html_buf, elem, pool, depth + 1);
-    
+
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "</ul>\n");
 }
@@ -392,10 +415,10 @@ static void process_itemize(StringBuf* html_buf, Element* elem, VariableMemPool*
 static void process_enumerate(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<ol class=\"latex-enumerate\">\n");
-    
+
     // Process items
     process_element_content(html_buf, elem, pool, depth + 1);
-    
+
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "</ol>\n");
 }
@@ -404,9 +427,9 @@ static void process_enumerate(StringBuf* html_buf, Element* elem, VariableMemPoo
 static void process_quote(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<div class=\"latex-quote\">\n");
-    
+
     process_element_content(html_buf, elem, pool, depth + 1);
-    
+
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "</div>\n");
 }
@@ -415,9 +438,9 @@ static void process_quote(StringBuf* html_buf, Element* elem, VariableMemPool* p
 static void process_verbatim(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<pre class=\"latex-verbatim\">");
-    
+
     process_element_content(html_buf, elem, pool, depth);
-    
+
     stringbuf_append_str(html_buf, "</pre>\n");
 }
 
@@ -428,9 +451,9 @@ static void process_text_command(StringBuf* html_buf, Element* elem, VariableMem
     stringbuf_append_str(html_buf, " class=\"");
     stringbuf_append_str(html_buf, css_class);
     stringbuf_append_str(html_buf, "\">");
-    
+
     process_element_content(html_buf, elem, pool, depth);
-    
+
     stringbuf_append_str(html_buf, "</");
     stringbuf_append_str(html_buf, tag);
     stringbuf_append_str(html_buf, ">");
@@ -440,9 +463,9 @@ static void process_text_command(StringBuf* html_buf, Element* elem, VariableMem
 static void process_item(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<li class=\"latex-item\">");
-    
+
     process_element_content(html_buf, elem, pool, depth);
-    
+
     stringbuf_append_str(html_buf, "</li>\n");
 }
 
@@ -450,7 +473,7 @@ static void process_item(StringBuf* html_buf, Element* elem, VariableMemPool* po
 // Helper function to append escaped text
 static void append_escaped_text(StringBuf* html_buf, const char* text) {
     if (!text) return;
-    
+
     for (const char* p = text; *p; p++) {
         switch (*p) {
             case '<':

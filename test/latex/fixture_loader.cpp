@@ -35,16 +35,34 @@ bool FixtureLoader::starts_with(const std::string& str, const std::string& prefi
 
 std::vector<std::string> FixtureLoader::split_by_separator(const std::string& content, const std::string& separator) {
     std::vector<std::string> parts;
-    std::regex sep_regex("(?:^|\\r\\n|\\n|\\r)(?:" + std::regex_replace(separator, std::regex("[.?*+^$[\\]\\\\(){}|-]"), "\\\\$&") + 
-                        "(?:$|\\r\\n|\\n|\\r)(?!" + std::regex_replace(separator, std::regex("[.?*+^$[\\]\\\\(){}|-]"), "\\\\$&") + 
-                        ")|" + std::regex_replace(separator, std::regex("[.?*+^$[\\]\\\\(){}|-]"), "\\\\$&") + "(?=$|\\r\\n|\\n|\\r))");
     
-    std::sregex_token_iterator iter(content.begin(), content.end(), sep_regex, -1);
-    std::sregex_token_iterator end;
+    // Simple approach: split by lines that contain only the separator
+    std::istringstream stream(content);
+    std::string line;
+    std::string current_part;
     
-    for (; iter != end; ++iter) {
-        parts.push_back(*iter);
+    while (std::getline(stream, line)) {
+        // Check if line is just the separator (with optional whitespace)
+        std::string trimmed_line = trim(line);
+        if (trimmed_line == separator) {
+            // Found separator, save current part and start new one
+            parts.push_back(current_part);
+            current_part.clear();
+        } else {
+            // Add line to current part
+            if (!current_part.empty()) {
+                current_part += "\n";
+            }
+            current_part += line;
+        }
     }
+    
+    // Add the last part if not empty
+    if (!current_part.empty()) {
+        parts.push_back(current_part);
+    }
+    
+    // Debug output removed for cleaner test runs
     
     return parts;
 }
@@ -115,6 +133,8 @@ FixtureFile FixtureLoader::load_fixture_file(const std::string& filepath) {
 std::vector<FixtureFile> FixtureLoader::load_fixtures_directory(const std::string& directory_path) {
     std::vector<FixtureFile> fixture_files;
     
+    // std::cout << "DEBUG: Loading fixtures from directory: " << directory_path << std::endl;
+    
     try {
         for (const auto& entry : std::filesystem::directory_iterator(directory_path)) {
             if (entry.is_regular_file() && entry.path().extension() == ".tex") {
@@ -128,5 +148,6 @@ std::vector<FixtureFile> FixtureLoader::load_fixtures_directory(const std::strin
         std::cerr << "Error loading fixtures directory " << directory_path << ": " << e.what() << std::endl;
     }
     
+    // std::cout << "DEBUG: Total fixture files loaded: " << fixture_files.size() << std::endl;
     return fixture_files;
 }

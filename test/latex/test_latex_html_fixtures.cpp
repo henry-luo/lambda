@@ -2,22 +2,26 @@
 #include "fixture_loader.h"
 #include "html_comparison.h"
 #include "../../lambda/format/format-latex-html.h"
-#include "../../lambda/input/input-latex.h"
+#include "../../lambda/input/input.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mem-pool/include/mem_pool.h"
 #include <filesystem>
 #include <iostream>
 
+// Forward declaration for LaTeX parser function
+void parse_latex(Input* input, const char* latex_string);
+
 class LatexHtmlFixtureTest : public ::testing::Test {
 protected:
     void SetUp() override {
         // Initialize memory pool
-        pool = variable_mem_pool_create();
+        MemPoolError err = pool_variable_init(&pool, 1024, MEM_POOL_NO_BEST_FIT);
+        ASSERT_EQ(err, MEM_POOL_ERR_OK);
         ASSERT_NE(pool, nullptr);
         
         // Initialize string buffers
-        stringbuf_init(&html_buf);
-        stringbuf_init(&css_buf);
+        html_buf = stringbuf_new(pool);
+        css_buf = stringbuf_new(pool);
         
         // Initialize HTML comparator
         comparator.set_ignore_whitespace(true);
@@ -26,32 +30,38 @@ protected:
     }
     
     void TearDown() override {
-        // Cleanup string buffers
-        stringbuf_destroy(&html_buf);
-        stringbuf_destroy(&css_buf);
-        
-        // Cleanup memory pool
+        // Cleanup memory pool (this will cleanup string buffers too)
         if (pool) {
-            variable_mem_pool_destroy(pool);
+            pool_variable_destroy(pool);
         }
     }
     
     // Helper function to run a single fixture test
     void run_fixture_test(const LatexHtmlFixture& fixture) {
         // Clear buffers
-        stringbuf_clear(&html_buf);
-        stringbuf_clear(&css_buf);
+        stringbuf_reset(html_buf);
+        stringbuf_reset(css_buf);
         
         try {
+            // Create input object for LaTeX parsing
+            Input* input = input_new(nullptr);
+            ASSERT_NE(input, nullptr) << "Input creation should succeed";
+            
             // Parse LaTeX source using Lambda's parser
-            Item latex_ast = parse_latex_string(fixture.latex_source.c_str(), pool);
+            parse_latex(input, fixture.latex_source.c_str());
+            Item latex_ast = input->root;
             
             // Generate HTML using Lambda's formatter
-            format_latex_to_html(&html_buf, &css_buf, latex_ast, pool);
+            format_latex_to_html(html_buf, css_buf, latex_ast, pool);
             
             // Get generated HTML
-            String* html_result = stringbuf_to_string(&html_buf);
-            std::string actual_html(html_result->chars, html_result->length);
+            String* html_result = stringbuf_to_string(html_buf);
+            if (!html_result) {
+                FAIL() << "HTML formatting produced no result for fixture '" << fixture.header << "'";
+                return;
+            }
+            
+            std::string actual_html(html_result->chars, html_result->len);
             
             // Compare with expected output
             std::vector<HtmlDifference> differences;
@@ -65,6 +75,8 @@ protected:
             
         } catch (const std::exception& e) {
             FAIL() << "Exception in fixture '" << fixture.header << "': " << e.what();
+        } catch (...) {
+            FAIL() << "Unknown exception in fixture '" << fixture.header << "'";
         }
     }
     
@@ -97,8 +109,8 @@ protected:
     }
     
     VariableMemPool* pool;
-    StringBuf html_buf;
-    StringBuf css_buf;
+    StringBuf* html_buf;
+    StringBuf* css_buf;
     HtmlComparator comparator;
 };
 
@@ -162,7 +174,7 @@ TEST_P(LatexHtmlFixtureParameterizedTest, RunFixture) {
 std::vector<LatexHtmlFixture> load_all_fixtures() {
     std::vector<LatexHtmlFixture> all_fixtures;
     
-    std::string fixtures_dir = "test/latex_html/fixtures";
+    std::string fixtures_dir = "test/latex/fixtures";
     
     // Check if fixtures directory exists
     if (!std::filesystem::exists(fixtures_dir)) {

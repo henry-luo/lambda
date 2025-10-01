@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <sstream>
 #include <cctype>
+#include <iostream>
 
 HtmlComparator::HtmlComparator() 
     : ignore_whitespace_(true)
@@ -31,9 +32,17 @@ std::string HtmlComparator::normalize_whitespace(const std::string& html) {
     std::regex ws_regex("\\s+");
     std::string result = std::regex_replace(html, ws_regex, " ");
     
-    // Remove whitespace around tags
+    // Remove whitespace around tags (between tags)
     std::regex tag_ws_regex(">\\s+<");
     result = std::regex_replace(result, tag_ws_regex, "><");
+    
+    // Remove whitespace after opening tags
+    std::regex after_open_tag_regex(">\\s+");
+    result = std::regex_replace(result, after_open_tag_regex, ">");
+    
+    // Remove whitespace before closing tags
+    std::regex before_close_tag_regex("\\s+<");
+    result = std::regex_replace(result, before_close_tag_regex, "<");
     
     // Trim leading/trailing whitespace
     size_t start = result.find_first_not_of(" \t\r\n");
@@ -71,18 +80,24 @@ std::string HtmlComparator::remove_comments(const std::string& html) {
 std::string HtmlComparator::normalize_html(const std::string& html) {
     std::string result = html;
     
+    std::cout << "DEBUG: normalize_html input: \"" << html << "\"" << std::endl;
+    
     // Remove HTML comments
     result = remove_comments(result);
+    std::cout << "DEBUG: after remove_comments: \"" << result << "\"" << std::endl;
     
     // Normalize whitespace
     result = normalize_whitespace(result);
+    std::cout << "DEBUG: after normalize_whitespace: \"" << result << "\"" << std::endl;
     
     // Normalize attributes
     result = normalize_attributes(result);
+    std::cout << "DEBUG: after normalize_attributes: \"" << result << "\"" << std::endl;
     
     // Convert to lowercase if not case sensitive
     if (!case_sensitive_) {
         std::transform(result.begin(), result.end(), result.begin(), ::tolower);
+        std::cout << "DEBUG: after lowercase: \"" << result << "\"" << std::endl;
     }
     
     return result;
