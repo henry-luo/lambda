@@ -49,6 +49,13 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
         cd - > /dev/null
     fi
 
+    # Clean jemalloc build files
+    if [ -d "mac-deps/jemalloc-5.3.0" ]; then
+        cd mac-deps/jemalloc-5.3.0
+        make clean 2>/dev/null || true
+        cd - > /dev/null
+    fi
+
     echo "Cleanup completed."
     exit 0
 fi
@@ -335,6 +342,91 @@ build_mir_for_mac() {
     fi
 
     echo "❌ MIR build failed"
+    cd - > /dev/null
+    return 1
+}
+
+# Function to build jemalloc with je_ prefix for Mac
+build_jemalloc_with_je_prefix_for_mac() {
+    echo "Building jemalloc with je_ prefix for Mac..."
+
+    # Check if already built in mac-deps
+    if [ -f "mac-deps/jemalloc-install/lib/libjemalloc.a" ] && [ -f "mac-deps/jemalloc-install/include/jemalloc/jemalloc.h" ]; then
+        echo "jemalloc with je_ prefix already built"
+        return 0
+    fi
+
+    # Create mac-deps directory if it doesn't exist
+    mkdir -p mac-deps
+
+    # Check if source exists, if not clone it
+    if [ ! -d "mac-deps/jemalloc" ]; then
+        echo "Cloning jemalloc repository..."
+        cd mac-deps
+        git clone https://github.com/jemalloc/jemalloc.git || {
+            echo "Warning: Could not clone jemalloc repository"
+            cd - > /dev/null
+            return 1
+        }
+        cd - > /dev/null
+    fi
+
+    cd mac-deps/jemalloc
+
+    # Clean any previous builds
+    make clean 2>/dev/null || true
+    rm -rf ../jemalloc-install 2>/dev/null || true
+
+    # Generate configure script if needed
+    if [ ! -f "configure" ]; then
+        echo "Generating configure script for jemalloc..."
+        if command -v autoconf >/dev/null 2>&1; then
+            ./autogen.sh || {
+                echo "❌ Failed to generate configure script"
+                cd - > /dev/null
+                return 1
+            }
+        else
+            echo "❌ autoconf not found - needed to generate configure script"
+            cd - > /dev/null
+            return 1
+        fi
+    fi
+
+    # Configure jemalloc with je_ prefix for standalone use
+    echo "Configuring jemalloc with je_ prefix..."
+    if ./configure \
+        --with-jemalloc-prefix=je_ \
+        --prefix="$SCRIPT_DIR/mac-deps/jemalloc-install" \
+        --enable-static \
+        --disable-shared \
+        --disable-debug \
+        --enable-stats \
+        --disable-prof \
+        --disable-fill; then
+
+        echo "Building jemalloc..."
+        if make -j$(sysctl -n hw.ncpu); then
+            echo "Installing jemalloc to mac-deps..."
+            if make install; then
+                # Verify the je_ prefix functions are available
+                if nm "../jemalloc-install/lib/libjemalloc.a" | grep -q "je_malloc"; then
+                    echo "✅ jemalloc with je_ prefix built successfully"
+                    echo "   - je_malloc: ✓ Available"
+                    echo "   - je_calloc: ✓ Available"
+                    echo "   - je_free: ✓ Available"
+                    cd - > /dev/null
+                    return 0
+                else
+                    echo "❌ je_ prefix functions not found in built library"
+                    cd - > /dev/null
+                    return 1
+                fi
+            fi
+        fi
+    fi
+
+    echo "❌ jemalloc build failed"
     cd - > /dev/null
     return 1
 }
@@ -846,6 +938,19 @@ else
     fi
 fi
 
+# Build jemalloc with je_ prefix for Mac (Lambda dependency)
+echo "Setting up jemalloc with je_ prefix..."
+if [ -f "mac-deps/jemalloc-install/lib/libjemalloc.a" ]; then
+    echo "jemalloc with je_ prefix already available"
+else
+    if ! build_jemalloc_with_je_prefix_for_mac; then
+        echo "❌ jemalloc with je_ prefix build failed - required for Lambda memory pool"
+        exit 1
+    else
+        echo "✅ jemalloc with je_ prefix built successfully"
+    fi
+fi
+
 # Build nghttp2 for Mac (Lambda dependency)
 echo "Setting up nghttp2..."
 if [ -f "mac-deps/nghttp2/lib/libnghttp2.a" ]; then
@@ -1013,6 +1118,7 @@ else
 fi
 
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- jemalloc with je_ prefix: $([ -f "mac-deps/jemalloc-install/lib/libjemalloc.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Google Test: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"

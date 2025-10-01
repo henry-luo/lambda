@@ -1082,30 +1082,59 @@
                         "binary": "test_basic_gtest.exe"
                     },
                     {
-                        "source": "test_mempool_simple_gtest.cpp",
-                        "name": "🏊 Simple Memory Pool Tests (GTest)",
+                        "source": "test_mempool.c",
+                        "name": "🚀 Unified Memory Pool Tests (C)",
                         "dependencies": [],
                         "libraries": [
+                            "jemalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/mempool.c"
+                        ],
+                        "binary": "test_mempool.exe"
+                    },
+                    {
+                        "_DISABLED_source": "test_mempool_simple_gtest.cpp",
+                        "_DISABLED_name": "🏊 Simple Memory Pool Tests (GTest)",
+                        "_DISABLED_dependencies": [],
+                        "_DISABLED_libraries": [
                             "gtest",
                             "gtest_main",
                             "jemalloc"
                         ],
-                        "additional_sources": [
+                        "_DISABLED_additional_sources": [
                             "lib/mempool.c"
                         ],
-                        "binary": "test_mempool_simple_gtest.exe"
+                        "_DISABLED_binary": "test_mempool_simple_gtest.exe",
+                        "_comment": "DISABLED - replaced by unified test_mempool.c"
                     },
                     {
-                        "source": "test_mempool_standalone.c",
-                        "name": "🧪 Standalone Mempool Test (C)",
-                        "dependencies": [],
-                        "libraries": [
+                        "_DISABLED_source": "test_mempool_standalone.c",
+                        "_DISABLED_name": "🧪 Standalone Mempool Test (C)",
+                        "_DISABLED_dependencies": [],
+                        "_DISABLED_libraries": [
                             "jemalloc"
                         ],
-                        "additional_sources": [
+                        "_DISABLED_additional_sources": [
                             "lib/mempool.c"
                         ],
-                        "binary": "test_mempool_standalone.exe"
+                        "_DISABLED_binary": "test_mempool_standalone.exe",
+                        "_comment": "DISABLED - replaced by unified test_mempool.c"
+                    },
+                    {
+                        "_DISABLED_source": "test_mempool_comprehensive_gtest.cpp",
+                        "_DISABLED_name": "🚀 Comprehensive Memory Pool Tests (GTest)",
+                        "_DISABLED_dependencies": [],
+                        "_DISABLED_libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "jemalloc"
+                        ],
+                        "_DISABLED_additional_sources": [
+                            "lib/mempool.c"
+                        ],
+                        "_DISABLED_binary": "test_mempool_comprehensive_gtest.exe",
+                        "_comment": "DISABLED - replaced by unified test_mempool.c"
                     },
                     {
                         "_DISABLED_source": "test_mempool_gtest.cpp",
