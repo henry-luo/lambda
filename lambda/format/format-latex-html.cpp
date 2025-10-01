@@ -40,145 +40,158 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
     if (!html_buf || !css_buf || !pool) {
         return;
     }
-    
+
     printf("DEBUG: format_latex_to_html - html_buf=%p, css_buf=%p\n", html_buf, css_buf);
-    
+
     // Initialize document state
     memset(&doc_state, 0, sizeof(DocumentState));
-    
+
     // Start HTML document container
     stringbuf_append_str(html_buf, "<div class=\"latex-document\">\n");
     printf("DEBUG: Added HTML container to html_buf\n");
-    
-    
+
+
     // Check if we have a valid AST
     if (latex_ast.item == ITEM_NULL) {
-        stringbuf_append_str(html_buf, "<p>No content</p>\n");
     } else {
-        // Add paragraph wrapper for inline content
-        stringbuf_append_str(html_buf, "<p>");
-        
-        // Process the LaTeX AST
+        // Process the LaTeX AST without automatic paragraph wrapper
+        // Individual text content will be wrapped in paragraphs as needed
         printf("DEBUG: About to process LaTeX AST\n");
         process_latex_element(html_buf, latex_ast, pool, 1);
-        printf("DEBUG: Finished processing LaTeX AST\n");
-        
-        // Close paragraph wrapper
-        stringbuf_append_str(html_buf, "</p>");
     }
-    
+
+    // Break down the CSS into smaller chunks to avoid C++ compiler issues with very long string literals
+
+    // Document styles
+    stringbuf_append_str(css_buf, ".latex-document {\n");
+    stringbuf_append_str(css_buf, "  font-family: 'Computer Modern', 'Latin Modern', serif;\n");
+    stringbuf_append_str(css_buf, "  max-width: 800px;\n");
+    stringbuf_append_str(css_buf, "  margin: 0 auto;\n");
+    stringbuf_append_str(css_buf, "  padding: 2rem;\n");
+    stringbuf_append_str(css_buf, "  line-height: 1.6;\n");
+    stringbuf_append_str(css_buf, "  color: #333;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    // Title styles
+    stringbuf_append_str(css_buf, ".latex-title {\n");
+    stringbuf_append_str(css_buf, "  text-align: center;\n");
+    stringbuf_append_str(css_buf, "  font-size: 2.5em;\n");
+    stringbuf_append_str(css_buf, "  font-weight: bold;\n");
+    stringbuf_append_str(css_buf, "  margin: 2rem 0;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    // Author styles
+    stringbuf_append_str(css_buf, ".latex-author {\n");
+    stringbuf_append_str(css_buf, "  text-align: center;\n");
+    stringbuf_append_str(css_buf, "  font-size: 1.2em;\n");
+    stringbuf_append_str(css_buf, "  margin: 1rem 0;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    // Date styles
+    stringbuf_append_str(css_buf, ".latex-date {\n");
+    stringbuf_append_str(css_buf, "  text-align: center;\n");
+    stringbuf_append_str(css_buf, "  font-style: italic;\n");
+    stringbuf_append_str(css_buf, "  margin: 1rem 0 2rem 0;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    // Section styles
+    stringbuf_append_str(css_buf, ".latex-section {\n");
+    stringbuf_append_str(css_buf, "  font-size: 1.8em;\n");
+    stringbuf_append_str(css_buf, "  font-weight: bold;\n");
+    stringbuf_append_str(css_buf, "  margin: 2rem 0 1rem 0;\n");
+    stringbuf_append_str(css_buf, "  border-bottom: 1px solid #ccc;\n");
+    stringbuf_append_str(css_buf, "  padding-bottom: 0.5rem;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    // Subsection styles
+    stringbuf_append_str(css_buf, ".latex-subsection {\n");
+    stringbuf_append_str(css_buf, "  font-size: 1.4em;\n");
+    stringbuf_append_str(css_buf, "  font-weight: bold;\n");
+    stringbuf_append_str(css_buf, "  margin: 1.5rem 0 1rem 0;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    // Subsubsection styles
+    stringbuf_append_str(css_buf, ".latex-subsubsection {\n");
+    stringbuf_append_str(css_buf, "  font-size: 1.2em;\n");
+    stringbuf_append_str(css_buf, "  font-weight: bold;\n");
+    stringbuf_append_str(css_buf, "  margin: 1rem 0 0.5rem 0;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    // Text formatting styles
+    stringbuf_append_str(css_buf, ".latex-textbf {\n");
+    stringbuf_append_str(css_buf, "  font-weight: bold;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    stringbuf_append_str(css_buf, ".latex-textit {\n");
+    stringbuf_append_str(css_buf, "  font-style: italic;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    // List styles
+    stringbuf_append_str(css_buf, ".latex-itemize {\n");
+    stringbuf_append_str(css_buf, "  margin: 1rem 0;\n");
+    stringbuf_append_str(css_buf, "  padding-left: 2rem;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    stringbuf_append_str(css_buf, ".latex-enumerate {\n");
+    stringbuf_append_str(css_buf, "  margin: 1rem 0;\n");
+    stringbuf_append_str(css_buf, "  padding-left: 2rem;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    stringbuf_append_str(css_buf, ".latex-item {\n");
+    stringbuf_append_str(css_buf, "  margin: 0.5rem 0;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
     // Close document container
     stringbuf_append_str(html_buf, "</div>\n");
     printf("DEBUG: Closed HTML container\n");
-    
-    // Generate CSS
-    printf("DEBUG: About to generate CSS to css_buf=%p\n", css_buf);
-    generate_latex_css(css_buf);
-    printf("DEBUG: CSS generation complete\n");
-    
+
     printf("DEBUG: HTML and CSS generation completed\n");
 }
 
 // Generate comprehensive CSS for LaTeX documents
 static void generate_latex_css(StringBuf* css_buf) {
     if (!css_buf) {
+        printf("DEBUG: css_buf is NULL!\n");
         return;
     }
 
-    // Generate basic CSS for LaTeX documents
-    stringbuf_append_str(css_buf,
-        ".latex-document {\n"
-        "  font-family: 'Computer Modern', 'Latin Modern', serif;\n"
-        "  max-width: 800px;\n"
-        "  margin: 0 auto;\n"
-        "  padding: 2rem;\n"
-        "  line-height: 1.6;\n"
-        "  color: #333;\n"
-        "}\n"
+    printf("DEBUG: css_buf=%p, pool=%p, str=%p, length=%zu, capacity=%zu\n",
+           css_buf, css_buf->pool, css_buf->str, css_buf->length, css_buf->capacity);
 
-        ".latex-title {\n"
-        "  text-align: center;\n"
-        "  font-size: 2.5em;\n"
-        "  font-weight: bold;\n"
-        "  margin: 2rem 0;\n"
-        "}\n"
+    // Validate StringBuf structure before using it
+    if (!css_buf->pool) {
+        printf("DEBUG: css_buf->pool is NULL!\n");
+        return;
+    }
 
-        ".latex-author {\n"
-        "  text-align: center;\n"
-        "  font-size: 1.2em;\n"
-        "  margin: 1rem 0;\n"
-        "}\n"
+    if (css_buf->str && css_buf->capacity == 0) {
+        printf("DEBUG: css_buf has str but zero capacity!\n");
+        return;
+    }
 
-        ".latex-date {\n"
-        "  text-align: center;\n"
-        "  font-style: italic;\n"
-        "  margin: 1rem 0 2rem 0;\n"
-        "}\n"
+    if (css_buf->length > css_buf->capacity) {
+        printf("DEBUG: css_buf length (%zu) > capacity (%zu)!\n", css_buf->length, css_buf->capacity);
+        return;
+    }
 
-        ".latex-section {\n"
-        "  font-size: 1.8em;\n"
-        "  font-weight: bold;\n"
-        "  margin: 2rem 0 1rem 0;\n"
-        "  border-bottom: 1px solid #ccc;\n"
-        "  padding-bottom: 0.5rem;\n"
-        "}\n"
+    // Generate basic CSS for LaTeX documents - broken into small chunks to avoid C++ compiler issues
+    stringbuf_append_str(css_buf, ".latex-document {\n");
+    stringbuf_append_str(css_buf, "  font-family: 'Computer Modern', 'Latin Modern', serif;\n");
+    stringbuf_append_str(css_buf, "  max-width: 800px;\n");
+    stringbuf_append_str(css_buf, "  margin: 0 auto;\n");
+    stringbuf_append_str(css_buf, "  padding: 2rem;\n");
+    stringbuf_append_str(css_buf, "  line-height: 1.6;\n");
+    stringbuf_append_str(css_buf, "  color: #333;\n");
+    stringbuf_append_str(css_buf, "}\n");
 
-        ".latex-subsection {\n"
-        "  font-size: 1.4em;\n"
-        "  font-weight: bold;\n"
-        "  margin: 1.5rem 0 1rem 0;\n"
-        "}\n"
+    stringbuf_append_str(css_buf, ".latex-textbf { font-weight: bold; }\n");
+    stringbuf_append_str(css_buf, ".latex-textit { font-style: italic; }\n");
+    stringbuf_append_str(css_buf, ".latex-section { font-size: 1.8em; font-weight: bold; margin: 2rem 0 1rem 0; }\n");
+    stringbuf_append_str(css_buf, ".latex-subsection { font-size: 1.4em; font-weight: bold; margin: 1.5rem 0 1rem 0; }\n");
 
-        ".latex-subsubsection {\n"
-        "  font-size: 1.2em;\n"
-        "  font-weight: bold;\n"
-        "  margin: 1rem 0 0.5rem 0;\n"
-        "}\n"
-
-        ".latex-paragraph {\n"
-        "  margin: 1rem 0;\n"
-        "  text-align: justify;\n"
-        "}\n"
-
-        ".latex-itemize, .latex-enumerate {\n"
-        "  margin: 1rem 0;\n"
-        "  padding-left: 2rem;\n"
-        "}\n"
-
-        ".latex-item {\n"
-        "  margin: 0.5rem 0;\n"
-        "}\n"
-
-        ".latex-quote {\n"
-        "  margin: 1rem 2rem;\n"
-        "  padding: 1rem;\n"
-        "  border-left: 4px solid #ccc;\n"
-        "  background-color: #f9f9f9;\n"
-        "  font-style: italic;\n"
-        "}\n"
-
-        ".latex-verbatim {\n"
-        "  font-family: 'Courier New', monospace;\n"
-        "  background-color: #f5f5f5;\n"
-        "  border: 1px solid #ddd;\n"
-        "  padding: 1rem;\n"
-        "  margin: 1rem 0;\n"
-        "  white-space: pre;\n"
-        "  overflow-x: auto;\n"
-        "}\n"
-
-        ".latex-textbf {\n"
-        "  font-weight: bold;\n"
-        "}\n"
-
-        ".latex-textit {\n"
-        "  font-style: italic;\n"
-        "}\n"
-
-        ".latex-emph {\n"
-        "  font-style: italic;\n"
-        "}\n"
-    );
+    // Additional CSS for list environments
+    stringbuf_append_str(css_buf, ".latex-itemize, .latex-enumerate { margin: 1rem 0; padding-left: 2rem; }\n");
+    stringbuf_append_str(css_buf, ".latex-item { margin: 0.5rem 0; }\n");
 }
 
 // Process a LaTeX element and convert to HTML
@@ -186,7 +199,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPoo
     if (item.item == ITEM_NULL) {
         return;
     }
-    
+
     TypeId type = get_type_id(item);
 
     if (type == LMD_TYPE_ELEMENT) {
@@ -265,24 +278,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPoo
         String* str = (String*)item.pointer;
         printf("DEBUG: LMD_TYPE_STRING - str=%p\n", str);
         if (str) {
-            printf("DEBUG: String length=%u, chars=%p\n", str->len, str->chars);
-            if (str->len > 0 && str->len < 1000) { // Safety check
-                printf("DEBUG: Processing string of length %u: '%.20s'\n", str->len, str->chars);
-                // Use a simpler approach - create a temporary buffer on stack for small strings
-                if (str->len < 256) {
-                    char temp_buf[256];
-                    memcpy(temp_buf, str->chars, str->len);
-                    temp_buf[str->len] = '\0';
-                    printf("DEBUG: About to append text: '%s'\n", temp_buf);
-                    // Use direct stringbuf_append_str instead of append_escaped_text to avoid corruption
-                    stringbuf_append_str(html_buf, temp_buf);
-                    printf("DEBUG: Text appended successfully\n");
-                } else {
-                    printf("DEBUG: String too long (%u chars), skipping\n", str->len);
-                }
-            } else {
-                printf("DEBUG: String length %u is invalid (empty or too long), skipping\n", str->len);
-            }
+            stringbuf_append_str(html_buf, str->chars);
         } else {
             printf("DEBUG: String pointer is null, skipping\n");
         }
@@ -298,7 +294,55 @@ static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPoo
     }
 }
 
-// Process element content (based on format-latex.cpp pattern)
+// Check if an element is a block-level element that should not be wrapped in paragraphs
+static bool is_block_element(Item item) {
+    TypeId type = get_type_id(item);
+    if (type != LMD_TYPE_ELEMENT) {
+        return false;
+    }
+
+    Element* elem = item.element;
+    if (!elem || !elem->type) {
+        return false;
+    }
+
+    TypeElmt* elmt_type = (TypeElmt*)elem->type;
+    if (!elmt_type || !elmt_type->name.str) {
+        return false;
+    }
+
+    // Convert name to null-terminated string
+    char cmd_name[64];
+    int name_len = elmt_type->name.length < 63 ? elmt_type->name.length : 63;
+    strncpy(cmd_name, elmt_type->name.str, name_len);
+    cmd_name[name_len] = '\0';
+
+    // Block-level elements that should not be wrapped in paragraphs
+    return (strcmp(cmd_name, "section") == 0 ||
+            strcmp(cmd_name, "subsection") == 0 ||
+            strcmp(cmd_name, "subsubsection") == 0 ||
+            strcmp(cmd_name, "itemize") == 0 ||
+            strcmp(cmd_name, "enumerate") == 0 ||
+            strcmp(cmd_name, "quote") == 0 ||
+            strcmp(cmd_name, "verbatim") == 0);
+}
+
+// Process element content without paragraph wrapping (for titles, etc.)
+static void process_element_content_simple(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
+    if (!elem || !elem->items) {
+        return;
+    }
+
+    // Process element items directly without paragraph wrapping
+    if (elem->length > 0 && elem->length < 1000) { // Reasonable limit
+        for (int i = 0; i < elem->length; i++) {
+            Item content_item = elem->items[i];
+            process_latex_element(html_buf, content_item, pool, depth);
+        }
+    }
+}
+
+// Process element content with intelligent paragraph wrapping
 static void process_element_content(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
     if (!elem || !elem->items) {
         printf("DEBUG: process_element_content - elem or items is null\n");
@@ -306,16 +350,49 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Variable
     }
 
     printf("DEBUG: process_element_content - elem->length = %d\n", elem->length);
-    
-    // Process element items with safety checks
+
+    // Process element items with intelligent paragraph grouping
     if (elem->length > 0 && elem->length < 1000) { // Reasonable limit
+        bool in_paragraph = false;
+
         for (int i = 0; i < elem->length; i++) {
             printf("DEBUG: Processing element content item %d\n", i);
             Item content_item = elem->items[i];
             TypeId item_type = get_type_id(content_item);
             printf("DEBUG: Content item %d has type %d\n", i, item_type);
-            process_latex_element(html_buf, content_item, pool, depth);
+
+            bool is_block = is_block_element(content_item);
+            bool is_text = (item_type == LMD_TYPE_STRING);
+            bool is_inline = (item_type == LMD_TYPE_ELEMENT && !is_block);
+
+            // Handle paragraph wrapping logic
+            if (is_block) {
+                // Close any open paragraph before block element
+                if (in_paragraph) {
+                    stringbuf_append_str(html_buf, "</p>\n");
+                    in_paragraph = false;
+                }
+                // Process block element directly
+                process_latex_element(html_buf, content_item, pool, depth);
+            } else if (is_text || is_inline) {
+                // Open paragraph if not already in one
+                if (!in_paragraph) {
+                    stringbuf_append_str(html_buf, "<p>");
+                    in_paragraph = true;
+                }
+                // Process inline content
+                process_latex_element(html_buf, content_item, pool, depth);
+            } else {
+                // Unknown content type - process directly
+                process_latex_element(html_buf, content_item, pool, depth);
+            }
+
             printf("DEBUG: Finished processing element content item %d\n", i);
+        }
+
+        // Close any remaining open paragraph
+        if (in_paragraph) {
+            stringbuf_append_str(html_buf, "</p>\n");
         }
     }
     printf("DEBUG: process_element_content completed\n");
@@ -403,8 +480,8 @@ static void process_section(StringBuf* html_buf, Element* elem, VariableMemPool*
     stringbuf_append_str(html_buf, css_class);
     stringbuf_append_str(html_buf, "\">");
 
-    // Process section title
-    process_element_content(html_buf, elem, pool, depth);
+    // Process section title without paragraph wrapping
+    process_element_content_simple(html_buf, elem, pool, depth);
 
     stringbuf_append_str(html_buf, "</div>\n");
 }
@@ -490,7 +567,7 @@ static void process_verbatim(StringBuf* html_buf, Element* elem, VariableMemPool
 // Process text formatting commands
 static void process_text_command(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth, const char* css_class, const char* tag) {
     printf("DEBUG: process_text_command starting - css_class='%s', tag='%s'\n", css_class, tag);
-    
+
     stringbuf_append_str(html_buf, "<");
     stringbuf_append_str(html_buf, tag);
     stringbuf_append_str(html_buf, " class=\"");
@@ -499,7 +576,7 @@ static void process_text_command(StringBuf* html_buf, Element* elem, VariableMem
     printf("DEBUG: Opening tag appended successfully\n");
 
     printf("DEBUG: About to process element content\n");
-    process_element_content(html_buf, elem, pool, depth);
+    process_element_content_simple(html_buf, elem, pool, depth);
     printf("DEBUG: Element content processed successfully\n");
 
     printf("DEBUG: About to append closing tag\n");

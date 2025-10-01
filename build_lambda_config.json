@@ -864,7 +864,7 @@
             ],
             "build_dir": "build",
             "cross_compile": false,
-            "disable_sanitizer": true
+            "disable_sanitizer": false
         },
         "macos": {
             "includes": [

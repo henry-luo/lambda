@@ -29,12 +29,12 @@ static bool is_continuation_line(const char *eml) {
 static String* parse_header_name(Input *input, const char **eml) {
     StringBuf* sb = input->sb;
     stringbuf_reset(sb);  // Reset buffer for reuse
-    
+
     while (**eml && **eml != ':' && **eml != '\n' && **eml != '\r') {
         stringbuf_append_char(sb, **eml);
         (*eml)++;
     }
-    
+
     if (sb->str && sb->str->len > 0) {
         return stringbuf_to_string(sb);
     }
@@ -45,13 +45,13 @@ static String* parse_header_name(Input *input, const char **eml) {
 static String* parse_header_value(Input *input, const char **eml) {
     StringBuf* sb = input->sb;
     stringbuf_reset(sb);  // Reset buffer for reuse
-    
+
     // Skip the colon and initial whitespace
     if (**eml == ':') {
         (*eml)++;
         skip_line_whitespace(eml);
     }
-    
+
     // Read the header value, handling continuation lines
     while (**eml) {
         if (**eml == '\n' || **eml == '\r') {
@@ -62,7 +62,7 @@ static String* parse_header_value(Input *input, const char **eml) {
             } else if (*next_line == '\n' || *next_line == '\r') {
                 next_line++;
             }
-            
+
             if (is_continuation_line(next_line)) {
                 // Replace line break with space and continue
                 stringbuf_append_char(sb, ' ');
@@ -77,14 +77,15 @@ static String* parse_header_value(Input *input, const char **eml) {
             (*eml)++;
         }
     }
-    
-    // Trim trailing whitespace
-    while (sb->length > 0 && sb->str && sb->str->len > 0 &&
-           (sb->str->chars[sb->str->len - 1] == ' ' || sb->str->chars[sb->str->len - 1] == '\t')) {
-        sb->str->len--;
+
+    // Trim trailing whitespace using proper StringBuf API
+    while (sb->length > 0 &&
+           (sb->str->chars[sb->length - 1] == ' ' || sb->str->chars[sb->length - 1] == '\t')) {
         sb->length--;
+        sb->str->len = sb->length;
+        sb->str->chars[sb->length] = '\0';
     }
-    
+
     if (sb->str && sb->str->len > 0) {
         return stringbuf_to_string(sb);
     }
@@ -101,12 +102,12 @@ static void normalize_header_name(char* name) {
 // Helper function to parse email addresses from a header value
 static String* extract_email_address(Input *input, const char* header_value) {
     if (!header_value) return NULL;
-    
+
     StringBuf* sb = input->sb;
     stringbuf_reset(sb);  // Reset buffer for reuse
     const char* start = strchr(header_value, '<');
     const char* end = NULL;
-    
+
     if (start) {
         // Format: "Name <email@domain.com>"
         start++;
@@ -126,31 +127,31 @@ static String* extract_email_address(Input *input, const char* header_value) {
             while (start > header_value && *(start-1) != ' ' && *(start-1) != '\t') {
                 start--;
             }
-            
+
             // Find end of email (look forwards for space or end of string)
             end = at_pos;
             while (*end && *end != ' ' && *end != '\t' && *end != '\n' && *end != '\r') {
                 end++;
             }
-            
+
             while (start < end) {
                 stringbuf_append_char(sb, *start);
                 start++;
             }
         }
     }
-    
+
     if (sb->str && sb->str->len > 0) {
         return stringbuf_to_string(sb);
     }
-    
+
     return NULL;
 }
 
 // Helper function to parse date value
 static String* parse_date_value(Input *input, const char* date_str) {
     if (!date_str) return NULL;
-    
+
     // For now, just return the raw date string
     // TODO: Could parse into structured datetime format
     return input_create_string(input, date_str);
@@ -159,22 +160,22 @@ static String* parse_date_value(Input *input, const char* date_str) {
 // Main EML parsing function
 void parse_eml(Input* input, const char* eml_string) {
     if (!eml_string || !input) return;
-    
+
     // Initialize string buffer for parsing
     input->sb = stringbuf_new(input->pool);
     if (!input->sb) return;
-    
+
     const char* eml = eml_string;
-    
+
     // Create root map for the email
     Map* email_map = map_pooled(input->pool);
     if (!email_map) return;
-    
+
     // Initialize headers map
     Map* headers_map = map_pooled(input->pool);
     if (!headers_map) return;
-    
-    // Parse headers  
+
+    // Parse headers
     while (*eml) {
         // Check if we've reached the empty line separating headers from body
         if (*eml == '\n') {
@@ -185,7 +186,7 @@ void parse_eml(Input* input, const char* eml_string) {
                 break;
             } else if (*(eml+1) == '\r' && *(eml+2) == '\n') {
                 // Found \n\r\n - end of headers
-                eml += 3; // Skip all three characters to get to body  
+                eml += 3; // Skip all three characters to get to body
                 break;
             }
         } else if (*eml == '\r' && *(eml+1) == '\n') {
@@ -200,40 +201,40 @@ void parse_eml(Input* input, const char* eml_string) {
                 break;
             }
         }
-        
+
         // Skip empty lines in headers
         if (*eml == '\n' || *eml == '\r') {
             skip_to_newline(&eml);
             continue;
         }
-        
+
         // Skip lines that start with whitespace (continuation lines are handled in parse_header_value)
         if (is_continuation_line(eml)) {
             skip_to_newline(&eml);
             continue;
         }
-        
+
         // Parse header name
         String* header_name = parse_header_name(input, &eml);
         if (!header_name) {
             skip_to_newline(&eml);
             continue;
         }
-        
+
         // Parse header value
         String* header_value = parse_header_value(input, &eml);
         if (!header_value) {
             skip_to_newline(&eml);
             continue;
         }
-        
+
         // Normalize header name to lowercase for consistency
         normalize_header_name(header_name->chars);
-        
+
         // Store header in headers map
         Item value = {.item = s2it(header_value)};
         map_put(headers_map, header_name, value, input);
-        
+
         // Also store common headers as top-level fields for easier access
         if (strcmp(header_name->chars, "from") == 0) {
             String* from_email = extract_email_address(input, header_value->chars);
@@ -270,22 +271,22 @@ void parse_eml(Input* input, const char* eml_string) {
             map_put(email_map, msgid_key, msgid_value, input);
         }
     }
-    
+
     // Store headers map in email
     String* headers_key = input_create_string(input, "headers");
     Item headers_value = {.item = (uint64_t)headers_map};
     map_put(email_map, headers_key, headers_value, input);
-    
+
     // At this point, eml should be positioned at the start of the body
     // Parse body
     StringBuf* body_sb = input->sb;
     stringbuf_reset(body_sb);  // Reset buffer for reuse
-    
+
     while (*eml) {
         stringbuf_append_char(body_sb, *eml);
         eml++;
     }
-    
+
     if (body_sb->str && body_sb->str->len > 0) {
         String* body_string = stringbuf_to_string(body_sb);
         if (body_string) {
@@ -294,7 +295,7 @@ void parse_eml(Input* input, const char* eml_string) {
             map_put(email_map, body_key, body_value, input);
         }
     }
-    
+
     // Set the email map as the root of the input
     input->root = {.item = (uint64_t)email_map};
 }

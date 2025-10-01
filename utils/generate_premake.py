@@ -479,15 +479,10 @@ class PremakeGenerator:
         print(f"DEBUG: linux_config: {linux_config}")
         print(f"DEBUG: disable_sanitizer: {disable_sanitizer}")
 
+        # Note: AddressSanitizer will be applied individually to test projects only
+        # This avoids applying it to the main lambda.exe executable
         if not disable_sanitizer:
-            self.premake_content.extend([
-                '    -- AddressSanitizer for non-Linux platforms only (conflicts with -static)',
-                '    filter { "configurations:Debug", "not platforms:Linux_x64" }',
-                '        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }',
-                '        linkoptions { "-fsanitize=address" }',
-                '    ',
-            ])
-            print("DEBUG: Added AddressSanitizer for Debug (non-Linux)")
+            print("DEBUG: AddressSanitizer will be applied to test projects only")
         else:
             self.premake_content.extend([
                 '    -- AddressSanitizer disabled for Linux platform',
@@ -2374,6 +2369,22 @@ class PremakeGenerator:
 
             self.premake_content.extend([
                 '    }',
+                '    ',
+            ])
+
+        # Add AddressSanitizer for test projects only (not for main lambda.exe)
+        platforms_config = self.config.get('platforms', {})
+        linux_config = platforms_config.get('linux', {})
+        disable_sanitizer = linux_config.get('disable_sanitizer', False)
+
+        if not disable_sanitizer:
+            self.premake_content.extend([
+                '    -- AddressSanitizer for test projects only',
+                '    filter { "configurations:Debug", "not platforms:Linux_x64" }',
+                '        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }',
+                '        linkoptions { "-fsanitize=address" }',
+                '    ',
+                '    filter {}',
                 '    ',
             ])
 

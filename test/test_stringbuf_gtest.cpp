@@ -412,3 +412,174 @@ TEST_F(StringBufTest, TestStringbufLengthOverflowProtection) {
 
     stringbuf_free(sb);
 }
+
+// Test that reproduces the LaTeX formatter crash scenario
+// Two StringBufs sharing the same memory pool with interleaved operations
+TEST_F(StringBufTest, TestDualStringBufMemoryCorruption) {
+    printf("DEBUG: Starting dual StringBuf memory corruption test\n");
+
+    // Create two StringBufs sharing the same memory pool (like LaTeX formatter)
+    StringBuf *html_buf = stringbuf_new(test_pool);
+    StringBuf *css_buf = stringbuf_new(test_pool);
+
+    ASSERT_NE(html_buf, nullptr) << "html_buf creation should succeed";
+    ASSERT_NE(css_buf, nullptr) << "css_buf creation should succeed";
+    ASSERT_EQ(html_buf->pool, test_pool) << "html_buf should use test_pool";
+    ASSERT_EQ(css_buf->pool, test_pool) << "css_buf should use test_pool";
+
+    // Simulate LaTeX HTML generation with CSS generation
+    // This reproduces the exact pattern that causes the crash
+
+    // Phase 1: HTML content generation (like process_latex_element)
+    printf("DEBUG: Phase 1 - HTML generation\n");
+    stringbuf_append_str(html_buf, "<div class=\"latex-document\">\n");
+    stringbuf_append_str(html_buf, "<h1>Test Document</h1>\n");
+    stringbuf_append_str(html_buf, "<p>This is some content that will cause ");
+    stringbuf_append_str(html_buf, "the HTML StringBuf to grow and allocate memory.</p>\n");
+
+    // Store initial String pointer for corruption detection
+    String* initial_html_str = html_buf->str;
+    size_t initial_html_length = html_buf->length;
+    printf("DEBUG: Initial html_buf->str=%p, length=%zu\n", initial_html_str, initial_html_length);
+
+    // Phase 2: CSS generation (like generate_latex_css) - this causes many reallocations
+    printf("DEBUG: Phase 2 - CSS generation (causes reallocations)\n");
+
+    // Simulate the CSS generation that causes the crash
+    for (int i = 0; i < 100; i++) {
+        // These are the exact CSS strings from the LaTeX formatter
+        stringbuf_append_str(css_buf, ".latex-document {\n");
+        stringbuf_append_str(css_buf, "  font-family: 'Computer Modern', 'Latin Modern', serif;\n");
+        stringbuf_append_str(css_buf, "  max-width: 800px;\n");
+        stringbuf_append_str(css_buf, "  margin: 0 auto;\n");
+        stringbuf_append_str(css_buf, "  padding: 2rem;\n");
+        stringbuf_append_str(css_buf, "  line-height: 1.6;\n");
+        stringbuf_append_str(css_buf, "  color: #333;\n");
+        stringbuf_append_str(css_buf, "}\n");
+
+        // Add more CSS to force reallocations
+        stringbuf_append_str(css_buf, ".latex-title {\n");
+        stringbuf_append_str(css_buf, "  text-align: center;\n");
+        stringbuf_append_str(css_buf, "  font-size: 2.5em;\n");
+        stringbuf_append_str(css_buf, "  font-weight: bold;\n");
+        stringbuf_append_str(css_buf, "  margin: 2rem 0;\n");
+        stringbuf_append_str(css_buf, "}\n");
+
+        // Intermittently add to HTML buffer (simulates interleaved operations)
+        if (i % 10 == 0) {
+            printf("DEBUG: Iteration %d - Adding to HTML buffer\n", i);
+            printf("DEBUG: Before HTML append - html_buf->str=%p, css_buf->str=%p\n",
+                   html_buf->str, css_buf->str);
+
+            // This operation might crash if html_buf->str was corrupted by css_buf reallocation
+            stringbuf_append_str(html_buf, "<p>More content added during CSS generation</p>\n");
+
+            printf("DEBUG: After HTML append - html_buf->str=%p, css_buf->str=%p\n",
+                   html_buf->str, css_buf->str);
+
+            // Check if html_buf String pointer changed due to memory corruption
+            if (html_buf->str != initial_html_str) {
+                printf("DEBUG: html_buf->str pointer changed from %p to %p at iteration %d\n",
+                       initial_html_str, html_buf->str, i);
+                initial_html_str = html_buf->str;
+            }
+        }
+    }
+
+    // Phase 3: Final access (like stringbuf_to_string in test)
+    printf("DEBUG: Phase 3 - Final access to HTML buffer\n");
+
+    // This might crash if the String pointer was corrupted
+    ASSERT_NE(html_buf->str, nullptr) << "html_buf->str should not be NULL";
+    ASSERT_GT(html_buf->length, initial_html_length) << "HTML buffer should have grown";
+    ASSERT_EQ(html_buf->length, html_buf->str->len) << "Length fields should be synchronized";
+
+    // Try to convert to string (this is where the test crash occurred)
+    String* html_result = stringbuf_to_string(html_buf);
+    ASSERT_NE(html_result, nullptr) << "stringbuf_to_string should succeed";
+    ASSERT_GT(html_result->len, 0) << "Result should have content";
+
+    printf("DEBUG: Test completed successfully - html_buf final length=%zu, css_buf final length=%zu\n",
+           html_buf->length, css_buf->length);
+
+    stringbuf_free(html_buf);
+    stringbuf_free(css_buf);
+}
+
+// Stress test version with random operations
+TEST_F(StringBufTest, TestDualStringBufStress) {
+    printf("DEBUG: Starting dual StringBuf stress test\n");
+
+    const int NUM_ITERATIONS = 1000;
+    const int TARGET_DOCUMENT_SIZE = 50000; // ~50KB document
+
+    StringBuf *buf1 = stringbuf_new(test_pool);
+    StringBuf *buf2 = stringbuf_new(test_pool);
+
+    ASSERT_NE(buf1, nullptr);
+    ASSERT_NE(buf2, nullptr);
+
+    // Array of strings to randomly append (simulating HTML/CSS content)
+    const char* html_strings[] = {
+        "<div class=\"content\">",
+        "<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit.</p>",
+        "<h1>Section Header</h1>",
+        "<ul><li>List item 1</li><li>List item 2</li></ul>",
+        "</div>",
+        "<span class=\"highlight\">Important text</span>",
+    };
+
+    const char* css_strings[] = {
+        "body { font-family: Arial, sans-serif; }",
+        ".content { margin: 20px; padding: 10px; }",
+        "h1 { color: #333; font-size: 24px; }",
+        "p { line-height: 1.6; margin-bottom: 16px; }",
+        ".highlight { background-color: yellow; }",
+        "ul { list-style-type: disc; margin-left: 20px; }",
+    };
+
+    int total_size = 0;
+    for (int i = 0; i < NUM_ITERATIONS && total_size < TARGET_DOCUMENT_SIZE; i++) {
+        // Randomly choose which buffer to append to
+        bool use_buf1 = (i % 3 != 0); // Bias toward buf1 (HTML)
+        StringBuf* target_buf = use_buf1 ? buf1 : buf2;
+        const char** string_array = use_buf1 ? html_strings : css_strings;
+        int array_size = use_buf1 ? 6 : 6;
+
+        // Randomly choose string to append
+        int string_index = i % array_size;
+        const char* str_to_append = string_array[string_index];
+
+        printf("DEBUG: Iteration %d - Appending to %s: '%.20s...'\n",
+               i, use_buf1 ? "buf1" : "buf2", str_to_append);
+
+        // This might crash due to memory corruption
+        stringbuf_append_str(target_buf, str_to_append);
+
+        total_size += strlen(str_to_append);
+
+        // Periodically verify integrity
+        if (i % 100 == 0) {
+            ASSERT_NE(buf1->str, nullptr) << "buf1->str should not be NULL at iteration " << i;
+            ASSERT_NE(buf2->str, nullptr) << "buf2->str should not be NULL at iteration " << i;
+            ASSERT_EQ(buf1->length, buf1->str->len) << "buf1 length sync at iteration " << i;
+            ASSERT_EQ(buf2->length, buf2->str->len) << "buf2 length sync at iteration " << i;
+        }
+    }
+
+    // Final verification
+    ASSERT_GT(buf1->length, 0) << "buf1 should have content";
+    ASSERT_GT(buf2->length, 0) << "buf2 should have content";
+
+    String* result1 = stringbuf_to_string(buf1);
+    String* result2 = stringbuf_to_string(buf2);
+
+    ASSERT_NE(result1, nullptr) << "buf1 stringbuf_to_string should succeed";
+    ASSERT_NE(result2, nullptr) << "buf2 stringbuf_to_string should succeed";
+
+    printf("DEBUG: Stress test completed - buf1 size=%zu, buf2 size=%zu\n",
+           result1->len, result2->len);
+
+    stringbuf_free(buf1);
+    stringbuf_free(buf2);
+}
