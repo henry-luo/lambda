@@ -97,7 +97,8 @@
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
-        "lexbor/source"
+        "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include"
     ],
     "libraries": [
         {
@@ -167,6 +168,13 @@
             "name": "zlib",
             "include": null,
             "lib": "/opt/homebrew/opt/zlib/lib/libz.a",
+            "link": "static"
+        },
+        {
+            "name": "jemalloc",
+            "description": "High-performance memory allocator (jemalloc with je_ prefix)",
+            "include": "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+            "lib": "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
             "link": "static"
         },
         {
@@ -261,12 +269,14 @@
             "lang": "c17",
             "includes": [
                 "lib/mem-pool/include",
-                "/opt/homebrew/include"
+                "/opt/homebrew/include",
+                "/opt/homebrew/opt/jemalloc/include"
             ],
             "sources": [
                 "lib/mem-pool/src/variable.c",
                 "lib/mem-pool/src/buffer.c",
                 "lib/mem-pool/src/utils.c",
+                "lib/mempool.c",
                 "lib/strbuf.c",
                 "lib/stringbuf.c",
                 "lib/strview.c",
@@ -282,7 +292,8 @@
                 "lambda/input/mime-types.c"
             ],
             "libraries": [
-                "utf8proc"
+                "utf8proc",
+                "jemalloc"
             ],
             "special_flags": "-DUTF8PROC_STATIC",
             "cpp_flags": "-I/opt/homebrew/include -DUTF8PROC_STATIC",
@@ -1059,6 +1070,56 @@
                         ],
                         "binary": "test_cmdedit_gtest.exe",
                         "special_flags": "-DCMDEDIT_TESTING -Wno-implicit-function-declaration -DUTF8PROC_STATIC"
+                    },
+                    {
+                        "source": "test_basic_gtest.cpp",
+                        "name": "🧪 Basic Tests (GTest)",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ],
+                        "binary": "test_basic_gtest.exe"
+                    },
+                    {
+                        "source": "test_mempool_simple_gtest.cpp",
+                        "name": "🏊 Simple Memory Pool Tests (GTest)",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "jemalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/mempool.c"
+                        ],
+                        "binary": "test_mempool_simple_gtest.exe"
+                    },
+                    {
+                        "source": "test_mempool_standalone.c",
+                        "name": "🧪 Standalone Mempool Test (C)",
+                        "dependencies": [],
+                        "libraries": [
+                            "jemalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/mempool.c"
+                        ],
+                        "binary": "test_mempool_standalone.exe"
+                    },
+                    {
+                        "_DISABLED_source": "test_mempool_gtest.cpp",
+                        "_DISABLED_name": "🏊 Memory Pool Tests (GTest)",
+                        "_DISABLED_dependencies": [
+                            "lambda-lib"
+                        ],
+                        "_DISABLED_libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "jemalloc"
+                        ],
+                        "_DISABLED_binary": "test_mempool_gtest.exe",
+                        "_comment": "DISABLED - old complex mempool API"
                     }
                 ],
                 "type": "library"

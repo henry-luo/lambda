@@ -42,6 +42,7 @@ project "lambda-lib"
         "lib/mem-pool/src/variable.c",
         "lib/mem-pool/src/buffer.c",
         "lib/mem-pool/src/utils.c",
+        "lib/mempool.c",
         "lib/strbuf.c",
         "lib/stringbuf.c",
         "lib/strview.c",
@@ -63,6 +64,7 @@ project "lambda-lib"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -76,6 +78,7 @@ project "lambda-lib"
     
     links {
         "utf8proc",
+        "jemalloc",
     }
     
     buildoptions {
@@ -112,6 +115,7 @@ project "lambda-input-full-c"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -211,6 +215,7 @@ project "lambda-input-full-cpp"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -367,6 +372,7 @@ project "radiant"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -609,6 +615,7 @@ project "lambda"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -636,6 +643,7 @@ project "lambda"
         "/opt/homebrew/lib/libhpdf.a",
         "/opt/homebrew/lib/libnghttp2.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
         "/Users/henryluo/Projects/Jubily/lexbor/liblexbor_static.a",
         "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
         "/opt/homebrew/lib/libpng.a",
@@ -715,6 +723,7 @@ project "test_strbuf_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -772,6 +781,7 @@ project "test_stringbuf_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -829,6 +839,7 @@ project "test_strview_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -886,6 +897,7 @@ project "test_variable_pool_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -943,6 +955,7 @@ project "test_num_stack_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1000,6 +1013,7 @@ project "test_datetime_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1057,6 +1071,7 @@ project "test_url_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1114,6 +1129,7 @@ project "test_url_extra_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1171,6 +1187,7 @@ project "test_cmdedit_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1216,6 +1233,183 @@ project "test_cmdedit_gtest"
     filter {}
     
 
+project "test_basic_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_basic_gtest.cpp",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lib/mem-pool/include",
+        "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/opt/homebrew/include/openssl",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_mempool_simple_gtest"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_mempool_simple_gtest.cpp",
+        "lib/mempool.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lib/mem-pool/include",
+        "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/opt/homebrew/include/openssl",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+        "jemalloc",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_mempool_standalone"
+    kind "ConsoleApp"
+    language "C"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_mempool_standalone.c",
+        "lib/mempool.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lib/mem-pool/include",
+        "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+        "/opt/homebrew/include/openssl",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "jemalloc",
+        "criterion",
+        "nanomsg",
+        "git2",
+    }
+    
+    linkoptions {
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-std=c99",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
 project "test_mime_detect_gtest"
     kind "ConsoleApp"
     language "C++"
@@ -1233,6 +1427,7 @@ project "test_mime_detect_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1334,6 +1529,7 @@ project "test_math_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1435,6 +1631,7 @@ project "test_math_ascii_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1536,6 +1733,7 @@ project "test_markup_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1637,6 +1835,7 @@ project "test_input_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1738,6 +1937,7 @@ project "test_dir_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1839,6 +2039,7 @@ project "test_http_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1940,6 +2141,7 @@ project "test_sysinfo_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2041,6 +2243,7 @@ project "test_jsx_roundtrip_new_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2142,6 +2345,7 @@ project "test_mdx_roundtrip_new_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2243,6 +2447,7 @@ project "test_css_tokenizer_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2344,6 +2549,7 @@ project "test_css_parser_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2445,6 +2651,7 @@ project "test_css_integration_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2546,6 +2753,7 @@ project "test_css_files_safe_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2647,6 +2855,7 @@ project "test_css_frameworks_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2748,6 +2957,7 @@ project "test_mdx_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2849,6 +3059,7 @@ project "test_jsx_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2953,6 +3164,7 @@ project "test_latex_html_fixtures_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3055,6 +3267,7 @@ project "test_validator_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3155,6 +3368,7 @@ project "test_ast_validator_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3255,6 +3469,7 @@ project "test_lambda_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3311,6 +3526,7 @@ project "test_lambda_repl_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3367,6 +3583,7 @@ project "test_lambda_proc_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3423,6 +3640,7 @@ project "test_lambda_runner"
         "lambda/tree-sitter-lambda/bindings/c",
         "lib/mem-pool/include",
         "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
