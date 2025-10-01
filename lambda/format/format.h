@@ -23,6 +23,8 @@ String* format_css(VariableMemPool* pool, Item root_item);
 String* format_jsx(VariableMemPool* pool, Item root_item);
 String* format_mdx(VariableMemPool* pool, Item root_item);
 String* format_latex(VariableMemPool* pool, Item root_item);
+String* format_latex_html(VariableMemPool* pool, Item root_item);
+String* format_latex_html_with_css(VariableMemPool* pool, Item root_item, StringBuf* css_output);
 void format_rst(StringBuf* sb, Item root_item);
 String* format_rst_string(VariableMemPool* pool, Item root_item);
 void format_org(StringBuf* sb, Item root_item);
