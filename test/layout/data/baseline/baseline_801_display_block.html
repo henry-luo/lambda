@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Display Block</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        span {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <p>Test passes if there are two lines of "Filler Text" below.</p>
+    <div>
+        <span>Filler Text</span>
+        <span>Filler Text</span>
+    </div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_801_display_block",
+        "category": "baseline",
+        "features": ["display", "block"],
+        "description": "Display property set to block on inline elements",
+        "original_css_test": "display-002.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/visuren.html#display-prop"],
+        "complexity": "fundamental",
+        "expected_behavior": "Span elements should display as block elements on separate lines"
+    }
+    </script>
+</body>
+</html>

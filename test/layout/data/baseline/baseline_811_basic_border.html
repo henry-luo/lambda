@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Basic Border</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .box1 {
+            width: 100px;
+            height: 100px;
+            background-color: lightblue;
+            border: 3px solid red;
+            margin: 10px;
+        }
+        .box2 {
+            width: 100px;
+            height: 100px;
+            background-color: lightgreen;
+            border: 5px dotted blue;
+            margin: 10px;
+        }
+        .box3 {
+            width: 100px;
+            height: 100px;
+            background-color: lightyellow;
+            border: 2px dashed purple;
+            margin: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="box1"></div>
+    <div class="box2"></div>
+    <div class="box3"></div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_811_basic_border",
+        "category": "baseline",
+        "features": ["border", "border-style", "border-width", "border-color"],
+        "description": "Basic border properties - solid, dotted, and dashed styles",
+        "original_css_test": "border-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/box.html#border-properties"],
+        "complexity": "fundamental",
+        "expected_behavior": "Three boxes with different border styles: solid red, dotted blue, dashed purple"
+    }
+    </script>
+</body>
+</html>

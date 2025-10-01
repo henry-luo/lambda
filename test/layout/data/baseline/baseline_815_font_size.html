@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Font Size</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .text-container {
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid gray;
+        }
+        .small { font-size: 12px; }
+        .medium { font-size: 16px; }
+        .large { font-size: 24px; }
+        .percent { font-size: 150%; }
+        .em { font-size: 2em; }
+    </style>
+</head>
+<body>
+    <div class="text-container small">This text is 12px</div>
+    <div class="text-container medium">This text is 16px</div>
+    <div class="text-container large">This text is 24px</div>
+    <div class="text-container percent">This text is 150%</div>
+    <div class="text-container em">This text is 2em</div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_815_font_size",
+        "category": "baseline",
+        "features": ["font-size", "px", "percent", "em"],
+        "description": "Font size using different units: px, %, em",
+        "original_css_test": "font-size-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/fonts.html#font-size-props"],
+        "complexity": "fundamental",
+        "expected_behavior": "Five text containers with progressively increasing font sizes"
+    }
+    </script>
+</body>
+</html>

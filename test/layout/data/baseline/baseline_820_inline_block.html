@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Inline Block</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container {
+            width: 400px;
+            border: 1px solid black;
+            padding: 10px;
+            text-align: center;
+        }
+        .inline-block {
+            display: inline-block;
+            width: 80px;
+            height: 60px;
+            margin: 5px;
+            border: 2px solid blue;
+            background-color: lightcyan;
+            vertical-align: top;
+        }
+        .different-height {
+            height: 100px;
+            background-color: lightpink;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="inline-block">Box 1</div>
+        <div class="inline-block">Box 2</div>
+        <div class="inline-block different-height">Taller Box</div>
+        <div class="inline-block">Box 4</div>
+    </div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_820_inline_block",
+        "category": "baseline",
+        "features": ["display", "inline-block", "vertical-align"],
+        "description": "Inline-block elements with different heights",
+        "original_css_test": "inline-block-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/visuren.html#display-prop"],
+        "complexity": "fundamental",
+        "expected_behavior": "Four inline-block boxes in a row, with one taller box"
+    }
+    </script>
+</body>
+</html>

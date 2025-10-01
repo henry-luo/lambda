@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Basic Padding</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .box {
+            width: 100px;
+            height: 100px;
+            background-color: green;
+            padding: 15px;
+            border: 2px solid black;
+        }
+    </style>
+</head>
+<body>
+    <div class="box">Content</div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_804_basic_padding",
+        "category": "baseline",
+        "features": ["padding", "box-model"],
+        "description": "Basic padding property application",
+        "original_css_test": "padding-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/box.html#padding-properties"],
+        "complexity": "fundamental",
+        "expected_behavior": "Green box with 15px padding around content"
+    }
+    </script>
+</body>
+</html>

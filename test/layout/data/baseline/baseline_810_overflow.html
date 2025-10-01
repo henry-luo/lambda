@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Overflow</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .container {
+            width: 200px;
+            height: 100px;
+            border: 2px solid black;
+            margin: 10px;
+            padding: 10px;
+        }
+        .visible {
+            overflow: visible;
+            background-color: lightcoral;
+        }
+        .hidden {
+            overflow: hidden;
+            background-color: lightblue;
+        }
+        .scroll {
+            overflow: scroll;
+            background-color: lightgreen;
+        }
+        .content {
+            width: 300px;
+            height: 150px;
+            background-color: yellow;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    <div class="container visible">
+        <div class="content">Overflow: visible - content extends beyond container</div>
+    </div>
+    <div class="container hidden">
+        <div class="content">Overflow: hidden - content is clipped</div>
+    </div>
+    <div class="container scroll">
+        <div class="content">Overflow: scroll - scrollbars appear</div>
+    </div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_810_overflow",
+        "category": "baseline",
+        "features": ["overflow", "visible", "hidden", "scroll"],
+        "description": "Basic overflow property behaviors",
+        "original_css_test": "overflow-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/visufx.html#overflow"],
+        "complexity": "fundamental",
+        "expected_behavior": "Three containers demonstrating visible, hidden, and scroll overflow behaviors"
+    }
+    </script>
+</body>
+</html>

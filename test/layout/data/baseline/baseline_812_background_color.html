@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Background Color</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .box {
+            width: 150px;
+            height: 100px;
+            margin: 10px;
+            padding: 15px;
+            border: 1px solid black;
+        }
+        .red { background-color: red; }
+        .green { background-color: #00ff00; }
+        .blue { background-color: rgb(0, 0, 255); }
+        .transparent { background-color: transparent; }
+    </style>
+</head>
+<body>
+    <div class="box red">Red background</div>
+    <div class="box green">Green background</div>
+    <div class="box blue">Blue background</div>
+    <div class="box transparent">Transparent background</div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_812_background_color",
+        "category": "baseline",
+        "features": ["background-color", "color-values"],
+        "description": "Background color using different color value formats",
+        "original_css_test": "background-color-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/colors.html#background-properties"],
+        "complexity": "fundamental",
+        "expected_behavior": "Four boxes with red, green, blue, and transparent backgrounds"
+    }
+    </script>
+</body>
+</html>

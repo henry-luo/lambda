@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: White Space</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container {
+            width: 300px;
+            border: 2px solid black;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        .normal {
+            white-space: normal;
+            background-color: lightgray;
+        }
+        .nowrap {
+            white-space: nowrap;
+            background-color: lightblue;
+        }
+        .pre {
+            white-space: pre;
+            background-color: lightgreen;
+        }
+        .pre-wrap {
+            white-space: pre-wrap;
+            background-color: lightyellow;
+        }
+    </style>
+</head>
+<body>
+    <div class="container normal">
+        <p>Normal: This    text   has    multiple    spaces and
+        line breaks that should be collapsed.</p>
+    </div>
+    <div class="container nowrap">
+        <p>Nowrap: This text should not wrap to the next line even if it is very long and exceeds the container width.</p>
+    </div>
+    <div class="container pre">
+        <p>Pre: This    text   preserves    all    spaces and
+        line breaks exactly as written.</p>
+    </div>
+    <div class="container pre-wrap">
+        <p>Pre-wrap: This    text   preserves    spaces but still wraps when it reaches the container edge like this long line.</p>
+    </div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_818_white_space",
+        "category": "baseline",
+        "features": ["white-space", "normal", "nowrap", "pre", "pre-wrap"],
+        "description": "White-space property behavior for text handling",
+        "original_css_test": "white-space-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/text.html#white-space-prop"],
+        "complexity": "fundamental",
+        "expected_behavior": "Four containers showing different white-space behaviors: normal, nowrap, pre, and pre-wrap"
+    }
+    </script>
+</body>
+</html>

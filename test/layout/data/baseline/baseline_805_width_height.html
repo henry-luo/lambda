@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Width and Height</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .box {
+            width: 150px;
+            height: 80px;
+            background-color: orange;
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+    <div class="box"></div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_805_width_height",
+        "category": "baseline",
+        "features": ["width", "height", "dimensions"],
+        "description": "Basic width and height property application",
+        "original_css_test": "width-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/visudet.html#the-width-property"],
+        "complexity": "fundamental",
+        "expected_behavior": "Orange box with exact dimensions 150px × 80px"
+    }
+    </script>
+</body>
+</html>

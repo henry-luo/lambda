@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Position Relative</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .box {
+            width: 100px;
+            height: 100px;
+            margin: 10px;
+            border: 2px solid black;
+        }
+        .box1 {
+            background-color: lightgreen;
+        }
+        .box2 {
+            background-color: lightcoral;
+            position: relative;
+            top: 20px;
+            left: 30px;
+        }
+        .box3 {
+            background-color: lightblue;
+        }
+    </style>
+</head>
+<body>
+    <div class="box box1"></div>
+    <div class="box box2"></div>
+    <div class="box box3"></div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_808_position_relative",
+        "category": "baseline",
+        "features": ["position", "relative", "top", "left"],
+        "description": "Basic relative positioning",
+        "original_css_test": "position-relative-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/visuren.html#positioning-scheme"],
+        "complexity": "fundamental",
+        "expected_behavior": "Middle coral box shifted 20px down and 30px right from its normal position"
+    }
+    </script>
+</body>
+</html>

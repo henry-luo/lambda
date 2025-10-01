@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Clear Float</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container {
+            width: 400px;
+            border: 2px solid black;
+            padding: 10px;
+        }
+        .float-left {
+            float: left;
+            width: 100px;
+            height: 60px;
+            background-color: red;
+            margin: 5px;
+        }
+        .float-right {
+            float: right;
+            width: 100px;
+            height: 60px;
+            background-color: blue;
+            margin: 5px;
+        }
+        .clear-both {
+            clear: both;
+            background-color: green;
+            height: 40px;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="float-left"></div>
+        <div class="float-right"></div>
+        <div class="clear-both">This green box clears both floats</div>
+    </div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_814_clear_float",
+        "category": "baseline",
+        "features": ["clear", "both", "float"],
+        "description": "Clear property to clear floating elements",
+        "original_css_test": "clear-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/visuren.html#flow-control"],
+        "complexity": "fundamental",
+        "expected_behavior": "Green box appears below floated red and blue boxes due to clear: both"
+    }
+    </script>
+</body>
+</html>

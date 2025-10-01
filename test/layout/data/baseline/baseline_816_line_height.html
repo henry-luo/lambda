@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Line Height</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .text-block {
+            width: 300px;
+            margin: 20px;
+            padding: 10px;
+            border: 1px solid black;
+            font-size: 16px;
+        }
+        .normal { line-height: normal; }
+        .number { line-height: 1.5; }
+        .pixels { line-height: 24px; }
+        .percent { line-height: 200%; }
+    </style>
+</head>
+<body>
+    <div class="text-block normal">
+        This paragraph has normal line height. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.
+    </div>
+    <div class="text-block number">
+        This paragraph has line-height: 1.5. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.
+    </div>
+    <div class="text-block pixels">
+        This paragraph has line-height: 24px. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.
+    </div>
+    <div class="text-block percent">
+        This paragraph has line-height: 200%. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.
+    </div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_816_line_height",
+        "category": "baseline",
+        "features": ["line-height", "normal", "number", "pixels", "percent"],
+        "description": "Line height using different value types",
+        "original_css_test": "line-height-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/visudet.html#line-height"],
+        "complexity": "fundamental",
+        "expected_behavior": "Four text blocks with different line spacing"
+    }
+    </script>
+</body>
+</html>

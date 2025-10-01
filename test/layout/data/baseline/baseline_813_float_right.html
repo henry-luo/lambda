@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Float Right</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container {
+            width: 400px;
+            border: 2px solid black;
+            padding: 10px;
+            background-color: #f0f0f0;
+        }
+        .float-box {
+            float: right;
+            width: 120px;
+            height: 80px;
+            background-color: orange;
+            margin: 5px;
+            border: 1px solid red;
+        }
+        .content {
+            background-color: lightblue;
+            padding: 10px;
+            min-height: 100px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="float-box"></div>
+        <div class="content">
+            This text content should wrap around the orange box that is floated to the right side of the container.
+        </div>
+    </div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_813_float_right",
+        "category": "baseline",
+        "features": ["float", "right"],
+        "description": "Basic float right behavior with text wrapping",
+        "original_css_test": "floats-002.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/visuren.html#floats"],
+        "complexity": "fundamental",
+        "expected_behavior": "Orange box floated right with text wrapping around it on the left"
+    }
+    </script>
+</body>
+</html>

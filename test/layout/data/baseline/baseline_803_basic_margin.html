@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Basic Margin</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .box {
+            width: 100px;
+            height: 100px;
+            background-color: blue;
+            margin: 20px;
+            border: 2px solid black;
+        }
+    </style>
+</head>
+<body>
+    <div class="box"></div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_803_basic_margin",
+        "category": "baseline",
+        "features": ["margin", "box-model"],
+        "description": "Basic margin property application",
+        "original_css_test": "margin-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/box.html#margin-properties"],
+        "complexity": "fundamental",
+        "expected_behavior": "Blue box with 20px margin on all sides"
+    }
+    </script>
+</body>
+</html>

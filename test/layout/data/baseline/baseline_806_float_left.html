@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Float Left</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .container {
+            border: 2px solid black;
+            padding: 10px;
+            width: 300px;
+        }
+        .float-box {
+            float: left;
+            width: 100px;
+            height: 100px;
+            background-color: red;
+            margin: 5px;
+        }
+        .content {
+            background-color: lightgray;
+            padding: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="float-box"></div>
+        <div class="content">This text should wrap around the floated red box on the left.</div>
+    </div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_806_float_left",
+        "category": "baseline",
+        "features": ["float", "left"],
+        "description": "Basic float left behavior",
+        "original_css_test": "floats-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/visuren.html#floats"],
+        "complexity": "fundamental",
+        "expected_behavior": "Red box floated left with text wrapping around it"
+    }
+    </script>
+</body>
+</html>

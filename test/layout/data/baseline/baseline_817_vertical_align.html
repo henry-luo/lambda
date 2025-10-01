@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Vertical Align</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container {
+            line-height: 60px;
+            border: 1px solid black;
+            margin: 10px;
+            padding: 10px;
+            font-size: 18px;
+        }
+        .box {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            background-color: lightblue;
+            border: 1px solid blue;
+            margin: 0 5px;
+        }
+        .baseline { vertical-align: baseline; }
+        .top { vertical-align: top; }
+        .middle { vertical-align: middle; }
+        .bottom { vertical-align: bottom; }
+        .text-top { vertical-align: text-top; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        Text baseline
+        <span class="box baseline"></span>
+        <span class="box top"></span>
+        <span class="box middle"></span>
+        <span class="box bottom"></span>
+        <span class="box text-top"></span>
+        more text
+    </div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_817_vertical_align",
+        "category": "baseline",
+        "features": ["vertical-align", "baseline", "top", "middle", "bottom", "text-top"],
+        "description": "Vertical alignment of inline elements",
+        "original_css_test": "vertical-align-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/visudet.html#line-height"],
+        "complexity": "fundamental",
+        "expected_behavior": "Five blue boxes aligned differently relative to the text baseline"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Text Align</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .container {
+            width: 300px;
+            border: 2px solid black;
+            padding: 20px;
+            margin: 10px;
+        }
+        .left {
+            text-align: left;
+            background-color: lightgray;
+        }
+        .center {
+            text-align: center;
+            background-color: lightblue;
+        }
+        .right {
+            text-align: right;
+            background-color: lightgreen;
+        }
+    </style>
+</head>
+<body>
+    <div class="container left">
+        <p>This text is left-aligned.</p>
+    </div>
+    <div class="container center">
+        <p>This text is center-aligned.</p>
+    </div>
+    <div class="container right">
+        <p>This text is right-aligned.</p>
+    </div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_809_text_align",
+        "category": "baseline",
+        "features": ["text-align", "left", "center", "right"],
+        "description": "Basic text alignment properties",
+        "original_css_test": "text-align-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/text.html#alignment-prop"],
+        "complexity": "fundamental",
+        "expected_behavior": "Three containers with text aligned left, center, and right respectively"
+    }
+    </script>
+</body>
+</html>

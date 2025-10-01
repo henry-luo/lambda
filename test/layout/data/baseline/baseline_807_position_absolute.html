@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Position Absolute</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; }
+        .container {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            border: 2px solid black;
+            background-color: lightblue;
+        }
+        .absolute-box {
+            position: absolute;
+            top: 50px;
+            left: 50px;
+            width: 80px;
+            height: 80px;
+            background-color: purple;
+        }
+        .normal-box {
+            width: 100px;
+            height: 50px;
+            background-color: yellow;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="normal-box"></div>
+        <div class="absolute-box"></div>
+    </div>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_807_position_absolute",
+        "category": "baseline",
+        "features": ["position", "absolute", "top", "left"],
+        "description": "Basic absolute positioning",
+        "original_css_test": "position-absolute-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/visuren.html#positioning-scheme"],
+        "complexity": "fundamental",
+        "expected_behavior": "Purple box positioned absolutely at 50px from top and left, overlapping yellow box"
+    }
+    </script>
+</body>
+</html>

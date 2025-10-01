@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baseline Test: Visibility</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container {
+            width: 300px;
+            margin: 10px;
+            padding: 10px;
+            border: 1px solid black;
+        }
+        .box {
+            width: 100px;
+            height: 50px;
+            margin: 5px;
+            border: 1px solid red;
+            display: inline-block;
+        }
+        .visible {
+            visibility: visible;
+            background-color: lightgreen;
+        }
+        .hidden {
+            visibility: hidden;
+            background-color: lightblue;
+        }
+        .normal {
+            background-color: lightyellow;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="box visible">Visible</div>
+        <div class="box hidden">Hidden</div>
+        <div class="box normal">Normal</div>
+    </div>
+    <p>The middle box should be hidden but still take up space in the layout.</p>
+
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "baseline_819_visibility",
+        "category": "baseline",
+        "features": ["visibility", "visible", "hidden"],
+        "description": "Visibility property - hidden vs visible",
+        "original_css_test": "visibility-001.htm",
+        "spec_references": ["https://www.w3.org/TR/CSS21/visufx.html#visibility"],
+        "complexity": "fundamental",
+        "expected_behavior": "Three boxes with middle one invisible but maintaining layout space"
+    }
+    </script>
+</body>
+</html>
