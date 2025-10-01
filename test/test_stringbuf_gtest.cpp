@@ -377,3 +377,38 @@ TEST_F(StringBufTest, TestStringbufFormatNullFormat) {
 
     stringbuf_free(sb);
 }
+
+// Test length field overflow protection (22-bit limit = 4,194,303)
+TEST_F(StringBufTest, TestStringbufLengthOverflowProtection) {
+    StringBuf *sb = stringbuf_new(test_pool);
+
+    // First, get to exactly the limit
+    const size_t max_len = 0x3FFFFF; // 22-bit max value: 4,194,303
+
+    // Manually set length to exactly the limit (for testing purposes)
+    // In real usage, this would happen through many append operations
+    if (stringbuf_ensure_cap(sb, max_len + 100)) {
+        sb->length = max_len;
+        sb->str->len = max_len;
+        sb->str->chars[max_len] = '\0';
+
+        size_t old_length = sb->length;
+
+        // Try to append a character that would exceed the limit
+        stringbuf_append_char(sb, 'X');
+
+        // Length should remain unchanged due to overflow protection
+        ASSERT_EQ(sb->length, old_length) << "char append should be rejected due to overflow";
+        ASSERT_EQ(sb->str->len, old_length) << "str->len should not change when overflow would occur";
+
+        // Try to append a string that would exceed the limit
+        stringbuf_append_str(sb, "This should be rejected");
+        ASSERT_EQ(sb->length, old_length) << "string append should be rejected due to overflow";
+
+        // Try format append that should also be rejected
+        stringbuf_append_format(sb, "Number: %d", 42);
+        ASSERT_EQ(sb->length, old_length) << "format append should be rejected due to overflow";
+    }
+
+    stringbuf_free(sb);
+}
