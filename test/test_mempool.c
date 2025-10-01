@@ -602,14 +602,391 @@ static int test_pool_realloc(void) {
 
     // Test realloc to size 0 (should behave like free)
     void* ptr3 = pool_realloc(pool, ptr2, 0);
-    // ptr3 may be NULL or a minimal allocation - both are valid
+    // After realloc to size 0, ptr3 should be NULL (memory is freed)
+    EXPECT_TRUE(ptr3 == NULL, "Realloc to zero size should return NULL");
 
     pool_free(pool, ptr);
-    if (ptr3) {
-        pool_free(pool, ptr3);
+
+    pool_destroy(pool);
+    return 1;
+}
+
+static int test_realloc_stress(void) {
+    Pool* pool = pool_create();
+    EXPECT_NOT_NULL(pool, "Pool creation should succeed");
+
+    // Test multiple consecutive reallocs
+    void* ptr = pool_alloc(pool, 10);
+    EXPECT_NOT_NULL(ptr, "Initial allocation should succeed");
+    strcpy((char*)ptr, "Hi");
+
+    // Multiple reallocs with increasing sizes
+    for (int i = 0; i < 10; i++) {
+        size_t new_size = 20 + i * 30;
+        ptr = pool_realloc(pool, ptr, new_size);
+        EXPECT_NOT_NULL(ptr, "Realloc should succeed");
+        EXPECT_TRUE(strncmp((char*)ptr, "Hi", 2) == 0, "Data should be preserved across reallocs");
+    }
+
+    // Test realloc down to very small size
+    ptr = pool_realloc(pool, ptr, 5);
+    EXPECT_NOT_NULL(ptr, "Realloc to small size should succeed");
+    EXPECT_TRUE(strncmp((char*)ptr, "Hi", 2) == 0, "Data should be preserved when shrinking");
+
+    pool_free(pool, ptr);
+    pool_destroy(pool);
+    return 1;
+}
+
+static int test_realloc_null_handling(void) {
+    Pool* pool = pool_create();
+    EXPECT_NOT_NULL(pool, "Pool creation should succeed");
+
+    // Test realloc with NULL pointer (should behave like malloc)
+    void* ptr1 = pool_realloc(pool, NULL, 100);
+    EXPECT_NOT_NULL(ptr1, "Realloc from NULL should work like alloc");
+    strcpy((char*)ptr1, "Test");
+    EXPECT_TRUE(strcmp((char*)ptr1, "Test") == 0, "Should be able to write to allocated memory");
+
+    // Test realloc to zero size (should behave like free)
+    void* ptr2 = pool_realloc(pool, ptr1, 0);
+    EXPECT_TRUE(ptr2 == NULL, "Realloc to zero size should return NULL");
+
+    pool_destroy(pool);
+    return 1;
+}
+
+static int test_realloc_data_preservation(void) {
+    Pool* pool = pool_create();
+    EXPECT_NOT_NULL(pool, "Pool creation should succeed");
+
+    // Test data preservation during expansion
+    void* ptr = pool_alloc(pool, 20);
+    EXPECT_NOT_NULL(ptr, "Initial allocation should succeed");
+    strcpy((char*)ptr, "Hello World!");
+
+    ptr = pool_realloc(pool, ptr, 100);
+    EXPECT_NOT_NULL(ptr, "Realloc expansion should succeed");
+    EXPECT_TRUE(strcmp((char*)ptr, "Hello World!") == 0, "Data should be preserved during expansion");
+
+    // Test data preservation during shrinking
+    ptr = pool_realloc(pool, ptr, 12);
+    EXPECT_NOT_NULL(ptr, "Realloc shrinking should succeed");
+    EXPECT_TRUE(strncmp((char*)ptr, "Hello World!", 12) == 0, "Data should be preserved during shrinking");
+
+    pool_free(pool, ptr);
+    pool_destroy(pool);
+    return 1;
+}
+
+static int test_multiple_pools_isolation(void) {
+    // Test that multiple pools are properly isolated
+    Pool* pool1 = pool_create();
+    Pool* pool2 = pool_create();
+    EXPECT_NOT_NULL(pool1, "First pool creation should succeed");
+    EXPECT_NOT_NULL(pool2, "Second pool creation should succeed");
+
+    // Allocate from both pools
+    void* ptr1 = pool_alloc(pool1, 100);
+    void* ptr2 = pool_alloc(pool2, 100);
+    EXPECT_NOT_NULL(ptr1, "Allocation from pool1 should succeed");
+    EXPECT_NOT_NULL(ptr2, "Allocation from pool2 should succeed");
+
+    // Fill with different patterns
+    fill_pattern(ptr1, 100, 0xAA);
+    fill_pattern(ptr2, 100, 0xBB);
+
+    // Verify isolation
+    EXPECT_TRUE(verify_pattern(ptr1, 100, 0xAA), "Pool1 data should be preserved");
+    EXPECT_TRUE(verify_pattern(ptr2, 100, 0xBB), "Pool2 data should be preserved");
+
+    // Test realloc in both pools
+    ptr1 = pool_realloc(pool1, ptr1, 200);
+    ptr2 = pool_realloc(pool2, ptr2, 200);
+    EXPECT_NOT_NULL(ptr1, "Realloc in pool1 should succeed");
+    EXPECT_NOT_NULL(ptr2, "Realloc in pool2 should succeed");
+
+    // Verify data is still preserved after realloc
+    EXPECT_TRUE(verify_pattern(ptr1, 100, 0xAA), "Pool1 data should be preserved after realloc");
+    EXPECT_TRUE(verify_pattern(ptr2, 100, 0xBB), "Pool2 data should be preserved after realloc");
+
+    pool_free(pool1, ptr1);
+    pool_free(pool2, ptr2);
+    pool_destroy(pool1);
+    pool_destroy(pool2);
+    return 1;
+}
+
+static int test_invalid_pool_operations(void) {
+    Pool* pool = pool_create();
+    EXPECT_NOT_NULL(pool, "Pool creation should succeed");
+
+    void* ptr = pool_alloc(pool, 100);
+    EXPECT_NOT_NULL(ptr, "Valid allocation should succeed");
+
+    // Test operations with NULL pool
+    void* null_ptr = pool_alloc(NULL, 100);
+    EXPECT_TRUE(null_ptr == NULL, "Allocation with NULL pool should fail");
+
+    void* null_realloc = pool_realloc(NULL, ptr, 200);
+    EXPECT_TRUE(null_realloc == NULL, "Realloc with NULL pool should fail");
+
+    // Test free with NULL pool (should not crash)
+    pool_free(NULL, ptr);
+
+    // Test operations with destroyed pool
+    pool_destroy(pool);
+
+    // After destruction, operations should fail gracefully
+    void* destroyed_ptr = pool_alloc(pool, 100);
+    EXPECT_TRUE(destroyed_ptr == NULL, "Allocation from destroyed pool should fail");
+
+    return 1;
+}
+
+static int test_realloc_edge_cases(void) {
+    Pool* pool = pool_create();
+    EXPECT_NOT_NULL(pool, "Pool creation should succeed");
+
+    // Test realloc with same size
+    void* ptr = pool_alloc(pool, 100);
+    EXPECT_NOT_NULL(ptr, "Initial allocation should succeed");
+    strcpy((char*)ptr, "Same size test");
+
+    void* same_ptr = pool_realloc(pool, ptr, 100);
+    EXPECT_NOT_NULL(same_ptr, "Realloc with same size should succeed");
+    EXPECT_TRUE(strcmp((char*)same_ptr, "Same size test") == 0, "Data should be preserved with same size realloc");
+
+    // Test very large realloc
+    void* large_ptr = pool_realloc(pool, same_ptr, 10 * 1024 * 1024); // 10MB
+    EXPECT_NOT_NULL(large_ptr, "Large realloc should succeed");
+    EXPECT_TRUE(strncmp((char*)large_ptr, "Same size test", 14) == 0, "Data should be preserved in large realloc");
+
+    // Test realloc back to small size
+    void* small_ptr = pool_realloc(pool, large_ptr, 50);
+    EXPECT_NOT_NULL(small_ptr, "Realloc back to small size should succeed");
+    EXPECT_TRUE(strncmp((char*)small_ptr, "Same size test", 14) == 0, "Data should be preserved when shrinking from large");
+
+    pool_free(pool, small_ptr);
+    pool_destroy(pool);
+    return 1;
+}
+
+static int test_arena_memory_efficiency(void) {
+    Pool* pool = pool_create();
+    EXPECT_NOT_NULL(pool, "Pool creation should succeed");
+
+    // Test that arena-based allocation is efficient
+    void* ptrs[100];
+
+    // Allocate many small blocks
+    for (int i = 0; i < 100; i++) {
+        ptrs[i] = pool_alloc(pool, 32 + (i % 16));
+        EXPECT_NOT_NULL(ptrs[i], "Arena allocation should succeed");
+        snprintf((char*)ptrs[i], 32 + (i % 16), "Block%d", i);
+    }
+
+    // Verify all allocations are valid
+    for (int i = 0; i < 100; i++) {
+        char expected[20];
+        snprintf(expected, sizeof(expected), "Block%d", i);
+        EXPECT_TRUE(strcmp((char*)ptrs[i], expected) == 0, "Arena memory should be properly allocated");
+    }
+
+    // Test realloc on several blocks
+    for (int i = 0; i < 10; i++) {
+        char expected[20];
+        snprintf(expected, sizeof(expected), "Block%d", i);
+        ptrs[i] = pool_realloc(pool, ptrs[i], 100 + i * 10);
+        EXPECT_NOT_NULL(ptrs[i], "Arena realloc should succeed");
+        EXPECT_TRUE(strncmp((char*)ptrs[i], expected, strlen(expected)) == 0, "Data should be preserved in arena realloc");
+    }
+
+    // Free all blocks
+    for (int i = 0; i < 100; i++) {
+        pool_free(pool, ptrs[i]);
     }
 
     pool_destroy(pool);
+    return 1;
+}
+
+static int test_cross_pool_corruption_protection(void) {
+    // Test that memory from one pool cannot corrupt another
+    Pool* pool1 = pool_create();
+    Pool* pool2 = pool_create();
+    EXPECT_NOT_NULL(pool1, "First pool creation should succeed");
+    EXPECT_NOT_NULL(pool2, "Second pool creation should succeed");
+
+    void* ptr1 = pool_alloc(pool1, 100);
+    void* ptr2 = pool_alloc(pool2, 100);
+    EXPECT_NOT_NULL(ptr1, "Allocation from pool1 should succeed");
+    EXPECT_NOT_NULL(ptr2, "Allocation from pool2 should succeed");
+
+    strcpy((char*)ptr1, "Pool1 data");
+    strcpy((char*)ptr2, "Pool2 data");
+
+    // Attempt to free ptr1 using pool2 (should fail gracefully)
+    pool_free(pool2, ptr1); // This should not corrupt anything
+
+    // Verify both pointers are still valid and contain correct data
+    EXPECT_TRUE(strcmp((char*)ptr1, "Pool1 data") == 0, "Pool1 data should remain intact");
+    EXPECT_TRUE(strcmp((char*)ptr2, "Pool2 data") == 0, "Pool2 data should remain intact");
+
+    // Proper cleanup
+    pool_free(pool1, ptr1);
+    pool_free(pool2, ptr2);
+    pool_destroy(pool1);
+    pool_destroy(pool2);
+    return 1;
+}
+
+static int test_realloc_chain_operations(void) {
+    Pool* pool = pool_create();
+    EXPECT_NOT_NULL(pool, "Pool creation should succeed");
+
+    // Test a complex chain of realloc operations
+    void* ptr = pool_realloc(pool, NULL, 50); // Start with NULL
+    EXPECT_NOT_NULL(ptr, "Initial realloc from NULL should succeed");
+    strcpy((char*)ptr, "Chain test");
+
+    // Chain of size changes
+    size_t sizes[] = {100, 25, 200, 75, 300, 50, 400, 30};
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        ptr = pool_realloc(pool, ptr, sizes[i]);
+        EXPECT_NOT_NULL(ptr, "Chained realloc should succeed");
+        EXPECT_TRUE(strncmp((char*)ptr, "Chain test", 10) == 0, "Data should be preserved through realloc chain");
+    }
+
+    // End with realloc to 0 (free)
+    ptr = pool_realloc(pool, ptr, 0);
+    EXPECT_TRUE(ptr == NULL, "Final realloc to 0 should return NULL");
+
+    pool_destroy(pool);
+    return 1;
+}
+
+// ========================================================================
+// Arena-Specific Tests
+// ========================================================================
+
+static int test_pool_creation(void) {
+    Pool* pool = pool_create();
+    EXPECT_NOT_NULL(pool, "Pool creation should succeed");
+    pool_destroy(pool);
+    return 1;
+}
+
+static int test_pool_destruction(void) {
+    Pool* pool = pool_create();
+    EXPECT_NOT_NULL(pool, "Pool creation should succeed");
+
+    // Should not crash
+    pool_destroy(pool);
+
+    // Double destroy should be safe
+    pool_destroy(pool);
+    return 1;
+}
+
+static int test_null_pool_handling(void) {
+    // Should not crash with NULL pool
+    pool_destroy(NULL);
+
+    void* ptr = pool_alloc(NULL, 1024);
+    EXPECT_TRUE(ptr == NULL, "Allocation with NULL pool should fail");
+
+    ptr = pool_calloc(NULL, 10, 100);
+    EXPECT_TRUE(ptr == NULL, "Calloc with NULL pool should fail");
+
+    // Should not crash
+    pool_free(NULL, NULL);
+    return 1;
+}
+
+static int test_multiple_pools_creation(void) {
+    Pool* pool1 = pool_create();
+    Pool* pool2 = pool_create();
+    Pool* pool3 = pool_create();
+
+    EXPECT_NOT_NULL(pool1, "First pool creation should succeed");
+    EXPECT_NOT_NULL(pool2, "Second pool creation should succeed");
+    EXPECT_NOT_NULL(pool3, "Third pool creation should succeed");
+
+    // Allocate from different pools
+    void* ptr1 = pool_alloc(pool1, 1024);
+    void* ptr2 = pool_alloc(pool2, 2048);
+    void* ptr3 = pool_alloc(pool3, 512);
+
+    EXPECT_NOT_NULL(ptr1, "Allocation from pool1 should succeed");
+    EXPECT_NOT_NULL(ptr2, "Allocation from pool2 should succeed");
+    EXPECT_NOT_NULL(ptr3, "Allocation from pool3 should succeed");
+
+    // Clean up
+    pool_free(pool1, ptr1);
+    pool_free(pool2, ptr2);
+    pool_free(pool3, ptr3);
+
+    pool_destroy(pool1);
+    pool_destroy(pool2);
+    pool_destroy(pool3);
+    return 1;
+}
+
+static int test_pool_isolation(void) {
+    Pool* pool1 = pool_create();
+    Pool* pool2 = pool_create();
+
+    EXPECT_NOT_NULL(pool1, "Pool1 creation should succeed");
+    EXPECT_NOT_NULL(pool2, "Pool2 creation should succeed");
+
+    // Allocate from both pools
+    const size_t size = 1024;
+    void* ptr1 = pool_alloc(pool1, size);
+    void* ptr2 = pool_alloc(pool2, size);
+
+    EXPECT_NOT_NULL(ptr1, "Allocation from pool1 should succeed");
+    EXPECT_NOT_NULL(ptr2, "Allocation from pool2 should succeed");
+
+    // Fill with different patterns
+    fill_pattern(ptr1, size, 0x11);
+    fill_pattern(ptr2, size, 0x22);
+
+    // Verify patterns are preserved (pools are isolated)
+    EXPECT_TRUE(verify_pattern(ptr1, size, 0x11), "Pool1 memory pattern should be preserved");
+    EXPECT_TRUE(verify_pattern(ptr2, size, 0x22), "Pool2 memory pattern should be preserved");
+
+    // Free from correct pools
+    pool_free(pool1, ptr1);
+    pool_free(pool2, ptr2);
+
+    pool_destroy(pool1);
+    pool_destroy(pool2);
+    return 1;
+}
+
+static int test_pool_destruction_with_allocations(void) {
+    Pool* pool = pool_create();
+    EXPECT_NOT_NULL(pool, "Pool creation should succeed");
+
+    // Allocate some memory but don't free it explicitly
+    void* ptr1 = pool_alloc(pool, 1024);
+    void* ptr2 = pool_alloc(pool, 2048);
+    void* ptr3 = pool_calloc(pool, 100, 32);
+
+    EXPECT_NOT_NULL(ptr1, "Allocation 1 should succeed");
+    EXPECT_NOT_NULL(ptr2, "Allocation 2 should succeed");
+    EXPECT_NOT_NULL(ptr3, "Allocation 3 should succeed");
+
+    // Fill with data to ensure allocations are valid
+    strcpy((char*)ptr1, "Test data 1");
+    strcpy((char*)ptr2, "Test data 2");
+    strcpy((char*)ptr3, "Test data 3");
+
+    // Destroy pool without explicitly freeing allocations
+    // Arena-based implementation should clean up all memory automatically
+    pool_destroy(pool);
+
     return 1;
 }
 
@@ -643,19 +1020,39 @@ static test_case_t test_cases[] = {
     {"MixedOperations", test_mixed_operations},
     {"RealWorldSimulation", test_real_world_simulation},
     {"PoolRealloc", test_pool_realloc},
+    {"ReallocStress", test_realloc_stress},
+    {"ReallocNullHandling", test_realloc_null_handling},
+    {"ReallocDataPreservation", test_realloc_data_preservation},
+    {"MultiplePoolsIsolation", test_multiple_pools_isolation},
+    {"InvalidPoolOperations", test_invalid_pool_operations},
+    {"ReallocEdgeCases", test_realloc_edge_cases},
+    {"ArenaMemoryEfficiency", test_arena_memory_efficiency},
+    {"CrossPoolCorruptionProtection", test_cross_pool_corruption_protection},
+    {"ReallocChainOperations", test_realloc_chain_operations},
+    {"PoolCreation", test_pool_creation},
+    {"PoolDestruction", test_pool_destruction},
+    {"NullPoolHandling", test_null_pool_handling},
+    {"MultiplePoolsCreation", test_multiple_pools_creation},
+    {"PoolIsolation", test_pool_isolation},
+    {"PoolDestructionWithAllocations", test_pool_destruction_with_allocations},
 };
 
 static void run_all_tests(void) {
     printf("=== Comprehensive Memory Pool Test Suite ===\n");
-    printf("Testing jemalloc-based memory pool implementation\n");
+    printf("Testing jemalloc-based arena memory pool implementation\n");
     printf("Features tested:\n");
     printf("  ✓ Basic allocation/deallocation (pool_alloc/pool_free)\n");
     printf("  ✓ Zero-initialized allocation (pool_calloc)\n");
-    printf("  ✓ Memory reallocation (pool_realloc)\n");
+    printf("  ✓ Memory reallocation (pool_realloc) - comprehensive testing\n");
     printf("  ✓ Memory pattern verification and coherency\n");
+    printf("  ✓ Arena-based memory isolation and efficiency\n");
+    printf("  ✓ Pool lifecycle management (creation/destruction)\n");
+    printf("  ✓ Multi-pool creation and isolation verification\n");
     printf("  ✓ Stress testing and fragmentation handling\n");
     printf("  ✓ Large allocation and memory pressure testing\n");
     printf("  ✓ Edge cases and boundary conditions\n");
+    printf("  ✓ Multi-pool isolation and corruption protection\n");
+    printf("  ✓ Null handling and invalid operation protection\n");
     printf("  ✓ Real-world usage pattern simulation\n");
     printf("==========================================\n\n");
 
