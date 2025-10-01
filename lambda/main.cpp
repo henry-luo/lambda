@@ -398,6 +398,7 @@ int exec_convert(int argc, char* argv[]) {
         }
 
         printf("Successfully parsed input file\n");
+        printf("DEBUG: input->root type_id: %d, pointer: %p\n", input->root.type_id, input->root.pointer);
         
         // Capture the effective type by checking if LaTeX parsing was used
         bool is_latex_input = false;
