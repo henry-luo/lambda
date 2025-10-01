@@ -35,32 +35,48 @@ typedef struct {
 } DocumentState;
 
 static DocumentState doc_state = {0};
-
 // Main API function
 void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_ast, VariableMemPool* pool) {
     if (!html_buf || !css_buf || !pool) {
         return;
     }
-
+    
+    printf("DEBUG: format_latex_to_html - html_buf=%p, css_buf=%p\n", html_buf, css_buf);
+    
     // Initialize document state
     memset(&doc_state, 0, sizeof(DocumentState));
-
+    
     // Start HTML document container
     stringbuf_append_str(html_buf, "<div class=\"latex-document\">\n");
-
+    printf("DEBUG: Added HTML container to html_buf\n");
+    
+    
     // Check if we have a valid AST
     if (latex_ast.item == ITEM_NULL) {
         stringbuf_append_str(html_buf, "<p>No content</p>\n");
     } else {
+        // Add paragraph wrapper for inline content
+        stringbuf_append_str(html_buf, "<p>");
+        
         // Process the LaTeX AST
+        printf("DEBUG: About to process LaTeX AST\n");
         process_latex_element(html_buf, latex_ast, pool, 1);
+        printf("DEBUG: Finished processing LaTeX AST\n");
+        
+        // Close paragraph wrapper
+        stringbuf_append_str(html_buf, "</p>");
     }
-
+    
     // Close document container
     stringbuf_append_str(html_buf, "</div>\n");
-
+    printf("DEBUG: Closed HTML container\n");
+    
     // Generate CSS
+    printf("DEBUG: About to generate CSS to css_buf=%p\n", css_buf);
     generate_latex_css(css_buf);
+    printf("DEBUG: CSS generation complete\n");
+    
+    printf("DEBUG: HTML and CSS generation completed\n");
 }
 
 // Generate comprehensive CSS for LaTeX documents
@@ -161,33 +177,26 @@ static void generate_latex_css(StringBuf* css_buf) {
 
         ".latex-emph {\n"
         "  font-style: italic;\n"
+        "}\n"
     );
 }
 
 // Process a LaTeX element and convert to HTML
 static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPool* pool, int depth) {
-    printf("DEBUG: process_latex_element called with item=%llu, depth=%d\n", (unsigned long long)item.item, depth);
-
     if (item.item == ITEM_NULL) {
-        printf("DEBUG: Item is null, returning\n");
         return;
     }
-
-    printf("DEBUG: About to call get_type_id\n");
+    
     TypeId type = get_type_id(item);
-    printf("DEBUG: get_type_id returned %d\n", type);
 
     if (type == LMD_TYPE_ELEMENT) {
-        printf("DEBUG: Processing LMD_TYPE_ELEMENT\n");
         Element* elem = item.element;
         if (!elem || !elem->type) {
-            printf("DEBUG: Element or element type is null\n");
             return;
         }
 
         TypeElmt* elmt_type = (TypeElmt*)elem->type;
         if (!elmt_type) {
-            printf("DEBUG: elmt_type is null\n");
             return;
         }
 
@@ -231,10 +240,14 @@ static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPoo
             process_environment(html_buf, elem, pool, depth);
         }
         else if (strcmp(cmd_name, "textbf") == 0) {
+            printf("DEBUG: Processing textbf command\n");
             process_text_command(html_buf, elem, pool, depth, "latex-textbf", "span");
+            printf("DEBUG: Finished processing textbf command\n");
         }
         else if (strcmp(cmd_name, "textit") == 0) {
+            printf("DEBUG: Processing textit command\n");
             process_text_command(html_buf, elem, pool, depth, "latex-textit", "span");
+            printf("DEBUG: Finished processing textit command\n");
         }
         else if (strcmp(cmd_name, "emph") == 0) {
             process_text_command(html_buf, elem, pool, depth, "latex-emph", "span");
@@ -247,14 +260,34 @@ static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPoo
             process_element_content(html_buf, elem, pool, depth);
         }
     }
-    else if (item.type_id == LMD_TYPE_STRING) {
+    else if (type == LMD_TYPE_STRING) {
         // Handle text content
         String* str = (String*)item.pointer;
-        if (str && str->chars) {
-            append_escaped_text(html_buf, str->chars);
+        printf("DEBUG: LMD_TYPE_STRING - str=%p\n", str);
+        if (str) {
+            printf("DEBUG: String length=%u, chars=%p\n", str->len, str->chars);
+            if (str->len > 0 && str->len < 1000) { // Safety check
+                printf("DEBUG: Processing string of length %u: '%.20s'\n", str->len, str->chars);
+                // Use a simpler approach - create a temporary buffer on stack for small strings
+                if (str->len < 256) {
+                    char temp_buf[256];
+                    memcpy(temp_buf, str->chars, str->len);
+                    temp_buf[str->len] = '\0';
+                    printf("DEBUG: About to append text: '%s'\n", temp_buf);
+                    // Use direct stringbuf_append_str instead of append_escaped_text to avoid corruption
+                    stringbuf_append_str(html_buf, temp_buf);
+                    printf("DEBUG: Text appended successfully\n");
+                } else {
+                    printf("DEBUG: String too long (%u chars), skipping\n", str->len);
+                }
+            } else {
+                printf("DEBUG: String length %u is invalid (empty or too long), skipping\n", str->len);
+            }
+        } else {
+            printf("DEBUG: String pointer is null, skipping\n");
         }
     }
-    else if (item.type_id == LMD_TYPE_ARRAY) {
+    else if (type == LMD_TYPE_ARRAY) {
         // Process array of elements
         Array* arr = item.array;
         if (arr && arr->items) {
@@ -267,15 +300,25 @@ static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPoo
 
 // Process element content (based on format-latex.cpp pattern)
 static void process_element_content(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
-    if (!elem || !elem->items) return;
+    if (!elem || !elem->items) {
+        printf("DEBUG: process_element_content - elem or items is null\n");
+        return;
+    }
 
+    printf("DEBUG: process_element_content - elem->length = %d\n", elem->length);
+    
     // Process element items with safety checks
     if (elem->length > 0 && elem->length < 1000) { // Reasonable limit
         for (int i = 0; i < elem->length; i++) {
+            printf("DEBUG: Processing element content item %d\n", i);
             Item content_item = elem->items[i];
+            TypeId item_type = get_type_id(content_item);
+            printf("DEBUG: Content item %d has type %d\n", i, item_type);
             process_latex_element(html_buf, content_item, pool, depth);
+            printf("DEBUG: Finished processing element content item %d\n", i);
         }
     }
+    printf("DEBUG: process_element_content completed\n");
 }
 
 // Process title command
@@ -446,17 +489,25 @@ static void process_verbatim(StringBuf* html_buf, Element* elem, VariableMemPool
 
 // Process text formatting commands
 static void process_text_command(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth, const char* css_class, const char* tag) {
+    printf("DEBUG: process_text_command starting - css_class='%s', tag='%s'\n", css_class, tag);
+    
     stringbuf_append_str(html_buf, "<");
     stringbuf_append_str(html_buf, tag);
     stringbuf_append_str(html_buf, " class=\"");
     stringbuf_append_str(html_buf, css_class);
     stringbuf_append_str(html_buf, "\">");
+    printf("DEBUG: Opening tag appended successfully\n");
 
+    printf("DEBUG: About to process element content\n");
     process_element_content(html_buf, elem, pool, depth);
+    printf("DEBUG: Element content processed successfully\n");
 
+    printf("DEBUG: About to append closing tag\n");
     stringbuf_append_str(html_buf, "</");
     stringbuf_append_str(html_buf, tag);
     stringbuf_append_str(html_buf, ">");
+    printf("DEBUG: Closing tag appended successfully\n");
+    printf("DEBUG: process_text_command completed\n");
 }
 
 // Process item command

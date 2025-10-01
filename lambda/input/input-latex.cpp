@@ -83,6 +83,7 @@ static String* parse_command_name(Input *input, const char **latex) {
 }
 
 static Array* parse_command_arguments(Input *input, const char **latex) {
+    printf("DEBUG: parse_command_arguments starting at: '%.30s'\n", *latex);
     Array* args = array_pooled(input->pool);
     if (!args) return NULL;
     
@@ -103,6 +104,7 @@ static Array* parse_command_arguments(Input *input, const char **latex) {
     
     // Parse required arguments {...}
     while (**latex == '{') {
+        printf("DEBUG: Found opening brace, parsing argument from: '%.20s'\n", *latex);
         (*latex)++; // Skip {
         
         // For required arguments, we need to handle nested braces
@@ -110,7 +112,9 @@ static Array* parse_command_arguments(Input *input, const char **latex) {
         StringBuf* arg_sb = input->sb;
         stringbuf_reset(arg_sb);
         
-        while (**latex && brace_depth > 0) {
+        int char_count = 0;
+        while (**latex && brace_depth > 0 && char_count < 100) { // Safety limit
+            printf("DEBUG: Processing char '%c' (brace_depth=%d)\n", **latex, brace_depth);
             if (**latex == '{') {
                 brace_depth++;
                 stringbuf_append_char(arg_sb, **latex);
@@ -119,6 +123,7 @@ static Array* parse_command_arguments(Input *input, const char **latex) {
                 if (brace_depth > 0) {
                     stringbuf_append_char(arg_sb, **latex);
                 }
+                printf("DEBUG: Found closing brace, brace_depth now %d\n", brace_depth);
             } else if (**latex == '\\') {
                 stringbuf_append_char(arg_sb, **latex);
                 (*latex)++;
@@ -129,17 +134,22 @@ static Array* parse_command_arguments(Input *input, const char **latex) {
                 stringbuf_append_char(arg_sb, **latex);
             }
             (*latex)++;
+            char_count++;
         }
+        printf("DEBUG: Finished parsing argument, processed %d chars\n", char_count);
         
         if (arg_sb->length > sizeof(uint32_t)) {
-            String *arg_string = (String*)arg_sb->str;
-            arg_string->len = arg_sb->length - sizeof(uint32_t);
-            arg_string->ref_cnt = 0;
+            String *arg_string = stringbuf_to_string(arg_sb);
+            if (arg_string) {
+                printf("DEBUG: Parsed argument: '%.*s' (length: %u)\n", (int)arg_string->len, arg_string->chars, arg_string->len);
+                Item arg_item = {.item = s2it(arg_string)};
+                array_append(args, arg_item, input->pool);
+            } else {
+                printf("DEBUG: stringbuf_to_string failed\n");
+            }
             stringbuf_reset(arg_sb);
-            
-            Item arg_item = {.item = s2it(arg_string)};
-            array_append(args, arg_item, input->pool);
         } else {
+            printf("DEBUG: Argument too short, skipping\n");
             stringbuf_reset(arg_sb);
         }
         
@@ -160,6 +170,8 @@ static Item parse_latex_command(Input *input, const char **latex) {
     if (!cmd_name || cmd_name->len == 0) {
         return {.item = ITEM_ERROR};
     }
+    
+    printf("DEBUG: Parsing command '%.*s' at position: '%.30s'\n", (int)cmd_name->len, cmd_name->chars, *latex);
     
     // Handle \end{} commands - these are handled implicitly by environment parsing
     if (strcmp(cmd_name->chars, "end") == 0) {
@@ -515,23 +527,23 @@ static Item parse_latex_element(Input *input, const char **latex) {
             }
         }
         
-        stringbuf_reset(math_sb);
         parse_depth--;
         return {.item = ITEM_ERROR};
     }
     
-    // Parse regular text content with escape handling
+    // Parse regular text content
+    printf("DEBUG: Parsing text starting at: '%.20s'\n", *latex);
     StringBuf* text_sb = input->sb;
     stringbuf_reset(text_sb);
-    
     int text_chars = 0;
     const int max_text_chars = 5000;
     
     while (**latex && text_chars < max_text_chars) {
         if (**latex == '\\') {
+            printf("DEBUG: Found backslash at position %d\n", text_chars);
             // Check if this is an escaped character or command
             const char* next_char = *latex + 1;
-            if (*next_char && strchr("{}$&#^_%~", *next_char)) {
+            if (next_char && strchr("{\\}$&#^_%~", *next_char)) {
                 // This is an escaped character
                 (*latex)++; // Skip backslash
                 switch (**latex) {
@@ -565,10 +577,12 @@ static Item parse_latex_element(Input *input, const char **latex) {
     }
     
     if (text_sb->length > sizeof(uint32_t)) {
-        String *text_string = (String*)text_sb->str;
-        text_string->len = text_sb->length - sizeof(uint32_t);
-        text_string->ref_cnt = 0;
-        stringbuf_reset(text_sb);
+        String *text_string = stringbuf_to_string(text_sb);
+        if (!text_string) {
+            stringbuf_reset(text_sb);
+            parse_depth--;
+            return {.item = ITEM_NULL};
+        }
         
         // Only return non-whitespace text
         bool has_non_whitespace = false;
@@ -580,8 +594,11 @@ static Item parse_latex_element(Input *input, const char **latex) {
         }
         
         if (has_non_whitespace) {
+            printf("DEBUG: Returning text node: '%.*s' (length: %u)\n", (int)text_string->len, text_string->chars, text_string->len);
             parse_depth--;
             return {.item = s2it(text_string)};
+        } else {
+            printf("DEBUG: Text node is whitespace-only, skipping: '%.*s'\n", (int)text_string->len, text_string->chars);
         }
     } else {
         stringbuf_reset(text_sb);
