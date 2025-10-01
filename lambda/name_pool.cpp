@@ -1,7 +1,7 @@
 #include "name_pool.h"
 #include "../lib/log.h"
 #include "../lib/string.h"
-#include <cstring>
+#include "lambda-data.hpp"
 
 // String creation helper - reuse existing string creation functions
 extern String* string_from_chars(const char* str, size_t len, VariableMemPool* pool);
@@ -24,15 +24,15 @@ static uint64_t name_entry_hash(const void *item, uint64_t seed0, uint64_t seed1
 static int name_entry_compare(const void *a, const void *b, void *udata) {
     const NamePoolEntry* entry_a = (const NamePoolEntry*)a;
     const NamePoolEntry* entry_b = (const NamePoolEntry*)b;
-    
+
     // Compare using StrView for efficiency
     const StrView* view_a = &entry_a->view;
     const StrView* view_b = &entry_b->view;
-    
+
     if (view_a->length != view_b->length) {
         return (view_a->length < view_b->length) ? -1 : 1;
     }
-    
+
     if (view_a->length == 0) return 0;
     return memcmp(view_a->str, view_b->str, view_a->length);
 }
@@ -40,12 +40,12 @@ static int name_entry_compare(const void *a, const void *b, void *udata) {
 // Helper function to find string by content in the name pool
 static String* find_string_by_content(NamePool* pool, const char* content, size_t len) {
     if (!pool || !pool->names || !content) return nullptr;
-    
+
     // Create search entry using StrView for lookup
     StrView temp_view = {.str = content, .length = len};
     NamePoolEntry search_entry = {nullptr, temp_view};
     const NamePoolEntry* found = (const NamePoolEntry*)hashmap_get(pool->names, &search_entry);
-    
+
     return found ? found->name : nullptr;
 }
 
@@ -59,52 +59,52 @@ struct NamePoolImpl {
 
 NamePool* name_pool_create(VariableMemPool* memory_pool, NamePool* parent) {
     if (!memory_pool) return nullptr;
-    
+
     NamePool* pool = (NamePool*)pool_calloc(memory_pool, sizeof(NamePool));
     if (!pool) return nullptr;
-    
+
     pool->pool = memory_pool;
     pool->parent = parent ? name_pool_retain(parent) : nullptr;
     pool->ref_count = 1;
-    
+
     // Create C hashmap with NamePoolEntry
-    pool->names = hashmap_new(sizeof(NamePoolEntry), 32, 
+    pool->names = hashmap_new(sizeof(NamePoolEntry), 32,
                               0x1234567890abcdefULL, 0xfedcba0987654321ULL,
-                              name_entry_hash, name_entry_compare, 
+                              name_entry_hash, name_entry_compare,
                               nullptr, nullptr);
-    
+
     if (!pool->names) {
         if (pool->parent) {
             name_pool_release(pool->parent);
         }
         return nullptr;
     }
-    
+
     return pool;
 }
 
 NamePool* name_pool_retain(NamePool* pool) {
     if (!pool) return nullptr;
-    
+
     pool->ref_count++;
     return pool;
 }
 
 void name_pool_release(NamePool* pool) {
     if (!pool) return;
-    
+
     pool->ref_count--;
     if (pool->ref_count == 0) {
         // Release parent pool
         if (pool->parent) {
             name_pool_release(pool->parent);
         }
-        
+
         // Free the hashmap
         if (pool->names) {
             hashmap_free(pool->names);
         }
-        
+
         // Note: pool memory itself will be freed when the VariableMemPool is destroyed
     }
 }
@@ -130,7 +130,7 @@ String* name_pool_create_strview(NamePool* pool, StrView name) {
         log_error("ERROR: pool is NULL");
         return nullptr;
     }
-    
+
     // 1. Try in parent pool first
     if (pool->parent) {
         String* parent_result = name_pool_lookup_strview(pool->parent, name);
@@ -145,7 +145,7 @@ String* name_pool_create_strview(NamePool* pool, StrView name) {
         existing->ref_cnt++;
         return existing;
     }
-    
+
     // 3. Create new string in current pool
     String* str = string_from_strview(name, pool->pool);
     if (str) {
@@ -211,12 +211,12 @@ void name_pool_print_stats(NamePool* pool) {
         log_debug("NamePool: null");
         return;
     }
-    
+
     log_debug("NamePool: %p", pool);
     log_debug("  ref_count: %u", pool->ref_count);
     log_debug("  names count: %zu", name_pool_count(pool));
     log_debug("  parent: %p", pool->parent);
-    
+
     if (pool->parent) {
         log_debug("  parent stats:");
         name_pool_print_stats(pool->parent);
