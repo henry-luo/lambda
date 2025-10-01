@@ -1284,7 +1284,8 @@
                         "binary": "test_latex_html_fixtures_gtest.exe",
                         "additional_sources": [
                             "test/latex/fixture_loader.cpp",
-                            "test/latex/html_comparison.cpp"
+                            "test/latex/html_comparison.cpp",
+                            "lambda/input/input-latex.cpp"
                         ],
                         "includes": [
                             "test/latex"
