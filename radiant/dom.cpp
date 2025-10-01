@@ -116,10 +116,10 @@ Item DomNode::mark_get_attribute(const char* attr_name) {
 }
 
 Item DomNode::mark_get_content() {
-    if (type == MARK_ELEMENT && mark_element) {
-        // Access element content using Lambda's element API
-        return elmt_get(mark_element, ItemNull);  // null key typically gets content
-    }
+    // if (type == MARK_ELEMENT && mark_element) {
+    //     // Access element content using Lambda's element API
+    //     return elmt_get(mark_element, ItemNull);  // null key typically gets content
+    // }
     return ItemNull;
 }
 

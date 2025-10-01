@@ -5,9 +5,10 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <sys/stat.h>
-#include <algorithm>  // for std::max
 #include "../../lib/log.h"  // add logging support
 #include "../../file.h"
+
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 void parse_json(Input* input, const char* json_string);
 void parse_csv(Input* input, const char* csv_string);
@@ -169,7 +170,7 @@ void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool) {
     int byte_offset = shape_entry->byte_offset + bsize;
     if (byte_offset > elmt->data_cap) { // resize map data
         // elmt->data_cap could be 0
-        int byte_cap = std::max(elmt->data_cap, byte_offset) * 2;
+        int byte_cap = MAX(elmt->data_cap, byte_offset) * 2;
         void* new_data = pool_calloc(pool, byte_cap);
         if (!new_data) return;
         if (elmt->data) {

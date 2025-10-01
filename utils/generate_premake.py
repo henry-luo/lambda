@@ -773,9 +773,25 @@ class PremakeGenerator:
         # Get language info from the lib target configuration
         detected_language, standard, needs_cpp_stdlib = self._get_language_info(lib)
 
-        # Use detected language if different from passed language
-        if detected_language != language:
-            language = detected_language
+        # For split projects (with -c or -cpp suffix), respect the passed language parameter
+        # Otherwise, use detected language from configuration
+        if project_name.endswith('-c') or project_name.endswith('-cpp'):
+            # This is a split project, use the explicitly passed language
+            if language == "C":
+                detected_language = "C"
+                standard = "c17"  # Use C17 standard for C projects
+                needs_cpp_stdlib = False
+            elif language == "C++":
+                # Keep the original C++ settings from the library
+                pass
+            # Use the explicitly passed language for split projects
+            final_language = language
+        else:
+            # Use detected language if different from passed language for non-split projects
+            if detected_language != language:
+                final_language = detected_language
+            else:
+                final_language = language
 
         # Determine library type based on link attribute
         link_type = lib.get('link', 'static')
@@ -789,7 +805,7 @@ class PremakeGenerator:
         self.premake_content.extend([
             f'project "{project_name}"',
             f'    kind "{kind}"',
-            f'    language "{language}"',
+            f'    language "{final_language}"',
             '    targetdir "build/lib"',
             '    objdir "build/obj/%{prj.name}"',
             '    ',
@@ -878,7 +894,7 @@ class PremakeGenerator:
         c_files_present = any(f.endswith('.c') for f in source_files)
         cpp_files_present = any(f.endswith('.cpp') for f in source_files)
 
-        if c_files_present and cpp_files_present and language == "C++":
+        if c_files_present and cpp_files_present and final_language == "C++":
             # Mixed project: use file-specific build options
             c_build_opts = build_opts + ['-std=c17']  # Default C standard for mixed projects
             cpp_standard = self._get_cpp_standard(lib)
@@ -907,13 +923,18 @@ class PremakeGenerator:
             ])
         else:
             # Pure language project: use global build options
-            if language == "C++":
+            if final_language == "C++":
                 cpp_standard = self._get_cpp_standard(lib)
                 build_opts.append(f'-std={cpp_standard}')
-            elif language == "C":
-                # Add C standard support
-                _, c_standard, _ = self._get_language_info(lib)
-                build_opts.append(f'-std={c_standard}')
+            elif final_language == "C":
+                # Add C standard support - use the corrected standard for split projects
+                if project_name.endswith('-c'):
+                    # Use the corrected C standard for split C projects
+                    build_opts.append(f'-std={standard}')
+                else:
+                    # For regular C projects, get from library config
+                    _, c_standard, _ = self._get_language_info(lib)
+                    build_opts.append(f'-std={c_standard}')
 
             # Add Windows DLL export flags for lambda-input-full projects - moved to linkoptions
             # if (self.use_windows_config and link_type == 'dynamic' and
@@ -1245,6 +1266,9 @@ class PremakeGenerator:
                     else:
                         # For static libraries, use the full path if provided or if it's a .a file
                         if lib_path and (lib_path.startswith('/') or lib_path.endswith('.a')):
+                            # Add ../../ prefix for relative paths to make them consistent with build directory
+                            if not lib_path.startswith('/'):
+                                lib_path = f"../../{lib_path}"
                             static_libs.append(lib_path)  # Use full path for absolute paths and .a files
                         else:
                             static_libs.append(lib_name)  # Use name for relative paths
@@ -1271,6 +1295,9 @@ class PremakeGenerator:
                         else:
                             # For static libraries, use the full path if provided or if it's a .a file
                             if lib_path and (lib_path.startswith('/') or lib_path.endswith('.a')):
+                                # Add ../../ prefix for relative paths to make them consistent with build directory
+                                if not lib_path.startswith('/'):
+                                    lib_path = f"../../{lib_path}"
                                 static_libs.append(lib_path)  # Use full path for absolute paths and .a files
                             else:
                                 static_libs.append(lib)  # Use name for relative paths

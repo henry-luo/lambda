@@ -5,6 +5,8 @@
 int run_layout(const char* html_file);
 int window_main(int argc, char* argv[]);
 
+__thread Context* input_context;
+
 int main(int argc, char* argv[]) {
     // Check for layout sub-command
     if (argc >= 3 && strcmp(argv[1], "layout") == 0) {

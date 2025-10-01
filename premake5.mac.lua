@@ -92,7 +92,7 @@ project "lambda-lib"
 
 project "lambda-input-full-c"
     kind "SharedLib"
-    language "C++"
+    language "C"
     targetdir "build/lib"
     objdir "build/obj/%{prj.name}"
     
@@ -125,7 +125,7 @@ project "lambda-input-full-c"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c++17"
+        "-std=c17"
     }
     
     libdirs {
@@ -167,11 +167,6 @@ project "lambda-input-full-c"
         "-framework CoreGraphics",
         "-framework AppKit",
         "-framework Carbon",
-    }
-    
-    -- Automatically added C++ standard library
-    links {
-        "c++",
     }
     
 
@@ -352,9 +347,12 @@ project "radiant"
         "lambda/lambda-data.cpp",
         "lib/strview.c",
         "lib/strbuf.c",
+        "lib/stringbuf.c",
         "lib/hashmap.c",
         "lib/arraylist.c",
         "lib/log.c",
+        "lib/datetime.c",
+        "lib/string.c",
         "lib/mem-pool/src/variable.c",
         "lib/mem-pool/src/buffer.c",
         "lib/mem-pool/src/utils.c",
@@ -387,6 +385,11 @@ project "radiant"
     
     linkoptions {
         "/Users/henryluo/Projects/Jubily/lexbor/liblexbor_static.a",
+        "../../lambda/tree-sitter/libtree-sitter.a",
+        "../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+        "/opt/homebrew/lib/libhpdf.a",
+        "/opt/homebrew/lib/libmpdec.a",
+        "/opt/homebrew/lib/libutf8proc.a",
         "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
         "/opt/homebrew/lib/libfontconfig.a",
         "/opt/homebrew/lib/libglfw3.a",
