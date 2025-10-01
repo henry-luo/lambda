@@ -596,6 +596,7 @@ project "lambda"
         "lambda/format/format-html.cpp",
         "lambda/format/format-mdx.cpp",
         "lambda/format/format-rst.cpp",
+        "lambda/format/format-latex-html.cpp",
         "lambda/format/format-org.cpp",
         "lambda/format/format-ini.cpp",
         "lambda/format/format-xml.cpp",

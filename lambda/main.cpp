@@ -1,5 +1,6 @@
 #include "input/input.h"
 #include "format/format.h"
+#include "format/format-latex-html.h"
 #include "input/mime-detect.h"
 #include <unistd.h>  // for getcwd
 #include <limits.h>  // for PATH_MAX
@@ -397,6 +398,20 @@ int exec_convert(int argc, char* argv[]) {
         }
 
         printf("Successfully parsed input file\n");
+        
+        // Capture the effective type by checking if LaTeX parsing was used
+        bool is_latex_input = false;
+        if (from_format && (strcmp(from_format, "latex") == 0 || strcmp(from_format, "tex") == 0)) {
+            is_latex_input = true;
+        } else if (!from_format && strcmp(type_string->chars, "auto") == 0) {
+            // For auto-detection, check if the file extension suggests LaTeX
+            const char* filename = strrchr(input_file, '/');
+            filename = filename ? filename + 1 : input_file; // Get just the filename
+            const char* ext = strrchr(filename, '.');
+            if (ext && (strcmp(ext, ".tex") == 0 || strcmp(ext, ".latex") == 0)) {
+                is_latex_input = true;
+            }
+        }
 
         // Step 2: Format the parsed data to the target format
         printf("Converting to format: %s\n", to_format);
@@ -409,7 +424,42 @@ int exec_convert(int argc, char* argv[]) {
         } else if (strcmp(to_format, "xml") == 0) {
             formatted_output = format_xml(input->pool, input->root);
         } else if (strcmp(to_format, "html") == 0) {
-            formatted_output = format_html(input->pool, input->root);
+            // Check if input is LaTeX and route to LaTeX-HTML converter
+            if (is_latex_input) {
+                // Use LaTeX to HTML converter
+                printf("Using LaTeX to HTML converter\n");
+                StringBuf* html_buf = stringbuf_new(input->pool);
+                StringBuf* css_buf = stringbuf_new(input->pool);
+                
+                if (html_buf && css_buf) {
+                    format_latex_to_html(html_buf, css_buf, input->root, input->pool);
+                    
+                    // Combine HTML and CSS into a complete HTML document
+                    StringBuf* combined_buf = stringbuf_new(input->pool);
+                    if (combined_buf) {
+                        stringbuf_append_str(combined_buf, "<!DOCTYPE html>\n<html>\n<head>\n<style>\n");
+                        String* css_result = stringbuf_to_string(css_buf);
+                        if (css_result && css_result->chars) {
+                            stringbuf_append_str(combined_buf, css_result->chars);
+                        }
+                        stringbuf_append_str(combined_buf, "\n</style>\n</head>\n<body>\n");
+                        String* html_result = stringbuf_to_string(html_buf);
+                        if (html_result && html_result->chars) {
+                            stringbuf_append_str(combined_buf, html_result->chars);
+                        }
+                        stringbuf_append_str(combined_buf, "\n</body>\n</html>");
+                        formatted_output = stringbuf_to_string(combined_buf);
+                        stringbuf_free(combined_buf);
+                    }
+                    stringbuf_free(html_buf);
+                    stringbuf_free(css_buf);
+                } else {
+                    printf("Error: Failed to create string buffers for LaTeX conversion\n");
+                }
+            } else {
+                // Use regular HTML formatter
+                formatted_output = format_html(input->pool, input->root);
+            }
         } else if (strcmp(to_format, "yaml") == 0) {
             formatted_output = format_yaml(input->pool, input->root);
         } else if (strcmp(to_format, "toml") == 0) {
