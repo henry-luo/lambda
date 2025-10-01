@@ -72,55 +72,15 @@ let output = format(transform(doc), 'markdown')
 
 ### Build System
 - **Primary**: Use `make build` for incremental builds
-- **Cross-platform**: `make build-windows` for Windows cross-compilation
 - **Configuration**: JSON-based build configs (`build_lambda_config.json`)
 - **Testing**: Comprehensive test suite with `make test`
-
-## Unicode & Internationalization
-
-The system has configurable Unicode support levels:
-- **Level 0**: ASCII-only (minimal overhead)
-- **Level 1**: Compact ICU integration (default, ~2-4MB)
-
-When working with Unicode:
-```c
-// Use Unicode-aware comparison functions
-CompResult result = equal_comp_unicode(a_item, b_item);
-UnicodeCompareResult cmp = string_compare_unicode(str1, len1, str2, len2);
-```
 
 ### Running Tests
 ```bash
 make build-test         # Build all the test executables
 make test               # Run all tests
 ```
-
-## Common Patterns
-
-### Input Processing
-```c
-// Parse document with format detection
-Item parsed = input_auto_detect(pool, filename);
-if (parsed.type_id == LMD_TYPE_ERROR) {
-    // Handle parsing error
-}
-```
-
-### Output Generation
-```c
-// Generate formatted output
-String* json_output = format_json(pool, root_item);
-String* md_output = format_markdown(pool, root_item);
-```
-
-### Type Validation
-```c
-// Schema-based validation
-ValidationResult result = validate_document(doc, schema);
-if (result.is_valid) {
-    // Document conforms to schema
-}
-```
+Test executables are located in the `./test/` directory.
 
 ## File Organization
 
@@ -134,8 +94,3 @@ if (result.is_valid) {
 - `build/` - Build artifacts (auto-generated)
 - `*.json` - Build configuration files
 - `temp/` - Temporary files (auto-generated)
-
-## Key Considerations
-
-
-
