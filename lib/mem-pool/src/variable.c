@@ -106,13 +106,27 @@ static void *best_fit_from_free_list(VariableMemPool *pool, size_t required_size
         if (MEM_POOL_NO_BEST_FIT == pool->tolerance_percent || diff_percent <= pool->tolerance_percent) {
             SizedBlock *block = *curr;
 
-            // CRITICAL: Check if reusing this block would overlap with allocated memory
+            // CRITICAL: Check if reusing this block would have enough space in buffer
             void *block_start = (char *)block + pool->header_size;
+
+            // Find which buffer this block belongs to
+            Buffer *buff = buffer_list_find(pool->buff_head, block);
+            if (buff) {
+                // Check if there's enough space from this address to buffer end
+                size_t available_space = (char*)buff->end - (char*)block_start;
+                if (required_size > available_space) {
+                    // Skip this block - not enough space in buffer
+                    curr = &(*curr)->next_in_free_list;
+                    continue;
+                }
+            }
+
+            // CRITICAL: Check if reusing this block would overlap with allocated memory
             void *block_end = (char *)block_start + required_size;
 
             // Check if this expanded block would overlap with any currently allocated blocks
             bool would_overlap = false;
-            Buffer *buff = pool->buff_head;
+            buff = pool->buff_head;
             while (buff && !would_overlap) {
                 // Check all allocated blocks in this buffer
                 char *curr_ptr = buff->start;
@@ -178,8 +192,18 @@ MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr)
     size_t block_size = mem_align(size);
 
     if (pool->block_head && (*ptr = best_fit_from_free_list(pool, block_size))) {
-        // Tell AddressSanitizer that this memory is now allocated and accessible
-        __asan_unpoison_memory_region(*ptr, block_size);
+        // Find which buffer this pointer belongs to and check available space
+        Buffer *buff = buffer_list_find(pool->buff_head, *ptr);
+        if (buff) {
+            // Calculate how much space is actually available from this pointer to buffer end
+            size_t available_space = (char*)buff->end - (char*)*ptr;
+            size_t safe_unpoison_size = (block_size < available_space) ? block_size : available_space;
+            // Tell AddressSanitizer that this memory is now allocated and accessible
+            __asan_unpoison_memory_region(*ptr, safe_unpoison_size);
+        } else {
+            // Fallback - shouldn't happen but just in case
+            __asan_unpoison_memory_region(*ptr, block_size);
+        }
         // unlock(pool);
         return MEM_POOL_ERR_OK;
     }
@@ -214,13 +238,18 @@ void* pool_calloc(VariableMemPool* pool, size_t size) {
 }
 
 void* pool_variable_realloc(VariableMemPool *pool, void *ptr, size_t data_size, size_t new_size) {
+
     void *new_ptr;
     MemPoolError err = pool_variable_alloc(pool, new_size, &new_ptr);
     if (err != MEM_POOL_ERR_OK) {
         return NULL;
     }
+
+    // Get the actual allocated size (aligned)
+    size_t aligned_new_size = mem_align(new_size);
+
     // Tell AddressSanitizer about the new allocation size
-    __asan_unpoison_memory_region(new_ptr, new_size);
+    __asan_unpoison_memory_region(new_ptr, aligned_new_size);
 
     // copy the old data to the new block
     if (new_ptr == ptr) {
@@ -229,13 +258,25 @@ void* pool_variable_realloc(VariableMemPool *pool, void *ptr, size_t data_size, 
 
     if (ptr) {
         if (data_size) {
-            // Use memmove instead of memcpy to handle overlapping memory regions
-            memmove(new_ptr, ptr, data_size);
+            // Calculate actual available space at destination
+            Buffer *buff = buffer_list_find(pool->buff_head, new_ptr);
+            size_t available_space = aligned_new_size; // Default to aligned size
 
+            if (buff) {
+                // Calculate available space in buffer from this address
+                size_t space_in_buffer = (char*)buff->end - (char*)new_ptr;
+                available_space = (aligned_new_size < space_in_buffer) ? aligned_new_size : space_in_buffer;
+            }
+
+            // Only copy the minimum of data_size and actual available space
+            size_t copy_size = (data_size < available_space) ? data_size : available_space;
+
+
+            // Use memmove instead of memcpy to handle overlapping memory regions
+            memmove(new_ptr, ptr, copy_size);
         }
 
         if (new_ptr != ptr) {
-
             pool_variable_free(pool, ptr);
         }
     }
