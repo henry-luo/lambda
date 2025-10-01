@@ -196,6 +196,76 @@ static Item parse_latex_command(Input *input, const char **latex) {
         return {.item = ITEM_ERROR};
     }
 
+    // Handle special commands that need custom parsing
+    if (strcmp(cmd_name->chars, "item") == 0) {
+        // \item commands don't take arguments in braces
+        // Their content is everything until the next \item or \end{environment}
+        printf("DEBUG: Parsing \\item command content\n");
+        
+        skip_whitespace(latex);
+        
+        // Parse content until next \item or \end
+        StringBuf* content_sb = input->sb;
+        stringbuf_reset(content_sb);
+        
+        while (**latex) {
+            // Stop at next \item or \end
+            if (strncmp(*latex, "\\item", 5) == 0 || strncmp(*latex, "\\end{", 5) == 0) {
+                break;
+            }
+            
+            // Handle escaped characters
+            if (**latex == '\\') {
+                // This might be a command within the item content
+                // For now, just add the backslash and continue
+                stringbuf_append_char(content_sb, **latex);
+                (*latex)++;
+                if (**latex) {
+                    stringbuf_append_char(content_sb, **latex);
+                    (*latex)++;
+                }
+            } else {
+                stringbuf_append_char(content_sb, **latex);
+                (*latex)++;
+            }
+        }
+        
+        // Add the content as a child of the item element
+        if (content_sb->length > 0) {
+            String *content_string = stringbuf_to_string(content_sb);
+            if (content_string) {
+                // Trim whitespace from content
+                char* trimmed_content = (char*)pool_calloc(input->pool, content_string->len + 1);
+                if (trimmed_content) {
+                    strncpy(trimmed_content, content_string->chars, content_string->len);
+                    trimmed_content[content_string->len] = '\0';
+                    
+                    // Simple trim - remove leading/trailing whitespace
+                    char* start = trimmed_content;
+                    while (*start && (*start == ' ' || *start == '\t' || *start == '\n' || *start == '\r')) start++;
+                    
+                    char* end = start + strlen(start) - 1;
+                    while (end > start && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end--;
+                    *(end + 1) = '\0';
+                    
+                    if (strlen(start) > 0) {
+                        String *trimmed_string = input_create_string(input, start);
+                        if (trimmed_string) {
+                            printf("DEBUG: Adding item content: '%s'\n", start);
+                            Item content_item = {.item = s2it(trimmed_string)};
+                            list_push((List*)element, content_item);
+                        }
+                    }
+                }
+            }
+            stringbuf_reset(content_sb);
+        }
+        
+        // Set content length
+        ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
+        return {.item = (uint64_t)element};
+    }
+
     // Parse arguments
     Array* args = parse_command_arguments(input, latex);
 
