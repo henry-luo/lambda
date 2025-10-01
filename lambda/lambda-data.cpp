@@ -195,6 +195,19 @@ Array* array_pooled(VariableMemPool *pool) {
     return arr;
 }
 
+VariableMemPool* variable_mem_pool_create() {
+    VariableMemPool *pool;
+    MemPoolError err = pool_variable_init(&pool, 1024, 10);  // 1KB grow size, 10% tolerance
+    if (err != MEM_POOL_ERR_OK) return NULL;
+    return pool;
+}
+
+void variable_mem_pool_destroy(VariableMemPool* pool) {
+    if (pool) {
+        pool_variable_destroy(pool);
+    }
+}
+
 void array_set(Array* arr, int index, Item itm) {
     arr->items[index] = itm;
     TypeId type_id = get_type_id(itm);

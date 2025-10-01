@@ -20,8 +20,6 @@ workspace "Lambda"
         symbols "On"
         optimize "Off"
     
-    -- AddressSanitizer disabled for Linux platform
-    
     filter "configurations:Release"
         defines { "NDEBUG" }
         optimize "On"
@@ -749,6 +747,13 @@ project "test_strbuf_gtest"
         "-fdiagnostics-color=auto",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_stringbuf_gtest"
     kind "ConsoleApp"
@@ -798,6 +803,13 @@ project "test_stringbuf_gtest"
         "-pedantic",
         "-fdiagnostics-color=auto",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_strview_gtest"
@@ -849,6 +861,13 @@ project "test_strview_gtest"
         "-fdiagnostics-color=auto",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_variable_pool_gtest"
     kind "ConsoleApp"
@@ -898,6 +917,13 @@ project "test_variable_pool_gtest"
         "-pedantic",
         "-fdiagnostics-color=auto",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_num_stack_gtest"
@@ -949,6 +975,13 @@ project "test_num_stack_gtest"
         "-fdiagnostics-color=auto",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_datetime_gtest"
     kind "ConsoleApp"
@@ -998,6 +1031,13 @@ project "test_datetime_gtest"
         "-pedantic",
         "-fdiagnostics-color=auto",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_url_gtest"
@@ -1049,6 +1089,13 @@ project "test_url_gtest"
         "-fdiagnostics-color=auto",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_url_extra_gtest"
     kind "ConsoleApp"
@@ -1098,6 +1145,13 @@ project "test_url_extra_gtest"
         "-pedantic",
         "-fdiagnostics-color=auto",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_cmdedit_gtest"
@@ -1153,6 +1207,13 @@ project "test_cmdedit_gtest"
         "-Wno-implicit-function-declaration",
         "-DUTF8PROC_STATIC",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_mime_detect_gtest"
@@ -1248,6 +1309,13 @@ project "test_mime_detect_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_math_gtest"
     kind "ConsoleApp"
@@ -1341,6 +1409,13 @@ project "test_math_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_math_ascii_gtest"
@@ -1436,6 +1511,13 @@ project "test_math_ascii_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_markup_roundtrip_gtest"
     kind "ConsoleApp"
@@ -1529,6 +1611,13 @@ project "test_markup_roundtrip_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_input_roundtrip_gtest"
@@ -1624,6 +1713,13 @@ project "test_input_roundtrip_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_dir_gtest"
     kind "ConsoleApp"
@@ -1717,6 +1813,13 @@ project "test_dir_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_http_gtest"
@@ -1812,6 +1915,13 @@ project "test_http_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_sysinfo_gtest"
     kind "ConsoleApp"
@@ -1905,6 +2015,13 @@ project "test_sysinfo_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_jsx_roundtrip_new_gtest"
@@ -2000,6 +2117,13 @@ project "test_jsx_roundtrip_new_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_mdx_roundtrip_new_gtest"
     kind "ConsoleApp"
@@ -2093,6 +2217,13 @@ project "test_mdx_roundtrip_new_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_css_tokenizer_gtest"
@@ -2188,6 +2319,13 @@ project "test_css_tokenizer_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_css_parser_gtest"
     kind "ConsoleApp"
@@ -2281,6 +2419,13 @@ project "test_css_parser_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_css_integration_gtest"
@@ -2376,6 +2521,13 @@ project "test_css_integration_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_css_files_safe_gtest"
     kind "ConsoleApp"
@@ -2469,6 +2621,13 @@ project "test_css_files_safe_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_css_frameworks_gtest"
@@ -2564,6 +2723,13 @@ project "test_css_frameworks_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_mdx_roundtrip_gtest"
     kind "ConsoleApp"
@@ -2658,6 +2824,13 @@ project "test_mdx_roundtrip_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_jsx_roundtrip_gtest"
     kind "ConsoleApp"
@@ -2751,6 +2924,13 @@ project "test_jsx_roundtrip_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_latex_html_fixtures_gtest"
@@ -2850,6 +3030,13 @@ project "test_latex_html_fixtures_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_validator_gtest"
     kind "ConsoleApp"
@@ -2942,6 +3129,13 @@ project "test_validator_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_ast_validator_gtest"
@@ -3036,6 +3230,13 @@ project "test_ast_validator_gtest"
         "-Wl,-force_load,../../lambda/tree-sitter/libtree-sitter.a",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_lambda_gtest"
     kind "ConsoleApp"
@@ -3084,6 +3285,13 @@ project "test_lambda_gtest"
         "-pedantic",
         "-fdiagnostics-color=auto",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     
 
 project "test_lambda_repl_gtest"
@@ -3134,6 +3342,13 @@ project "test_lambda_repl_gtest"
         "-fdiagnostics-color=auto",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_lambda_proc_gtest"
     kind "ConsoleApp"
@@ -3183,6 +3398,13 @@ project "test_lambda_proc_gtest"
         "-fdiagnostics-color=auto",
     }
     
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
 
 project "test_lambda_runner"
     kind "ConsoleApp"
@@ -3229,4 +3451,11 @@ project "test_lambda_runner"
         "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES",
         "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0",
     }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
     

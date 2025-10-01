@@ -432,4 +432,8 @@ Element* elmt_pooled(VariableMemPool* pool);
 TypedItem elmt_get_typed(Element* elmt, Item key);
 void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool);
 
+// Memory pool convenience functions
+VariableMemPool* variable_mem_pool_create();
+void variable_mem_pool_destroy(VariableMemPool* pool);
+
 Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
