@@ -6,16 +6,16 @@
 
 StringBuf* stringbuf_new_cap(VariableMemPool *pool, size_t capacity) {
     if (!pool) return NULL;
-    
+
     StringBuf *sb;
     MemPoolError err = pool_variable_alloc(pool, sizeof(StringBuf), (void**)&sb);
     if (err != MEM_POOL_ERR_OK) return NULL;
-    
+
     sb->pool = pool;
     sb->str = NULL;
     sb->length = 0;
     sb->capacity = 0;
-    
+
     // Pre-allocate capacity if requested
     if (capacity > 0) {
         if (!stringbuf_ensure_cap(sb, capacity)) {
@@ -23,7 +23,7 @@ StringBuf* stringbuf_new_cap(VariableMemPool *pool, size_t capacity) {
             return NULL;
         }
     }
-    
+
     return sb;
 }
 
@@ -33,7 +33,7 @@ StringBuf* stringbuf_new(VariableMemPool *pool) {
 
 void stringbuf_free(StringBuf *sb) {
     if (!sb) return;
-    
+
     if (sb->str) {
         pool_variable_free(sb->pool, sb->str);
     }
@@ -42,7 +42,7 @@ void stringbuf_free(StringBuf *sb) {
 
 void stringbuf_reset(StringBuf *sb) {
     if (!sb) return;
-    
+
     if (sb->str && sb->capacity > 0) {
         // Reset the String structure
         sb->str->len = 0;
@@ -57,7 +57,7 @@ void stringbuf_reset(StringBuf *sb) {
 
 void stringbuf_full_reset(StringBuf *sb) {
     if (!sb) return;
-    
+
     if (sb->str) {
         pool_variable_free(sb->pool, sb->str);
     }
@@ -68,45 +68,45 @@ void stringbuf_full_reset(StringBuf *sb) {
 
 bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
     if (!sb) return false;
-    
+
     // Calculate required capacity including String header
     size_t required_capacity = sizeof(String) + min_capacity;
-    
+
     if (required_capacity <= sb->capacity) return true;
-    
+
     // Check for unreasonable allocation sizes to prevent overflow
     if (required_capacity >= SIZE_MAX / 2) {
         return false;
     }
-    
+
     size_t new_capacity = sb->capacity ? sb->capacity : sizeof(String) + INITIAL_CAPACITY;
-    
-    while (new_capacity < required_capacity) { 
+
+    while (new_capacity < required_capacity) {
         // Check for overflow before doubling
         if (new_capacity > SIZE_MAX / 2) {
             new_capacity = required_capacity;
             break;
         }
         log_debug("doubling stringbuf new_capacity: %zu -> %zu", new_capacity, new_capacity * 2);
-        new_capacity *= 2; 
+        new_capacity *= 2;
     }
-    
+
     String *new_str;
-    if (!sb->str) { 
+    if (!sb->str) {
         // First allocation
         MemPoolError err = pool_variable_alloc(sb->pool, new_capacity, (void**)&new_str);
         if (err != MEM_POOL_ERR_OK) return false;
-        
+
         // Initialize String structure
         new_str->len = 0;
         new_str->ref_cnt = 0;
         new_str->chars[0] = '\0';
-    } else { 
+    } else {
         // Realloc existing buffer
         new_str = (String*)pool_variable_realloc(sb->pool, sb->str, sb->capacity, new_capacity);
         if (!new_str) return false;
     }
-    
+
     sb->str = new_str;
     sb->capacity = new_capacity;
     return true;
@@ -114,10 +114,10 @@ bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
 
 void stringbuf_append_str(StringBuf *sb, const char *str) {
     if (!sb || !str) return;
-    
+
     size_t str_len = strlen(str);
     if (!stringbuf_ensure_cap(sb, sb->length + str_len + 1)) return;
-    
+
     memcpy(sb->str->chars + sb->length, str, str_len);
     sb->length += str_len;
     sb->str->chars[sb->length] = '\0';
@@ -126,9 +126,9 @@ void stringbuf_append_str(StringBuf *sb, const char *str) {
 
 void stringbuf_append_str_n(StringBuf *sb, const char *str, size_t len) {
     if (!sb || !str) return;
-    
+
     if (!stringbuf_ensure_cap(sb, sb->length + len + 1)) return;
-    
+
     memcpy(sb->str->chars + sb->length, str, len);
     sb->length += len;
     sb->str->chars[sb->length] = '\0';
@@ -137,9 +137,9 @@ void stringbuf_append_str_n(StringBuf *sb, const char *str, size_t len) {
 
 void stringbuf_append_char(StringBuf *sb, char c) {
     if (!sb) return;
-    
+
     if (!stringbuf_ensure_cap(sb, sb->length + 2)) return;
-    
+
     sb->str->chars[sb->length] = c;
     sb->length++;
     sb->str->chars[sb->length] = '\0';
@@ -148,9 +148,9 @@ void stringbuf_append_char(StringBuf *sb, char c) {
 
 void stringbuf_append_char_n(StringBuf *sb, char c, size_t n) {
     if (!sb) return;
-    
+
     if (!stringbuf_ensure_cap(sb, sb->length + n + 1)) return;
-    
+
     memset(sb->str->chars + sb->length, c, n);
     sb->length += n;
     sb->str->chars[sb->length] = '\0';
@@ -159,7 +159,7 @@ void stringbuf_append_char_n(StringBuf *sb, char c, size_t n) {
 
 void stringbuf_append_all(StringBuf *sb, int num_args, ...) {
     if (!sb) return;
-    
+
     va_list args;
     va_start(args, num_args);
     stringbuf_vappend(sb, num_args, args);
@@ -168,7 +168,7 @@ void stringbuf_append_all(StringBuf *sb, int num_args, ...) {
 
 void stringbuf_vappend(StringBuf *sb, int num_args, va_list args) {
     if (!sb) return;
-    
+
     for (int i = 0; i < num_args; i++) {
         const char *str = va_arg(args, const char*);
         if (str) {
@@ -179,7 +179,7 @@ void stringbuf_vappend(StringBuf *sb, int num_args, va_list args) {
 
 void stringbuf_append_format(StringBuf *sb, const char *format, ...) {
     if (!sb || !format) return;
-    
+
     va_list args;
     va_start(args, format);
     stringbuf_vappend_format(sb, format, args);
@@ -188,19 +188,19 @@ void stringbuf_append_format(StringBuf *sb, const char *format, ...) {
 
 void stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args) {
     if (!sb || !format) return;
-    
+
     va_list args_copy;
     va_copy(args_copy, args);
-    
+
     int size = vsnprintf(NULL, 0, format, args_copy);
     va_end(args_copy);
-    
-    if (size < 0) return;    
-    if (!stringbuf_ensure_cap(sb, sb->length + size + 1)) return;
-    
-    size = vsnprintf(sb->str->chars + sb->length, sb->capacity - sizeof(String) - sb->length, format, args);
+
     if (size < 0) return;
-    
+    if (!stringbuf_ensure_cap(sb, sb->length + size + 1)) return;
+
+    size = vsnprintf(sb->str->chars + sb->length, (sb->capacity - sizeof(String)) - sb->length, format, args);
+    if (size < 0) return;
+
     sb->length += size;
     sb->str->chars[sb->length] = '\0';
     sb->str->len = sb->length;
@@ -208,10 +208,10 @@ void stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args) {
 
 void stringbuf_copy(StringBuf *dst, const StringBuf *src) {
     if (!dst || !src) return;
-    
+
     stringbuf_reset(dst);
     if (!stringbuf_ensure_cap(dst, src->length + 1)) return;
-    
+
     memcpy(dst->str->chars, src->str->chars, src->length + 1);
     dst->length = src->length;
     dst->str->len = dst->length;
@@ -219,10 +219,10 @@ void stringbuf_copy(StringBuf *dst, const StringBuf *src) {
 
 StringBuf* stringbuf_dup(const StringBuf *sb) {
     if (!sb) return NULL;
-    
+
     StringBuf *new_sb = stringbuf_new_cap(sb->pool, sb->length + 1);
     if (!new_sb) return NULL;
-    
+
     stringbuf_copy(new_sb, sb);
     return new_sb;
 }
@@ -266,7 +266,7 @@ static inline size_t num_of_digits(unsigned long v) {
 
 void stringbuf_append_ulong(StringBuf *sb, unsigned long value) {
     if (!sb) return;
-    
+
     static const char digits[201] =
         "0001020304050607080910111213141516171819"
         "2021222324252627282930313233343536373839"
@@ -278,7 +278,7 @@ void stringbuf_append_ulong(StringBuf *sb, unsigned long value) {
     size_t pos = num_digits - 1;
 
     if (!stringbuf_ensure_cap(sb, sb->length + num_digits + 1)) return;
-    
+
     char *dst = sb->str->chars + sb->length;
 
     while(value >= 100) {
@@ -296,7 +296,7 @@ void stringbuf_append_ulong(StringBuf *sb, unsigned long value) {
         dst[pos] = digits[value * 2 + 1];
         dst[pos - 1] = digits[value * 2];
     }
-    
+
     sb->length += num_digits;
     sb->str->chars[sb->length] = '\0';
     sb->str->len = sb->length;
@@ -308,24 +308,24 @@ void stringbuf_append_int(StringBuf *sb, int value) {
 
 void stringbuf_append_long(StringBuf *sb, long value) {
     if (!sb) return;
-    
-    if (value < 0) { 
-        stringbuf_append_char(sb, '-'); 
-        value = -value; 
+
+    if (value < 0) {
+        stringbuf_append_char(sb, '-');
+        value = -value;
     }
     stringbuf_append_ulong(sb, value);
 }
 
 bool stringbuf_append_file(StringBuf *sb, FILE *file) {
     if (!sb || !file) return false;
-    
+
     fseek(file, 0, SEEK_END);
     long size = ftell(file);
     fseek(file, 0, SEEK_SET);
-    
+
     if (size < 0) return false;
     if (!stringbuf_ensure_cap(sb, sb->length + size + 1)) return false;
-    
+
     size_t read = fread(sb->str->chars + sb->length, 1, size, file);
     sb->length += read;
     sb->str->chars[sb->length] = '\0';
@@ -335,9 +335,9 @@ bool stringbuf_append_file(StringBuf *sb, FILE *file) {
 
 bool stringbuf_append_file_head(StringBuf *sb, FILE *file, size_t n) {
     if (!sb || !file) return false;
-    
+
     if (!stringbuf_ensure_cap(sb, sb->length + n + 1)) return false;
-    
+
     size_t read = fread(sb->str->chars + sb->length, 1, n, file);
     sb->length += read;
     sb->str->chars[sb->length] = '\0';
@@ -347,16 +347,16 @@ bool stringbuf_append_file_head(StringBuf *sb, FILE *file, size_t n) {
 
 String* stringbuf_to_string(StringBuf *sb) {
     if (!sb || !sb->str) return NULL;
-    
+
     // Ensure the String structure is properly set up
     sb->str->len = sb->length;
     sb->str->ref_cnt = 0;
-    
+
     // Return the String and reset the StringBuf
     String *result = sb->str;
     sb->str = NULL;
     sb->length = 0;
     sb->capacity = 0;
-    
+
     return result;
 }
