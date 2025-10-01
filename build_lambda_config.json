@@ -382,9 +382,12 @@
                 "lambda/lambda-data.cpp",
                 "lib/strview.c",
                 "lib/strbuf.c",
+                "lib/stringbuf.c",
                 "lib/hashmap.c",
                 "lib/arraylist.c",
                 "lib/log.c",
+                "lib/datetime.c",
+                "lib/string.c",
                 "lib/mem-pool/src/variable.c",
                 "lib/mem-pool/src/buffer.c",
                 "lib/mem-pool/src/utils.c",
@@ -394,8 +397,20 @@
                 "lib/utf.c",
                 "lib/image.c"
             ],
+            "includes": [
+                "lambda/tree-sitter/lib/include",
+                "lambda/tree-sitter-lambda/bindings/c",
+                "lib/mem-pool/include",
+                "lexbor/source",
+                "."
+            ],
             "libraries": [
                 "lexbor",
+                "tree-sitter",
+                "tree-sitter-lambda",
+                "hpdf",
+                "mpdec",
+                "utf8proc",
                 "freetype",
                 "fontconfig",
                 "glfw",
