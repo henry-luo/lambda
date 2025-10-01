@@ -116,21 +116,33 @@ void stringbuf_append_str(StringBuf *sb, const char *str) {
     if (!sb || !str) return;
 
     size_t str_len = strlen(str);
-    if (!stringbuf_ensure_cap(sb, sb->length + str_len + 1)) return;
+    size_t new_length = sb->length + str_len;
+
+    // Check for 22-bit len field overflow (max 4,194,303 chars)
+    if (new_length > 0x3FFFFF) {
+        return; // Silently fail to prevent corruption
+    }
+
+    if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
     memcpy(sb->str->chars + sb->length, str, str_len);
-    sb->length += str_len;
+    sb->length = new_length;
     sb->str->chars[sb->length] = '\0';
     sb->str->len = sb->length;
-}
-
-void stringbuf_append_str_n(StringBuf *sb, const char *str, size_t len) {
+}void stringbuf_append_str_n(StringBuf *sb, const char *str, size_t len) {
     if (!sb || !str) return;
 
-    if (!stringbuf_ensure_cap(sb, sb->length + len + 1)) return;
+    size_t new_length = sb->length + len;
+
+    // Check for 22-bit len field overflow (max 4,194,303 chars)
+    if (new_length > 0x3FFFFF) {
+        return; // Silently fail to prevent corruption
+    }
+
+    if (!stringbuf_ensure_cap(sb, new_length + 1)) return;    if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
     memcpy(sb->str->chars + sb->length, str, len);
-    sb->length += len;
+    sb->length = new_length;
     sb->str->chars[sb->length] = '\0';
     sb->str->len = sb->length;
 }
@@ -138,26 +150,36 @@ void stringbuf_append_str_n(StringBuf *sb, const char *str, size_t len) {
 void stringbuf_append_char(StringBuf *sb, char c) {
     if (!sb) return;
 
-    if (!stringbuf_ensure_cap(sb, sb->length + 2)) return;
+    size_t new_length = sb->length + 1;
+
+    // Check for 22-bit len field overflow (max 4,194,303 chars)
+    if (new_length > 0x3FFFFF) {
+        return; // Silently fail to prevent corruption
+    }
+
+    if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
     sb->str->chars[sb->length] = c;
-    sb->length++;
+    sb->length = new_length;
     sb->str->chars[sb->length] = '\0';
     sb->str->len = sb->length;
-}
-
-void stringbuf_append_char_n(StringBuf *sb, char c, size_t n) {
+}void stringbuf_append_char_n(StringBuf *sb, char c, size_t n) {
     if (!sb) return;
 
-    if (!stringbuf_ensure_cap(sb, sb->length + n + 1)) return;
+    size_t new_length = sb->length + n;
+
+    // Check for 22-bit len field overflow (max 4,194,303 chars)
+    if (new_length > 0x3FFFFF) {
+        return; // Silently fail to prevent corruption
+    }
+
+    if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
     memset(sb->str->chars + sb->length, c, n);
-    sb->length += n;
+    sb->length = new_length;
     sb->str->chars[sb->length] = '\0';
     sb->str->len = sb->length;
-}
-
-void stringbuf_append_all(StringBuf *sb, int num_args, ...) {
+}void stringbuf_append_all(StringBuf *sb, int num_args, ...) {
     if (!sb) return;
 
     va_list args;
@@ -196,17 +218,23 @@ void stringbuf_vappend_format(StringBuf *sb, const char *format, va_list args) {
     va_end(args_copy);
 
     if (size < 0) return;
-    if (!stringbuf_ensure_cap(sb, sb->length + size + 1)) return;
+
+    size_t new_length = sb->length + size;
+
+    // Check for 22-bit len field overflow (max 4,194,303 chars)
+    if (new_length > 0x3FFFFF) {
+        return; // Silently fail to prevent corruption
+    }
+
+    if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
 
     size = vsnprintf(sb->str->chars + sb->length, (sb->capacity - sizeof(String)) - sb->length, format, args);
     if (size < 0) return;
 
-    sb->length += size;
+    sb->length = new_length;
     sb->str->chars[sb->length] = '\0';
     sb->str->len = sb->length;
-}
-
-void stringbuf_copy(StringBuf *dst, const StringBuf *src) {
+}void stringbuf_copy(StringBuf *dst, const StringBuf *src) {
     if (!dst || !src) return;
 
     stringbuf_reset(dst);
@@ -275,13 +303,17 @@ void stringbuf_append_ulong(StringBuf *sb, unsigned long value) {
         "8081828384858687888990919293949596979899";
 
     size_t num_digits = num_of_digits(value);
+    size_t new_length = sb->length + num_digits;
+
+    // Check for 22-bit len field overflow (max 4,194,303 chars)
+    if (new_length > 0x3FFFFF) {
+        return; // Silently fail to prevent corruption
+    }
+
+    if (!stringbuf_ensure_cap(sb, new_length + 1)) return;
+
     size_t pos = num_digits - 1;
-
-    if (!stringbuf_ensure_cap(sb, sb->length + num_digits + 1)) return;
-
-    char *dst = sb->str->chars + sb->length;
-
-    while(value >= 100) {
+    char *dst = sb->str->chars + sb->length;    while(value >= 100) {
         size_t v = value % 100;
         value /= 100;
         dst[pos] = digits[v * 2 + 1];
@@ -297,12 +329,10 @@ void stringbuf_append_ulong(StringBuf *sb, unsigned long value) {
         dst[pos - 1] = digits[value * 2];
     }
 
-    sb->length += num_digits;
+    sb->length = new_length;
     sb->str->chars[sb->length] = '\0';
     sb->str->len = sb->length;
-}
-
-void stringbuf_append_int(StringBuf *sb, int value) {
+}void stringbuf_append_int(StringBuf *sb, int value) {
     stringbuf_append_long(sb, value);
 }
 
@@ -310,13 +340,15 @@ void stringbuf_append_long(StringBuf *sb, long value) {
     if (!sb) return;
 
     if (value < 0) {
+        // Check if adding the minus sign would cause overflow
+        if (sb->length >= 0x3FFFFF) {
+            return; // Silently fail to prevent corruption
+        }
         stringbuf_append_char(sb, '-');
         value = -value;
     }
     stringbuf_append_ulong(sb, value);
-}
-
-bool stringbuf_append_file(StringBuf *sb, FILE *file) {
+}bool stringbuf_append_file(StringBuf *sb, FILE *file) {
     if (!sb || !file) return false;
 
     fseek(file, 0, SEEK_END);
