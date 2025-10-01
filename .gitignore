@@ -120,5 +120,6 @@ test*.exe
 test.history
 test_output/
 test/venv/
+test/layout/data/css2.1
 
 analysis-results*/
