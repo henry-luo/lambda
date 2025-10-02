@@ -1,170 +1,318 @@
 {
-  "primitives": {
-    "string": "Hello, World!",
-    "number_integer": 42,
-    "number_float": 3.14159,
-    "number_negative": -123,
-    "number_zero": 0,
-    "number_scientific": 1.23e10,
-    "number_scientific_negative": -4.56e-7,
-    "boolean_true": true,
-    "boolean_false": false,
-    "null_value": null
-  },
-  "strings": {
-    "empty": "",
-    "whitespace": "   \t\n  ",
-    "unicode": "Hello 🌍 世界 مرحبا بالعالم",
-    "escaped_characters": "Quote: \" Backslash: \\ Newline: \n Tab: \t",
-    "unicode_escape": "Unicode heart: \\u2764",
-    "long_string": "This is a very long string that might be used to test parsing performance and memory allocation when dealing with large text content in JSON documents.",
-    "numbers_as_strings": "123",
-    "special_chars": "!@#$%^&*()_+-=[]{}|;:,.<>?",
-    "path_like": "/path/to/file.txt",
-    "url_like": "https://example.com/api/v1/users?id=123&format=json"
-  },
-  "numbers": {
-    "integer_max": 9007199254740991,
-    "integer_min": -9007199254740991,
-    "float_precision": 0.123456789012345,
-    "very_small": 1e-10,
-    "very_large": 1e10,
-    "zero_variants": [0, 0.0, -0],
-    "infinity_representation": "Infinity cannot be represented in JSON",
-    "nan_representation": "NaN cannot be represented in JSON"
-  },
-  "arrays": {
-    "empty": [],
-    "single_element": [1],
-    "mixed_types": [1, "two", true, null, {"nested": "object"}],
-    "nested_arrays": [[1, 2], [3, 4], [[5, 6]]],
-    "large_array": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
-    "homogeneous_strings": ["apple", "banana", "cherry", "date"],
-    "homogeneous_numbers": [1, 2, 3, 4, 5],
-    "homogeneous_booleans": [true, false, true, false],
-    "with_nulls": [1, null, 3, null, 5]
-  },
-  "objects": {
-    "empty": {},
-    "single_property": {"key": "value"},
-    "nested": {
-      "level1": {
-        "level2": {
-          "level3": {
-            "deep_value": "Found me!"
-          }
-        }
-      }
+    "primitives": {
+        "string": "Hello, World!",
+        "number_integer": 42,
+        "number_float": 3.14159,
+        "number_negative": -123,
+        "number_zero": 0,
+        "number_scientific": 1.23e10,
+        "number_scientific_negative": -4.56e-7,
+        "boolean_true": true,
+        "boolean_false": false,
+        "null_value": null
     },
-    "mixed_values": {
-      "string": "text",
-      "number": 123,
-      "boolean": true,
-      "null": null,
-      "array": [1, 2, 3],
-      "object": {"inner": "value"}
+    "strings": {
+        "empty": "",
+        "whitespace": "   \t\n  ",
+        "unicode": "Hello 🌍 世界 مرحبا بالعالم",
+        "escaped_characters": "Quote: \" Backslash: \\ Newline: \n Tab: \t",
+        "unicode_escape": "Unicode heart: \\u2764",
+        "long_string": "This is a very long string that might be used to test parsing performance and memory allocation when dealing with large text content in JSON documents.",
+        "numbers_as_strings": "123",
+        "special_chars": "!@#$%^&*()_+-=[]{}|;:,.<>?",
+        "path_like": "/path/to/file.txt",
+        "url_like": "https://example.com/api/v1/users?id=123&format=json"
     },
-    "special_keys": {
-      "": "empty key",
-      " ": "space key",
-      "key with spaces": "spaces in key",
-      "key-with-dashes": "dashes in key",
-      "key_with_underscores": "underscores in key",
-      "UPPER_CASE": "uppercase key",
-      "123": "numeric string key",
-      "unicode_key_🔑": "unicode in key"
-    }
-  },
-  "edge_cases": {
-    "duplicate_keys_note": "JSON spec allows duplicate keys, but behavior is implementation-specific",
-    "trailing_comma_note": "Trailing commas are not allowed in JSON",
-    "comments_note": "Comments are not part of JSON specification",
-    "multiline_strings": "JSON strings cannot contain unescaped newlines",
-    "single_quotes_note": "JSON only allows double quotes for strings"
-  },
-  "real_world_examples": {
-    "api_response": {
-      "status": 200,
-      "message": "Success",
-      "data": {
-        "users": [
-          {
-            "id": 1,
-            "name": "John Doe",
-            "email": "john@example.com",
-            "active": true,
-            "created_at": "2023-01-15T10:30:00Z",
-            "metadata": null
-          },
-          {
-            "id": 2,
-            "name": "Jane Smith",
-            "email": "jane@example.com",
-            "active": false,
-            "created_at": "2023-02-20T14:45:00Z",
-            "metadata": {
-              "preferences": {
-                "theme": "dark",
-                "notifications": true
-              }
-            }
-          }
+    "numbers": {
+        "integer_max": 9007199254740991,
+        "integer_min": -9007199254740991,
+        "float_precision": 0.123456789012345,
+        "very_small": 1e-10,
+        "very_large": 1e10,
+        "zero_variants": [
+            0,
+            0.0,
+            -0
         ],
-        "pagination": {
-          "page": 1,
-          "per_page": 10,
-          "total": 2,
-          "total_pages": 1
+        "infinity_representation": "Infinity cannot be represented in JSON",
+        "nan_representation": "NaN cannot be represented in JSON"
+    },
+    "arrays": {
+        "empty": [],
+        "single_element": [
+            1
+        ],
+        "mixed_types": [
+            1,
+            "two",
+            true,
+            null,
+            {
+                "nested": "object"
+            }
+        ],
+        "nested_arrays": [
+            [
+                1,
+                2
+            ],
+            [
+                3,
+                4
+            ],
+            [
+                [
+                    5,
+                    6
+                ]
+            ]
+        ],
+        "large_array": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20
+        ],
+        "homogeneous_strings": [
+            "apple",
+            "banana",
+            "cherry",
+            "date"
+        ],
+        "homogeneous_numbers": [
+            1,
+            2,
+            3,
+            4,
+            5
+        ],
+        "homogeneous_booleans": [
+            true,
+            false,
+            true,
+            false
+        ],
+        "with_nulls": [
+            1,
+            null,
+            3,
+            null,
+            5
+        ]
+    },
+    "objects": {
+        "empty": {},
+        "single_property": {
+            "key": "value"
+        },
+        "nested": {
+            "level1": {
+                "level2": {
+                    "level3": {
+                        "deep_value": "Found me!"
+                    }
+                }
+            }
+        },
+        "mixed_values": {
+            "string": "text",
+            "number": 123,
+            "boolean": true,
+            "null": null,
+            "array": [
+                1,
+                2,
+                3
+            ],
+            "object": {
+                "inner": "value"
+            }
+        },
+        "special_keys": {
+            ".": "empty key",
+            " ": "space key",
+            "key with spaces": "spaces in key",
+            "key-with-dashes": "dashes in key",
+            "key_with_underscores": "underscores in key",
+            "UPPER_CASE": "uppercase key",
+            "123": "numeric string key",
+            "unicode_key_🔑": "unicode in key"
         }
-      }
     },
-    "config_file": {
-      "app_name": "TestApp",
-      "version": "1.0.0",
-      "debug": false,
-      "database": {
-        "host": "localhost",
-        "port": 5432,
-        "name": "testdb",
-        "ssl": true
-      },
-      "features": ["auth", "logging", "caching"],
-      "timeouts": {
-        "connection": 30,
-        "request": 60,
-        "idle": 300
-      }
+    "edge_cases": {
+        "duplicate_keys_note": "JSON spec allows duplicate keys, but behavior is implementation-specific",
+        "trailing_comma_note": "Trailing commas are not allowed in JSON",
+        "comments_note": "Comments are not part of JSON specification",
+        "multiline_strings": "JSON strings cannot contain unescaped newlines",
+        "single_quotes_note": "JSON only allows double quotes for strings"
     },
-    "geojson_like": {
-      "type": "Feature",
-      "geometry": {
-        "type": "Point",
-        "coordinates": [-122.4194, 37.7749]
-      },
-      "properties": {
-        "name": "San Francisco",
-        "population": 883305
-      }
+    "real_world_examples": {
+        "api_response": {
+            "status": 200,
+            "message": "Success",
+            "data": {
+                "users": [
+                    {
+                        "id": 1,
+                        "name": "John Doe",
+                        "email": "john@example.com",
+                        "active": true,
+                        "created_at": "2023-01-15T10:30:00Z",
+                        "metadata": null
+                    },
+                    {
+                        "id": 2,
+                        "name": "Jane Smith",
+                        "email": "jane@example.com",
+                        "active": false,
+                        "created_at": "2023-02-20T14:45:00Z",
+                        "metadata": {
+                            "preferences": {
+                                "theme": "dark",
+                                "notifications": true
+                            }
+                        }
+                    }
+                ],
+                "pagination": {
+                    "page": 1,
+                    "per_page": 10,
+                    "total": 2,
+                    "total_pages": 1
+                }
+            }
+        },
+        "config_file": {
+            "app_name": "TestApp",
+            "version": "1.0.0",
+            "debug": false,
+            "database": {
+                "host": "localhost",
+                "port": 5432,
+                "name": "testdb",
+                "ssl": true
+            },
+            "features": [
+                "auth",
+                "logging",
+                "caching"
+            ],
+            "timeouts": {
+                "connection": 30,
+                "request": 60,
+                "idle": 300
+            }
+        },
+        "geojson_like": {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    -122.4194,
+                    37.7749
+                ]
+            },
+            "properties": {
+                "name": "San Francisco",
+                "population": 883305
+            }
+        }
+    },
+    "stress_tests": {
+        "deeply_nested": {
+            "a": {
+                "b": {
+                    "c": {
+                        "d": {
+                            "e": {
+                                "f": {
+                                    "g": {
+                                        "h": {
+                                            "i": {
+                                                "j": "deep"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "many_siblings": {
+            "prop1": 1,
+            "prop2": 2,
+            "prop3": 3,
+            "prop4": 4,
+            "prop5": 5,
+            "prop6": 6,
+            "prop7": 7,
+            "prop8": 8,
+            "prop9": 9,
+            "prop10": 10,
+            "prop11": 11,
+            "prop12": 12,
+            "prop13": 13,
+            "prop14": 14,
+            "prop15": 15
+        },
+        "mixed_nesting": {
+            "arrays_in_objects": {
+                "list1": [
+                    {
+                        "nested": true
+                    },
+                    {
+                        "nested": false
+                    }
+                ],
+                "list2": [
+                    1,
+                    [
+                        2,
+                        [
+                            3,
+                            [
+                                4
+                            ]
+                        ]
+                    ]
+                ]
+            },
+            "objects in arrays": [
+                {
+                    "type": "A",
+                    "data": [
+                        1,
+                        2,
+                        3
+                    ]
+                },
+                {
+                    "type": "B",
+                    "data": {
+                        "x": 10,
+                        "y": 20
+                    }
+                }
+            ]
+        }
     }
-  },
-  "stress_tests": {
-    "deeply_nested": {
-      "a": {"b": {"c": {"d": {"e": {"f": {"g": {"h": {"i": {"j": "deep"}}}}}}}}}
-    },
-    "many_siblings": {
-      "prop1": 1, "prop2": 2, "prop3": 3, "prop4": 4, "prop5": 5,
-      "prop6": 6, "prop7": 7, "prop8": 8, "prop9": 9, "prop10": 10,
-      "prop11": 11, "prop12": 12, "prop13": 13, "prop14": 14, "prop15": 15
-    },
-    "mixed_nesting": {
-      "arrays_in_objects": {
-        "list1": [{"nested": true}, {"nested": false}],
-        "list2": [1, [2, [3, [4]]]]
-      },
-      "objects in arrays": [
-        {"type": "A", "data": [1, 2, 3]},
-        {"type": "B", "data": {"x": 10, "y": 20}}
-      ]
-    }
-  }
 }

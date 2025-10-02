@@ -1,0 +1,148 @@
+"Database:"
+{
+  host: "localhost",
+  port: 5432,
+  name: "my_database",
+  user: "admin",
+  ssl_enabled: true,
+  debug_mode: true,
+  auto_connect: true,
+  backup_enabled: true,
+  logging: true,
+  verbose: true,
+  maintenance: true,
+  read_only: false,
+  encryption: false,
+  cache: false,
+  profiling: false,
+  monitoring: false,
+  alerts: false,
+  test_mode: false,
+  password: null,
+  api_key: null,
+  secret: null,
+  token: null,
+  config_file: null,
+  temp_dir: null
+}
+"Full INI:"
+{
+  global: {
+    global_string: "This is a global value",
+    global_number: 42,
+    global_boolean: true
+  },
+  database: {
+    host: "localhost",
+    port: 5432,
+    name: "my_database",
+    user: "admin",
+    ssl_enabled: true,
+    debug_mode: true,
+    auto_connect: true,
+    backup_enabled: true,
+    logging: true,
+    verbose: true,
+    maintenance: true,
+    read_only: false,
+    encryption: false,
+    cache: false,
+    profiling: false,
+    monitoring: false,
+    alerts: false,
+    test_mode: false,
+    password: null,
+    api_key: null,
+    secret: null,
+    token: null,
+    config_file: null,
+    temp_dir: null
+  },
+  numbers: {
+    positive_int: 123,
+    negative_int: -456,
+    zero: false,
+    large_number: 999999999,
+    pi: 3.14159,
+    negative_float: -2.718,
+    zero_float: 0,
+    small_decimal: 0.001,
+    avogadro: 6.022e+23,
+    planck: 6.626e-34,
+    big_positive: 1.5e+10,
+    big_negative: -2.3e-15,
+    signed_positive: 100,
+    signed_float: 3.14,
+    signed_scientific: 12300
+  },
+  strings: {
+    simple_string: "hello world",
+    string_with_spaces: "value with leading and trailing spaces  ",
+    empty_string: null,
+    double_quoted: "This is a double quoted string",
+    single_quoted: "This is a single quoted string",
+    quoted_with_spaces: "  spaces preserved in quotes  ",
+    empty_quoted: null,
+    empty_single_quoted: null,
+    escaped_quotes: "He said "Hello" to me",
+    mixed_quotes: "She replied "Hi there!"",
+    string_with_equals: "key=value format",
+    string_with_hash: "value",
+    string_with_semicolon: "value"
+  },
+  whitespace_tests: {
+    key_with_spaces: "value_with_spaces   ",
+    tab_separated: "tab_value   ",
+    mixed_whitespace: "mixed value       "
+  },
+  edge_cases: {
+    just_key: null,
+    key_with_comment: "value ",
+    key_with_hash: "value ",
+    key_123: "numeric key",
+    _underscore_key: "underscore value",
+    key_with_123_numbers: "mixed key"
+  },
+  boolean_variations: {
+    true_lower: true,
+    true_upper: true,
+    true_mixed: true,
+    yes_lower: true,
+    yes_upper: true,
+    yes_mixed: true,
+    on_lower: true,
+    on_upper: true,
+    on_mixed: true,
+    one_digit: true,
+    false_lower: false,
+    false_upper: false,
+    false_mixed: false,
+    no_lower: false,
+    no_upper: false,
+    no_mixed: false,
+    off_lower: false,
+    off_upper: false,
+    off_mixed: false,
+    zero_digit: false
+  },
+  null_variations: {
+    null_lower: null,
+    null_upper: null,
+    null_mixed: null,
+    nil_lower: null,
+    nil_upper: null,
+    nil_mixed: null,
+    empty_lower: null,
+    empty_upper: null,
+    empty_mixed: null
+  },
+  section_with_special_chars: {
+    url: "https://example.com",
+    email: "test@example.com",
+    path: "/home/user/documents",
+    windows_path: "C:\Program Files\App"
+  },
+  final_section: {
+    last_key: "final_value"
+  }
+}

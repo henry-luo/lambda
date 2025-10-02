@@ -275,9 +275,21 @@ static Item parse_latex_command(Input *input, const char **latex) {
         if (args && args->length > 0) {
             printf("DEBUG: Processing \\begin command with %lld arguments\n", args->length);
             
-            // For now, hardcode common environment names to avoid memory corruption
-            // This is a temporary workaround until the memory issue is resolved
-            const char* env_name = "itemize"; // Default to itemize for testing
+            // Extract the environment name from the first argument
+            String* env_name_str = (String*)args->items[0].item;
+            if (!env_name_str || !env_name_str->chars || env_name_str->len == 0) {
+                printf("DEBUG: Invalid environment name in \\begin command\n");
+                return ItemError;
+            }
+            
+            // Create a null-terminated string for the environment name
+            char* env_name = (char*)pool_calloc(input->pool, env_name_str->len + 1);
+            if (!env_name) {
+                printf("DEBUG: Failed to allocate memory for environment name\n");
+                return ItemError;
+            }
+            strncpy(env_name, env_name_str->chars, env_name_str->len);
+            env_name[env_name_str->len] = '\0';
             
             printf("DEBUG: Creating environment element for: '%s'\n", env_name);
 
