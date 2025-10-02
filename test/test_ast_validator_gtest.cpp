@@ -15,18 +15,13 @@
 
 // Include validator headers for ValidationResult and run_validation
 #include "../lambda/validator.hpp"
-
-// External function declarations for memory pool
-extern "C" {
-    MemPoolError pool_variable_init(VariableMemPool **pool, size_t grow_size, uint16_t tolerance_percent);
-    MemPoolError pool_variable_destroy(VariableMemPool *pool);
-}
+#include "../lib/mempool.h"
 
 // Forward declaration for path segment creation
-PathSegment* create_path_segment(PathSegmentType type, const char* name, long index, VariableMemPool* pool);
+PathSegment* create_path_segment(PathSegmentType type, const char* name, long index, Pool* pool);
 
 // Simple implementation of create_path_segment for tests
-PathSegment* create_path_segment(PathSegmentType type, const char* name, long index, VariableMemPool* pool) {
+PathSegment* create_path_segment(PathSegmentType type, const char* name, long index, Pool* pool) {
     PathSegment* segment = (PathSegment*)pool_calloc(pool, sizeof(PathSegment));
     if (!segment) return nullptr;
 
@@ -76,13 +71,12 @@ AstNode* build_script(Transpiler* tp, TSNode script_node) {
 // Test fixture class for AST validator tests
 class AstValidatorTest : public ::testing::Test {
 protected:
-    VariableMemPool* test_pool = nullptr;
+    Pool* test_pool = nullptr;
     AstValidator* validator = nullptr;
 
     void SetUp() override {
-        MemPoolError err = pool_variable_init(&test_pool, 1024 * 1024, MEM_POOL_NO_BEST_FIT); // 1MB pool
-        ASSERT_EQ(err, MEM_POOL_ERR_OK) << "Failed to create memory pool";
-        ASSERT_NE(test_pool, nullptr) << "Memory pool should not be null";
+        test_pool = pool_create();
+        ASSERT_NE(test_pool, nullptr) << "Failed to create memory pool";
 
         validator = ast_validator_create(test_pool);
         ASSERT_NE(validator, nullptr) << "Failed to create AST validator";
@@ -95,7 +89,7 @@ protected:
         }
 
         if (test_pool) {
-            pool_variable_destroy(test_pool);
+            pool_destroy(test_pool);
             test_pool = nullptr;
         }
     }

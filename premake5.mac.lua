@@ -142,6 +142,7 @@ project "lambda-input-full-c"
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     links {
@@ -251,6 +252,7 @@ project "lambda-input-full-cpp"
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     links {
@@ -351,9 +353,7 @@ project "radiant"
         "lib/log.c",
         "lib/datetime.c",
         "lib/string.c",
-        "lib/mem-pool/src/variable.c",
-        "lib/mem-pool/src/buffer.c",
-        "lib/mem-pool/src/utils.c",
+        "lib/mempool.c",
         "lib/file.c",
         "lib/url.c",
         "lib/url_parser.c",
@@ -372,7 +372,6 @@ project "radiant"
         "/opt/homebrew/include",
         "/opt/homebrew/include/libpng16",
         "lib",
-        "lib/mem-pool/include",
         "/usr/local/include",
     }
     
@@ -399,6 +398,7 @@ project "radiant"
         "/opt/homebrew/opt/bzip2/lib/libbz2.a",
         "/opt/homebrew/lib/libpng.a",
         "/opt/homebrew/opt/expat/lib/libexpat.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     links {
@@ -795,11 +795,13 @@ project "test_stringbuf_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     buildoptions {
@@ -824,64 +826,6 @@ project "test_strview_gtest"
     
     files {
         "test/test_strview_gtest.cpp",
-    }
-    
-    includedirs {
-        ".",
-        "lambda/tree-sitter/lib/include",
-        "lambda/tree-sitter-lambda/bindings/c",
-        "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
-        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
-        "/opt/homebrew/include/fontconfig",
-        "/opt/homebrew/include",
-        "/opt/homebrew/include/libpng16",
-        "lib/mem-pool/include",
-        "mac-deps/curl-8.10.1/include",
-        "/usr/local/include",
-        "/opt/homebrew/include/openssl",
-    }
-    
-    libdirs {
-        "/opt/homebrew/lib",
-        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
-        "/usr/local/lib",
-        "build/lib",
-    }
-    
-    links {
-        "lambda-lib",
-        "gtest",
-        "gtest_main",
-    }
-    
-    linkoptions {
-        "/opt/homebrew/lib/libgtest.a",
-        "/opt/homebrew/lib/libgtest_main.a",
-    }
-    
-    buildoptions {
-        "-pedantic",
-        "-fdiagnostics-color=auto",
-    }
-    
-    -- AddressSanitizer for test projects only
-    filter { "configurations:Debug", "not platforms:Linux_x64" }
-        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
-        linkoptions { "-fsanitize=address" }
-    
-    filter {}
-    
-
-project "test_variable_pool_gtest"
-    kind "ConsoleApp"
-    language "C++"
-    targetdir "test"
-    objdir "build/obj/%{prj.name}"
-    targetextension ".exe"
-    
-    files {
-        "test/test_variable_pool_gtest.cpp",
     }
     
     includedirs {
@@ -1027,11 +971,13 @@ project "test_datetime_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     buildoptions {
@@ -1226,15 +1172,15 @@ project "test_cmdedit_gtest"
     filter {}
     
 
-project "test_mempool"
+project "test_mempool_gtest"
     kind "ConsoleApp"
-    language "C"
+    language "C++"
     targetdir "test"
     objdir "build/obj/%{prj.name}"
     targetextension ".exe"
     
     files {
-        "test/test_mempool.c",
+        "test/test_mempool_gtest.cpp",
         "lib/mempool.c",
     }
     
@@ -1262,20 +1208,20 @@ project "test_mempool"
     }
     
     links {
+        "gtest",
+        "gtest_main",
         "jemalloc",
-        "criterion",
-        "nanomsg",
-        "git2",
     }
     
     linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
-        "-std=c99",
     }
     
     -- AddressSanitizer for test projects only
@@ -1428,11 +1374,13 @@ project "test_math_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {
@@ -1530,11 +1478,13 @@ project "test_math_ascii_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {
@@ -1632,11 +1582,13 @@ project "test_markup_roundtrip_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {
@@ -1734,11 +1686,13 @@ project "test_input_roundtrip_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {
@@ -2040,11 +1994,13 @@ project "test_sysinfo_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {
@@ -2142,11 +2098,13 @@ project "test_jsx_roundtrip_new_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {
@@ -2346,11 +2304,13 @@ project "test_css_tokenizer_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {
@@ -2448,11 +2408,13 @@ project "test_css_parser_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {
@@ -2550,11 +2512,13 @@ project "test_css_integration_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {
@@ -2652,11 +2616,13 @@ project "test_css_files_safe_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {
@@ -2754,11 +2720,13 @@ project "test_css_frameworks_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {
@@ -3063,11 +3031,13 @@ project "test_latex_html_fixtures_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {
@@ -3267,11 +3237,13 @@ project "test_ast_validator_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
+        "jemalloc",
     }
     
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
     }
     
     linkoptions {

@@ -10,14 +10,14 @@ Lambda Script is a **general-purpose, cross-platform, pure functional scripting 
 - **Compilation**: JIT compilation via MIR for near-native performance
 - **Memory Management**: Advanced variable-size memory pools with reference counting
 - **Target Use Cases**: Data processing, document transformation, mathematical computation
-- **Platforms**: macOS, Linux, Windows (cross-compilation support)
+- **Platforms**: macOS, Linux, Windows
 
 ## Architecture & Components
 
 ### Core System
 - **Parser**: Tree-sitter based language parser (`lambda/tree-sitter-lambda/`)
 - **Runtime**: MIR-based JIT transpiler (`lambda/transpiler.hpp`, `lambda/lambda-eval.cpp`)
-- **Memory**: Variable memory pool system (`lib/mem-pool/`)
+- **Memory**: Variable memory pool system (`lib/mempool.c/`)
 - **Type System**: Strong typing with inference (`lambda/lambda-data.hpp`)
 
 ### Document Processing
@@ -72,7 +72,7 @@ let output = format(transform(doc), 'markdown')
 
 ### Build System
 - **Primary**: Use `make build` for incremental builds
-- **Configuration**: JSON-based build configs (`build_lambda_config.json`)
+- **Configuration**: JSON-based build configs (`build_lambda_config.json`). And uses `./utils/generate_premake.py` to generate Premake makefiles to build.
 - **Testing**: Comprehensive test suite with `make test`
 
 ### Running Tests

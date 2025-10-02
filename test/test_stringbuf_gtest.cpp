@@ -3,21 +3,21 @@
 
 extern "C" {
 #include "../lib/stringbuf.h"
-#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/mempool.h"
 }
 
 class StringBufTest : public ::testing::Test {
 protected:
-    VariableMemPool *test_pool = nullptr;
+    Pool *test_pool = nullptr;
 
     void SetUp() override {
-        MemPoolError err = pool_variable_init(&test_pool, 1024 * 1024, 10);
-        ASSERT_EQ(err, MEM_POOL_ERR_OK) << "Failed to create memory pool";
+        test_pool = pool_create();
+        ASSERT_NE(test_pool, nullptr) << "Failed to create memory pool";
     }
 
     void TearDown() override {
         if (test_pool) {
-            pool_variable_destroy(test_pool);
+            pool_destroy(test_pool);
             test_pool = nullptr;
         }
     }

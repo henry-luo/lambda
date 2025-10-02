@@ -21,7 +21,7 @@ extern "C" {
 #define LAMBDA_STATIC
 #include "../lambda/lambda-data.hpp"
 
-extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool* pool);
+extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool);
 extern "C" Item input_from_source(char* source, Url* url, String* type, String* flavor);
 extern "C" char* read_text_file(const char* filename);
 // Tree-sitter function declarations

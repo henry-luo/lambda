@@ -228,7 +228,7 @@ MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr)
     return MEM_POOL_ERR_OK;
 }
 
-void* pool_calloc(VariableMemPool* pool, size_t size) {
+void* pool_variable_calloc(VariableMemPool* pool, size_t size) {
     void* bytes;
     if (pool_variable_alloc(pool, size, &bytes) == MEM_POOL_ERR_OK) {
         memset(bytes, 0, size);
