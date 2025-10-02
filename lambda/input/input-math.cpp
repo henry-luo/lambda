@@ -750,8 +750,8 @@ static Item parse_math_number(Input *input, const char **math) {
         if (is_negative) value = -value;
 
         double *dval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval); 
-        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        dval = (double*)pool_calloc(input->pool, sizeof(double)); 
+        if (dval == NULL) return {.item = ITEM_ERROR};
         *dval = value;
         result = {.item = d2it(dval)};
     } else {
@@ -765,8 +765,8 @@ static Item parse_math_number(Input *input, const char **math) {
         } else {
             // promote to double
             double *dval;
-            MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-            if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+            dval = (double*)pool_calloc(input->pool, sizeof(double));
+            if (dval == NULL) return {.item = ITEM_ERROR};
             *dval = value;
             result = {.item = d2it(dval)};
         }

@@ -46,7 +46,7 @@ static void skip_to_brace(const char **rtf, char target_brace) {
 
 static String* parse_rtf_string(Input *input, const char **rtf, char delimiter) {
     StringBuf* sb = input->sb;
-    
+
     while (**rtf && **rtf != delimiter && **rtf != '{' && **rtf != '}') {
         if (**rtf == '\\') {
             (*rtf)++; // Skip backslash
@@ -126,73 +126,73 @@ static String* parse_rtf_string(Input *input, const char **rtf, char delimiter) 
         }
         (*rtf)++;
     }
-    
+
     return stringbuf_to_string(sb);
 }
 
 static RTFControlWord parse_control_word(Input *input, const char **rtf) {
     RTFControlWord control_word = {0};
-    
+
     if (**rtf != '\\') {
         return control_word;
     }
-    
+
     (*rtf)++; // Skip backslash
-    
+
     StringBuf* sb = input->sb;
-    
+
     // Parse keyword (letters only)
     while (**rtf && isalpha(**rtf)) {
         stringbuf_append_char(sb, **rtf);
         (*rtf)++;
     }
-    
+
     control_word.keyword = stringbuf_to_string(sb);
-    
+
     // Parse optional parameter (digits with optional minus sign)
     if (**rtf == '-' || (**rtf >= '0' && **rtf <= '9')) {
         control_word.has_parameter = true;
         int sign = 1;
-        
+
         if (**rtf == '-') {
             sign = -1;
             (*rtf)++;
         }
-        
+
         int value = 0;
         while (**rtf >= '0' && **rtf <= '9') {
             value = value * 10 + (**rtf - '0');
             (*rtf)++;
         }
-        
+
         control_word.parameter = sign * value;
     }
-    
+
     // Skip optional space delimiter
     if (**rtf == ' ') {
         (*rtf)++;
     }
-    
+
     return control_word;
 }
 
 static Array* parse_color_table(Input *input, const char **rtf) {
     Array* colors = array_pooled(input->pool);
     if (!colors) return NULL;
-    
+
     // Skip the \colortbl keyword
     while (**rtf && **rtf != ';' && **rtf != '}') {
         if (**rtf == '\\') {
             RTFControlWord cw = parse_control_word(input, rtf);
             if (cw.keyword) {
                 RTFColor* color;
-                MemPoolError err = pool_variable_alloc(input->pool, sizeof(RTFColor), (void**)&color);
-                if (err != MEM_POOL_ERR_OK) break;
-                
+                color = (RTFColor*)pool_calloc(input->pool, sizeof(RTFColor));
+                if (color == NULL) break;
+
                 color->red = 0;
                 color->green = 0;
                 color->blue = 0;
-                
+
                 if (strcmp(cw.keyword->chars, "red") == 0 && cw.has_parameter) {
                     color->red = cw.parameter;
                 } else if (strcmp(cw.keyword->chars, "green") == 0 && cw.has_parameter) {
@@ -200,7 +200,7 @@ static Array* parse_color_table(Input *input, const char **rtf) {
                 } else if (strcmp(cw.keyword->chars, "blue") == 0 && cw.has_parameter) {
                     color->blue = cw.parameter;
                 }
-                
+
                 Item color_item = {.item = (uint64_t)color};
                 array_append(colors, color_item, input->pool);
             }
@@ -210,40 +210,40 @@ static Array* parse_color_table(Input *input, const char **rtf) {
             (*rtf)++;
         }
     }
-    
+
     return colors;
 }
 
 static Array* parse_font_table(Input *input, const char **rtf) {
     Array* fonts = array_pooled(input->pool);
     if (!fonts) return NULL;
-    
+
     while (**rtf && **rtf != '}') {
         if (**rtf == '\\') {
             RTFControlWord cw = parse_control_word(input, rtf);
             if (cw.keyword && strcmp(cw.keyword->chars, "f") == 0 && cw.has_parameter) {
                 // Start of font definition
                 RTFFont* font;
-                MemPoolError err = pool_variable_alloc(input->pool, sizeof(RTFFont), (void**)&font);
-                if (err != MEM_POOL_ERR_OK) break;
-                
+                font = (RTFFont*)pool_calloc(input->pool, sizeof(RTFFont));
+                if (font == NULL) break;
+
                 font->font_number = cw.parameter;
-                
+
                 // Parse font family
                 skip_whitespace(rtf);
                 if (**rtf == '\\') {
                     RTFControlWord family_cw = parse_control_word(input, rtf);
                     font->font_family = family_cw.keyword;
                 }
-                
+
                 // Parse font name (until semicolon)
                 skip_whitespace(rtf);
                 font->font_name = parse_rtf_string(input, rtf, ';');
-                
+
                 if (**rtf == ';') {
                     (*rtf)++; // Skip semicolon
                 }
-                
+
                 Item font_item = {.item = (uint64_t)font};
                 array_append(fonts, font_item, input->pool);
             }
@@ -251,24 +251,24 @@ static Array* parse_font_table(Input *input, const char **rtf) {
             (*rtf)++;
         }
     }
-    
+
     return fonts;
 }
 
 static Map* parse_document_properties(Input *input, const char **rtf) {
     Map* props = map_pooled(input->pool);
     if (!props) return NULL;
-    
+
     while (**rtf && **rtf != '}') {
         if (**rtf == '\\') {
             RTFControlWord cw = parse_control_word(input, rtf);
             if (cw.keyword) {
                 Item value;
-                
+
                 if (cw.has_parameter) {
                     double *dval;
-                    MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-                    if (err == MEM_POOL_ERR_OK) {
+                    dval = (double*)pool_calloc(input->pool, sizeof(double));
+                    if (dval != NULL) {
                         *dval = (double)cw.parameter;
                         value = {.item = d2it(dval)};
                     } else {
@@ -290,20 +290,20 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
     if (**rtf != '{') {
         return {.item = ITEM_ERROR};
     }
-    
+
     (*rtf)++; // Skip opening brace
     skip_whitespace(rtf);
-    
+
     // Create a group object (map)
     Map* group = map_pooled(input->pool);
     if (!group) return {.item = ITEM_ERROR};
-    
+
     Array* content = array_pooled(input->pool);
     if (!content) return {.item = (uint64_t)group};
-    
+
     Map* formatting = map_pooled(input->pool);
     if (!formatting) return {.item = (uint64_t)group};
-    
+
     while (**rtf && **rtf != '}') {
         if (**rtf == '\\') {
             RTFControlWord cw = parse_control_word(input, rtf);
@@ -313,10 +313,10 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                     Array* colors = parse_color_table(input, rtf);
                     if (colors) {
                         Item color_table = {.item = (uint64_t)colors};
-                        
+
                         String* key;
-                        MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 12, (void**)&key);
-                        if (err == MEM_POOL_ERR_OK) {
+                        key = (String*)pool_calloc(input->pool, sizeof(String) + 12);
+                        if (key != NULL) {
                             strcpy(key->chars, "color_table");
                             key->len = 11;
                             key->ref_cnt = 0;
@@ -327,10 +327,10 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                     Array* fonts = parse_font_table(input, rtf);
                     if (fonts) {
                         Item font_table = {.item = (uint64_t)fonts};
-                        
+
                         String* key;
-                        MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 11, (void**)&key);
-                        if (err == MEM_POOL_ERR_OK) {
+                        key = (String*)pool_calloc(input->pool, sizeof(String) + 11);
+                        if (key != NULL) {
                             strcpy(key->chars, "font_table");
                             key->len = 10;
                             key->ref_cnt = 0;
@@ -342,8 +342,8 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                     Item value;
                     if (cw.has_parameter) {
                         double *dval;
-                        MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-                        if (err == MEM_POOL_ERR_OK) {
+                        dval = (double*)pool_calloc(input->pool, sizeof(double));
+                        if (dval != NULL) {
                             *dval = (double)cw.parameter;
                             value = {.item = d2it(dval)};
                         } else {
@@ -369,34 +369,34 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
                 array_append(content, text_item, input->pool);
             }
         }
-        
+
         skip_whitespace(rtf);
     }
-    
+
     if (**rtf == '}') {
         (*rtf)++; // Skip closing brace
     }
-    
+
     // Add content and formatting to group
     if (content->length > 0) {
         Item content_item = {.item = (uint64_t)content};
-        
+
         String* content_key;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&content_key);
-        if (err == MEM_POOL_ERR_OK) {
+        content_key = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+        if (content_key != NULL) {
             strcpy(content_key->chars, "content");
             content_key->len = 7;
             content_key->ref_cnt = 0;
             map_put(group, content_key, content_item, input);
         }
     }
-    
+
     if (((TypeMap*)formatting->type)->length > 0) {
         Item format_item = {.item = (uint64_t)formatting};
-        
+
         String* format_key;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 11, (void**)&format_key);
-        if (err == MEM_POOL_ERR_OK) {
+        format_key = (String*)pool_calloc(input->pool, sizeof(String) + 11);
+        if (format_key != NULL) {
             strcpy(format_key->chars, "formatting");
             format_key->len = 10;
             format_key->ref_cnt = 0;
@@ -408,40 +408,40 @@ static Item parse_rtf_group(Input *input, const char **rtf) {
 
 static Item parse_rtf_content(Input *input, const char **rtf) {
     skip_whitespace(rtf);
-    
+
     if (**rtf == '{') {
         return parse_rtf_group(input, rtf);
     }
-    
+
     return {.item = ITEM_ERROR};
 }
 
 void parse_rtf(Input* input, const char* rtf_string) {
     printf("rtf_parse\n");
     input->sb = stringbuf_new(input->pool);
-    
+
     const char* rtf = rtf_string;
     skip_whitespace(&rtf);
-    
+
     // RTF documents must start with {\rtf
     if (strncmp(rtf, "{\\rtf", 5) != 0) {
         printf("Error: Invalid RTF format - must start with {\\rtf\n");
         input->root = {.item = ITEM_ERROR};
         return;
     }
-    
+
     // Create document root to hold all groups
     Array* document = array_pooled(input->pool);
     if (!document) {
         input->root = {.item = ITEM_ERROR};
         return;
     }
-    
+
     // Parse all groups in the document
     while (*rtf && *rtf != '\0') {
         skip_whitespace(&rtf);
         if (*rtf == '\0') break;
-        
+
         if (*rtf == '{') {
             Item group = parse_rtf_group(input, &rtf);
             if (group .item != ITEM_ERROR && group .item != ITEM_NULL) {
@@ -452,6 +452,6 @@ void parse_rtf(Input* input, const char* rtf_string) {
             rtf++;
         }
     }
-    
+
     input->root = {.item = (uint64_t)document};
 }

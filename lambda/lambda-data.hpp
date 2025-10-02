@@ -18,7 +18,7 @@ extern "C" {
 #include "../lib/strbuf.h"
 #include "../lib/stringbuf.h"
 #include "../lib/hashmap.h"
-#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/mempool.h"
 #include "../lib/arraylist.h"
 #include "../lib/strview.h"
 #include "../lib/num_stack.h"
@@ -67,7 +67,7 @@ typedef struct AstValidator AstValidator;
 
 typedef struct EvalContext : Context {
     Heap* heap;
-    VariableMemPool* ast_pool;
+    Pool* ast_pool;
     ArrayList* type_list;
     num_stack_t* num_stack;  // for long and double pointers
     void* type_info;  // meta info for the base types
@@ -416,24 +416,24 @@ extern TypeInfo type_info[];
 typedef struct Input {
     void* url;
     void* path;
-    VariableMemPool* pool;      // memory pool
+    Pool* pool;      // memory pool
     NamePool* name_pool;        // centralized name management
     ArrayList* type_list;       // list of types
     Item root;
     StringBuf* sb;
 } Input;
 
-Array* array_pooled(VariableMemPool* pool);
-void array_append(Array* arr, Item itm, VariableMemPool* pool);
-Map* map_pooled(VariableMemPool* pool);
+Array* array_pooled(Pool* pool);
+void array_append(Array* arr, Item itm, Pool* pool);
+Map* map_pooled(Pool* pool);
 TypedItem map_get_typed(Map* map, Item key);
 TypedItem list_get_typed(List* list, int index);
-Element* elmt_pooled(VariableMemPool* pool);
+Element* elmt_pooled(Pool* pool);
 TypedItem elmt_get_typed(Element* elmt, Item key);
-void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool);
+void elmt_put(Element* elmt, String* key, Item value, Pool* pool);
 
 // Memory pool convenience functions
-VariableMemPool* variable_mem_pool_create();
-void variable_mem_pool_destroy(VariableMemPool* pool);
+Pool* variable_mem_pool_create();
+void variable_mem_pool_destroy(Pool* pool);
 
-Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size);
+Type* alloc_type(Pool* pool, TypeId type, size_t size);

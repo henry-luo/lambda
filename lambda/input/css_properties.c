@@ -1,5 +1,5 @@
 #include "css_properties.h"
-#include "../../lib/mem-pool/include/mem_pool.h"
+#include "../../lib/mempool.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -182,7 +182,7 @@ static bool is_valid_unit(const char* unit, css_value_type_t type) {
 }
 
 // Create value definitions for common patterns
-static css_value_def_t* create_auto_length_percentage_values(VariableMemPool* pool) {
+static css_value_def_t* create_auto_length_percentage_values(Pool* pool) {
     css_value_def_t* values = (css_value_def_t*)pool_calloc(pool, sizeof(css_value_def_t) * 4);
     
     values[0] = (css_value_def_t){CSS_VALUE_KEYWORD, "auto", 0, 0, NULL, NULL, 0};
@@ -193,7 +193,7 @@ static css_value_def_t* create_auto_length_percentage_values(VariableMemPool* po
     return values;
 }
 
-static css_value_def_t* create_length_percentage_values(VariableMemPool* pool) {
+static css_value_def_t* create_length_percentage_values(Pool* pool) {
     css_value_def_t* values = (css_value_def_t*)pool_calloc(pool, sizeof(css_value_def_t) * 3);
     
     values[0] = (css_value_def_t){CSS_VALUE_LENGTH, NULL, 0, HUGE_VAL, NULL, NULL, 0};
@@ -203,7 +203,7 @@ static css_value_def_t* create_length_percentage_values(VariableMemPool* pool) {
     return values;
 }
 
-static css_value_def_t* create_color_values(VariableMemPool* pool) {
+static css_value_def_t* create_color_values(Pool* pool) {
     css_value_def_t* values = (css_value_def_t*)pool_calloc(pool, sizeof(css_value_def_t) * 4);
     
     values[0] = (css_value_def_t){CSS_VALUE_COLOR, NULL, 0, 0, NULL, NULL, 0};
@@ -215,7 +215,7 @@ static css_value_def_t* create_color_values(VariableMemPool* pool) {
 }
 
 // Create property database with common CSS properties
-css_property_db_t* css_property_db_create(VariableMemPool* pool) {
+css_property_db_t* css_property_db_create(Pool* pool) {
     css_property_db_t* db = (css_property_db_t*)pool_calloc(pool, sizeof(css_property_db_t));
     if (!db) return NULL;
     
@@ -591,7 +591,7 @@ const char* css_property_get_initial_value(const css_property_db_t* db, const ch
     return NULL;
 }
 
-char* css_property_normalize_name(const char* name, VariableMemPool* pool) {
+char* css_property_normalize_name(const char* name, Pool* pool) {
     if (!name) return NULL;
     
     int len = strlen(name);
@@ -619,7 +619,7 @@ bool css_property_has_vendor_prefix(const char* name) {
                               strncmp(name, "-o-", 3) == 0);
 }
 
-char* css_property_remove_vendor_prefix(const char* name, VariableMemPool* pool) {
+char* css_property_remove_vendor_prefix(const char* name, Pool* pool) {
     if (!name || !css_property_has_vendor_prefix(name)) {
         return css_property_normalize_name(name, pool);
     }
@@ -646,7 +646,7 @@ const char* css_property_get_vendor_prefix(const char* name) {
 
 css_declaration_t* css_declaration_create(const char* property, css_token_t* tokens, 
                                         int token_count, css_importance_t importance, 
-                                        VariableMemPool* pool) {
+                                        Pool* pool) {
     printf("DEBUG: css_declaration_create called for property '%s' with %d tokens\n", property ? property : "NULL", token_count);
     if (!property || !tokens || token_count == 0 || !pool) return NULL;
     

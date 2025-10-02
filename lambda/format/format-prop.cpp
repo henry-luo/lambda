@@ -187,7 +187,7 @@ static void format_map_flattened(StringBuf* sb, Map* map, const char* prefix) {
 }
 
 // main Properties formatter function
-String* format_properties(VariableMemPool* pool, Item root_item) {
+String* format_properties(Pool* pool, Item root_item) {
     TypeId type_id = get_type_id(root_item);
     
     StringBuf* sb = stringbuf_new(pool);

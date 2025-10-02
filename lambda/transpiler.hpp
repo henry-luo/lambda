@@ -8,7 +8,7 @@
 #include "ast.hpp"
 
 typedef struct Heap {
-    VariableMemPool *pool;  // memory pool for the heap
+    Pool *pool;  // memory pool for the heap
     // HeapEntry *first, *last;  // first and last heap entry
     ArrayList *entries;  // list of allocation entries
 } Heap;

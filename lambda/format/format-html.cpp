@@ -312,7 +312,7 @@ static void format_item(StringBuf* sb, Item item, int depth) {
     }
 }
 
-String* format_html(VariableMemPool* pool, Item root_item) {
+String* format_html(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     

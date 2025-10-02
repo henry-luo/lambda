@@ -272,7 +272,7 @@ static void format_toml_attrs_from_shape(StringBuf* sb, TypeMap* type_map, void*
 }
 
 // main formatter entry point
-String* format_toml(VariableMemPool* pool, Item root_item) {
+String* format_toml(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) {
         return NULL;

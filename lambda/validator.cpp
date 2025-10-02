@@ -3,7 +3,7 @@
 #include <climits>
 #include <cstdint>
 #include "../lib/hashmap.h"
-#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/mempool.h"
 #include "../lib/log.h"
 #include "../lib/arraylist.h"
 #include "validator.hpp"
@@ -24,12 +24,12 @@ AstNode* build_script(Transpiler* tp, TSNode script_node);
 ArrayList* arraylist_new(size_t initial_capacity);
 
 // C++ function declarations (no extern "C" needed)
-Transpiler* transpiler_create(VariableMemPool* pool);
+Transpiler* transpiler_create(Pool* pool);
 void transpiler_destroy(Transpiler* transpiler);
 AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source);
 
 // Forward declarations for functions we need to implement
-Transpiler* transpiler_create(VariableMemPool* pool) {
+Transpiler* transpiler_create(Pool* pool) {
     // Placeholder implementation for Phase 1
     Transpiler* tp = (Transpiler*)pool_calloc(pool, sizeof(Transpiler));
     if (tp) {
@@ -58,9 +58,7 @@ AstNode* transpiler_build_ast(Transpiler* transpiler, const char* source) {
 
     // Initialize memory pool if not already done
     if (!transpiler->ast_pool) {
-        size_t grow_size = 4096;  // 4k
-        size_t tolerance_percent = 20;
-        pool_variable_init(&transpiler->ast_pool, grow_size, tolerance_percent);
+        transpiler->ast_pool = pool_create();
     }
 
     // Initialize type and const lists if not already done
@@ -131,7 +129,7 @@ static int type_entry_compare(const void *a, const void *b, void *udata) {
 
 // ==================== Core Validator Functions ====================
 
-AstValidator* ast_validator_create(VariableMemPool* pool) {
+AstValidator* ast_validator_create(Pool* pool) {
     if (!pool) return nullptr;
 
     AstValidator* validator = (AstValidator*)pool_calloc(pool, sizeof(AstValidator));
@@ -225,7 +223,7 @@ Type* ast_validator_find_type(AstValidator* validator, const char* type_name) {
 
 // ==================== Error Handling ====================
 
-ValidationResult* create_validation_result(VariableMemPool* pool) {
+ValidationResult* create_validation_result(Pool* pool) {
     ValidationResult* result;
 
     if (pool) {
@@ -243,7 +241,7 @@ ValidationResult* create_validation_result(VariableMemPool* pool) {
     return result;
 }
 
-ValidationError* create_validation_error(ValidationErrorCode code, const char* message, PathSegment* path, VariableMemPool* pool) {
+ValidationError* create_validation_error(ValidationErrorCode code, const char* message, PathSegment* path, Pool* pool) {
     if (!message) return nullptr;
 
     ValidationError* error;

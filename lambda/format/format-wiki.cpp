@@ -423,7 +423,7 @@ void format_wiki(StringBuf* sb, Item root_item) {
 }
 
 // Main Wiki formatting function (String version)
-String* format_wiki_string(VariableMemPool* pool, Item root_item) {
+String* format_wiki_string(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     format_wiki(sb, root_item);
     String* result = stringbuf_to_string(sb);

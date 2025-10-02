@@ -427,7 +427,7 @@ static void format_item(StringBuf* sb, Item item, const char* tag_name) {
     }
 }
 
-String* format_xml(VariableMemPool* pool, Item root_item) {
+String* format_xml(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     

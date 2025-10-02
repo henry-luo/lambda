@@ -13,7 +13,7 @@ static void format_element_with_mdx_awareness(StringBuf* sb, Element* elem);
 
 // External formatters
 void format_markdown(StringBuf* sb, Item root_item);
-String* format_jsx(VariableMemPool* pool, Item root_item);
+String* format_jsx(Pool* pool, Item root_item);
 
 static bool contains_jsx_element(Element* elem);
 static void format_element_with_mdx_awareness(StringBuf* sb, Element* elem);
@@ -267,7 +267,7 @@ static void format_mdx_item(StringBuf* sb, Item item) {
 }
 
 // Main MDX formatting function
-String* format_mdx(VariableMemPool* pool, Item root_item) {
+String* format_mdx(Pool* pool, Item root_item) {
     if (root_item.item == ITEM_NULL) {
         printf("DEBUG format_mdx: root_item is NULL\n");
         return &EMPTY_STRING;

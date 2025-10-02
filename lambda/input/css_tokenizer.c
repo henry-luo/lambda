@@ -13,7 +13,7 @@ bool css_is_name_char(int c) {
 }
 
 bool css_is_non_printable(int c) {
-    return (c >= 0x0000 && c <= 0x0008) || c == 0x000B || 
+    return (c >= 0x0000 && c <= 0x0008) || c == 0x000B ||
            (c >= 0x000E && c <= 0x001F) || c == 0x007F;
 }
 
@@ -76,7 +76,7 @@ typedef struct {
     const char* input;
     const char* current;
     const char* end;
-    VariableMemPool* pool;
+    Pool* pool;
     CSSToken* tokens;
     size_t token_capacity;
     size_t token_count;
@@ -100,25 +100,23 @@ static double css_tokenizer_consume_numeric_value(CSSTokenizer* tokenizer);
 static void css_tokenizer_add_token(CSSTokenizer* tokenizer, CSSTokenType type, const char* start, size_t length) {
     if (tokenizer->token_count >= tokenizer->token_capacity) {
         tokenizer->token_capacity *= 2;
-        CSSToken* new_tokens;
-        MemPoolError err = pool_variable_alloc(tokenizer->pool, 
-            tokenizer->token_capacity * sizeof(CSSToken), (void**)&new_tokens);
-        if (err != MEM_POOL_ERR_OK) return;
-        
+        CSSToken* new_tokens = (CSSToken*)pool_calloc(tokenizer->pool,
+            tokenizer->token_capacity * sizeof(CSSToken));
+        if (new_tokens == NULL) return;
+
         memcpy(new_tokens, tokenizer->tokens, tokenizer->token_count * sizeof(CSSToken));
         tokenizer->tokens = new_tokens;
     }
-    
+
     CSSToken* token = &tokenizer->tokens[tokenizer->token_count++];
     token->type = type;
     token->start = start;
     token->length = length;
     token->data.number_value = 0.0;
-    
+
     // Create null-terminated value string
-    char* value_str;
-    MemPoolError err = pool_variable_alloc(tokenizer->pool, length + 1, (void**)&value_str);
-    if (err == MEM_POOL_ERR_OK) {
+    char* value_str = (char*)pool_calloc(tokenizer->pool, length + 1);
+    if (value_str != NULL) {
         memcpy(value_str, start, length);
         value_str[length] = '\0';
         token->value = value_str;
@@ -147,7 +145,7 @@ static void css_tokenizer_consume_whitespace(CSSTokenizer* tokenizer) {
 static void css_tokenizer_consume_comment(CSSTokenizer* tokenizer) {
     const char* start = tokenizer->current;
     tokenizer->current += 2; // Skip /*
-    
+
     while (tokenizer->current < tokenizer->end - 1) {
         if (tokenizer->current[0] == '*' && tokenizer->current[1] == '/') {
             tokenizer->current += 2;
@@ -155,7 +153,7 @@ static void css_tokenizer_consume_comment(CSSTokenizer* tokenizer) {
         }
         tokenizer->current++;
     }
-    
+
     css_tokenizer_add_token(tokenizer, CSS_TOKEN_COMMENT, start, tokenizer->current - start);
 }
 
@@ -163,10 +161,10 @@ static void css_tokenizer_consume_comment(CSSTokenizer* tokenizer) {
 static void css_tokenizer_consume_string(CSSTokenizer* tokenizer, char quote) {
     const char* start = tokenizer->current;
     tokenizer->current++; // Skip opening quote
-    
+
     while (tokenizer->current < tokenizer->end) {
         char c = *tokenizer->current;
-        
+
         if (c == quote) {
             tokenizer->current++; // Skip closing quote
             css_tokenizer_add_token(tokenizer, CSS_TOKEN_STRING, start, tokenizer->current - start);
@@ -190,7 +188,7 @@ static void css_tokenizer_consume_string(CSSTokenizer* tokenizer, char quote) {
             tokenizer->current++;
         }
     }
-    
+
     // Unterminated string at EOF
     css_tokenizer_add_token(tokenizer, CSS_TOKEN_STRING, start, tokenizer->current - start);
 }
@@ -198,7 +196,7 @@ static void css_tokenizer_consume_string(CSSTokenizer* tokenizer, char quote) {
 // Check if next characters would start an identifier
 static bool css_tokenizer_would_start_identifier(CSSTokenizer* tokenizer) {
     if (tokenizer->current >= tokenizer->end) return false;
-    
+
     char c = *tokenizer->current;
     if (css_is_name_start_char(c)) return true;
     if (c == '-') {
@@ -217,7 +215,7 @@ static bool css_tokenizer_would_start_identifier(CSSTokenizer* tokenizer) {
 // Check if next characters would start a number
 static bool css_tokenizer_would_start_number(CSSTokenizer* tokenizer) {
     if (tokenizer->current >= tokenizer->end) return false;
-    
+
     char c = *tokenizer->current;
     if (css_is_digit(c)) return true;
     if (c == '.') {
@@ -240,17 +238,17 @@ static bool css_tokenizer_would_start_number(CSSTokenizer* tokenizer) {
 // Consume numeric value and return it
 static double css_tokenizer_consume_numeric_value(CSSTokenizer* tokenizer) {
     const char* start = tokenizer->current;
-    
+
     // Optional sign
     if (*tokenizer->current == '+' || *tokenizer->current == '-') {
         tokenizer->current++;
     }
-    
+
     // Integer part
     while (tokenizer->current < tokenizer->end && css_is_digit(*tokenizer->current)) {
         tokenizer->current++;
     }
-    
+
     // Fractional part
     if (tokenizer->current < tokenizer->end && *tokenizer->current == '.') {
         tokenizer->current++;
@@ -258,12 +256,12 @@ static double css_tokenizer_consume_numeric_value(CSSTokenizer* tokenizer) {
             tokenizer->current++;
         }
     }
-    
+
     // Exponent part
-    if (tokenizer->current < tokenizer->end && 
+    if (tokenizer->current < tokenizer->end &&
         (*tokenizer->current == 'e' || *tokenizer->current == 'E')) {
         tokenizer->current++;
-        if (tokenizer->current < tokenizer->end && 
+        if (tokenizer->current < tokenizer->end &&
             (*tokenizer->current == '+' || *tokenizer->current == '-')) {
             tokenizer->current++;
         }
@@ -271,7 +269,7 @@ static double css_tokenizer_consume_numeric_value(CSSTokenizer* tokenizer) {
             tokenizer->current++;
         }
     }
-    
+
     // Convert to double
     char* end_ptr;
     double value = strtod(start, &end_ptr);
@@ -282,7 +280,7 @@ static double css_tokenizer_consume_numeric_value(CSSTokenizer* tokenizer) {
 static void css_tokenizer_consume_number(CSSTokenizer* tokenizer) {
     const char* start = tokenizer->current;
     double value = css_tokenizer_consume_numeric_value(tokenizer);
-    
+
     // Check for percentage
     if (tokenizer->current < tokenizer->end && *tokenizer->current == '%') {
         tokenizer->current++;
@@ -303,12 +301,12 @@ static void css_tokenizer_consume_number(CSSTokenizer* tokenizer) {
 // Consume identifier
 static void css_tokenizer_consume_ident(CSSTokenizer* tokenizer) {
     const char* start = tokenizer->current;
-    
+
     // Handle leading dash
     if (*tokenizer->current == '-') {
         tokenizer->current++;
     }
-    
+
     // First character (after optional dash)
     if (tokenizer->current < tokenizer->end) {
         if (css_is_name_start_char(*tokenizer->current)) {
@@ -318,7 +316,7 @@ static void css_tokenizer_consume_ident(CSSTokenizer* tokenizer) {
             tokenizer->current += 2;
         }
     }
-    
+
     // Remaining characters
     while (tokenizer->current < tokenizer->end) {
         if (css_is_name_char(*tokenizer->current)) {
@@ -330,7 +328,7 @@ static void css_tokenizer_consume_ident(CSSTokenizer* tokenizer) {
             break;
         }
     }
-    
+
     // Check if this is a function
     if (tokenizer->current < tokenizer->end && *tokenizer->current == '(') {
         css_tokenizer_add_token(tokenizer, CSS_TOKEN_FUNCTION, start, tokenizer->current - start);
@@ -344,21 +342,21 @@ static void css_tokenizer_consume_ident(CSSTokenizer* tokenizer) {
 static void css_tokenizer_consume_hash(CSSTokenizer* tokenizer) {
     const char* start = tokenizer->current;
     tokenizer->current++; // Skip #
-    
+
     if (tokenizer->current < tokenizer->end && css_is_name_char(*tokenizer->current)) {
         while (tokenizer->current < tokenizer->end && css_is_name_char(*tokenizer->current)) {
             tokenizer->current++;
         }
-        
+
         CSSToken* token = &tokenizer->tokens[tokenizer->token_count];
         css_tokenizer_add_token(tokenizer, CSS_TOKEN_HASH, start, tokenizer->current - start);
-        
+
         // Determine hash type
         if (tokenizer->token_count > 0) {
             // Check if it would be a valid identifier
             const char* name_start = start + 1;
             bool is_id = css_is_name_start_char(*name_start) || *name_start == '-';
-            tokenizer->tokens[tokenizer->token_count - 1].data.hash_type = 
+            tokenizer->tokens[tokenizer->token_count - 1].data.hash_type =
                 is_id ? CSS_HASH_ID : CSS_HASH_UNRESTRICTED;
         }
     } else {
@@ -372,27 +370,27 @@ static void css_tokenizer_consume_hash(CSSTokenizer* tokenizer) {
 static void css_tokenizer_consume_url(CSSTokenizer* tokenizer) {
     const char* start = tokenizer->current;
     tokenizer->current += 4; // Skip "url("
-    
+
     // Skip whitespace
     while (tokenizer->current < tokenizer->end && css_is_whitespace(*tokenizer->current)) {
         tokenizer->current++;
     }
-    
-    if (tokenizer->current < tokenizer->end && 
+
+    if (tokenizer->current < tokenizer->end &&
         (*tokenizer->current == '"' || *tokenizer->current == '\'')) {
         // Quoted URL
         char quote = *tokenizer->current;
         css_tokenizer_consume_string(tokenizer, quote);
-        
+
         // Skip whitespace
         while (tokenizer->current < tokenizer->end && css_is_whitespace(*tokenizer->current)) {
             tokenizer->current++;
         }
-        
+
         if (tokenizer->current < tokenizer->end && *tokenizer->current == ')') {
             tokenizer->current++;
         }
-        
+
         // Replace the string token with URL token
         if (tokenizer->token_count > 0) {
             tokenizer->tokens[tokenizer->token_count - 1].type = CSS_TOKEN_URL;
@@ -410,19 +408,19 @@ static void css_tokenizer_consume_url(CSSTokenizer* tokenizer) {
             }
             tokenizer->current++;
         }
-        
+
         if (tokenizer->current < tokenizer->end && *tokenizer->current == ')') {
             tokenizer->current++;
         }
-        
+
         css_tokenizer_add_token(tokenizer, CSS_TOKEN_URL, start, tokenizer->current - start);
     }
 }
 
 // Main tokenization function
-CSSToken* css_tokenize(const char* input, size_t length, VariableMemPool* pool, size_t* token_count) {
+CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* token_count) {
     if (!input || !pool || !token_count) return NULL;
-    
+
     CSSTokenizer tokenizer = {0};
     tokenizer.input = input;
     tokenizer.current = input;
@@ -430,24 +428,24 @@ CSSToken* css_tokenize(const char* input, size_t length, VariableMemPool* pool, 
     tokenizer.pool = pool;
     tokenizer.token_capacity = 64;
     tokenizer.token_count = 0;
-    
+
     // Allocate initial token array with size check
     size_t initial_size = tokenizer.token_capacity * sizeof(CSSToken);
     if (initial_size > 1024 * 1024) { // 1MB limit for token array
         *token_count = 0;
         return NULL;
     }
-    
-    MemPoolError err = pool_variable_alloc(pool, initial_size, (void**)&tokenizer.tokens);
-    if (err != MEM_POOL_ERR_OK) return NULL;
-    
+
+    tokenizer.tokens = (CSSToken*)pool_calloc(pool, initial_size * sizeof(CSSToken));
+    if (tokenizer.tokens == NULL) return NULL;
+
     // Add safety limit to prevent infinite loops
     size_t max_tokens = 10000; // Reasonable limit for CSS files
-    
+
     while (tokenizer.current < tokenizer.end && tokenizer.token_count < max_tokens) {
         const char* start_pos = tokenizer.current;
         char c = *tokenizer.current;
-        
+
         if (css_is_whitespace(c)) {
             css_tokenizer_consume_whitespace(&tokenizer);
         } else if (c == '/' && tokenizer.current + 1 < tokenizer.end && tokenizer.current[1] == '*') {
@@ -460,7 +458,7 @@ CSSToken* css_tokenize(const char* input, size_t length, VariableMemPool* pool, 
             css_tokenizer_consume_number(&tokenizer);
         } else if (css_tokenizer_would_start_identifier(&tokenizer)) {
             // Check for url() function
-            if (tokenizer.current + 4 <= tokenizer.end && 
+            if (tokenizer.current + 4 <= tokenizer.end &&
                 strncmp(tokenizer.current, "url(", 4) == 0) {
                 css_tokenizer_consume_url(&tokenizer);
             } else {
@@ -555,27 +553,26 @@ CSSToken* css_tokenize(const char* input, size_t length, VariableMemPool* pool, 
             tokenizer.current++;
         }
     }
-    
+
     // Add EOF token
     css_tokenizer_add_token(&tokenizer, CSS_TOKEN_EOF, tokenizer.current, 0);
-    
+
     *token_count = tokenizer.token_count;
     return tokenizer.tokens;
 }
 
 // Token stream functions
-CSSTokenStream* css_token_stream_create(CSSToken* tokens, size_t length, VariableMemPool* pool) {
+CSSTokenStream* css_token_stream_create(CSSToken* tokens, size_t length, Pool* pool) {
     if (!tokens || !pool) return NULL;
-    
-    CSSTokenStream* stream;
-    MemPoolError err = pool_variable_alloc(pool, sizeof(CSSTokenStream), (void**)&stream);
-    if (err != MEM_POOL_ERR_OK) return NULL;
-    
+
+    CSSTokenStream* stream = (CSSTokenStream*)pool_calloc(pool, sizeof(CSSTokenStream));
+    if (stream == NULL) return NULL;
+
     stream->tokens = tokens;
     stream->current = 0;
     stream->length = length;
     stream->pool = pool;
-    
+
     return stream;
 }
 
@@ -626,16 +623,15 @@ bool css_token_equals_string(const CSSToken* token, const char* str) {
     return token->length == str_len && strncmp(token->start, str, str_len) == 0;
 }
 
-char* css_token_to_string(const CSSToken* token, VariableMemPool* pool) {
+char* css_token_to_string(const CSSToken* token, Pool* pool) {
     if (!token || !pool) return NULL;
-    
-    char* str;
-    MemPoolError err = pool_variable_alloc(pool, token->length + 1, (void**)&str);
-    if (err != MEM_POOL_ERR_OK) return NULL;
-    
+
+    char* str = (char*)pool_calloc(pool, token->length + 1);
+    if (str == NULL) return NULL;
+
     strncpy(str, token->start, token->length);
     str[token->length] = '\0';
-    
+
     return str;
 }
 

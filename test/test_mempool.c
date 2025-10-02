@@ -17,7 +17,7 @@
     EXPECT_NOT_NULL(pool, \"Pool creation should succeed\");
 
     size_t size = 1024;
-    char* ptr = (char*)pool_calloc(pool, 1, size);
+    char* ptr = (char*)pool_calloc(pool, size);
     EXPECT_NOT_NULL(ptr, \"Basic calloc should succeed\");
 
     // Check that memory is zeroed
@@ -169,7 +169,7 @@ static int test_basic_calloc(void) {
     EXPECT_NOT_NULL(pool, "Pool creation should succeed");
 
     size_t size = 1024;
-    char* ptr = (char*)pool_calloc(pool, 1, size);
+    char* ptr = (char*)pool_calloc(pool, size);
     EXPECT_NOT_NULL(ptr, "Basic calloc should succeed");
 
     // Check that memory is zeroed
@@ -222,13 +222,13 @@ static int test_zero_size_calloc(void) {
     Pool* pool = pool_create();
     EXPECT_NOT_NULL(pool, "Pool creation should succeed");
 
-    void* ptr = pool_calloc(pool, 0, 100);
+    void* ptr = pool_calloc(pool, 100);
     // Should handle zero gracefully
     if (ptr) {
         pool_free(pool, ptr);
     }
 
-    ptr = pool_calloc(pool, 100, 0);
+    ptr = pool_calloc(pool, 0);
     if (ptr) {
         pool_free(pool, ptr);
     }
@@ -472,7 +472,7 @@ static int test_calloc_large_blocks(void) {
     size_t sizes[] = {1000, 10000, 100000};
 
     for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
-        char* ptr = (char*)pool_calloc(pool, 1, sizes[i]);
+        char* ptr = (char*)pool_calloc(pool, sizes[i]);
         EXPECT_NOT_NULL(ptr, "Large calloc should succeed");
 
         // Verify memory is zeroed
@@ -498,7 +498,7 @@ static int test_mixed_operations(void) {
         if (i % 3 == 0) {
             ptrs[i] = pool_alloc(pool, 128 + i * 8);
         } else if (i % 3 == 1) {
-            ptrs[i] = pool_calloc(pool, 1, 64 + i * 4);
+            ptrs[i] = pool_calloc(pool, 64 + i * 4);
         } else {
             ptrs[i] = pool_alloc(pool, 256);
         }
@@ -896,7 +896,7 @@ static int test_null_pool_handling(void) {
     void* ptr = pool_alloc(NULL, 1024);
     EXPECT_TRUE(ptr == NULL, "Allocation with NULL pool should fail");
 
-    ptr = pool_calloc(NULL, 10, 100);
+    ptr = pool_calloc(NULL, 100);
     EXPECT_TRUE(ptr == NULL, "Calloc with NULL pool should fail");
 
     // Should not crash
@@ -972,7 +972,7 @@ static int test_pool_destruction_with_allocations(void) {
     // Allocate some memory but don't free it explicitly
     void* ptr1 = pool_alloc(pool, 1024);
     void* ptr2 = pool_alloc(pool, 2048);
-    void* ptr3 = pool_calloc(pool, 100, 32);
+    void* ptr3 = pool_calloc(pool, 32);
 
     EXPECT_NOT_NULL(ptr1, "Allocation 1 should succeed");
     EXPECT_NOT_NULL(ptr2, "Allocation 2 should succeed");

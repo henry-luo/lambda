@@ -352,7 +352,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
                                     if (math_input->type_list) {
                                         arraylist_free(math_input->type_list);
                                     }
-                                    pool_variable_destroy(math_input->pool);
+                                    pool_destroy(math_input->pool);
                                     free(math_input);
                                 } else {
                                     // Fallback to raw text if math parsing fails
@@ -363,7 +363,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
                                     if (math_input->type_list) {
                                         arraylist_free(math_input->type_list);
                                     }
-                                    pool_variable_destroy(math_input->pool);
+                                    pool_destroy(math_input->pool);
                                     free(math_input);
                                 }
                             } else {
@@ -603,7 +603,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
                         if (math_input->type_list) {
                             arraylist_free(math_input->type_list);
                         }
-                        pool_variable_destroy(math_input->pool);
+                        pool_destroy(math_input->pool);
                         free(math_input);
 
                         stringbuf_reset(math_sb);
@@ -615,7 +615,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
                     if (math_input->type_list) {
                         arraylist_free(math_input->type_list);
                     }
-                    pool_variable_destroy(math_input->pool);
+                    pool_destroy(math_input->pool);
                     free(math_input);
                 }
             }

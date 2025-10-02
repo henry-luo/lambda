@@ -39,11 +39,10 @@ void* pool_alloc(Pool* pool, size_t size);
 /**
  * Allocate zeroed memory from a specific pool
  * @param pool Pool to allocate from
- * @param n Number of elements
- * @param size Size of each element in bytes
+ * @param size Size in bytes to allocate and zero
  * @return Pointer to allocated zeroed memory, or NULL on failure
  */
-void* pool_calloc(Pool* pool, size_t n, size_t size);
+void* pool_calloc(Pool* pool, size_t size);
 
 /**
  * Free memory allocated by pool_alloc or pool_calloc

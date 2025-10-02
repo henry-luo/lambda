@@ -431,7 +431,7 @@ void format_rst(StringBuf* sb, Item root_item) {
 }
 
 // Main entry point that creates a String* return value
-String* format_rst_string(VariableMemPool* pool, Item root_item) {
+String* format_rst_string(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     

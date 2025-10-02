@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
-#include "../../lib/mem-pool/include/mem_pool.h"
+#include "../../lib/mempool.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,16 +73,16 @@ typedef struct {
     CSSToken* tokens;
     size_t current;
     size_t length;
-    VariableMemPool* pool;
+    Pool* pool;
 } CSSTokenStream;
 
 // Core tokenizer functions
-CSSToken* css_tokenize(const char* input, size_t length, VariableMemPool* pool, size_t* token_count);
+CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* token_count);
 void css_free_tokens(CSSToken* tokens);
 const char* css_token_type_to_str(CSSTokenType type);
 
 // Token stream utilities
-CSSTokenStream* css_token_stream_create(CSSToken* tokens, size_t length, VariableMemPool* pool);
+CSSTokenStream* css_token_stream_create(CSSToken* tokens, size_t length, Pool* pool);
 void css_token_stream_free(CSSTokenStream* stream);
 CSSToken* css_token_stream_current(CSSTokenStream* stream);
 CSSToken* css_token_stream_peek(CSSTokenStream* stream, size_t offset);
@@ -94,7 +94,7 @@ bool css_token_stream_at_end(CSSTokenStream* stream);
 bool css_token_is_whitespace(const CSSToken* token);
 bool css_token_is_comment(const CSSToken* token);
 bool css_token_equals_string(const CSSToken* token, const char* str);
-char* css_token_to_string(const CSSToken* token, VariableMemPool* pool);
+char* css_token_to_string(const CSSToken* token, Pool* pool);
 
 // Character classification helpers
 bool css_is_name_start_char(int c);

@@ -1,6 +1,6 @@
 #include "validator.hpp"
 #include "../../lib/url.h"
-#include "../../lib/mem-pool/include/mem_pool.h"
+#include "../../lib/mempool.h"
 #include "../validator.h"
 #include <unistd.h>  // for getcwd
 #include <cstring>   // for C++ string functions
@@ -21,21 +21,21 @@ AstValidationResult* run_ast_validation(const char* data_file, const char* schem
 ValidationResult* run_ast_validation(const char* data_file, const char* schema_file, const char* input_format) {
     printf("Lambda AST Validator v2.0\n");
     printf("Validating '%s' using AST-based validation\n", data_file);
-    
+
     if (schema_file) {
         printf("Note: Schema file '%s' ignored (AST validation uses built-in rules)\n", schema_file);
     }
     if (input_format && strcmp(input_format, "lambda") != 0) {
         printf("Note: Input format '%s' ignored (AST validation is Lambda-specific)\n", input_format);
     }
-    
+
     // Create memory pool for validation
     VariableMemPool* pool;
     if (pool_variable_init(&pool, 1024 * 1024, MEM_POOL_NO_BEST_FIT) != MEM_POOL_ERR_OK) {
         printf("Error: Failed to create memory pool for AST validation\n");
         return nullptr;
     }
-    
+
     // Create validation result
     ValidationResult* result = (ValidationResult*)pool_calloc(pool, sizeof(ValidationResult));
     if (!result) {
@@ -43,12 +43,12 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         pool_variable_destroy(pool);
         return nullptr;
     }
-    
+
     // Initialize result
     result->valid = true;
     result->error_count = 0;
     result->errors = nullptr;
-    
+
     // Read source file
     char* source_content = read_text_file(data_file);
     if (!source_content) {
@@ -57,9 +57,9 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         result->error_count = 1;
         return result;
     }
-    
+
     printf("\n=== AST Validation Results ===\n");
-    
+
     // Perform basic validation checks
     size_t content_length = strlen(source_content);
     if (content_length == 0) {
@@ -73,7 +73,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
         if (strstr(source_content, "=") || strstr(source_content, "{") || strstr(source_content, "}")) {
             has_lambda_syntax = true;
         }
-        
+
         if (has_lambda_syntax) {
             printf("✅ Validation PASSED\n");
             printf("✓ Lambda file '%s' has valid structure\n", data_file);
@@ -88,10 +88,10 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
             result->error_count = 1;
         }
     }
-    
+
     // Cleanup
     free(source_content);
-    
+
     return result;
 }
 */
@@ -99,7 +99,7 @@ ValidationResult* run_ast_validation(const char* data_file, const char* schema_f
 ValidationResult* run_validation(const char *data_file, const char *schema_file, const char *input_format) {
     fprintf(stderr, "TRACE: run_validation() started - using AST validator\n");
     fflush(stderr);
-    
+
     // Check if this is a Lambda file (*.ls extension or no schema specified)
     bool is_lambda_file = false;
     if (!schema_file) {
@@ -110,7 +110,7 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
             is_lambda_file = true;
         }
     }
-    
+
     // Use new AST-based validation for Lambda files
     if (is_lambda_file) {
         fprintf(stderr, "TRACE: Using AST validation for Lambda file\n");
@@ -119,20 +119,20 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
         if (!ast_result) {
             return nullptr;
         }
-        
+
         // Convert AstValidationResult to ValidationResult for compatibility
         ValidationResult* result = (ValidationResult*)malloc(sizeof(ValidationResult));
         if (!result) {
             return nullptr;
         }
-        
+
         result->valid = ast_result->valid;
         result->error_count = ast_result->error_count;
         result->errors = (ValidationError*)ast_result->errors;
-        
+
         return result;
     }
-    
+
     // Fall back to old schema-based validation for other formats
     printf("Lambda Schema Validator v1.0\n");
     if (input_format) {
@@ -140,33 +140,33 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
     } else {
         printf("Validating '%s' (auto-detect format) against schema '%s'\n", data_file, schema_file);
     }
-    
+
     fprintf(stderr, "TRACE: About to initialize runtime\n");
     fflush(stderr);
-    
+
     // Initialize runtime for Lambda script parsing if needed
     // Runtime runtime;
     // runtime_init(&runtime);
     // runtime.current_dir = (char*)"./";
-    
+
     fprintf(stderr, "TRACE: Runtime initialized, about to initialize validation context\n");
     fflush(stderr);
-    
+
     // Initialize minimal Lambda context for number stack (needed by map_get when retrieving floats)
     // Context validation_context = {0};
     // validation_context.num_stack = num_stack_create(16);
-    
+
     // Set the global context for Lambda evaluation functions
     // extern __thread Context* context;
     // Context* old_context = context;
     // context = &validation_context;
-    
+
     fprintf(stderr, "TRACE: about to read schema file: %s\n", schema_file);
     fflush(stderr);
-    
+
     // Track if we created a temp_runner for cleanup
     // Runner* temp_runner_ptr = NULL;
-    
+
     // Read schema file using read_text_file from lib/file.c
     char* schema_contents = read_text_file(schema_file);
     if (!schema_contents) {
@@ -174,10 +174,10 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
         fflush(stderr);
         return NULL;
     }
-    
+
     fprintf(stderr, "TRACE: Schema file read successfully, about to create memory pool\n");
     fflush(stderr);
-    
+
     // Create memory pool for validation
     VariableMemPool* pool = NULL;
     MemPoolError pool_err = pool_variable_init(&pool, 1024 * 1024, 10); // 1MB chunks, 10% tolerance
@@ -193,10 +193,10 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
         free(schema_contents);
         return NULL;
     }
-    
+
     fprintf(stderr, "TRACE: Memory pool created successfully, about to create validator\n");
     fflush(stderr);
-    
+
     // Create validator
     SchemaValidator* validator = schema_validator_create(pool);
     if (!validator) {
@@ -206,10 +206,10 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
         free(schema_contents);
         return NULL;
     }
-    
+
     // Load schema
     printf("Loading schema...\n");
-    
+
     // Determine the root type based on schema file
     const char* root_type = "Document";  // Default for doc_schema.ls
     if (strstr(schema_file, "html5_schema.ls")) {
@@ -225,7 +225,7 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
     } else if (strstr(schema_file, "schema_json_user_profile.ls")) {
         root_type = "Document";   // Use Document for JSON user profile schema (as defined in the schema)
     }
-    
+
     // Use the refactored schema parser
     int schema_result = schema_validator_load_schema(validator, schema_contents, root_type);
     if (!root_type) {
@@ -242,7 +242,7 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
         free(schema_contents);
         return NULL;
     }
-    
+
     // Parse data file using input parsing functions
     printf("Parsing data file...\n");
     Item data_item = {.item = ITEM_ERROR};
@@ -271,7 +271,7 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
         url_string->len = strlen(file_url);
         url_string->ref_cnt = 0;
         strcpy(url_string->chars, file_url);
-        
+
         String* type_string = NULL;
         if (input_format && strcmp(input_format, "auto-detect") != 0) {
             type_string = (String*)malloc(sizeof(String) + strlen(input_format) + 1);
@@ -281,22 +281,22 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
                 strcpy(type_string->chars, input_format);
             }
         }
-        
+
         // Use parse_url to create the URL (pass NULL for base to use absolute path)
         Input* input = input_from_url(url_string, type_string, NULL, NULL);
         if (input && input->root.item != ITEM_ERROR) {
             data_item = input->root;
-            printf("Successfully parsed input file with format '%s'\n", 
+            printf("Successfully parsed input file with format '%s'\n",
                     input_format ? input_format : "auto-detect");
         } else {
-            printf("Error: Failed to parse input file with format '%s'\n", 
+            printf("Error: Failed to parse input file with format '%s'\n",
                     input_format ? input_format : "auto-detect");
         }
-        
+
         free(url_string);
         if (type_string) free(type_string);
     }
-    
+
     if (data_item.item == ITEM_ERROR) {
         printf("Error: Failed to parse data file\n");
         schema_validator_destroy(validator);
@@ -304,11 +304,11 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
         free(schema_contents);
         return NULL;
     }
-    
+
     // Validate using the loaded schema
     printf("Validating data...\n");
     ValidationResult* result = validate_document(validator, data_item, root_type);
-    
+
     if (!result) {
         printf("Error: Validation failed to run\n");
         schema_validator_destroy(validator);
@@ -316,7 +316,7 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
         free(schema_contents);
         return NULL;
     }
-    
+
     // Print results
     printf("\n=== Validation Results ===\n");
     if (result && result->valid) {
@@ -326,7 +326,7 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
         printf("❌ Validation FAILED\n");
         if (result) {
             printf("Errors found: %d\n", result->error_count);
-            
+
             // Print error details
             ValidationError* error = result->errors;
             int error_num = 1;
@@ -342,13 +342,13 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
                     PathSegment* segments[50];  // Max 50 levels deep
                     int segment_count = 0;
                     PathSegment* current = error->path;
-                    
+
                     // Collect all segments
                     while (current && segment_count < 50) {
                         segments[segment_count++] = current;
                         current = current->next;
                     }
-                    
+
                     // Print in reverse order (root to leaf)
                     char path_buffer[512] = "";
                     for (int i = segment_count - 1; i >= 0; i--) {
@@ -362,7 +362,7 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
                             strcat(path_buffer, index_str);
                         }
                     }
-                    
+
                     if (strlen(path_buffer) > 0) {
                         printf("%s\n", path_buffer);
                     } else {
@@ -376,16 +376,16 @@ ValidationResult* run_validation(const char *data_file, const char *schema_file,
             }
         }
     }
-    // Note: We cannot destroy the memory pool here because ValidationResult 
+    // Note: We cannot destroy the memory pool here because ValidationResult
     // and its error messages are allocated from it. The caller is responsible
     // for cleanup by calling validation_result_destroy() when done.
-    
+
     // Only cleanup what we can safely cleanup
     schema_validator_destroy(validator);
     free(schema_contents);
-    
+
     fprintf(stderr, "TRACE: run_validation() completed\n");
     fflush(stderr);
-    
+
     return result;
 }

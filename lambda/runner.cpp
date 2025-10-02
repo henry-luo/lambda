@@ -210,7 +210,7 @@ void transpile_script(Transpiler *tp, Script* script, const char* script_path) {
     get_time(&start);
     size_t grow_size = 4096;  // 4k
     size_t tolerance_percent = 20;
-    pool_variable_init(&tp->ast_pool, grow_size, tolerance_percent);
+    tp->ast_pool = pool_create();
     tp->type_list = arraylist_new(16);
     tp->const_list = arraylist_new(16);
 
@@ -429,7 +429,7 @@ void runtime_cleanup(Runtime* runtime) {
             Script *script = (Script*)runtime->scripts->data[i];
             if (script->source) free((void*)script->source);
             if (script->syntax_tree) ts_tree_delete(script->syntax_tree);
-            if (script->ast_pool) pool_variable_destroy(script->ast_pool);
+            if (script->ast_pool) pool_destroy(script->ast_pool);
             if (script->type_list) arraylist_free(script->type_list);
             if (script->jit_context) jit_cleanup(script->jit_context);
             if (script->decimal_ctx) {

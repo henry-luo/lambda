@@ -59,8 +59,8 @@ typedef struct LayoutContext {
     // Additional fields for test compatibility
     int width, height;  // context dimensions
     int dpi;           // dots per inch
-    VariableMemPool* pool;  // memory pool for view allocation
-    
+    Pool* pool;  // memory pool for view allocation
+
     // Float context management
     struct FloatContext* current_float_context;  // Current float context for this layout
 } LayoutContext;

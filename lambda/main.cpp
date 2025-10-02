@@ -2,6 +2,7 @@
 #include "format/format.h"
 #include "format/format-latex-html.h"
 #include "input/mime-detect.h"
+#include "../lib/mempool.h"
 #include <unistd.h>  // for getcwd
 #include <limits.h>  // for PATH_MAX
 // Unicode support (always enabled)
@@ -332,9 +333,8 @@ int exec_convert(int argc, char* argv[]) {
               input_file, from_format ? from_format : "auto", to_format, output_file);
 
     // Create a temporary memory pool for string creation
-    VariableMemPool* temp_pool;
-    MemPoolError err = pool_variable_init(&temp_pool, 1024, 20);
-    if (err != MEM_POOL_ERR_OK) {
+    Pool* temp_pool = pool_create();
+    if (!temp_pool) {
         printf("Error: Failed to initialize temporary memory pool\n");
         return 1;
     }
@@ -346,7 +346,7 @@ int exec_convert(int argc, char* argv[]) {
     char cwd_path[PATH_MAX];
     if (!getcwd(cwd_path, sizeof(cwd_path))) {
         printf("Error: Failed to get current directory\n");
-        pool_variable_destroy(temp_pool);
+        pool_destroy(temp_pool);
         return 1;
     }
 
@@ -364,7 +364,7 @@ int exec_convert(int argc, char* argv[]) {
     String* url_string = create_string(temp_pool, file_url);
     if (!url_string) {
         printf("Error: Failed to create URL string\n");
-        pool_variable_destroy(temp_pool);
+        pool_destroy(temp_pool);
         return 1;
     }
 
@@ -378,7 +378,7 @@ int exec_convert(int argc, char* argv[]) {
 
     if (!type_string) {
         printf("Error: Failed to create type string\n");
-        pool_variable_destroy(temp_pool);
+        pool_destroy(temp_pool);
         return 1;
     }
 
@@ -386,20 +386,20 @@ int exec_convert(int argc, char* argv[]) {
         Input* input = input_from_url(url_string, type_string, NULL, NULL);
         if (!input) {
             printf("Error: Failed to parse input file\n");
-            pool_variable_destroy(temp_pool);
+            pool_destroy(temp_pool);
             return 1;
         }
 
         // Check if parsing was successful
         if (input->root.type_id == LMD_TYPE_ERROR) {
             printf("Error: Failed to parse input file\n");
-            pool_variable_destroy(temp_pool);
+            pool_destroy(temp_pool);
             return 1;
         }
 
         printf("Successfully parsed input file\n");
         printf("DEBUG: input->root type_id: %d, pointer: %p\n", input->root.type_id, input->root.pointer);
-        
+
         // Capture the effective type by checking if LaTeX parsing was used
         bool is_latex_input = false;
         if (from_format && (strcmp(from_format, "latex") == 0 || strcmp(from_format, "tex") == 0)) {
@@ -431,10 +431,10 @@ int exec_convert(int argc, char* argv[]) {
                 printf("Using LaTeX to HTML converter\n");
                 StringBuf* html_buf = stringbuf_new(input->pool);
                 StringBuf* css_buf = stringbuf_new(input->pool);
-                
+
                 if (html_buf && css_buf) {
                     format_latex_to_html(html_buf, css_buf, input->root, input->pool);
-                    
+
                     // Combine HTML and CSS into a complete HTML document
                     StringBuf* combined_buf = stringbuf_new(input->pool);
                     if (combined_buf) {
@@ -508,13 +508,13 @@ int exec_convert(int argc, char* argv[]) {
         } else {
             printf("Error: Unsupported output format '%s'\n", to_format);
             printf("Supported formats: mark, json, xml, html, yaml, toml, ini, css, jsx, mdx, latex, rst, org, wiki, text, markdown, math-ascii, math-latex, math-typst, math-mathml\n");
-            pool_variable_destroy(temp_pool);
+            pool_destroy(temp_pool);
             return 1;
         }
 
         if (!formatted_output) {
             printf("Error: Failed to format output\n");
-            pool_variable_destroy(temp_pool);
+            pool_destroy(temp_pool);
             return 1;
         }
 
@@ -528,7 +528,7 @@ int exec_convert(int argc, char* argv[]) {
     printf("Format: %s → %s\n", from_format ? from_format : "auto-detected", to_format);
 
     // Cleanup
-    pool_variable_destroy(temp_pool);
+    pool_destroy(temp_pool);
     return 0;
 }
 

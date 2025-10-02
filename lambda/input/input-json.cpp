@@ -12,7 +12,7 @@ static String* parse_string(Input *input, const char **json) {
     if (**json != '"') return NULL;
     StringBuf* sb = input->sb;
     stringbuf_reset(sb);
-    
+
     (*json)++; // Skip opening quote
     while (**json && **json != '"') {
         if (**json == '\\') {
@@ -60,8 +60,8 @@ static String* parse_string(Input *input, const char **json) {
 
 static Item parse_number(Input *input, const char **json) {
     double *dval;
-    MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-    if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+    dval = (double*)pool_calloc(input->pool, sizeof(double));
+    if (dval == NULL) return {.item = ITEM_ERROR};
     char* end;
     *dval = strtod(*json, &end);
     *json = end;
@@ -73,7 +73,7 @@ static Array* parse_array(Input *input, const char **json) {
     Array* arr = array_pooled(input->pool);
     if (!arr) return NULL;
 
-    (*json)++; // skip [ 
+    (*json)++; // skip [
     skip_whitespace(json);
     if (**json == ']') { (*json)++;  return arr; }
 
@@ -97,7 +97,7 @@ static Map* parse_object(Input *input, const char **json) {
     if (**json != '{') return NULL;
     Map* mp = map_pooled(input->pool);
     if (!mp) return NULL;
-    
+
     (*json)++; // skip '{'
     skip_whitespace(json);
     if (**json == '}') { // empty map
@@ -167,4 +167,3 @@ void parse_json(Input* input, const char* json_string) {
     input->sb = stringbuf_new(input->pool);
     input->root = parse_value(input, &json_string);
 }
-

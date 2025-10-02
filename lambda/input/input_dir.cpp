@@ -39,29 +39,29 @@ static Element* create_entry_element(Input* input, const char* name, const char*
     Element* elmt = input_create_element(input, is_dir ? "dir" : "file");
     if (!elmt) return NULL;
     input_add_attribute_to_element(input, elmt, "name", name);
-    
+
     // Create size as integer
     int64_t* size_ptr;
-    MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&size_ptr);
-    if (err == MEM_POOL_ERR_OK) {
+    size_ptr = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
+    if (size_ptr != NULL) {
         *size_ptr = (int64_t)st->st_size;
         Item size_item = {.item = l2it(size_ptr)};
         input_add_attribute_item_to_element(input, elmt, "size", size_item);
     }
-    
+
     // Create modified as Lambda datetime from Unix timestamp
     DateTime* dt_ptr = datetime_from_unix(input->pool, (int64_t)st->st_mtime);
     if (dt_ptr) {
         Item datetime_item = {.item = k2it(dt_ptr)};
         input_add_attribute_item_to_element(input, elmt, "modified", datetime_item);
     }
-    
+
     // Add is_link attribute if it's a symbolic link
     if (is_link) {
         Item link_item = {.item = b2it(true)};
         input_add_attribute_item_to_element(input, elmt, "is_link", link_item);
     }
-    
+
     // Keep mode as string for permissions
     char buf[64];
     snprintf(buf, sizeof(buf), "%o", (unsigned int)(st->st_mode & 0777));
@@ -79,12 +79,12 @@ static void traverse_directory(Input* input, Element* parent, const char* dir_pa
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
         char full_path[4096];
         snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, entry->d_name);
-        
+
         // Use lstat to detect symbolic links
         struct stat lst;
         if (lstat(full_path, &lst) != 0) continue;
         bool is_link = S_ISLNK(lst.st_mode);
-        
+
         // Use stat for target information (follows links)
         struct stat st;
         if (stat(full_path, &st) != 0) {
@@ -92,7 +92,7 @@ static void traverse_directory(Input* input, Element* parent, const char* dir_pa
             // Use lstat data for broken symlinks
             st = lst;
         }
-        
+
         int is_dir = S_ISDIR(st.st_mode);
         Element* elmt = create_entry_element(input, entry->d_name, full_path, &st, is_dir, is_link);
         if (!elmt) continue;
@@ -120,7 +120,7 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
     Input* input = input_new(NULL);
     struct stat st;
     if (stat(directory_path, &st) != 0) return NULL;
-    
+
     // Extract just the directory name from the full path
     const char* dir_name = strrchr(directory_path, '/');
     if (dir_name) {
@@ -128,13 +128,13 @@ Input* input_from_directory(const char* directory_path, bool recursive, int max_
     } else {
         dir_name = directory_path; // No '/' found, use the whole path
     }
-    
+
     Element* root = create_entry_element(input, dir_name, directory_path, &st, 1, false);
     if (!root) { free(input); return NULL; }
-    
+
     // Add the full path as a separate attribute for the root directory
     input_add_attribute_to_element(input, root, "path", directory_path);
-    
+
     // Traverse and populate
     traverse_directory(input, root, directory_path, recursive, max_depth, 0);
     input->root = {.item = (uint64_t)root};

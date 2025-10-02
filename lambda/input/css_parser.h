@@ -3,7 +3,7 @@
 
 #include "css_tokenizer.h"
 #include "css_properties.h"
-#include "../../lib/mem-pool/include/mem_pool.h"
+#include "../../lib/mempool.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -136,7 +136,7 @@ typedef struct css_stylesheet {
 typedef struct css_parser {
     CSSTokenStream* tokens;
     css_property_db_t* property_db;
-    VariableMemPool* pool;
+    Pool* pool;
     css_error_t* errors;
     int error_count;
     int error_capacity;
@@ -145,7 +145,7 @@ typedef struct css_parser {
 } css_parser_t;
 
 // Parser creation and destruction
-css_parser_t* css_parser_create(VariableMemPool* pool);
+css_parser_t* css_parser_create(Pool* pool);
 void css_parser_destroy(css_parser_t* parser);
 
 // Main parsing functions
@@ -194,10 +194,10 @@ css_rule_t* css_rule_create_at_rule(css_parser_t* parser, css_at_rule_t* at_rule
 css_rule_t* css_rule_create_comment(css_parser_t* parser, const char* comment);
 
 void css_style_rule_add_declaration(css_style_rule_t* rule, css_declaration_t* decl, 
-                                   VariableMemPool* pool);
-void css_at_rule_add_rule(css_at_rule_t* at_rule, css_rule_t* rule, VariableMemPool* pool);
+                                   Pool* pool);
+void css_at_rule_add_rule(css_at_rule_t* at_rule, css_rule_t* rule, Pool* pool);
 void css_at_rule_add_declaration(css_at_rule_t* at_rule, css_declaration_t* decl, 
-                                VariableMemPool* pool);
+                                Pool* pool);
 
 // Selector specificity calculation
 int css_selector_calculate_specificity(const css_selector_t* selector);
@@ -218,7 +218,7 @@ void css_rule_visit_declarations(css_rule_t* rule, css_declaration_visitor_t vis
 
 // Legacy API compatibility - commented out for now
 // Item css_parse_stylesheet_legacy(Input* input, const char** css);
-// String* css_format_stylesheet_legacy(Item item, VariableMemPool* pool);
+// String* css_format_stylesheet_legacy(Item item, Pool* pool);
 
 // Validation and optimization
 bool css_stylesheet_validate(css_stylesheet_t* stylesheet, css_property_db_t* property_db);

@@ -19,9 +19,7 @@
         "lib/log.c",
         "lib/cmdedit.c",
         "lib/cmdedit_utf8.c",
-        "lib/mem-pool/src/variable.c",
-        "lib/mem-pool/src/buffer.c",
-        "lib/mem-pool/src/utils.c",
+        "lib/mempool.c",
         "lib/url.c",
         "lib/url_parser.c",
         "lib/utf.c",
@@ -96,7 +94,6 @@
         ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
-        "lib/mem-pool/include",
         "lexbor/source",
         "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include"
     ],
@@ -268,14 +265,10 @@
             "description": "Unified runtime with all basic libraries for tests",
             "lang": "c17",
             "includes": [
-                "lib/mem-pool/include",
                 "/opt/homebrew/include",
                 "/opt/homebrew/opt/jemalloc/include"
             ],
             "sources": [
-                "lib/mem-pool/src/variable.c",
-                "lib/mem-pool/src/buffer.c",
-                "lib/mem-pool/src/utils.c",
                 "lib/mempool.c",
                 "lib/strbuf.c",
                 "lib/stringbuf.c",
@@ -344,7 +337,6 @@
                 "crypto",
                 "zlib"
             ],
-            "include": "lib/mem-pool/include",
             "defines": [
                 "SIMPLE_SCHEMA_PARSER"
             ],

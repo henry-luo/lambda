@@ -3,6 +3,7 @@
 
 // Include standard integer types from system
 #include <stdint.h>
+#include "../lib/mempool.h"
 
 #if !defined(__cplusplus) && !defined(_STDBOOL_H) && !defined(_STDBOOL_H_) && !defined(__bool_true_false_are_defined)
 #define bool uint8_t
@@ -309,7 +310,7 @@ typedef struct _ArrayList ArrayList;
 typedef struct VariableMemPool VariableMemPool;
 
 typedef struct Context {
-    VariableMemPool* pool;
+    Pool* pool;
     void** consts;
     Url* cwd;  // current working directory
     void* (*context_alloc)(int size, TypeId type_id);

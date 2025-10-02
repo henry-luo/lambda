@@ -51,13 +51,13 @@ static String* find_string_by_content(NamePool* pool, const char* content, size_
 
 // Update the structure definition to use the C hashmap directly
 struct NamePoolImpl {
-    VariableMemPool* pool;
+    Pool* pool;
     struct hashmap* names;
     struct NamePool* parent;
     uint32_t ref_count;
 };
 
-NamePool* name_pool_create(VariableMemPool* memory_pool, NamePool* parent) {
+NamePool* name_pool_create(Pool* memory_pool, NamePool* parent) {
     if (!memory_pool) return nullptr;
 
     NamePool* pool = (NamePool*)pool_calloc(memory_pool, sizeof(NamePool));

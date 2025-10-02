@@ -99,7 +99,7 @@ Item fn_join(Item left, Item right) {
     // todo: support binary concat
     else if (left_type == LMD_TYPE_LIST && right_type == LMD_TYPE_LIST) {
         List *left_list = left.list;  List *right_list = right.list;
-        int total_len = left_list->length + right_list->length, total_extra = left_list->extra + right_list->extra; 
+        int total_len = left_list->length + right_list->length, total_extra = left_list->extra + right_list->extra;
         List *result_list = (List *)heap_calloc(sizeof(List) + sizeof(Item)*(total_len + total_extra), LMD_TYPE_LIST);
         result_list->type_id = LMD_TYPE_LIST;
         result_list->length = total_len;  result_list->extra = total_extra;
@@ -858,7 +858,7 @@ Item fn_input1(Item url) {
     return fn_input2(url, ItemNull);
 }
 
-extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
+extern "C" String* format_data(Item item, String* type, String* flavor, Pool *pool);
 
 String* fn_format2(Item item, Item type) {
     TypeId type_id = get_type_id(type);

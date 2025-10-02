@@ -1815,7 +1815,7 @@ static void format_math_item(StringBuf* sb, Item item, MathOutputFlavor flavor, 
 // Main format functions for different flavors
 
 // Format math expression to LaTeX
-String* format_math_latex(VariableMemPool* pool, Item root_item) {
+String* format_math_latex(Pool* pool, Item root_item) {
     #ifdef DEBUG_MATH_FORMAT
     log_debug("format_math_latex: Starting with pool=%p, root_item=%p", 
             (void*)pool, (void*)root_item.pointer);
@@ -2043,7 +2043,7 @@ String* format_math_latex(VariableMemPool* pool, Item root_item) {
 
     return result;
 }// Format math expression to Typst
-String* format_math_typst(VariableMemPool* pool, Item root_item) {
+String* format_math_typst(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
@@ -2054,7 +2054,7 @@ String* format_math_typst(VariableMemPool* pool, Item root_item) {
 }
 
 // Format math expression to ASCII
-String* format_math_ascii(VariableMemPool* pool, Item root_item) {
+String* format_math_ascii(Pool* pool, Item root_item) {
     printf("DEBUG: format_math_ascii called with item=0x%lx\n", root_item.item);
     fflush(stdout);
     // Use the dedicated standalone ASCII math formatter for better results
@@ -2065,7 +2065,7 @@ String* format_math_ascii(VariableMemPool* pool, Item root_item) {
 }
 
 // Format math expression to MathML
-String* format_math_mathml(VariableMemPool* pool, Item root_item) {
+String* format_math_mathml(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
@@ -2078,7 +2078,7 @@ String* format_math_mathml(VariableMemPool* pool, Item root_item) {
 }
 
 // Format math expression to Unicode symbols
-String* format_math_unicode(VariableMemPool* pool, Item root_item) {
+String* format_math_unicode(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
@@ -2089,7 +2089,7 @@ String* format_math_unicode(VariableMemPool* pool, Item root_item) {
 }
 
 // Generic math formatter (defaults to LaTeX)
-String* format_math(VariableMemPool* pool, Item root_item) {
+String* format_math(Pool* pool, Item root_item) {
     return format_math_latex(pool, root_item);
 }
 

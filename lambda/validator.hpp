@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/mempool.h"
 #include "../lib/hashmap.h"
 #include "transpiler.hpp"
 
@@ -117,7 +117,7 @@ struct VisitedEntry {
 // Validation context
 typedef struct AstValidator {
     Transpiler* transpiler;          // Direct use of transpiler for AST
-    VariableMemPool* pool;           // Memory pool
+    Pool* pool;           // Memory pool
     HashMap* type_definitions;       // Registry of Type* definitions
     PathSegment* current_path;
     int current_depth;
@@ -129,7 +129,7 @@ typedef struct AstValidator {
 // Schema validator structure
 typedef struct SchemaValidator {
     HashMap* schemas;              // Loaded schemas by name
-    VariableMemPool* pool;         // Memory pool
+    Pool* pool;         // Memory pool
     void* context;                 // Default validation context
     void* custom_validators;       // Registered custom validators
     ValidationOptions default_options;  // Default validation options
@@ -140,7 +140,7 @@ typedef struct SchemaValidator {
 /**
  * Create a new AST-based validator
  */
-AstValidator* ast_validator_create(VariableMemPool* pool);
+AstValidator* ast_validator_create(Pool* pool);
 
 /**
  * Destroy validator and cleanup resources
@@ -216,12 +216,12 @@ ValidationResult* validate_against_occurrence(AstValidator* validator, TypedItem
 /**
  * Create validation result
  */
-ValidationResult* create_validation_result(VariableMemPool* pool);
+ValidationResult* create_validation_result(Pool* pool);
 
 /**
  * Create validation error
  */
-ValidationError* create_validation_error(ValidationErrorCode code, const char* message, PathSegment* path, VariableMemPool* pool);
+ValidationError* create_validation_error(ValidationErrorCode code, const char* message, PathSegment* path, Pool* pool);
 
 /**
  * Add error to validation result
@@ -241,27 +241,27 @@ void merge_validation_results(ValidationResult* dest, ValidationResult* src);
 /**
  * Generate validation report
  */
-String* generate_validation_report(ValidationResult* result, VariableMemPool* pool);
+String* generate_validation_report(ValidationResult* result, Pool* pool);
 
 /**
  * Generate JSON validation report
  */
-String* generate_json_report(ValidationResult* result, VariableMemPool* pool);
+String* generate_json_report(ValidationResult* result, Pool* pool);
 
 /**
  * Format error with context
  */
-String* format_error_with_context(ValidationError* error, VariableMemPool* pool);
+String* format_error_with_context(ValidationError* error, Pool* pool);
 
 /**
  * Format validation path
  */
-String* format_validation_path(PathSegment* path, VariableMemPool* pool);
+String* format_validation_path(PathSegment* path, Pool* pool);
 
 /**
  * Format type name
  */
-String* format_type_name(void* type, VariableMemPool* pool);
+String* format_type_name(void* type, Pool* pool);
 
 /**
  * Free validation result

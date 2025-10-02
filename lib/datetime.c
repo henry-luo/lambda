@@ -1,5 +1,4 @@
 #include "datetime.h"
-#include "mem-pool/include/mem_pool.h"
 #include "string.h"
 #include "strbuf.h"
 #include <string.h>
@@ -22,7 +21,7 @@ static int days_in_month(int year, int month) {
     return days[month - 1];
 }
 
-DateTime* datetime_new(VariableMemPool* pool) {
+DateTime* datetime_new(Pool* pool) {
     DateTime* dt = (DateTime*)pool_calloc(pool, sizeof(DateTime));
     if (!dt) return NULL;
     dt->precision = DATETIME_PRECISION_DATE_TIME;  // Full datetime by default
@@ -30,19 +29,19 @@ DateTime* datetime_new(VariableMemPool* pool) {
     return dt;
 }
 
-DateTime* datetime_now(VariableMemPool* pool) {
+DateTime* datetime_now(Pool* pool) {
     time_t now = time(NULL);
     return datetime_from_unix(pool, (int64_t)now);
 }
 
-DateTime* datetime_from_unix(VariableMemPool* pool, int64_t unix_timestamp) {
+DateTime* datetime_from_unix(Pool* pool, int64_t unix_timestamp) {
     DateTime* dt = datetime_new(pool);
     if (!dt) return NULL;
-    
+
     time_t timestamp = (time_t)unix_timestamp;
     struct tm* tm_utc = gmtime(&timestamp);
     if (!tm_utc) return NULL;
-    
+
     /* Use the new macros for year/month setting */
     DATETIME_SET_YEAR_MONTH(dt, tm_utc->tm_year + 1900, tm_utc->tm_mon + 1);
     dt->day = tm_utc->tm_mday;
@@ -50,7 +49,7 @@ DateTime* datetime_from_unix(VariableMemPool* pool, int64_t unix_timestamp) {
     dt->minute = tm_utc->tm_min;
     dt->second = tm_utc->tm_sec;
     dt->millisecond = 0;
-    
+
     /* Set UTC timezone (offset 0) and precision */
     DATETIME_SET_TZ_OFFSET(dt, 0);
     dt->precision = DATETIME_PRECISION_DATE_TIME;  // Full datetime from unix timestamp
@@ -64,84 +63,84 @@ DateTime* datetime_from_unix(VariableMemPool* pool, int64_t unix_timestamp) {
 static int64_t days_since_epoch(int year, int month, int day) {
     /* Days in each month (non-leap year) */
     static const int month_days[] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
-    
+
     int64_t days = 0;
-    
+
     /* Add days for complete years */
     for (int y = 1970; y < year; y++) {
         days += is_leap_year(y) ? 366 : 365;
     }
-    
+
     /* Add days for complete months in the current year */
     days += month_days[month - 1];
-    
+
     /* Add extra day if it's a leap year and we're past February */
     if (is_leap_year(year) && month > 2) {
         days++;
     }
-    
+
     /* Add the day of month (subtract 1 because day is 1-based) */
     days += day - 1;
-    
+
     return days;
 }
 
 int64_t datetime_to_unix(DateTime* dt) {
     if (!dt || !datetime_is_valid(dt)) return 0;
-    
+
     int year = DATETIME_GET_YEAR(dt);
     int month = DATETIME_GET_MONTH(dt);
     int day = dt->day;
-    
+
     /* Calculate days since Unix epoch */
     int64_t days = days_since_epoch(year, month, day);
-    
+
     /* Convert to seconds and add time components */
     int64_t seconds = days * 86400; /* 24 * 60 * 60 */
     seconds += dt->hour * 3600;     /* 60 * 60 */
     seconds += dt->minute * 60;
     seconds += dt->second;
-    
+
     /* Adjust for timezone offset if present */
     if (DATETIME_HAS_TIMEZONE(dt)) {
         int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
         seconds -= tz_offset * 60; /* Convert minutes to seconds */
     }
-    
+
     return seconds;
 }
 
 bool datetime_is_valid(DateTime* dt) {
     if (!dt) return false;
-    
+
     int year = DATETIME_GET_YEAR(dt);
     int month = DATETIME_GET_MONTH(dt);
-    
+
     if (year < DATETIME_MIN_YEAR || year > DATETIME_MAX_YEAR) return false;
     if (month < 1 || month > DATETIME_MAX_MONTH) return false;
-    
+
     /* Allow day = 0 for partial dates (year-month only), but validate full dates */
     if (dt->day == 0) {
         /* Partial date is valid if precision indicates year-only or date-only */
-        if (dt->precision != DATETIME_PRECISION_YEAR_ONLY && 
+        if (dt->precision != DATETIME_PRECISION_YEAR_ONLY &&
             dt->precision != DATETIME_PRECISION_DATE_ONLY) {
             return false;  /* day=0 not valid for time-based precisions */
         }
     } else if (dt->day < 1 || dt->day > days_in_month(year, month)) {
         return false;  /* Invalid day for full dates */
     }
-    
+
     if (dt->hour > DATETIME_MAX_HOUR) return false;
     if (dt->minute > DATETIME_MAX_MINUTE) return false;
     if (dt->second > DATETIME_MAX_SECOND) return false;
     if (dt->millisecond > DATETIME_MAX_MILLIS) return false;
-    
+
     /* Check timezone offset if present */
     if (DATETIME_HAS_TIMEZONE(dt)) {
         int tz_offset = DATETIME_GET_TZ_OFFSET(dt);
         if (tz_offset < DATETIME_MIN_TZ_OFFSET || tz_offset > DATETIME_MAX_TZ_OFFSET) return false;
     }
-    
+
     return true;
 }
 
@@ -153,7 +152,7 @@ static void skip_whitespace(const char** str) {
 /* Helper function to parse integer with specific width */
 static bool parse_int_small(const char** str, int width, int8_t* result) {
     if (!str || !*str || !result) return false;
-    
+
     int temp = 0;
     for (int i = 0; i < width; i++) {
         if (!isdigit(**str)) return false;
@@ -167,7 +166,7 @@ static bool parse_int_small(const char** str, int width, int8_t* result) {
 /* Helper function to parse integer with specific width for int32_t */
 static bool parse_int(const char** str, int width, int32_t* result) {
     if (!str || !*str || !result) return false;
-    
+
     *result = 0;
     for (int i = 0; i < width; i++) {
         if (!isdigit(**str)) return false;
@@ -180,7 +179,7 @@ static bool parse_int(const char** str, int width, int32_t* result) {
 /* Helper function to parse integer with specific width for int16_t */
 static bool parse_int_short(const char** str, int width, int16_t* result) {
     if (!str || !*str || !result) return false;
-    
+
     int temp = 0;
     for (int i = 0; i < width; i++) {
         if (!isdigit(**str)) return false;
@@ -195,23 +194,23 @@ static bool parse_int_short(const char** str, int width, int16_t* result) {
 static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimeParseFormat format);
 static bool datetime_parse_ics_internal(DateTime* dt, const char** ptr);
 
-DateTime* datetime_parse_iso8601(VariableMemPool* pool, const char* iso_str) {
+DateTime* datetime_parse_iso8601(Pool* pool, const char* iso_str) {
     if (!iso_str || !pool) return NULL;
-    
+
     DateTime* dt = datetime_new(pool);
     if (!dt) return NULL;
-    
+
     const char* ptr = iso_str;
     skip_whitespace(&ptr);
-    
+
     if (!datetime_parse_internal(dt, &ptr, DATETIME_PARSE_ISO8601)) {
         return NULL;
     }
-    
+
     if (!datetime_is_valid(dt)) {
         return NULL;
     }
-    
+
     return dt;
 }
 
@@ -225,10 +224,10 @@ DateTime* datetime_parse_iso8601(VariableMemPool* pool, const char* iso_str) {
  */
 static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimeParseFormat format) {
     if (!dt || !ptr || !*ptr) return false;
-    
+
     const char* start = *ptr;
     skip_whitespace(ptr);
-    
+
     /* Lambda format: Check for negative year first */
     bool negative_year = false;
     if (format == DATETIME_PARSE_LAMBDA && **ptr == '-') {
@@ -236,24 +235,24 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
         (*ptr)++;
         skip_whitespace(ptr);  /* Skip any additional whitespace after negative sign */
     }
-    
+
     /* Lambda format: Try to parse as time-only first (starts with digit digit:) */
-    if (format == DATETIME_PARSE_LAMBDA && 
+    if (format == DATETIME_PARSE_LAMBDA &&
         isdigit((*ptr)[0]) && isdigit((*ptr)[1]) && (*ptr)[2] == ':') {
-        
+
         /* Time only format: HH:MM:SS.sss with optional timezone */
         int32_t hour, minute = 0, second = 0;
-        
+
         if (!parse_int(ptr, 2, &hour)) return false;
         if (hour > DATETIME_MAX_HOUR) return false;
         dt->hour = hour;
-        
+
         if (**ptr == ':') {
             (*ptr)++;
             if (!parse_int(ptr, 2, &minute)) return false;
             if (minute > DATETIME_MAX_MINUTE) return false;
             dt->minute = minute;
-            
+
             if (**ptr == ':') {
                 (*ptr)++;
                 if (!parse_int(ptr, 2, &second)) return false;
@@ -261,7 +260,7 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
                 dt->second = second;
             }
         }
-        
+
         /* Parse optional milliseconds */
         if (**ptr == '.') {
             (*ptr)++;
@@ -270,7 +269,7 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
             if (millis > DATETIME_MAX_MILLIS) return false;
             dt->millisecond = millis;
         }
-        
+
         /* Parse optional timezone */
         bool parsed_z_suffix = false;
         if (**ptr == 'z' || **ptr == 'Z') {
@@ -280,20 +279,20 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
         } else if (**ptr == '+' || **ptr == '-') {
             bool tz_negative = (**ptr == '-');
             (*ptr)++;
-            
+
             int32_t tz_hour, tz_minute = 0;
             if (!parse_int(ptr, 2, &tz_hour)) return false;
             if (**ptr == ':') {
                 (*ptr)++;
                 if (!parse_int(ptr, 2, &tz_minute)) return false;
             }
-            
+
             int tz_offset = tz_hour * 60 + tz_minute;
             if (tz_negative) tz_offset = -tz_offset;
             if (tz_offset < DATETIME_MIN_TZ_OFFSET || tz_offset > DATETIME_MAX_TZ_OFFSET) return false;
             DATETIME_SET_TZ_OFFSET(dt, tz_offset);
         }
-        
+
         /* Set default date values and time-only precision */
         DATETIME_SET_YEAR_MONTH(dt, 1970, 1);
         dt->day = 1;
@@ -301,30 +300,30 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
         dt->format_hint = parsed_z_suffix ? DATETIME_FORMAT_ISO8601_UTC : DATETIME_FORMAT_ISO8601;
         return true;
     }
-    
+
     /* Parse year (required, 4 digits) */
     if (!isdigit(**ptr)) return false;
     int32_t year;
     if (!parse_int(ptr, 4, &year)) return false;
     if (negative_year) year = -year;
     if (year < DATETIME_MIN_YEAR || year > DATETIME_MAX_YEAR) return false;
-    
+
     /* Default values - use 1 for month, 0 for day when not specified */
     int month = 1, day = 0;  /* Default: January for year-only, day=0 when not specified */
     int hour = 0, minute = 0, second = 0, millisecond = 0;
     uint8_t precision = DATETIME_PRECISION_YEAR_ONLY;  /* Start with year-only */
-    
+
     /* Parse optional month */
     if (format == DATETIME_PARSE_LAMBDA) {
         skip_whitespace(ptr);  /* Lambda: Handle whitespace before month separator */
     }
-    
+
     if (**ptr == '-') {
         (*ptr)++;
         if (!parse_int(ptr, 2, &month)) return false;
         if (month < 1 || month > DATETIME_MAX_MONTH) return false;
         precision = DATETIME_PRECISION_DATE_ONLY;  /* Now we have year-month */
-        
+
         /* Parse optional day */
         if (**ptr == '-') {
             (*ptr)++;
@@ -335,7 +334,7 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
             /* Month specified but no day - keep day = 0 to indicate partial date */
         }
     }
-    
+
     /* Parse optional time part */
     bool has_time_separator = false;
     if (format == DATETIME_PARSE_LAMBDA) {
@@ -345,7 +344,7 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
         /* ISO8601: supports 'T', 't', and space separators */
         has_time_separator = (**ptr == 'T' || **ptr == 't' || **ptr == ' ');
     }
-    
+
     if (has_time_separator) {
         /* Skip separator */
         if (**ptr == ' ') {
@@ -357,30 +356,30 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
         } else {
             (*ptr)++;  /* Skip T/t */
         }
-        
+
         /* Update precision */
         if (precision == DATETIME_PRECISION_DATE_ONLY) {
             precision = DATETIME_PRECISION_DATE_TIME;  // Full datetime
         } else {
             precision = DATETIME_PRECISION_TIME_ONLY;  // Year + time becomes time only
         }
-        
+
         /* Parse time: HH:MM:SS */
         if (!parse_int(ptr, 2, &hour)) return false;
         if (hour > DATETIME_MAX_HOUR) return false;
-        
+
         if (**ptr == ':') {
             (*ptr)++;
             if (!parse_int(ptr, 2, &minute)) return false;
             if (minute > DATETIME_MAX_MINUTE) return false;
-            
+
             if (**ptr == ':') {
                 (*ptr)++;
                 if (!parse_int(ptr, 2, &second)) return false;
                 if (second > DATETIME_MAX_SECOND) return false;
             }
         }
-        
+
         /* Parse optional milliseconds */
         if (**ptr == '.') {
             (*ptr)++;
@@ -404,12 +403,12 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
                 }
             }
         }
-        
+
         /* Parse timezone */
         if (format == DATETIME_PARSE_ISO8601) {
             skip_whitespace(ptr);  /* ISO8601: skip whitespace before timezone */
         }
-        
+
         if (**ptr == 'Z' || **ptr == 'z') {
             DATETIME_SET_TZ_OFFSET(dt, 0);
             dt->format_hint = DATETIME_FORMAT_ISO8601_UTC;
@@ -417,15 +416,15 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
         } else if (**ptr == '+' || **ptr == '-') {
             bool tz_negative = (**ptr == '-');
             (*ptr)++;
-            
+
             int32_t tz_hour, tz_minute = 0;
             if (!parse_int(ptr, 2, &tz_hour)) return false;
-            
+
             if (**ptr == ':') {
                 (*ptr)++;
                 if (!parse_int(ptr, 2, &tz_minute)) return false;
             }
-            
+
             int tz_offset = tz_hour * 60 + tz_minute;
             if (tz_negative) tz_offset = -tz_offset;
             if (tz_offset < DATETIME_MIN_TZ_OFFSET || tz_offset > DATETIME_MAX_TZ_OFFSET) return false;
@@ -437,82 +436,82 @@ static bool datetime_parse_internal(DateTime* dt, const char** ptr, DateTimePars
     } else {
         /* Date only, no time part - clear time fields */
         hour = 0;
-        minute = 0; 
+        minute = 0;
         second = 0;
         millisecond = 0;
         DATETIME_CLEAR_TIMEZONE(dt);
     }
-    
+
     /* Set all the parsed values */
     DATETIME_SET_YEAR_MONTH(dt, year, month);
-    
+
     /* For year-only precision, set day to 1 to represent first day of year */
     if (precision == DATETIME_PRECISION_YEAR_ONLY) {
         dt->day = 1;
     } else {
         dt->day = day;
     }
-    
+
     dt->hour = hour;
     dt->minute = minute;
     dt->second = second;
     dt->millisecond = millisecond;
     dt->precision = precision;
-    
+
     if (dt->format_hint == 0) {  /* Not set to UTC format above */
         dt->format_hint = DATETIME_FORMAT_ISO8601;
     }
     return true;
 }
 
-DateTime* datetime_parse(VariableMemPool* pool, const char* str, DateTimeParseFormat format, char** end) {
+DateTime* datetime_parse(Pool* pool, const char* str, DateTimeParseFormat format, char** end) {
     if (!str || !pool) {
         if (end) *end = (char*)str;
         return NULL;
     }
-    
+
     DateTime* dt = datetime_new(pool);
     if (!dt) {
         if (end) *end = (char*)str;
         return NULL;
     }
-    
+
     const char* ptr = str;
     skip_whitespace(&ptr);
-    
+
     /* Parse based on format */
     switch (format) {
         case DATETIME_PARSE_ISO8601:
             if (!datetime_parse_internal(dt, &ptr, DATETIME_PARSE_ISO8601)) goto error;
             break;
-            
+
         case DATETIME_PARSE_LAMBDA:
             /* Lambda format: parse content directly without t'...' wrapper */
             if (!datetime_parse_internal(dt, &ptr, DATETIME_PARSE_LAMBDA)) goto error;
             break;
-            
+
         case DATETIME_PARSE_ICS:
             if (!datetime_parse_ics_internal(dt, &ptr)) goto error;
             break;
-            
+
         default:
             goto error;
     }
-    
+
     if (!datetime_is_valid(dt)) goto error;
-    
+
     /* Set end pointer to where parsing stopped */
     if (end) *end = (char*)ptr;
     return dt;
-    
+
 error:
     if (end) *end = (char*)str;  /* Reset end pointer on error */
     return NULL;  /* Let heap manager handle cleanup */
 }
 
-DateTime* datetime_parse_lambda(VariableMemPool* pool, const char* lambda_str) {
+DateTime* datetime_parse_lambda(Pool* pool, const char* lambda_str) {
     if (!lambda_str || !pool) return NULL;
-    
+
     /* Handle Lambda format with t'...' wrapper */
     if (strncmp(lambda_str, "t'", 2) == 0) {
         const char* content = lambda_str + 2;
@@ -524,21 +523,21 @@ DateTime* datetime_parse_lambda(VariableMemPool* pool, const char* lambda_str) {
             return datetime_parse(pool, temp, DATETIME_PARSE_LAMBDA, NULL);
         }
     }
-    
+
     /* If no wrapper, parse directly */
     return datetime_parse(pool, lambda_str, DATETIME_PARSE_LAMBDA, NULL);
 }
 
-DateTime* datetime_parse_ics(VariableMemPool* pool, const char* ics_str) {
+DateTime* datetime_parse_ics(Pool* pool, const char* ics_str) {
     return datetime_parse(pool, ics_str, DATETIME_PARSE_ICS, NULL);
 }
 
-DateTime* datetime_from_string(VariableMemPool* pool, const char* datetime_str) {
+DateTime* datetime_from_string(Pool* pool, const char* datetime_str) {
     if (!datetime_str || !pool) return NULL;
-    
+
     /* Try different formats in order of specificity */
     DateTime* dt = NULL;
-    
+
     /* Try Lambda format first if it starts with t' */
     if (strncmp(datetime_str, "t'", 2) == 0) {
         const char* content = datetime_str + 2;
@@ -551,13 +550,13 @@ DateTime* datetime_from_string(VariableMemPool* pool, const char* datetime_str) 
             if (dt) return dt;
         }
     }
-    
+
     /* Try ICS format (YYYYMMDDTHHMMSS or YYYYMMDD) */
     if (strlen(datetime_str) >= 8 && isdigit(datetime_str[0])) {
         dt = datetime_parse(pool, datetime_str, DATETIME_PARSE_ICS, NULL);
         if (dt) return dt;
     }
-    
+
     /* Try ISO8601 format */
     dt = datetime_parse(pool, datetime_str, DATETIME_PARSE_ISO8601, NULL);
     return dt;
@@ -566,34 +565,34 @@ DateTime* datetime_from_string(VariableMemPool* pool, const char* datetime_str) 
 /* Internal ICS parser (common logic) */
 static bool datetime_parse_ics_internal(DateTime* dt, const char** ptr) {
     if (!dt || !ptr || !*ptr) return false;
-    
+
     /* Parse ICS format: YYYYMMDD or YYYYMMDDTHHMMSS or YYYYMMDDTHHMMSSZ */
     const char* start = *ptr;
     if (strlen(start) < 8) return false;
-    
+
     /* Parse date: YYYYMMDD */
     int year, month, day;
     if (!parse_int(ptr, 4, &year)) return false;
     if (!parse_int(ptr, 2, &month)) return false;
     if (!parse_int(ptr, 2, &day)) return false;
-    
+
     DATETIME_SET_YEAR_MONTH(dt, year, month);
     dt->day = day;
-    
+
     /* Check for time part */
     if (**ptr == 'T' && strlen(*ptr) >= 7) {
         (*ptr)++; /* skip 'T' */
         dt->precision = DATETIME_PRECISION_DATE_TIME;  // Full datetime
-        
+
         int hour, minute, second;
         if (!parse_int(ptr, 2, &hour)) return false;
         if (!parse_int(ptr, 2, &minute)) return false;
         if (!parse_int(ptr, 2, &second)) return false;
-        
+
         dt->hour = hour;
         dt->minute = minute;
         dt->second = second;
-        
+
         /* Check for UTC marker */
         if (**ptr == 'Z') {
             DATETIME_SET_TZ_OFFSET(dt, 0);
@@ -607,29 +606,29 @@ static bool datetime_parse_ics_internal(DateTime* dt, const char** ptr) {
         dt->precision = DATETIME_PRECISION_DATE_ONLY;
         DATETIME_CLEAR_TIMEZONE(dt);
     }
-    
+
     if (dt->format_hint == 0) {
         dt->format_hint = DATETIME_FORMAT_ISO8601;
     }
-    
+
     return true;
 }
 
 void datetime_format_internal(StrBuf *strbuf, DateTime* dt, DateTimeParseFormat format) {
     if (!dt || !strbuf) return;
     char separator = (format == DATETIME_PARSE_LAMBDA) ? ' ' : 'T';
-    
+
     int year = DATETIME_GET_YEAR(dt);
     int month = DATETIME_GET_MONTH(dt);
     int day = dt->day;
-    
+
     /* Format based on precision */
     switch (dt->precision) {
         case DATETIME_PRECISION_YEAR_ONLY:
             /* Just year */
             strbuf_append_format(strbuf, "%04d", year);
             break;
-            
+
         case DATETIME_PRECISION_DATE_ONLY:
             /* Check if this is a partial date (year-month only) or full date */
             if (day == 0) {
@@ -640,20 +639,20 @@ void datetime_format_internal(StrBuf *strbuf, DateTime* dt, DateTimeParseFormat 
                 strbuf_append_format(strbuf, "%04d-%02d-%02d", year, month, day);
             }
             break;
-            
+
         case DATETIME_PRECISION_TIME_ONLY:
             /* Time only - omit seconds if they are 0 and no milliseconds */
             if (dt->second == 0 && dt->millisecond == 0) {
                 strbuf_append_format(strbuf, "%02d:%02d", dt->hour, dt->minute);
             } else {
-                strbuf_append_format(strbuf, "%02d:%02d:%02d", 
+                strbuf_append_format(strbuf, "%02d:%02d:%02d",
                                    dt->hour, dt->minute, dt->second);
                 if (dt->millisecond > 0) {
                     strbuf_append_format(strbuf, ".%03d", dt->millisecond);
                 }
             }
             break;
-            
+
         case DATETIME_PRECISION_DATE_TIME:
             /* Full datetime */
             strbuf_append_format(strbuf, "%04d-%02d-%02d%c%02d:%02d:%02d",
@@ -663,7 +662,7 @@ void datetime_format_internal(StrBuf *strbuf, DateTime* dt, DateTimeParseFormat 
             }
             break;
     }
-    
+
     /* Handle timezone formatting for time-based precisions */
     if (dt->precision == DATETIME_PRECISION_TIME_ONLY || dt->precision == DATETIME_PRECISION_DATE_TIME) {
         /* Handle timezone formatting */
@@ -691,32 +690,32 @@ void datetime_format_lambda(StrBuf *strbuf, DateTime* dt) {
 
 void datetime_format_ics(StrBuf *strbuf, DateTime* dt) {
     if (!dt || !strbuf) return;
-    
+
     /* Format based on precision */
     switch (dt->precision) {
         case DATETIME_PRECISION_YEAR_ONLY:
             /* Year only - not standard ICS, but we'll format as year0101 */
             strbuf_append_format(strbuf, "%04d0101", DATETIME_GET_YEAR(dt));
             break;
-            
+
         case DATETIME_PRECISION_DATE_ONLY:
             /* Date only */
-            strbuf_append_format(strbuf, "%04d%02d%02d", 
+            strbuf_append_format(strbuf, "%04d%02d%02d",
                                DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day);
             break;
-            
+
         case DATETIME_PRECISION_TIME_ONLY:
             /* Time only - not standard ICS, but we'll format as 19700101T time */
-            strbuf_append_format(strbuf, "19700101T%02d%02d%02d", 
+            strbuf_append_format(strbuf, "19700101T%02d%02d%02d",
                                dt->hour, dt->minute, dt->second);
             if (DATETIME_IS_UTC_FORMAT(dt)) {
                 strbuf_append_char(strbuf, 'Z');
             }
             break;
-            
+
         case DATETIME_PRECISION_DATE_TIME:
             /* Full datetime */
-            strbuf_append_format(strbuf, "%04d%02d%02dT%02d%02d%02d", 
+            strbuf_append_format(strbuf, "%04d%02d%02dT%02d%02d%02d",
                                DATETIME_GET_YEAR(dt), DATETIME_GET_MONTH(dt), dt->day,
                                dt->hour, dt->minute, dt->second);
             if (DATETIME_IS_UTC_FORMAT(dt)) {
@@ -728,7 +727,7 @@ void datetime_format_ics(StrBuf *strbuf, DateTime* dt) {
 
 void datetime_to_string(StrBuf *strbuf, DateTime* dt, DateTimeFormat format) {
     if (!dt || !strbuf) return;
-    
+
     switch (format) {
         case DATETIME_FORMAT_ISO8601:
         case DATETIME_FORMAT_ISO8601_UTC:
@@ -746,17 +745,17 @@ void datetime_to_string(StrBuf *strbuf, DateTime* dt, DateTimeFormat format) {
 
 int datetime_compare(DateTime* dt1, DateTime* dt2) {
     if (!dt1 || !dt2) return 0;
-    
+
     int64_t unix1 = datetime_to_unix(dt1);
     int64_t unix2 = datetime_to_unix(dt2);
-    
+
     if (unix1 < unix2) return -1;
     if (unix1 > unix2) return 1;
     return 0;
 }
 
 /* Placeholder implementations for remaining functions */
-DateTime* datetime_parse_rfc2822(VariableMemPool* pool, const char* rfc_str) {
+DateTime* datetime_parse_rfc2822(Pool* pool, const char* rfc_str) {
     /* TODO: Implement RFC2822 parsing */
     (void)pool; (void)rfc_str; /* suppress unused warnings */
     return NULL;
@@ -773,23 +772,23 @@ void datetime_format_human(StrBuf *strbuf, DateTime* dt) {
     datetime_format_iso8601(strbuf, dt);
 }
 
-DateTime* datetime_add_seconds(VariableMemPool* pool, DateTime* dt, int64_t seconds) {
+DateTime* datetime_add_seconds(Pool* pool, DateTime* dt, int64_t seconds) {
     if (!dt || !pool) return NULL;
-    
+
     int64_t unix_time = datetime_to_unix(dt);
     unix_time += seconds;
-    
+
     return datetime_from_unix(pool, unix_time);
 }
 
-DateTime* datetime_to_utc(VariableMemPool* pool, DateTime* dt) {
+DateTime* datetime_to_utc(Pool* pool, DateTime* dt) {
     if (!dt || !pool || !DATETIME_HAS_TIMEZONE(dt) || DATETIME_IS_UTC_FORMAT(dt)) return dt;
-    
+
     DateTime* utc_dt = datetime_new(pool);
     if (!utc_dt) return NULL;
-    
+
     *utc_dt = *dt;  /* Copy all fields */
-    
+
     /* Convert to UTC by subtracting offset */
     int64_t unix_time = datetime_to_unix(dt);
     DateTime* result = datetime_from_unix(pool, unix_time);
@@ -797,11 +796,11 @@ DateTime* datetime_to_utc(VariableMemPool* pool, DateTime* dt) {
         result->precision = dt->precision;
         result->format_hint = DATETIME_FORMAT_ISO8601_UTC;
     }
-    
+
     return result;
 }
 
-DateTime* datetime_to_local(VariableMemPool* pool, DateTime* dt) {
+DateTime* datetime_to_local(Pool* pool, DateTime* dt) {
     /* TODO: Implement local timezone conversion */
     /* For now, just return the original datetime */
     (void)pool; /* suppress unused warning */

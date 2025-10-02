@@ -2,7 +2,6 @@
 #include "name_pool.h"
 #include "../lib/hashmap.h"
 #include "../lib/datetime.h"
-#include "../lib/mem-pool/include/mem_pool.h"
 #include "../lib/log.h"
 #include <errno.h>
 #include <algorithm>  // for std::max
@@ -85,16 +84,14 @@ mpd_t* str_to_decimal(char* str, mpd_context_t* ctx) {
 }
 
 AstNode* alloc_ast_node(Transpiler* tp, AstNodeType node_type, TSNode node, size_t size) {
-    AstNode* ast_node;
-    pool_variable_alloc(tp->ast_pool, size, (void**)&ast_node);
+    AstNode* ast_node = (AstNode*)pool_alloc(tp->ast_pool, size);
     memset(ast_node, 0, size);
     ast_node->node_type = node_type;  ast_node->node = node;
     return ast_node;
 }
 
 void* alloc_const(Transpiler* tp, size_t size) {
-    void* bytes;
-    pool_variable_alloc(tp->ast_pool, size, &bytes);
+    void* bytes = pool_alloc(tp->ast_pool, size);
     memset(bytes, 0, size);
     return bytes;
 }
@@ -390,7 +387,7 @@ Type* build_lit_string(Transpiler* tp, TSNode node, TSSymbol symbol) {
         int start = ts_node_start_byte(child), end = ts_node_end_byte(child);
         int len = end - start;
         // copy the string
-        pool_variable_alloc(tp->ast_pool, sizeof(String) + len + 1, (void**)&str);
+        str = (String*)pool_alloc(tp->ast_pool, sizeof(String) + len + 1);
         str_type->string = (String*)str;
         const char* str_content = tp->source + start;
         memcpy(str->chars, str_content, len);  // memcpy is probably faster than strcpy
@@ -629,7 +626,7 @@ Type* build_lit_decimal(Transpiler* tp, TSNode node) {
 
     // Allocate heap-allocated Decimal structure
     Decimal* decimal;
-    pool_variable_alloc(tp->ast_pool, sizeof(Decimal), (void**)&decimal);
+    decimal = (Decimal*)pool_alloc(tp->ast_pool, sizeof(Decimal));
     item_type->decimal = decimal;
 
     // Initialize the decimal with reference counting and libmpdec

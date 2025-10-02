@@ -4,12 +4,11 @@
 
 #define INITIAL_CAPACITY 32
 
-StringBuf* stringbuf_new_cap(VariableMemPool *pool, size_t capacity) {
+StringBuf* stringbuf_new_cap(Pool *pool, size_t capacity) {
     if (!pool) return NULL;
 
-    StringBuf *sb;
-    MemPoolError err = pool_variable_alloc(pool, sizeof(StringBuf), (void**)&sb);
-    if (err != MEM_POOL_ERR_OK) return NULL;
+    StringBuf *sb = (StringBuf*)pool_alloc(pool, sizeof(StringBuf));
+    if (!sb) return NULL;
 
     sb->pool = pool;
     sb->str = NULL;
@@ -19,7 +18,7 @@ StringBuf* stringbuf_new_cap(VariableMemPool *pool, size_t capacity) {
     // Pre-allocate capacity if requested
     if (capacity > 0) {
         if (!stringbuf_ensure_cap(sb, capacity)) {
-            pool_variable_free(pool, sb);
+            pool_free(pool, sb);
             return NULL;
         }
     }
@@ -27,7 +26,7 @@ StringBuf* stringbuf_new_cap(VariableMemPool *pool, size_t capacity) {
     return sb;
 }
 
-StringBuf* stringbuf_new(VariableMemPool *pool) {
+StringBuf* stringbuf_new(Pool *pool) {
     return stringbuf_new_cap(pool, INITIAL_CAPACITY);
 }
 
@@ -35,9 +34,9 @@ void stringbuf_free(StringBuf *sb) {
     if (!sb) return;
 
     if (sb->str) {
-        pool_variable_free(sb->pool, sb->str);
+        pool_free(sb->pool, sb->str);
     }
-    pool_variable_free(sb->pool, sb);
+    pool_free(sb->pool, sb);
 }
 
 void stringbuf_reset(StringBuf *sb) {
@@ -59,7 +58,7 @@ void stringbuf_full_reset(StringBuf *sb) {
     if (!sb) return;
 
     if (sb->str) {
-        pool_variable_free(sb->pool, sb->str);
+        pool_free(sb->pool, sb->str);
     }
     sb->str = NULL;
     sb->length = 0;
@@ -97,8 +96,8 @@ bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
     String *new_str;
     if (!sb->str) {
         // First allocation
-        MemPoolError err = pool_variable_alloc(sb->pool, new_capacity, (void**)&new_str);
-        if (err != MEM_POOL_ERR_OK) {
+        new_str = (String*)pool_alloc(sb->pool, new_capacity);
+        if (!new_str) {
             return false;
         }
 
@@ -111,7 +110,7 @@ bool stringbuf_ensure_cap(StringBuf *sb, size_t min_capacity) {
         size_t string_header_size = sizeof(String);
         size_t data_to_copy = string_header_size + sb->length + 1; // +1 for null terminator
 
-        new_str = (String*)pool_variable_realloc(sb->pool, sb->str, data_to_copy, new_capacity);
+        new_str = (String*)pool_realloc(sb->pool, sb->str, new_capacity);
         if (!new_str) {
             return false;
         }

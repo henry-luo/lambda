@@ -6,6 +6,7 @@ extern "C" {
 
 #include <tree_sitter/api.h>
 #include "ts-enum.h"
+#include "../lib/mempool.h"
 
 #define SYM_NULL sym_null
 #define SYM_TRUE sym_true
@@ -281,7 +282,7 @@ struct Script {
     TSTree* syntax_tree;
 
     // AST and Memory Management
-    VariableMemPool* ast_pool;
+    Pool* ast_pool;
     NamePool* name_pool;        // centralized name management for this script
     AstNode *ast_root;
     NameScope* current_scope;   // current name scope

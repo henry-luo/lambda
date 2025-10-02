@@ -950,7 +950,7 @@ void format_org(StringBuf* sb, Item root_item) {
 }
 
 // String version of the formatter
-String* format_org_string(VariableMemPool* pool, Item root_item) {
+String* format_org_string(Pool* pool, Item root_item) {
     if (root_item.item == ITEM_NULL) return NULL;
     
     StringBuf* sb = stringbuf_new(pool);

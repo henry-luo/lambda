@@ -199,10 +199,10 @@ static Item parse_typed_value(Input *input, String* value_str) {
                 double dval = strtod(temp_str, &end);
                 if (end == temp_str + len) {
                     double* dval_ptr;
-                    MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval_ptr);
-                    if (err == MEM_POOL_ERR_OK) {
+                    dval_ptr = (double*)pool_calloc(input->pool, sizeof(double));
+                    if (dval_ptr != NULL) {
                         *dval_ptr = dval;
-                        pool_variable_free(input->pool, temp_str);
+                        pool_free(input->pool, temp_str);
                         return {.item = d2it(dval_ptr)};
                     }
                 }
@@ -211,16 +211,15 @@ static Item parse_typed_value(Input *input, String* value_str) {
                 int64_t lval = strtol(temp_str, &end, 10);
                 if (end == temp_str + len) {
                     int64_t* lval_ptr;
-                    MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&lval_ptr);
-                    if (err == MEM_POOL_ERR_OK) {
+                    lval_ptr = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
+                    if (lval_ptr != NULL) {
                         *lval_ptr = lval;
-                        pool_variable_free(input->pool, temp_str);
+                        pool_free(input->pool, temp_str);
                         return {.item = l2it(lval_ptr)};
                     }
                 }
             }
 
-            pool_variable_free(input->pool, temp_str);
         }
     }
 

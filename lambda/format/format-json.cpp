@@ -320,7 +320,7 @@ static void format_map(StringBuf* sb, Map* mp) {
     format_map_with_indent(sb, mp, 0);
 }
 
-String* format_json(VariableMemPool* pool, Item root_item) {
+String* format_json(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
     
