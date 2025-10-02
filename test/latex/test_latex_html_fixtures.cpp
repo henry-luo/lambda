@@ -5,11 +5,10 @@
 #include "../../lambda/input/input.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/mempool.h"
+#include "../../lib/url.h"
 #include <filesystem>
 #include <iostream>
-
-// Forward declaration for LaTeX parser function
-void parse_latex(Input* input, const char* latex_string);
+#include <stdexcept>
 
 class LatexHtmlFixtureTest : public ::testing::Test {
 protected:
@@ -42,13 +41,30 @@ protected:
         stringbuf_reset(css_buf);
 
         try {
-            // Create input object for LaTeX parsing
-            Input* input = input_new(nullptr);
+            // Create URL for the source (can be null since it's just source text)
+            Url* url = nullptr;
+
+            // Create String for type specification
+            String* type_str = nullptr;
+            {
+                const char* type_cstr = "latex";
+                type_str = (String*)malloc(sizeof(String) + strlen(type_cstr) + 1);
+                type_str->len = strlen(type_cstr);
+                type_str->ref_cnt = 0;
+                strcpy(type_str->chars, type_cstr);
+            }
+
+            // Create String for flavor (can be null)
+            String* flavor_str = nullptr;
+
+            // Parse LaTeX source using input_from_source
+            Input* input = input_from_source(fixture.latex_source.c_str(), url, type_str, flavor_str);
             ASSERT_NE(input, nullptr) << "Input creation should succeed";
 
-            // Parse LaTeX source using Lambda's parser
-            parse_latex(input, fixture.latex_source.c_str());
             Item latex_ast = input->root;
+
+            // Clean up type string
+            if (type_str) free(type_str);
 
             // Generate HTML using Lambda's formatter
             format_latex_to_html(html_buf, css_buf, latex_ast, pool);
@@ -71,7 +87,6 @@ protected:
                 std::string report = generate_failure_report(fixture, actual_html, differences);
                 FAIL() << report;
             }
-
         } catch (const std::exception& e) {
             FAIL() << "Exception in fixture '" << fixture.header << "': " << e.what();
         } catch (...) {

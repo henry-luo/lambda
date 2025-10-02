@@ -291,9 +291,9 @@ void list_push(List *list, Item item) {
                 // merge the two strings
                 size_t new_len = prev_str->len + new_str->len;
                 String *merged_str;
-                if (input_context->consts) {
+                if (input_context->consts) { // dynamic runtime context
                     merged_str = (String *)input_context->context_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
-                } else {
+                } else {  // static (input) context
                     merged_str = (String*)pool_calloc(input_context->pool, sizeof(String) + new_len + 1);
                 }
                 memcpy(merged_str->chars, prev_str->chars, prev_str->len);
