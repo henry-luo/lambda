@@ -1193,7 +1193,7 @@
                     },
                     {
                         "source": "test_input_roundtrip_gtest.cpp",
-                        "name": "🔄 Input Roundtrip Tests (GTest)",
+                        "name": "🔄 Input Roundtrip Tests (GTest) - JSON Only",
                         "dependencies": [
                             "lambda-input-full"
                         ],
