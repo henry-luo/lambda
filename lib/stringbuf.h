@@ -7,7 +7,7 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include "string.h"
-#include "mem-pool/include/mem_pool.h"
+#include "mempool.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,9 +17,9 @@ extern "C" {
 #pragma clang diagnostic ignored "-Wmicrosoft-anon-tag"
 typedef struct {
     String* str;          // pointer to String data (may or may-not be null-terminated)
-    size_t length;        // length excluding null terminator    
+    size_t length;        // length excluding null terminator
     size_t capacity;      // capacity in bytes
-    VariableMemPool *pool; // memory pool for the string buffer
+    Pool *pool; // memory pool for the string buffer
 } StringBuf;
 #pragma clang diagnostic pop
 
@@ -33,8 +33,8 @@ typedef struct {
 #endif
 
 // Core StringBuf functions
-StringBuf* stringbuf_new(VariableMemPool *pool);
-StringBuf* stringbuf_new_cap(VariableMemPool *pool, size_t capacity);
+StringBuf* stringbuf_new(Pool *pool);
+StringBuf* stringbuf_new_cap(Pool *pool, size_t capacity);
 void stringbuf_free(StringBuf *sb);
 void stringbuf_reset(StringBuf *sb);
 void stringbuf_full_reset(StringBuf *sb);

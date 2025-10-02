@@ -272,7 +272,7 @@ void format_text(StringBuf* sb, Item root_item) {
 }
 
 // String variant that returns a String* allocated from the pool
-String* format_text_string(VariableMemPool* pool, Item root_item) {
+String* format_text_string(Pool* pool, Item root_item) {
     if (!pool) return NULL;
     
     StringBuf* sb = stringbuf_new(pool);

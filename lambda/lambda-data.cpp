@@ -138,9 +138,9 @@ struct Initializer {
 };
 static Initializer initializer;
 
-Type* alloc_type(VariableMemPool* pool, TypeId type, size_t size) {
+Type* alloc_type(Pool* pool, TypeId type, size_t size) {
     Type* t;
-    pool_variable_alloc(pool, size, (void**)&t);
+    t = (Type*)pool_calloc(pool, size);
     memset(t, 0, size);
     t->type_id = type;
     // Defensive check: verify the type was properly initialized
@@ -186,25 +186,21 @@ void expand_list(List *list) {
     log_debug("list expanded: %d, capacity: %ld", list->type_id, list->capacity);
 }
 
-Array* array_pooled(VariableMemPool *pool) {
-    Array *arr;
-    MemPoolError err = pool_variable_alloc(pool, sizeof(Array), (void**)&arr);
-    if (err != MEM_POOL_ERR_OK) return NULL;
+Array* array_pooled(Pool *pool) {
+    Array* arr = (Array*)pool_calloc(pool, sizeof(Array));
+    if (arr == NULL) return NULL;
     memset(arr, 0, sizeof(Array));
     arr->type_id = LMD_TYPE_ARRAY;
     return arr;
 }
 
-VariableMemPool* variable_mem_pool_create() {
-    VariableMemPool *pool;
-    MemPoolError err = pool_variable_init(&pool, 1024, 10);  // 1KB grow size, 10% tolerance
-    if (err != MEM_POOL_ERR_OK) return NULL;
-    return pool;
+Pool* variable_mem_pool_create() {
+    return pool_create();
 }
 
-void variable_mem_pool_destroy(VariableMemPool* pool) {
+void variable_mem_pool_destroy(Pool* pool) {
     if (pool) {
-        pool_variable_destroy(pool);
+        pool_destroy(pool);
     }
 }
 
@@ -246,7 +242,7 @@ void array_set(Array* arr, int index, Item itm) {
     }
 }
 
-void array_append(Array* arr, Item itm, VariableMemPool *pool) {
+void array_append(Array* arr, Item itm, Pool *pool) {
     if (arr->length + arr->extra + 2 > arr->capacity) { expand_list((List*)arr); }
     // no need to call array_set() as the item data is pooled
     // array_set(arr, arr->length, itm, pool);
@@ -298,7 +294,7 @@ void list_push(List *list, Item item) {
                 if (input_context->consts) {
                     merged_str = (String *)input_context->context_alloc(sizeof(String) + new_len + 1, LMD_TYPE_STRING);
                 } else {
-                    pool_variable_alloc(input_context->pool, sizeof(String) + new_len + 1, (void**)&merged_str);
+                    merged_str = (String*)pool_calloc(input_context->pool, sizeof(String) + new_len + 1);
                 }
                 memcpy(merged_str->chars, prev_str->chars, prev_str->len);
                 memcpy(merged_str->chars + prev_str->len, new_str->chars, new_str->len);
@@ -559,7 +555,7 @@ void set_fields(TypeMap *map_type, void* map_data, va_list args) {
 
 extern TypeMap EmptyMap;
 
-Map* map_pooled(VariableMemPool *pool) {
+Map* map_pooled(Pool *pool) {
     Map *map = (Map *)pool_calloc(pool, sizeof(Map));
     map->type_id = LMD_TYPE_MAP;
     map->type = &EmptyMap;
@@ -676,7 +672,7 @@ TypedItem map_get_typed(Map* map, Item key) {
     return _map_get_typed((TypeMap*)map->type, map->data, key_str, &is_found);
 }
 
-Element* elmt_pooled(VariableMemPool *pool) {
+Element* elmt_pooled(Pool *pool) {
     Element *elmt = (Element *)pool_calloc(pool, sizeof(Element));
     elmt->type_id = LMD_TYPE_ELEMENT;
     elmt->type = &EmptyElmt;

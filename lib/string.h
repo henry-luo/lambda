@@ -1,7 +1,7 @@
 #pragma once
 
 #include <stdint.h>
-#include "mem-pool/include/mem_pool.h"
+#include "mempool.h"
 #include "strview.h"
 
 #ifdef __cplusplus
@@ -20,8 +20,8 @@ typedef struct String {
 #endif
 
 // String creation and manipulation functions
-String* create_string(VariableMemPool* pool, const char* str);
-String* string_from_strview(StrView view, VariableMemPool* pool);
+String* create_string(Pool* pool, const char* str);
+String* string_from_strview(StrView view, Pool* pool);
 
 #ifdef __cplusplus
 }

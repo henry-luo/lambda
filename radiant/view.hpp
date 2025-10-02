@@ -25,7 +25,7 @@ typedef struct FontFaceDescriptor FontFaceDescriptor;
 extern "C" {
 #endif
 #include "../lib/log.h"
-#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/mempool.h"
 #ifdef __cplusplus
 }
 #endif
@@ -402,7 +402,7 @@ typedef struct ViewTableCell : ViewBlock {
 } ViewTableCell;
 
 struct ViewTree {
-    VariableMemPool *pool;
+    Pool *pool;
     View* root;
 };
 

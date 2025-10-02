@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "mem-pool/include/mem_pool.h"
+#include "mempool.h"
 #include "string.h"
 #include "strbuf.h"
 
@@ -106,19 +106,19 @@ typedef enum {
 #define DATETIME_TZ_JST         540    // UTC+9 (Japan Standard Time)
 
 // Core DateTime functions
-DateTime* datetime_new(VariableMemPool* pool);
-DateTime* datetime_from_string(VariableMemPool* pool, const char* datetime_str);
-DateTime* datetime_now(VariableMemPool* pool);
+DateTime* datetime_new(Pool* pool);
+DateTime* datetime_from_string(Pool* pool, const char* datetime_str);
+DateTime* datetime_now(Pool* pool);
 void datetime_to_string(StrBuf *strbuf, DateTime* dt, DateTimeFormat format);
 
 // Parsing functions for different formats
-DateTime* datetime_parse_iso8601(VariableMemPool* pool, const char* iso_str);
-DateTime* datetime_parse_ics(VariableMemPool* pool, const char* ics_str);
-DateTime* datetime_parse_rfc2822(VariableMemPool* pool, const char* rfc_str);
-DateTime* datetime_parse_lambda(VariableMemPool* pool, const char* lambda_str);
+DateTime* datetime_parse_iso8601(Pool* pool, const char* iso_str);
+DateTime* datetime_parse_ics(Pool* pool, const char* ics_str);
+DateTime* datetime_parse_rfc2822(Pool* pool, const char* rfc_str);
+DateTime* datetime_parse_lambda(Pool* pool, const char* lambda_str);
 
 // General parsing function with format parameter
-DateTime* datetime_parse(VariableMemPool* pool, const char* str, DateTimeParseFormat format, char** end);
+DateTime* datetime_parse(Pool* pool, const char* str, DateTimeParseFormat format, char** end);
 
 // Formatting functions
 void datetime_format_iso8601(StrBuf *strbuf, DateTime* dt);
@@ -130,13 +130,13 @@ void datetime_format_human(StrBuf *strbuf, DateTime* dt);
 // Utility functions
 bool datetime_is_valid(DateTime* dt);
 int datetime_compare(DateTime* dt1, DateTime* dt2);
-DateTime* datetime_add_seconds(VariableMemPool* pool, DateTime* dt, int64_t seconds);
-DateTime* datetime_to_utc(VariableMemPool* pool, DateTime* dt);
-DateTime* datetime_to_local(VariableMemPool* pool, DateTime* dt);
+DateTime* datetime_add_seconds(Pool* pool, DateTime* dt, int64_t seconds);
+DateTime* datetime_to_utc(Pool* pool, DateTime* dt);
+DateTime* datetime_to_local(Pool* pool, DateTime* dt);
 
 // Convert between DateTime and unix timestamp
 int64_t datetime_to_unix(DateTime* dt);
-DateTime* datetime_from_unix(VariableMemPool* pool, int64_t unix_timestamp);
+DateTime* datetime_from_unix(Pool* pool, int64_t unix_timestamp);
 
 #ifdef __cplusplus
 }

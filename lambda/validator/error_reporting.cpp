@@ -13,9 +13,9 @@
 #include <assert.h>
 
 // Forward declarations for functions used in this file
-extern "C" List* suggest_corrections(ValidationError* error, VariableMemPool* pool);
-String* format_validation_path(PathSegment* path, VariableMemPool* pool);
-String* format_type_name(void* type, VariableMemPool* pool);
+extern "C" List* suggest_corrections(ValidationError* error, Pool* pool);
+String* format_validation_path(PathSegment* path, Pool* pool);
+String* format_type_name(void* type, Pool* pool);
 StrView strview_from_cstr(const char* str);
 
 static void stringbuf_append_string(StringBuf* sb, String* str) {
@@ -25,7 +25,7 @@ static void stringbuf_append_string(StringBuf* sb, String* str) {
 }
 
 // Note: Utility functions moved to avoid duplicates
-List* suggest_similar_names(const char* name, List* available_names, VariableMemPool* pool) {
+List* suggest_similar_names(const char* name, List* available_names, Pool* pool) {
     // Return NULL for now - suggestions not implemented
     (void)name;
     (void)available_names;
@@ -33,7 +33,7 @@ List* suggest_similar_names(const char* name, List* available_names, VariableMem
     return nullptr;
 }
 
-List* suggest_corrections(ValidationError* error, VariableMemPool* pool) {
+List* suggest_corrections(ValidationError* error, Pool* pool) {
     // Return NULL for now - suggestions not implemented
     (void)error;
     (void)pool;
@@ -69,7 +69,7 @@ const char* get_error_code_name(ValidationErrorCode code) {
     }
 }
 
-String* format_error_with_context(ValidationError* error, VariableMemPool* pool) {
+String* format_error_with_context(ValidationError* error, Pool* pool) {
     if (!error || !pool) return nullptr;
 
     const char* error_msg = error->message ? error->message->chars : "Unknown error";
@@ -86,7 +86,7 @@ String* format_error_with_context(ValidationError* error, VariableMemPool* pool)
 
 // ==================== Validation Report Generation ====================
 
-String* generate_validation_report(ValidationResult* result, VariableMemPool* pool) {
+String* generate_validation_report(ValidationResult* result, Pool* pool) {
     if (!result) {
         return string_from_strview(strview_from_cstr("No validation result"), pool);
     }
@@ -155,7 +155,7 @@ String* generate_validation_report(ValidationResult* result, VariableMemPool* po
 
 // ==================== JSON Report Generation ====================
 
-String* generate_json_report(ValidationResult* result, VariableMemPool* pool) {
+String* generate_json_report(ValidationResult* result, Pool* pool) {
     if (!result) {
         return string_from_strview(strview_from_cstr("{\"error\": \"No validation result\"}"), pool);
     }
@@ -255,7 +255,7 @@ String* generate_json_report(ValidationResult* result, VariableMemPool* pool) {
 // ==================== Missing Function Implementations ====================
 
 // Format validation path
-String* format_validation_path(PathSegment* path, VariableMemPool* pool) {
+String* format_validation_path(PathSegment* path, Pool* pool) {
     if (!path) {
         return string_from_strview(strview_from_cstr(""), pool);
     }
@@ -265,7 +265,7 @@ String* format_validation_path(PathSegment* path, VariableMemPool* pool) {
 }
 
 // Format type name
-String* format_type_name(void* type, VariableMemPool* pool) {
+String* format_type_name(void* type, Pool* pool) {
     // Simple type name formatting - just return "unknown" for now
     return string_from_strview(strview_from_cstr("unknown"), pool);
 }

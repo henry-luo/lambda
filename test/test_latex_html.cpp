@@ -42,7 +42,7 @@ TEST_F(LatexHtmlTest, BasicDocumentStructure) {
     // This would normally come from the LaTeX parser
 
     // Create document class element
-    Element* doc_class = (Element*)pool_calloc(pool, 1, sizeof(Element));
+    Element* doc_class = (Element*)pool_calloc(pool, sizeof(Element));
     doc_class->name = string_pooled(pool, "documentclass", 13);
     doc_class->children = array_pooled(pool);
 
@@ -65,7 +65,7 @@ TEST_F(LatexHtmlTest, BasicDocumentStructure) {
 
 TEST_F(LatexHtmlTest, TextFormatting) {
     // Create a textbf element
-    Element* textbf = (Element*)pool_calloc(pool, 1, sizeof(Element));
+    Element* textbf = (Element*)pool_calloc(pool, sizeof(Element));
     textbf->name = string_pooled(pool, "textbf", 6);
     textbf->children = array_pooled(pool);
 
@@ -91,7 +91,7 @@ TEST_F(LatexHtmlTest, TextFormatting) {
 
 TEST_F(LatexHtmlTest, SectionProcessing) {
     // Create a section element
-    Element* section = (Element*)pool_calloc(pool, 1, sizeof(Element));
+    Element* section = (Element*)pool_calloc(pool, sizeof(Element));
     section->name = string_pooled(pool, "section", 7);
     section->children = array_pooled(pool);
 
@@ -156,12 +156,12 @@ TEST_F(LatexHtmlTest, ReferenceManager) {
 
 TEST_F(LatexHtmlTest, ListEnvironment) {
     // Create an itemize environment
-    Element* itemize = (Element*)pool_calloc(pool, 1, sizeof(Element));
+    Element* itemize = (Element*)pool_calloc(pool, sizeof(Element));
     itemize->name = string_pooled(pool, "itemize", 7);
     itemize->children = array_pooled(pool);
 
     // Create list items
-    Element* item1 = (Element*)pool_calloc(pool, 1, sizeof(Element));
+    Element* item1 = (Element*)pool_calloc(pool, sizeof(Element));
     item1->name = string_pooled(pool, "item", 4);
     item1->children = array_pooled(pool);
 

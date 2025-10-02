@@ -328,7 +328,7 @@ static void format_item(StringBuf* sb, Item item, int indent_level) {
 }
 
 // yaml formatter that produces proper YAML output
-String* format_yaml(VariableMemPool* pool, Item root_item) {
+String* format_yaml(Pool* pool, Item root_item) {
     printf("format_yaml: ENTRY - direct traversal version\n");
     fflush(stdout);
     

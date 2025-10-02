@@ -3,14 +3,14 @@
 
 #include "../lambda-data.hpp"
 #include "../../lib/stringbuf.h"
-#include "../../lib/mem-pool/include/mem_pool.h"
+#include "../../lib/mempool.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // Main API function for LaTeX to HTML conversion
-void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_ast, VariableMemPool* pool);
+void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_ast, Pool* pool);
 
 #ifdef __cplusplus
 }

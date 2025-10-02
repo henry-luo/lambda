@@ -3,45 +3,39 @@
 #include <time.h>
 
 #include "../lib/log.h"
+#include "../lib/mempool.h"
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
 
 View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
-    View* view;  MemPoolError err;
+    View* view;
     ViewTree* tree = lycon->doc->view_tree;
     switch (type) {
         case RDT_VIEW_BLOCK:  case RDT_VIEW_INLINE_BLOCK:  case RDT_VIEW_LIST_ITEM:
-            err = pool_variable_alloc(tree->pool, sizeof(ViewBlock), (void **)&view);
-            memset(view, 0, sizeof(ViewBlock));
+            view = (ViewBlock*)pool_calloc(tree->pool, sizeof(ViewBlock));
             break;
         case RDT_VIEW_TABLE:
-            err = pool_variable_alloc(tree->pool, sizeof(ViewTable), (void **)&view);
-            memset(view, 0, sizeof(ViewTable));
+            view = (ViewTable*)pool_calloc(tree->pool, sizeof(ViewTable));
             break;
         case RDT_VIEW_TABLE_ROW_GROUP:
-            err = pool_variable_alloc(tree->pool, sizeof(ViewTableRowGroup), (void **)&view);
-            memset(view, 0, sizeof(ViewTableRowGroup));
+            view = (ViewTableRowGroup*)pool_calloc(tree->pool, sizeof(ViewTableRowGroup));
             break;
         case RDT_VIEW_TABLE_ROW:
-            err = pool_variable_alloc(tree->pool, sizeof(ViewTableRow), (void **)&view);
-            memset(view, 0, sizeof(ViewTableRow));
+            view = (ViewTableRow*)pool_calloc(tree->pool, sizeof(ViewTableRow));
             break;
         case RDT_VIEW_TABLE_CELL:
-            err = pool_variable_alloc(tree->pool, sizeof(ViewTableCell), (void **)&view);
-            memset(view, 0, sizeof(ViewTableCell));
+            view = (ViewTableCell*)pool_calloc(tree->pool, sizeof(ViewTableCell));
             break;
         case RDT_VIEW_INLINE:
-            err = pool_variable_alloc(tree->pool, sizeof(ViewSpan), (void **)&view);
-            memset(view, 0, sizeof(ViewSpan));
+            view = (ViewSpan*)pool_calloc(tree->pool, sizeof(ViewSpan));
             break;
         case RDT_VIEW_TEXT:
-            err = pool_variable_alloc(tree->pool, sizeof(ViewText), (void **)&view);
-            memset(view, 0, sizeof(ViewText));
-            break;            
+            view = (ViewText*)pool_calloc(tree->pool, sizeof(ViewText));
+            break;
         default:
             printf("Unknown view type\n");
             return NULL;
     }
-    if (err != MEM_POOL_ERR_OK) {
+    if (!view) {
         printf("Failed to allocate view: %d\n", type);
         return NULL;
     }
@@ -50,17 +44,17 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
     if (lycon->prev_view) { lycon->prev_view->next = view; }
     else { if (lycon->parent) lycon->parent->child = view; }
     if (!lycon->line.start_view) lycon->line.start_view = view;
-    
+
     // CRITICAL FIX: Also maintain ViewBlock hierarchy for flex layout
     if ((type == RDT_VIEW_BLOCK || type == RDT_VIEW_INLINE_BLOCK || type == RDT_VIEW_LIST_ITEM ||
          type == RDT_VIEW_TABLE || type == RDT_VIEW_TABLE_ROW_GROUP ||
-         type == RDT_VIEW_TABLE_ROW || type == RDT_VIEW_TABLE_CELL) && 
+         type == RDT_VIEW_TABLE_ROW || type == RDT_VIEW_TABLE_CELL) &&
         lycon->parent && (lycon->parent->type == RDT_VIEW_BLOCK || lycon->parent->type == RDT_VIEW_INLINE_BLOCK ||
                           lycon->parent->type == RDT_VIEW_TABLE || lycon->parent->type == RDT_VIEW_TABLE_ROW_GROUP ||
                           lycon->parent->type == RDT_VIEW_TABLE_ROW || lycon->parent->type == RDT_VIEW_TABLE_CELL)) {
         ViewBlock* block_child = (ViewBlock*)view;
         ViewBlock* block_parent = (ViewBlock*)lycon->parent;
-        
+
         // Link in ViewBlock hierarchy
         if (block_parent->last_child) {
             block_parent->last_child->next_sibling = block_child;
@@ -88,44 +82,43 @@ void free_view(ViewTree* tree, View* view) {
         if (span->font) {
             printf("free font prop\n");
             // font-family could be static and not from the pool
-            if (span->font->family && pool_variable_is_associated(tree->pool, span->font->family)) {
-                pool_variable_free(tree->pool, span->font->family);
+            if (span->font->family) {
+                pool_free(tree->pool, span->font->family);
             }
-            pool_variable_free(tree->pool, span->font);
+            pool_free(tree->pool, span->font);
         }
         if (span->in_line) {
             printf("free inline prop\n");
-            pool_variable_free(tree->pool, span->in_line);
+            pool_free(tree->pool, span->in_line);
         }
         if (span->bound) {
             printf("free bound prop\n");
-            if (span->bound->background) pool_variable_free(tree->pool, span->bound->background);
-            if (span->bound->border) pool_variable_free(tree->pool, span->bound->border);
-            pool_variable_free(tree->pool, span->bound);
+            if (span->bound->background) pool_free(tree->pool, span->bound->background);
+            if (span->bound->border) pool_free(tree->pool, span->bound->border);
+            pool_free(tree->pool, span->bound);
         }
-        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK || 
+        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
             view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_TABLE ||
             view->type == RDT_VIEW_TABLE_ROW_GROUP || view->type == RDT_VIEW_TABLE_ROW ||
             view->type == RDT_VIEW_TABLE_CELL) {
             ViewBlock* block = (ViewBlock*)view;
             if (block->blk) {
                 printf("free block prop\n");
-                pool_variable_free(tree->pool, block->blk);
+                pool_free(tree->pool, block->blk);
             }
             if (block->scroller) {
                 printf("free scroller\n");
-                if (block->scroller->pane) pool_variable_free(tree->pool, block->scroller->pane);
-                pool_variable_free(tree->pool, block->scroller);
+                if (block->scroller->pane) pool_free(tree->pool, block->scroller->pane);
+                pool_free(tree->pool, block->scroller);
             }
         }
     }
-    pool_variable_free(tree->pool, view);
+    pool_free(tree->pool, view);
 }
 
 void* alloc_prop(LayoutContext* lycon, size_t size) {
-    void* prop;
-    if (MEM_POOL_ERR_OK == pool_variable_alloc(lycon->doc->view_tree->pool, size, &prop)) {
-        memset(prop, 0, size);
+    void* prop = pool_calloc(lycon->doc->view_tree->pool, size);
+    if (prop) {
         return prop;
     }
     else {
@@ -154,8 +147,8 @@ FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon) {
     FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
     // set defaults
     prop->flex_shrink = 1;  prop->flex_basis = -1;  // -1 for auto
-    prop->align_self = ALIGN_START;  
-    // prop->flex_grow = 0;  prop->order = 0;  
+    prop->align_self = ALIGN_START;
+    // prop->flex_grow = 0;  prop->order = 0;
     return prop;
 }
 
@@ -173,16 +166,16 @@ PositionProp* alloc_position_prop(LayoutContext* lycon) {
 
 // alloc flex container blk
 void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block) {
-    if (!block->embed) { 
-        block->embed = block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp)); 
+    if (!block->embed) {
+        block->embed = block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
     }
     if (!block->embed->flex_container) {
         FlexContainerLayout* prop = (FlexContainerLayout*)alloc_prop(lycon, sizeof(FlexContainerLayout));
         // CRITICAL FIX: Use enum names that now align with Lexbor constants
-        prop->direction = DIR_ROW;  
-        prop->wrap = WRAP_NOWRAP;  
+        prop->direction = DIR_ROW;
+        prop->wrap = WRAP_NOWRAP;
         prop->justify = JUSTIFY_START;
-        prop->align_items = ALIGN_STRETCH;  
+        prop->align_items = ALIGN_STRETCH;
         prop->align_content = ALIGN_START;
         prop->row_gap = 0;  prop->column_gap = 0;
         prop->needs_reflow = true;
@@ -196,8 +189,8 @@ void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block) {
 
 // alloc grid container prop
 void alloc_grid_container_prop(LayoutContext* lycon, ViewBlock* block) {
-    if (!block->embed) { 
-        block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp)); 
+    if (!block->embed) {
+        block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
     }
     if (!block->embed->grid_container) {
         init_grid_container(block);
@@ -205,10 +198,9 @@ void alloc_grid_container_prop(LayoutContext* lycon, ViewBlock* block) {
 }
 
 void view_pool_init(ViewTree* tree) {
-    size_t grow_size = 4096;  // 4k
-    size_t tolerance_percent = 20;
     printf("init view pool\n");
-    if (MEM_POOL_ERR_OK != pool_variable_init(&tree->pool, grow_size, tolerance_percent)) {
+    tree->pool = pool_create();
+    if (!tree->pool) {
         printf("Failed to initialize view pool\n");
     }
     else {
@@ -217,7 +209,7 @@ void view_pool_init(ViewTree* tree) {
 }
 
 void view_pool_destroy(ViewTree* tree) {
-    if (tree->pool) pool_variable_destroy(tree->pool);
+    if (tree->pool) pool_destroy(tree->pool);
     tree->pool = NULL;
 }
 
@@ -267,21 +259,21 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
         if (span->bound->border) {
             strbuf_append_char_n(buf, ' ', indent);  strbuf_append_str(buf, "{");
             strbuf_append_format(buf, "border:{t-color:#%x, r-color:#%x, b-color:#%x, l-color:#%x,\n",
-                span->bound->border->top_color.c, span->bound->border->right_color.c, 
+                span->bound->border->top_color.c, span->bound->border->right_color.c,
                 span->bound->border->bottom_color.c, span->bound->border->left_color.c);
             strbuf_append_char_n(buf, ' ', indent);
             strbuf_append_format(buf, "  t-wd:%d, r-wd:%d, b-wd:%d, l-wd:%d, "
                 "t-sty:%d, r-sty:%d, b-sty:%d, l-sty:%d\n",
                 span->bound->border->width.top, span->bound->border->width.right,
                 span->bound->border->width.bottom, span->bound->border->width.left,
-                span->bound->border->top_style, span->bound->border->right_style, 
+                span->bound->border->top_style, span->bound->border->right_style,
                 span->bound->border->bottom_style, span->bound->border->left_style);
             strbuf_append_char_n(buf, ' ', indent);
             strbuf_append_format(buf, "  tl-rds:%d, tr-rds:%d, br-rds:%d, bl-rds:%d}\n",
                 span->bound->border->radius.top_left, span->bound->border->radius.top_right,
-                span->bound->border->radius.bottom_right, span->bound->border->radius.bottom_left);                
+                span->bound->border->radius.bottom_right, span->bound->border->radius.bottom_left);
         }
-    }  
+    }
 }
 
 void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
@@ -297,7 +289,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         strbuf_append_format(buf, "max-wd:%f ", block->blk->max_width);
         strbuf_append_format(buf, "min-hg:%f ", block->blk->min_height);
         strbuf_append_format(buf, "max-hg:%f ", block->blk->max_height);
-        
+
         // Add box-sizing and given dimensions debugging
         if (block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
             strbuf_append_str(buf, "box-sizing:border-box ");
@@ -312,20 +304,20 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         }
         strbuf_append_str(buf, "}\n");
     }
-    
+
     // Add flex container debugging info
     if (block->embed && block->embed->flex_container) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{flex-container: ");
-        strbuf_append_format(buf, "row-gap:%d column-gap:%d ", 
+        strbuf_append_format(buf, "row-gap:%d column-gap:%d ",
                            block->embed->flex_container->row_gap,
                            block->embed->flex_container->column_gap);
-        strbuf_append_format(buf, "main-axis:%d cross-axis:%d", 
+        strbuf_append_format(buf, "main-axis:%d cross-axis:%d",
                            block->embed->flex_container->main_axis_size,
                            block->embed->flex_container->cross_axis_size);
         strbuf_append_str(buf, "}\n");
     }
-    
+
     if (block->scroller) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
@@ -340,7 +332,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
             if (overflow_y_value && overflow_y_value->name) {
                 strbuf_append_format(buf, "overflow-y:%s ", overflow_y_value->name);
             }
-        }        
+        }
         if (block->scroller->has_hz_overflow) {
             strbuf_append_str(buf, "hz-overflow:true ");
         }
@@ -361,17 +353,17 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
 void print_block(ViewBlock* block, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_format(buf, "[view-%s:%s, x:%d, y:%d, wd:%d, hg:%d\n",
-        block->type == RDT_VIEW_BLOCK ? "block" : 
-        block->type == RDT_VIEW_INLINE_BLOCK ? "inline-block" : 
-        block->type == RDT_VIEW_LIST_ITEM ? "list-item" : 
-        block->type == RDT_VIEW_TABLE ? "table" : 
-        block->type == RDT_VIEW_TABLE_ROW_GROUP ? "table-row-group" : 
-        block->type == RDT_VIEW_TABLE_ROW ? "table-row" : 
+        block->type == RDT_VIEW_BLOCK ? "block" :
+        block->type == RDT_VIEW_INLINE_BLOCK ? "inline-block" :
+        block->type == RDT_VIEW_LIST_ITEM ? "list-item" :
+        block->type == RDT_VIEW_TABLE ? "table" :
+        block->type == RDT_VIEW_TABLE_ROW_GROUP ? "table-row-group" :
+        block->type == RDT_VIEW_TABLE_ROW ? "table-row" :
         block->type == RDT_VIEW_TABLE_CELL ? "table-cell" : "image",
         block->node->name(),
         block->x, block->y, block->width, block->height);
     print_block_props(block, buf, indent + 2);
-    print_inline_props((ViewSpan*)block, buf, indent+2);              
+    print_inline_props((ViewSpan*)block, buf, indent+2);
     print_view_group((ViewGroup*)block, buf, indent+2);
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "]\n");
@@ -403,7 +395,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                 unsigned char* text_data = view->node->text_data();
                 unsigned char* str = text_data ? text_data + text->start_index : nullptr;
                 if (!str || !(*str) || text->length <= 0) {
-                    strbuf_append_format(buf, "invalid text node: len:%d\n", text->length); 
+                    strbuf_append_format(buf, "invalid text node: len:%d\n", text->length);
                 } else {
                     strbuf_append_str(buf, "text:'");
                     strbuf_append_str_n(buf, (char*)str, text->length);
@@ -413,8 +405,8 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                         if (*s == '\n' || *s == '\r' || *s == '\'') { *s = '^'; }
                         s++;
                     }
-                    strbuf_append_format(buf, "', start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d\n", 
-                        text->start_index, text->length, text->x, text->y, text->width, text->height);                    
+                    strbuf_append_format(buf, "', start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d\n",
+                        text->start_index, text->length, text->x, text->y, text->width, text->height);
                 }
             }
             else {
@@ -473,7 +465,7 @@ void append_json_string(StrBuf* buf, const char* str) {
         strbuf_append_str(buf, "null");
         return;
     }
-    
+
     strbuf_append_char(buf, '"');
     for (const char* p = str; *p; p++) {
         switch (*p) {
@@ -494,20 +486,20 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         strbuf_append_str(buf, "null");
         return;
     }
-    
+
     // Add indentation
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "{\n");
-    
+
     // Basic view properties
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"type\": ");
     append_json_string(buf, get_view_type_name_json(block->type));
     strbuf_append_str(buf, ",\n");
-    
+
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"tag\": ");
-    
+
     // CRITICAL FIX: Provide better element names for debugging
     const char* tag_name = "unknown";
     if (block->node) {
@@ -516,19 +508,19 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             // CRITICAL ISSUE: #null elements should not exist in proper DOM structure
             if (strcmp(node_name, "#null") == 0) {
                 printf("ERROR: Found #null element! This indicates DOM structure issue.\n");
-                printf("ERROR: Element details - parent: %p, parent_node: %p\n", 
-                       (void*)block->parent, 
+                printf("ERROR: Element details - parent: %p, parent_node: %p\n",
+                       (void*)block->parent,
                        block->parent ? (void*)block->parent->node : nullptr);
-                
+
                 if (block->parent && block->parent->node) {
                     printf("ERROR: Parent node name: %s\n", block->parent->node->name());
                 }
-                
+
                 // Try to infer the element type from context (TEMPORARY WORKAROUND)
                 if (block->parent == nullptr) {
                     tag_name = "html";  // Root element should be html, not html-root
                     printf("WORKAROUND: Mapping root #null -> html\n");
-                } else if (block->parent && block->parent->node && 
+                } else if (block->parent && block->parent->node &&
                           strcmp(block->parent->node->name(), "html") == 0) {
                     tag_name = "body";
                     printf("WORKAROUND: Mapping child of html #null -> body\n");
@@ -558,19 +550,19 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
                 break;
         }
     }
-    
+
     append_json_string(buf, tag_name);
     strbuf_append_str(buf, ",\n");
-    
+
     // ENHANCEMENT: Add CSS class information if available
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"selector\": ");
-    
+
     // Generate enhanced CSS selector with nth-of-type support (matches browser behavior)
     if (block->node) {
         size_t class_len;
         const lxb_char_t* class_attr = block->node->get_attribute("class", &class_len);
-        
+
         // Start with tag name and class
         char base_selector[256];
         if (class_attr && class_len > 0) {
@@ -578,7 +570,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         } else {
             snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
         }
-        
+
         // Add nth-of-type if there are multiple siblings with same tag
         char final_selector[512];
         DomNode* parent = block->node->parent;
@@ -587,7 +579,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             int sibling_count = 0;
             int current_index = 0;
             DomNode* sibling = parent->first_child();
-            
+
             while (sibling) {
                 if (sibling->type == LEXBOR_ELEMENT) {
                     const char* sibling_tag = sibling->name();
@@ -600,7 +592,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
                 }
                 sibling = sibling->next_sibling();
             }
-            
+
             // Add nth-of-type if multiple siblings exist
             if (sibling_count > 1 && current_index > 0) {
                 snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)", base_selector, current_index);
@@ -610,13 +602,13 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         } else {
             snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
         }
-        
+
         append_json_string(buf, final_selector);
     } else {
         append_json_string(buf, tag_name);
     }
     strbuf_append_str(buf, ",\n");
-    
+
     // CRITICAL FIX: Use relative positioning for Radiant's coordinate system
     // Radiant uses relative positioning where each element's x,y is relative to its parent
     // Do NOT calculate absolute positions - this breaks the relative positioning system
@@ -624,29 +616,29 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     int css_y = (int)round(block->y / pixel_ratio);
     int css_width = (int)round(block->width / pixel_ratio);
     int css_height = (int)round(block->height / pixel_ratio);
-    
+
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    
+
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"x\": %d,\n", css_x);
-    
+
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"y\": %d,\n", css_y);
-    
+
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"width\": %d,\n", css_width);
-    
+
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"height\": %d\n", css_height);
-    
+
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
-    
+
     // CRITICAL FIX: Use "computed" instead of "css_properties" to match test framework expectations
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"computed\": {\n");
-    
+
     // Display property
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"display\": ");
@@ -657,12 +649,12 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     // CRITICAL FIX: Check for flex container
     else if (block->embed && block->embed->flex_container) display = "flex";
     append_json_string(buf, display);
-    
+
     // Add required CSS properties that test framework expects
     strbuf_append_str(buf, ",\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"position\": \"static\",\n");
-    
+
     // Box model properties (margins, padding, borders)
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"marginTop\": 0,\n");
@@ -672,7 +664,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_str(buf, "\"marginBottom\": 0,\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"marginLeft\": 0,\n");
-    
+
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"paddingTop\": 0,\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
@@ -681,7 +673,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_str(buf, "\"paddingBottom\": 0,\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"paddingLeft\": 0,\n");
-    
+
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"borderTopWidth\": 0,\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
@@ -690,7 +682,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_str(buf, "\"borderBottomWidth\": 0,\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"borderLeftWidth\": 0,\n");
-    
+
     // Flexbox properties
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"flexDirection\": \"row\",\n");
@@ -714,7 +706,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_str(buf, "\"order\": 0,\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"gap\": \"normal\",\n");
-    
+
     // Typography
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"fontSize\": 16,\n");
@@ -728,7 +720,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_str(buf, "\"textAlign\": \"start\",\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"verticalAlign\": \"baseline\",\n");
-    
+
     // Positioning
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"top\": \"auto\",\n");
@@ -740,7 +732,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_str(buf, "\"left\": \"auto\",\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"zIndex\": \"auto\",\n");
-    
+
     // Overflow
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"overflow\": \"visible\",\n");
@@ -748,7 +740,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_str(buf, "\"overflowX\": \"visible\",\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"overflowY\": \"visible\"");
-    
+
     // Add block properties if available
     if (block->blk) {
         strbuf_append_str(buf, ",\n");
@@ -767,9 +759,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_format(buf, "\"max_height\": %.2f,\n", block->blk->max_height);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"box_sizing\": \"%s\"", 
+        strbuf_append_format(buf, "\"box_sizing\": \"%s\"",
             block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX ? "border-box" : "content-box");
-        
+
         if (block->blk->given_width >= 0) {
             strbuf_append_str(buf, ",\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
@@ -781,7 +773,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             strbuf_append_format(buf, "\"given_height\": %d", block->blk->given_height);
         }
     }
-    
+
     // Add flex container properties if available
     if (block->embed && block->embed->flex_container) {
         strbuf_append_str(buf, ",\n");
@@ -798,15 +790,15 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "}");
     }
-    
+
     strbuf_append_str(buf, "\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
-    
+
     // Children
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"children\": [\n");
-    
+
     View* child = ((ViewGroup*)block)->child;
     bool first_child = true;
     while (child) {
@@ -814,7 +806,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             strbuf_append_str(buf, ",\n");
         }
         first_child = false;
-        
+
         if (child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK ||
             child->type == RDT_VIEW_LIST_ITEM || child->type == RDT_VIEW_TABLE ||
             child->type == RDT_VIEW_TABLE_ROW_GROUP || child->type == RDT_VIEW_TABLE_ROW ||
@@ -836,14 +828,14 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "}");
         }
-        
+
         child = child->next;
     }
-    
+
     strbuf_append_str(buf, "\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "]\n");
-    
+
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "}");
 }
@@ -852,20 +844,20 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
 void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "{\n");
-    
+
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"type\": \"text\",\n");
-    
+
     // CRITICAL FIX: Add tag field for consistency with block elements
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"tag\": \"text\",\n");
-    
+
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"selector\": \"text\",\n");
-    
+
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"content\": ");
-    
+
     // Extract text content with better error handling (matching text output)
     if (text->node) {
         unsigned char* text_data = text->node->text_data();
@@ -873,7 +865,7 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
             char* content = (char*)malloc(text->length + 1);
             strncpy(content, (char*)(text_data + text->start_index), text->length);
             content[text->length] = '\0';
-            
+
             // Clean up whitespace for better readability
             char* cleaned = content;
             while (*cleaned && (*cleaned == ' ' || *cleaned == '\n' || *cleaned == '\t')) cleaned++;
@@ -890,7 +882,7 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
         append_json_string(buf, "[no-node]");
     }
     strbuf_append_str(buf, ",\n");
-    
+
     // Add text fragment information (matching text output)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"text_info\": {\n");
@@ -900,14 +892,14 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
     strbuf_append_format(buf, "\"length\": %d\n", text->length);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
-    
+
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    
+
     // CRITICAL FIX: Calculate absolute position for text nodes (same as block elements)
     int abs_x = text->x;
     int abs_y = text->y;
-    
+
     // Calculate absolute position by traversing up the parent chain
     ViewGroup* parent = text->parent;
     while (parent && (parent->type == RDT_VIEW_BLOCK || parent->type == RDT_VIEW_INLINE_BLOCK ||
@@ -919,28 +911,28 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
         abs_y += parent_block->y;
         parent = parent_block->parent;
     }
-    
+
     // Convert absolute text dimensions to CSS pixels
     int css_x = (int)round(abs_x / pixel_ratio);
     int css_y = (int)round(abs_y / pixel_ratio);
     int css_width = (int)round(text->width / pixel_ratio);
     int css_height = (int)round(text->height / pixel_ratio);
-    
+
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"x\": %d,\n", css_x);
-    
+
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"y\": %d,\n", css_y);
-    
+
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"width\": %d,\n", css_width);
-    
+
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"height\": %d\n", css_height);
-    
+
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}\n");
-    
+
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "}");
 }
@@ -951,19 +943,19 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
         strbuf_append_str(buf, "null");
         return;
     }
-    
+
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "{\n");
-    
+
     // Basic view properties
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"type\": ");
     append_json_string(buf, get_view_type_name_json(span->type));
     strbuf_append_str(buf, ",\n");
-    
+
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"tag\": ");
-    
+
     // Get tag name
     const char* tag_name = "span";
     if (span->node) {
@@ -974,15 +966,15 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
     }
     append_json_string(buf, tag_name);
     strbuf_append_str(buf, ",\n");
-    
+
     // Generate selector (same logic as blocks)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"selector\": ");
-    
+
     if (span->node) {
         size_t class_len;
         const lxb_char_t* class_attr = span->node->get_attribute("class", &class_len);
-        
+
         // Start with tag name and class
         char base_selector[256];
         if (class_attr && class_len > 0) {
@@ -990,7 +982,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
         } else {
             snprintf(base_selector, sizeof(base_selector), "%s", tag_name);
         }
-        
+
         // Add nth-of-type if there are multiple siblings with same tag
         char final_selector[512];
         DomNode* parent = span->node->parent;
@@ -999,7 +991,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
             int sibling_count = 0;
             int current_index = 0;
             DomNode* sibling = parent->first_child();
-            
+
             while (sibling) {
                 if (sibling->type == LEXBOR_ELEMENT) {
                     const char* sibling_tag = sibling->name();
@@ -1012,7 +1004,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
                 }
                 sibling = sibling->next_sibling();
             }
-            
+
             // Add nth-of-type if multiple siblings exist
             if (sibling_count > 1 && current_index > 0) {
                 snprintf(final_selector, sizeof(final_selector), "%s:nth-of-type(%d)", base_selector, current_index);
@@ -1022,19 +1014,19 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
         } else {
             snprintf(final_selector, sizeof(final_selector), "%s", base_selector);
         }
-        
+
         append_json_string(buf, final_selector);
     } else {
         append_json_string(buf, tag_name);
     }
     strbuf_append_str(buf, ",\n");
-    
+
     // CSS properties (enhanced to match text output)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"css_properties\": {\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"display\": \"inline\"");
-    
+
     // Add inline properties if available
     if (span->in_line) {
         if (span->in_line->cursor) {
@@ -1059,7 +1051,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
             strbuf_append_format(buf, "\"vertical_align\": \"%s\"", lxb_css_value_by_id(span->in_line->vertical_align)->name);
         }
     }
-    
+
     // Add font properties if available
     if (span->font) {
         strbuf_append_str(buf, ",\n");
@@ -1078,15 +1070,15 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "}");
     }
-    
+
     strbuf_append_str(buf, "\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
-    
+
     // Children (this is the critical part - process span children!)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"children\": [\n");
-    
+
     View* child = ((ViewGroup*)span)->child;
     bool first_child = true;
     while (child) {
@@ -1094,7 +1086,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
             strbuf_append_str(buf, ",\n");
         }
         first_child = false;
-        
+
         if (child->type == RDT_VIEW_TEXT) {
             print_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
         } else if (child->type == RDT_VIEW_INLINE) {
@@ -1111,14 +1103,14 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "}");
         }
-        
+
         child = child->next;
     }
-    
+
     strbuf_append_str(buf, "\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "]\n");
-    
+
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "}");
 }
@@ -1126,10 +1118,10 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 // Main JSON generation function
 void print_view_tree_json(ViewGroup* view_root, float pixel_ratio) {
     StrBuf* json_buf = strbuf_new_cap(2048);
-    
+
     strbuf_append_str(json_buf, "{\n");
     strbuf_append_str(json_buf, "  \"test_info\": {\n");
-    
+
     // Add timestamp
     strbuf_append_str(json_buf, "    \"timestamp\": \"");
     time_t now = time(0);
@@ -1139,12 +1131,12 @@ void print_view_tree_json(ViewGroup* view_root, float pixel_ratio) {
         strbuf_append_str(json_buf, time_str);
     }
     strbuf_append_str(json_buf, "\",\n");
-    
+
     strbuf_append_str(json_buf, "    \"radiant_version\": \"1.0\",\n");
     strbuf_append_format(json_buf, "    \"pixel_ratio\": %.2f,\n", pixel_ratio);
     strbuf_append_str(json_buf, "    \"viewport\": { \"width\": 1200, \"height\": 800 }\n");
     strbuf_append_str(json_buf, "  },\n");
-    
+
     strbuf_append_str(json_buf, "  \"layout_tree\": ");
     if (view_root) {
         print_block_json((ViewBlock*)view_root, json_buf, 2, pixel_ratio);
@@ -1152,10 +1144,10 @@ void print_view_tree_json(ViewGroup* view_root, float pixel_ratio) {
         strbuf_append_str(json_buf, "null");
     }
     strbuf_append_str(json_buf, "\n}\n");
-    
+
     // Write to file in /tmp directory for easier access
     write_string_to_file("/tmp/view_tree.json", json_buf->str);
-    
+
     printf("JSON layout data written to: /tmp/view_tree.json\n");
     strbuf_free(json_buf);
 }

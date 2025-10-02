@@ -218,8 +218,8 @@ static Item parse_datetime(Input *input, const char **mark) {
 
 static Item parse_number(Input *input, const char **mark) {
     double *dval;
-    MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-    if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+    dval = (double*)pool_calloc(input->pool, sizeof(double));
+    if (dval == NULL) return {.item = ITEM_ERROR};
     
     char* end;
     *dval = strtod(*mark, &end);
@@ -502,8 +502,8 @@ static Item parse_value(Input *input, const char **mark) {
             } else if (strncmp(*mark, "nan", 3) == 0) {
                 *mark += 3;
                 double *dval;
-                MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-                if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+                dval = (double*)pool_calloc(input->pool, sizeof(double));
+                if (dval == NULL) return {.item = ITEM_ERROR};
                 *dval = NAN;
                 return {.item = d2it(dval)};
             }
@@ -512,8 +512,8 @@ static Item parse_value(Input *input, const char **mark) {
             if (strncmp(*mark, "inf", 3) == 0) {
                 *mark += 3;
                 double *dval;
-                MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-                if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+                dval = (double*)pool_calloc(input->pool, sizeof(double));
+                if (dval == NULL) return {.item = ITEM_ERROR};
                 *dval = INFINITY;
                 return {.item = d2it(dval)};
             }
@@ -522,15 +522,15 @@ static Item parse_value(Input *input, const char **mark) {
             if (strncmp(*mark, "-inf", 4) == 0) {
                 *mark += 4;
                 double *dval;
-                MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-                if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+                dval = (double*)pool_calloc(input->pool, sizeof(double));
+                if (dval == NULL) return {.item = ITEM_ERROR};
                 *dval = -INFINITY;
                 return {.item = d2it(dval)};
             } else if (strncmp(*mark, "-nan", 4) == 0) {
                 *mark += 4;
                 double *dval;
-                MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-                if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+                dval = (double*)pool_calloc(input->pool, sizeof(double));
+                if (dval == NULL) return {.item = ITEM_ERROR};
                 *dval = -NAN;
                 return {.item = d2it(dval)};
             }

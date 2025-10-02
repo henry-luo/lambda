@@ -71,7 +71,7 @@ void format_number(StringBuf* sb, Item item) {
     }
 }
 
-extern "C" String* format_data(Item item, String* type, String* flavor, VariableMemPool* pool) {
+extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool) {
     printf("DEBUG: format_data called with type='%s', flavor='%s'\n", 
            type ? type->chars : "NULL", flavor ? flavor->chars : "NULL");
     fflush(stdout);

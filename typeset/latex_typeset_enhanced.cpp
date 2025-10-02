@@ -7,6 +7,7 @@
 #include "../lambda/lambda-data.hpp"
 #include "../lib/log.h"
 #include "../lib/string.h"
+#include "../lib/mempool.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -127,8 +128,8 @@ bool fn_typeset_latex_enhanced_standalone(const char* input_file, const char* ou
     log_info("Enhanced LaTeX standalone processing: %s -> %s", input_file, output_file);
 
     // Initialize memory pool
-    VariableMemPool* pool;
-    if (pool_variable_init(&pool, 1024 * 1024, MEM_POOL_NO_BEST_FIT) != MEM_POOL_ERR_OK) { // 1MB initial pool
+    Pool* pool = pool_create();
+    if (!pool) {
         log_error("Failed to create memory pool for enhanced processing");
         return false;
     }
@@ -149,7 +150,7 @@ bool fn_typeset_latex_enhanced_standalone(const char* input_file, const char* ou
     FILE* file = fopen(input_file, "r");
     if (!file) {
         log_error("Failed to open input file: %s", input_file);
-        pool_variable_destroy(pool);
+        pool_destroy(pool);
         return false;
     }
 
@@ -161,7 +162,7 @@ bool fn_typeset_latex_enhanced_standalone(const char* input_file, const char* ou
     if (!file_content) {
         log_error("Failed to allocate memory for file content");
         fclose(file);
-        pool_variable_destroy(pool);
+        pool_destroy(pool);
         return false;
     }
 
@@ -177,7 +178,7 @@ bool fn_typeset_latex_enhanced_standalone(const char* input_file, const char* ou
 
     if (!input) {
         log_error("Failed to create input parser for LaTeX file");
-        pool_variable_destroy(pool);
+        pool_destroy(pool);
         return false;
     }
 
@@ -186,9 +187,9 @@ bool fn_typeset_latex_enhanced_standalone(const char* input_file, const char* ou
     if (get_type_id(latex_ast) == LMD_TYPE_ERROR) {
         log_error("Failed to parse LaTeX file: %s", input_file);
         if (input->type_list) arraylist_free(input->type_list);
-        pool_variable_destroy(input->pool);
+        pool_destroy(input->pool);
         free(input);
-        pool_variable_destroy(pool);
+        pool_destroy(pool);
         return false;
     }
 
@@ -203,9 +204,9 @@ bool fn_typeset_latex_enhanced_standalone(const char* input_file, const char* ou
     if (!engine) {
         log_error("Failed to create enhanced typeset engine");
         if (input->type_list) arraylist_free(input->type_list);
-        pool_variable_destroy(input->pool);
+        pool_destroy(input->pool);
         free(input);
-        pool_variable_destroy(pool);
+        pool_destroy(pool);
         return false;
     }
 
@@ -237,9 +238,9 @@ bool fn_typeset_latex_enhanced_standalone(const char* input_file, const char* ou
     // Clean up
     typeset_engine_destroy(engine);
     if (input->type_list) arraylist_free(input->type_list);
-    pool_variable_destroy(input->pool);
+    pool_destroy(input->pool);
     free(input);
-    pool_variable_destroy(pool);
+    pool_destroy(pool);
 
     if (success) {
         log_info("Enhanced LaTeX processing completed successfully");

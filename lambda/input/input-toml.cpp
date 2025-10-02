@@ -9,7 +9,7 @@ extern ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId 
 // is_multiline: true for multiline basic strings, false for regular strings
 static bool handle_escape_sequence(StringBuf* sb, const char **toml, bool is_multiline, int *line_num) {
     if (**toml != '\\') return false;
-    
+
     (*toml)++; // skip backslash
     switch (**toml) {
         case '"': stringbuf_append_char(sb, '"'); break;
@@ -77,7 +77,7 @@ static bool handle_escape_sequence(StringBuf* sb, const char **toml, bool is_mul
                 stringbuf_append_char(sb, **toml);
             }
             break;
-        default: 
+        default:
             stringbuf_append_char(sb, '\\');
             stringbuf_append_char(sb, **toml);
             break;
@@ -123,13 +123,13 @@ static void skip_whitespace_and_comments(const char **toml, int *line_num) {
 static String* parse_bare_key(Input *input, const char **toml) {
     StringBuf* sb = input->sb;
     const char *start = *toml;
-    
+
     // Bare keys can contain A-Z, a-z, 0-9, -, _ (including pure numeric keys)
     while (**toml && (isalnum(**toml) || **toml == '-' || **toml == '_')) {
         (*toml)++;
     }
     if (*toml == start) return NULL; // no valid characters
-    
+
     int len = *toml - start;
     for (int i = 0; i < len; i++) {
         stringbuf_append_char(sb, start[i]);
@@ -140,7 +140,7 @@ static String* parse_bare_key(Input *input, const char **toml) {
 static String* parse_quoted_key(Input *input, const char **toml) {
     if (**toml != '"') return NULL;
     StringBuf* sb = input->sb;
-    
+
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '"') {
         if (**toml == '\\') {
@@ -160,7 +160,7 @@ static String* parse_quoted_key(Input *input, const char **toml) {
 static String* parse_literal_key(Input *input, const char **toml) {
     if (**toml != '\'') return NULL;
     StringBuf* sb = input->sb;
-    
+
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '\'') {
         stringbuf_append_char(sb, **toml);
@@ -176,7 +176,7 @@ static String* parse_literal_key(Input *input, const char **toml) {
 static String* parse_basic_string(Input *input, const char **toml) {
     if (**toml != '"') return NULL;
     StringBuf* sb = input->sb;
-    
+
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '"') {
         if (**toml == '\\') {
@@ -196,7 +196,7 @@ static String* parse_basic_string(Input *input, const char **toml) {
 static String* parse_literal_string(Input *input, const char **toml) {
     if (**toml != '\'') return NULL;
     StringBuf* sb = input->sb;
-    
+
     (*toml)++; // Skip opening quote
     while (**toml && **toml != '\'') {
         stringbuf_append_char(sb, **toml);
@@ -212,9 +212,9 @@ static String* parse_literal_string(Input *input, const char **toml) {
 static String* parse_multiline_basic_string(Input *input, const char **toml, int *line_num) {
     if (strncmp(*toml, "\"\"\"", 3) != 0) return NULL;
     StringBuf* sb = input->sb;
-    
+
     *toml += 3; // Skip opening triple quotes
-    
+
     // Skip optional newline right after opening quotes
     if (**toml == '\n') {
         (*toml)++;
@@ -223,13 +223,13 @@ static String* parse_multiline_basic_string(Input *input, const char **toml, int
         *toml += 2;
         (*line_num)++;
     }
-    
+
     while (**toml) {
         if (strncmp(*toml, "\"\"\"", 3) == 0) {
             *toml += 3; // Skip closing triple quotes
             break;
         }
-        
+
         if (**toml == '\\') {
             handle_escape_sequence(sb, toml, true, line_num);
         } else {
@@ -246,9 +246,9 @@ static String* parse_multiline_basic_string(Input *input, const char **toml, int
 static String* parse_multiline_literal_string(Input *input, const char **toml, int *line_num) {
     if (strncmp(*toml, "'''", 3) != 0) return NULL;
     StringBuf* sb = input->sb;
-    
+
     *toml += 3; // Skip opening triple quotes
-    
+
     // Skip optional newline right after opening quotes
     if (**toml == '\n') {
         (*toml)++;
@@ -257,13 +257,13 @@ static String* parse_multiline_literal_string(Input *input, const char **toml, i
         *toml += 2;
         (*line_num)++;
     }
-    
+
     while (**toml) {
         if (strncmp(*toml, "'''", 3) == 0) {
             *toml += 3; // Skip closing triple quotes
             break;
         }
-        
+
         if (**toml == '\n') {
             (*line_num)++;
         }
@@ -286,47 +286,47 @@ static String* parse_key(Input *input, const char **toml) {
 static Item parse_number(Input *input, const char **toml) {
     char* end;
     const char *start = *toml;
-    
+
     // Handle special float values
     if (strncmp(*toml, "inf", 3) == 0) {
         double *dval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        dval = (double*)pool_calloc(input->pool, sizeof(double));
+        if (dval == NULL) return {.item = ITEM_ERROR};
         *dval = INFINITY;
         *toml += 3;
         return {.item = d2it(dval)};
     }
     if (strncmp(*toml, "-inf", 4) == 0) {
         double *dval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        dval = (double*)pool_calloc(input->pool, sizeof(double));
+        if (dval == NULL) return {.item = ITEM_ERROR};
         *dval = -INFINITY;
         *toml += 4;
         return {.item = d2it(dval)};
     }
     if (strncmp(*toml, "nan", 3) == 0) {
         double *dval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        dval = (double*)pool_calloc(input->pool, sizeof(double));
+        if (dval == NULL) return {.item = ITEM_ERROR};
         *dval = NAN;
         *toml += 3;
         return {.item = d2it(dval)};
     }
     if (strncmp(*toml, "-nan", 4) == 0) {
         double *dval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        dval = (double*)pool_calloc(input->pool, sizeof(double));
+        if (dval == NULL) return {.item = ITEM_ERROR};
         *dval = NAN;
         *toml += 4;
         return {.item = d2it(dval)};
     }
-    
+
     // Handle hex, octal, binary integers
     if (**toml == '0' && (*(*toml + 1) == 'x' || *(*toml + 1) == 'X')) {
         int64_t val = strtol(start, &end, 16);
         int64_t *lval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&lval);
-        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        lval = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
+        if (lval == NULL) return {.item = ITEM_ERROR};
         *lval = val;
         *toml = end;
         return {.item = l2it(lval)};
@@ -334,8 +334,8 @@ static Item parse_number(Input *input, const char **toml) {
     if (**toml == '0' && (*(*toml + 1) == 'o' || *(*toml + 1) == 'O')) {
         int64_t val = strtol(start + 2, &end, 8);
         int64_t *lval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&lval);
-        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        lval = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
+        if (lval == NULL) return {.item = ITEM_ERROR};
         *lval = val;
         *toml = end;
         return {.item = l2it(lval)};
@@ -343,22 +343,22 @@ static Item parse_number(Input *input, const char **toml) {
     if (**toml == '0' && (*(*toml + 1) == 'b' || *(*toml + 1) == 'B')) {
         int64_t val = strtol(start + 2, &end, 2);
         int64_t *lval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&lval);
-        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        lval = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
+        if (lval == NULL) return {.item = ITEM_ERROR};
         *lval = val;
         *toml = end;
         return {.item = l2it(lval)};
     }
-    
+
     // Check if it's a float (contains . or e/E)
     bool is_float = false;
     const char *temp = *toml;
-    
+
     // Skip sign
     if (*temp == '+' || *temp == '-') {
         temp++;
     }
-    
+
     // Remove underscores and check for float indicators
     while (*temp && (isdigit(*temp) || *temp == '.' || *temp == 'e' || *temp == 'E' || *temp == '+' || *temp == '-' || *temp == '_')) {
         if (*temp == '.' || *temp == 'e' || *temp == 'E') {
@@ -366,19 +366,19 @@ static Item parse_number(Input *input, const char **toml) {
         }
         temp++;
     }
-    
+
     if (is_float) {
         double *dval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        dval = (double*)pool_calloc(input->pool, sizeof(double));
+        if (dval == NULL) return {.item = ITEM_ERROR};
         *dval = strtod(start, &end);
         *toml = end;
         return {.item = d2it(dval)};
     } else {
         int64_t val = strtol(start, &end, 10);
         int64_t *lval;
-        MemPoolError err = pool_variable_alloc(input->pool, sizeof(int64_t), (void**)&lval);
-        if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
+        lval = (int64_t*)pool_calloc(input->pool, sizeof(int64_t));
+        if (lval == NULL) return {.item = ITEM_ERROR};
         *lval = val;
         *toml = end;
         return {.item = l2it(lval)};
@@ -392,10 +392,10 @@ static Array* parse_array(Input *input, const char **toml, int *line_num) {
 
     (*toml)++; // skip [
     skip_whitespace_and_comments(toml, line_num);
-    
-    if (**toml == ']') { 
-        (*toml)++;  
-        return arr; 
+
+    if (**toml == ']') {
+        (*toml)++;
+        return arr;
     }
 
     while (**toml) {
@@ -406,24 +406,24 @@ static Array* parse_array(Input *input, const char **toml, int *line_num) {
         array_append(arr, value, input->pool);
 
         skip_whitespace_and_comments(toml, line_num);
-        
-        if (**toml == ']') { 
-            (*toml)++;  
-            break; 
+
+        if (**toml == ']') {
+            (*toml)++;
+            break;
         }
         if (**toml != ',') {
             return NULL;
         }
         (*toml)++; // skip comma
         skip_whitespace_and_comments(toml, line_num);
-        
+
         // Handle trailing comma
         if (**toml == ']') {
             (*toml)++;
             break;
         }
     }
-    
+
     return arr;
 }
 
@@ -431,12 +431,12 @@ static Map* parse_inline_table(Input *input, const char **toml, int *line_num) {
     if (**toml != '{') return NULL;
     Map* mp = map_pooled(input->pool);
     if (!mp) return NULL;
-    
+
     (*toml)++; // skip '{'
     skip_whitespace(toml);
-    
+
     if (**toml == '}') { // empty table
-        (*toml)++;  
+        (*toml)++;
         return mp;
     }
 
@@ -457,13 +457,13 @@ static Map* parse_inline_table(Input *input, const char **toml, int *line_num) {
         if (value.item == ITEM_ERROR) {
             return NULL;
         }
-        
+
         map_put(mp, key, value, input);
 
         skip_whitespace(toml);
-        if (**toml == '}') { 
-            (*toml)++;  
-            break; 
+        if (**toml == '}') {
+            (*toml)++;
+            break;
         }
         if (**toml != ',') {
             return NULL;
@@ -476,7 +476,7 @@ static Map* parse_inline_table(Input *input, const char **toml, int *line_num) {
 
 static Item parse_value(Input *input, const char **toml, int *line_num) {
     skip_whitespace_and_comments(toml, line_num);
-    
+
     switch (**toml) {
         case '{': {
             Map* table = parse_inline_table(input, toml, line_num);
@@ -548,12 +548,12 @@ static Item parse_value(Input *input, const char **toml, int *line_num) {
 static String* create_string_key(Input *input, const char* key_str) {
     StringBuf* sb = input->sb;
     stringbuf_reset(sb);
-    
+
     int len = strlen(key_str);
     for (int i = 0; i < len; i++) {
         stringbuf_append_char(sb, key_str[i]);
     }
-    
+
     String* key = stringbuf_to_string(sb);
     return key;
 }
@@ -562,11 +562,11 @@ static String* create_string_key(Input *input, const char* key_str) {
 static Map* find_or_create_section(Input *input, Map* root_map, const char* section_name) {
     String* key = create_string_key(input, section_name);
     if (!key) return NULL;
-    
+
     // Look for existing section in root map
     ShapeEntry* entry = ((TypeMap*)root_map->type)->shape;
     while (entry) {
-        if (entry->name->length == key->len && 
+        if (entry->name->length == key->len &&
             strncmp(entry->name->str, key->chars, key->len) == 0) {
             // Found existing section
             void* field_ptr = (char*)root_map->data + entry->byte_offset;
@@ -574,11 +574,11 @@ static Map* find_or_create_section(Input *input, Map* root_map, const char* sect
         }
         entry = entry->next;
     }
-    
+
     // Create new section
     Map* section_map = map_pooled(input->pool);
     if (!section_map) return NULL;
-    
+
     // Add section to root map
     map_put(root_map, key, {.item = (uint64_t)section_map}, input);
 
@@ -590,20 +590,20 @@ static Map* handle_nested_section(Input *input, Map* root_map, const char* secti
     char path_copy[512];
     strncpy(path_copy, section_path, sizeof(path_copy) - 1);
     path_copy[sizeof(path_copy) - 1] = '\0';
-    
+
     // Split the path by dots
     char* first_part = strtok(path_copy, ".");
     char* remaining_path = strtok(NULL, "");
-    
+
     if (!first_part) return NULL;
-    
+
     // Get or create the first level section
     Map* current_map = find_or_create_section(input, root_map, first_part);
     if (!current_map) return NULL;
-    
+
     // If there's no remaining path, return the current section
     if (!remaining_path) return current_map;
-    
+
     // Handle nested parts
     TypeMap* current_map_type = (TypeMap*)current_map->type;
     ShapeEntry* current_shape_entry = current_map_type->shape;
@@ -612,17 +612,17 @@ static Map* handle_nested_section(Input *input, Map* root_map, const char* secti
             current_shape_entry = current_shape_entry->next;
         }
     }
-    
+
     char* token = strtok(remaining_path, ".");
     while (token != NULL) {
         String* key = create_string_key(input, token);
         if (!key) return NULL;
-        
+
         // Look for existing nested table in current map
         Map* nested_map = NULL;
         ShapeEntry* entry = current_map_type->shape;
         while (entry) {
-            if (entry->name->length == key->len && 
+            if (entry->name->length == key->len &&
                 strncmp(entry->name->str, key->chars, key->len) == 0) {
                 // Found existing entry
                 void* field_ptr = (char*)current_map->data + entry->byte_offset;
@@ -631,15 +631,15 @@ static Map* handle_nested_section(Input *input, Map* root_map, const char* secti
             }
             entry = entry->next;
         }
-        
+
         if (!nested_map) {
             // Create new nested table
             nested_map = map_pooled(input->pool);
             if (!nested_map) return NULL;
-            
+
             map_put(current_map, key, {.item = (uint64_t)nested_map}, input);
         }
-        
+
         current_map = nested_map;
         current_map_type = (TypeMap*)nested_map->type;
         // Find the last shape entry in the current table
@@ -649,19 +649,19 @@ static Map* handle_nested_section(Input *input, Map* root_map, const char* secti
                 current_shape_entry = current_shape_entry->next;
             }
         }
-        
+
         token = strtok(NULL, ".");
     }
-    
+
     return current_map;
 }
 
 static bool parse_table_header(const char **toml, char *table_name, int *line_num) {
     if (**toml != '[') return false;
     (*toml)++; // skip '['
-    
+
     skip_whitespace(toml);
-    
+
     int i = 0;
     while (**toml && **toml != ']' && i < 255) {
         if (**toml == ' ' || **toml == '\t') {
@@ -672,12 +672,12 @@ static bool parse_table_header(const char **toml, char *table_name, int *line_nu
         (*toml)++;
     }
     table_name[i] = '\0';
-    
+
     if (i == 0 || **toml != ']') {
         return false;
     }
     (*toml)++; // skip ']'
-    
+
     return true;
 }
 
@@ -693,7 +693,7 @@ void parse_toml(Input* input, const char* toml_string) {
 
     const char *toml = toml_string;
     int line_num = 1;
-    
+
     // Current table context
     Map* current_table = root_map;
     TypeMap* current_table_type = (TypeMap*)root_map->type;
@@ -701,7 +701,7 @@ void parse_toml(Input* input, const char* toml_string) {
     while (*toml) {
         skip_whitespace_and_comments(&toml, &line_num);
         if (!*toml) break;
-        
+
         // Check for table header
         if (*toml == '[') {
             // Check for array of tables [[...]] which we don't support yet
@@ -710,7 +710,7 @@ void parse_toml(Input* input, const char* toml_string) {
                 skip_line(&toml, &line_num);
                 continue;
             }
-            
+
             char table_name[256];
             if (parse_table_header(&toml, table_name, &line_num)) {
                 // Handle sections using the new refactored function
@@ -723,29 +723,29 @@ void parse_toml(Input* input, const char* toml_string) {
                 continue;
             }
         }
-        
+
         // Parse key-value pair
         String* key = parse_key(input, &toml);
         if (!key) {
             skip_line(&toml, &line_num);
             continue;
         }
-        
+
         skip_whitespace(&toml);
         if (*toml != '=') {
             skip_line(&toml, &line_num);
             continue;
         }
         toml++; // skip '='
-        
+
         Item value = parse_value(input, &toml, &line_num);
         if (value.item == ITEM_ERROR) {
             skip_line(&toml, &line_num);
             continue;
         }
-        
+
         map_put(current_table, key, value, input);
-        
+
         skip_line(&toml, &line_num);
     }
 }

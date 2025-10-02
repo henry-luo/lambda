@@ -19,14 +19,13 @@ void heap_init() {
     context->heap = (Heap*)calloc(1, sizeof(Heap));
     size_t grow_size = 4096;  // 4k
     size_t tolerance_percent = 20;
-    pool_variable_init(&context->heap->pool, grow_size, tolerance_percent);
+    context->heap->pool = pool_create();
     context->heap->entries = arraylist_new(1024);
 }
 
 void* heap_alloc(int size, TypeId type_id) {
     Heap *heap = context->heap;
-    void *data;
-    pool_variable_alloc(heap->pool, size, (void**)&data);
+    void *data = pool_alloc(heap->pool, size);
     if (!data) {
         log_error("Failed to allocate memory for heap entry");
         return NULL;
@@ -86,7 +85,7 @@ Item push_k(DateTime val) {
 
 void heap_destroy() {
     if (context->heap) {
-        if (context->heap->pool) pool_variable_destroy(context->heap->pool);
+        if (context->heap->pool) pool_destroy(context->heap->pool);
         free(context->heap);
     }
 }
@@ -212,7 +211,7 @@ void free_container(Container* cont, bool clear_entry) {
                 free_item(list->items[j], clear_entry);
             }
             if (list->items) free(list->items);
-            pool_variable_free(context->heap->pool, cont);
+            pool_free(context->heap->pool, cont);
         }
     }
     else if (type_id == LMD_TYPE_ARRAY) {
@@ -223,28 +222,28 @@ void free_container(Container* cont, bool clear_entry) {
                 free_item(arr->items[j], clear_entry);
             }
             if (arr->items) free(arr->items);
-            pool_variable_free(context->heap->pool, cont);
+            pool_free(context->heap->pool, cont);
         }
     }
     else if (type_id == LMD_TYPE_ARRAY_INT) {
         ArrayInt *arr = (ArrayInt*)cont;
         if (!arr->ref_cnt) {
             if (arr->items) free(arr->items);
-            pool_variable_free(context->heap->pool, cont);
+            pool_free(context->heap->pool, cont);
         }
     }
     else if (type_id == LMD_TYPE_ARRAY_INT64) {
         ArrayInt64 *arr = (ArrayInt64*)cont;
         if (!arr->ref_cnt) {
             if (arr->items) free(arr->items);
-            pool_variable_free(context->heap->pool, cont);
+            pool_free(context->heap->pool, cont);
         }
     }
     else if (type_id == LMD_TYPE_ARRAY_FLOAT) {
         ArrayFloat *arr = (ArrayFloat*)cont;
         if (!arr->ref_cnt) {
             if (arr->items) free(arr->items);
-            pool_variable_free(context->heap->pool, cont);
+            pool_free(context->heap->pool, cont);
         }
     }
     else if (type_id == LMD_TYPE_MAP) {
@@ -254,7 +253,7 @@ void free_container(Container* cont, bool clear_entry) {
             ShapeEntry *field = ((TypeMap*)map->type)->shape;
             if (field) { free_map_item(field, map->data, clear_entry); }
             if (map->data) free(map->data);
-            pool_variable_free(context->heap->pool, cont);
+            pool_free(context->heap->pool, cont);
         }
     }
     else if (type_id == LMD_TYPE_ELEMENT) {
@@ -269,7 +268,7 @@ void free_container(Container* cont, bool clear_entry) {
                 free_item(elmt->items[j], clear_entry);
             }
             if (elmt->items) free(elmt->items);
-            pool_variable_free(context->heap->pool, cont);
+            pool_free(context->heap->pool, cont);
         }
     }
 }
@@ -279,13 +278,13 @@ void free_item(Item item, bool clear_entry) {
         item.type_id == LMD_TYPE_BINARY) {
         String *str = (String*)item.pointer;
         if (str && !str->ref_cnt) {
-            pool_variable_free(context->heap->pool, str);
+            pool_free(context->heap->pool, str);
         }
     }
     else if (item.type_id == LMD_TYPE_DECIMAL) {
         Decimal *dec = (Decimal*)item.pointer;
         if (dec && !dec->ref_cnt) {
-            pool_variable_free(context->heap->pool, dec);
+            pool_free(context->heap->pool, dec);
         }
     }
     else if (item.type_id == LMD_TYPE_RAW_POINTER) {
@@ -338,14 +337,14 @@ void frame_end() {
             String *str = (String*)itm.pointer;
             if (str && !str->ref_cnt) {
                 log_debug("freeing heap string: %s", str->chars);
-                pool_variable_free(context->heap->pool, (void*)str);
+                pool_free(context->heap->pool, (void*)str);
             }
         }
         else if (itm.type_id == LMD_TYPE_DECIMAL) {
             Decimal *dec = (Decimal*)itm.pointer;
             if (dec && !dec->ref_cnt) {
                 log_debug("freeing heap decimal");
-                pool_variable_free(context->heap->pool, (void*)dec);
+                pool_free(context->heap->pool, (void*)dec);
             }
         }
         else if (itm.type_id == LMD_TYPE_RAW_POINTER) {

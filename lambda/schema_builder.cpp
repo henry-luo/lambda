@@ -404,7 +404,7 @@ TypeSchema* type_registry_resolve_reference(TypeRegistry* registry, StrView type
 
 // ==================== Enhanced Transpiler Functions ====================
 
-SchemaTranspiler* schema_transpiler_create(VariableMemPool* pool) {
+SchemaTranspiler* schema_transpiler_create(Pool* pool) {
     SchemaTranspiler* transpiler = (SchemaTranspiler*)pool_calloc(pool, sizeof(SchemaTranspiler));
     if (!transpiler) return NULL;
 

@@ -53,15 +53,15 @@ String* create_input_string(Input* input, const char* text, int start, int len) 
 
 String* input_create_string(Input *input, const char* text) {
     if (!text) return NULL;
-    
+
     // Add safety check for valid string pointer
     size_t len = strlen(text);
     if (len == 0) return &EMPTY_STRING;
-    
+
     return create_input_string(input, text, 0, len);
 }
 
-ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
+ShapeEntry* alloc_shape_entry(Pool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry) {
     ShapeEntry* shape_entry = (ShapeEntry*)pool_calloc(pool, sizeof(ShapeEntry) + sizeof(StrView));
     StrView* nv = (StrView*)((char*)shape_entry + sizeof(ShapeEntry));
     nv->str = key->chars;  nv->length = key->len;
@@ -105,7 +105,7 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
         void* new_data = pool_calloc(input->pool, byte_cap);
         if (!new_data) return;
         memcpy(new_data, mp->data, byte_offset - bsize);
-        pool_variable_free(input->pool, mp->data);
+        pool_free(input->pool, mp->data);
         mp->data = new_data;  mp->data_cap = byte_cap;
     }
     map_type->byte_size = byte_offset;
@@ -161,7 +161,7 @@ Element* input_create_element(Input *input, const char* tag_name) {
 }
 
 extern TypeElmt EmptyElmt;
-void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool) {
+void elmt_put(Element* elmt, String* key, Item value, Pool* pool) {
     assert(elmt->type != &EmptyElmt);
     TypeId type_id = get_type_id(value);
     TypeElmt* elmt_type = (TypeElmt*)elmt->type;
@@ -180,7 +180,7 @@ void elmt_put(Element* elmt, String* key, Item value, VariableMemPool* pool) {
         if (!new_data) return;
         if (elmt->data) {
             memcpy(new_data, elmt->data, byte_offset - bsize);
-            pool_variable_free(pool, elmt->data);
+            pool_free(pool, elmt->data);
         }
         elmt->data = new_data;  elmt->data_cap = byte_cap;
     }
@@ -227,8 +227,8 @@ Input* input_new(Url* abs_url) {
     input->url = abs_url;
     size_t grow_size = 1024;  // 1k
     size_t tolerance_percent = 20;
-    MemPoolError err = pool_variable_init(&input->pool, grow_size, tolerance_percent);
-    if (err != MEM_POOL_ERR_OK) { free(input);  return NULL; }
+    input->pool = pool_create();
+    if (input->pool == NULL) { free(input);  return NULL; }
     input->type_list = arraylist_new(16);
     input->root = {.item = ITEM_NULL};
     input->sb = stringbuf_new(input->pool);  // Always allocate StringBuf
@@ -675,9 +675,8 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
         printf("sys:// URL detected, using system information provider\n");
 
         // Create a variable pool for the input
-        VariableMemPool* pool;
-        MemPoolError pool_err = pool_variable_init(&pool, 4096, 10);
-        if (pool_err != MEM_POOL_ERR_OK) {
+        Pool* pool = pool_create();
+        if (pool == NULL) {
             printf("Failed to create variable pool for sys:// URL\n");
             url_destroy(abs_url);
             return NULL;
@@ -685,7 +684,7 @@ Input* input_from_url(String* url, String* type, String* flavor, Url* cwd) {
 
         Input* input = input_from_sysinfo(abs_url, pool);
         if (!input) {
-            pool_variable_destroy(pool);
+            pool_destroy(pool);
         }
         url_destroy(abs_url);
         return input;

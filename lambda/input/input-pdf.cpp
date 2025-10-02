@@ -42,7 +42,7 @@ typedef struct {
 } StreamObject;
 
 static void skip_whitespace(const char **pdf) {
-    while (**pdf && (**pdf == ' ' || **pdf == '\n' || **pdf == '\r' || 
+    while (**pdf && (**pdf == ' ' || **pdf == '\n' || **pdf == '\r' ||
            **pdf == '\t' || **pdf == '\f')) {
         (*pdf)++;
     }
@@ -84,26 +84,25 @@ static void advance_safely(const char **pdf, int max_advance) {
 }
 
 static Item parse_pdf_number(Input *input, const char **pdf) {
-    double *dval;
-    MemPoolError err = pool_variable_alloc(input->pool, sizeof(double), (void**)&dval);
-    if (err != MEM_POOL_ERR_OK) return {.item = ITEM_ERROR};
-    
+    double *dval = (double*)pool_calloc(input->pool, sizeof(double));
+    if (!dval) return {.item = ITEM_ERROR};
+
     char* end;
     *dval = strtod(*pdf, &end);
     *pdf = end;
-    
+
     return {.item = d2it(dval)};
 }
 
 static Array* parse_pdf_array(Input *input, const char **pdf) {
     if (**pdf != '[') return NULL;
-    
+
     (*pdf)++; // skip [
     skip_whitespace_and_comments(pdf);
-    
+
     Array* arr = array_pooled(input->pool);
     if (!arr) return NULL;
-    
+
     int item_count = 0;
     while (**pdf && **pdf != ']' && item_count < 10) { // reduced limit for safety
         Item obj = parse_pdf_object(input, pdf);
@@ -113,23 +112,23 @@ static Array* parse_pdf_array(Input *input, const char **pdf) {
         }
         skip_whitespace_and_comments(pdf);
     }
-    
+
     if (**pdf == ']') {
         (*pdf)++; // skip ]
     }
-    
+
     return arr;
 }
 
 static Map* parse_pdf_dictionary(Input *input, const char **pdf) {
     if (!(**pdf == '<' && *(*pdf + 1) == '<')) return NULL;
-    
+
     *pdf += 2; // skip <<
     skip_whitespace_and_comments(pdf);
-    
+
     Map* dict = map_pooled(input->pool);
     if (!dict) return NULL;
-    
+
     int pair_count = 0;
     while (**pdf && !(**pdf == '>' && *(*pdf + 1) == '>') && pair_count < 10) { // reduced limit for safety
         // parse key (should be a name)
@@ -138,22 +137,22 @@ static Map* parse_pdf_dictionary(Input *input, const char **pdf) {
             (*pdf)++;
             continue;
         }
-        
+
         String* key = parse_pdf_name(input, pdf);
         if (!key) break;
-        
+
         skip_whitespace_and_comments(pdf);
-        
+
         // parse value
         Item value = parse_pdf_object(input, pdf);
         if (value .item != ITEM_ERROR && value .item != ITEM_NULL) {
             map_put(dict, key, value, input);
             pair_count++;
         }
-        
+
         skip_whitespace_and_comments(pdf);
     }
-    
+
     if (**pdf == '>' && *(*pdf + 1) == '>') {
         *pdf += 2; // skip >>
     }
@@ -162,15 +161,15 @@ static Map* parse_pdf_dictionary(Input *input, const char **pdf) {
 
 static String* parse_pdf_name(Input *input, const char **pdf) {
     if (**pdf != '/') return NULL;
-    
+
     (*pdf)++; // skip /
     StringBuf* sb = input->sb;
     int char_count = 0;
     int max_chars = 100; // Safety limit for name length
-    
-    while (**pdf && char_count < max_chars && 
-           !isspace(**pdf) && **pdf != '/' && **pdf != '(' && **pdf != ')' && 
-           **pdf != '<' && **pdf != '>' && **pdf != '[' && **pdf != ']' && 
+
+    while (**pdf && char_count < max_chars &&
+           !isspace(**pdf) && **pdf != '/' && **pdf != '(' && **pdf != ')' &&
+           **pdf != '<' && **pdf != '>' && **pdf != '[' && **pdf != ']' &&
            **pdf != '{' && **pdf != '}' && **pdf != '%' && **pdf != '\0') {
         if (**pdf == '#') {
             // hex escape in name
@@ -190,7 +189,7 @@ static String* parse_pdf_name(Input *input, const char **pdf) {
         }
         char_count++;
     }
-    
+
     return stringbuf_to_string(sb);
 }
 
@@ -199,16 +198,16 @@ static Map* parse_pdf_dictionary(Input *input, const char **pdf);
 
 static String* parse_pdf_string(Input *input, const char **pdf) {
     if (**pdf != '(' && **pdf != '<') return NULL;
-    
+
     StringBuf* sb = input->sb;
-    
+
     if (**pdf == '(') {
         // literal string
         (*pdf)++; // skip (
         int paren_count = 1;
         int char_count = 0;
         int max_chars = 500; // Safety limit
-        
+
         while (**pdf && paren_count > 0 && char_count < max_chars) {
             if (**pdf == '\\') {
                 (*pdf)++; // skip backslash
@@ -252,7 +251,7 @@ static String* parse_pdf_string(Input *input, const char **pdf) {
         (*pdf)++; // skip <
         int char_count = 0;
         int max_chars = 500; // Safety limit
-        
+
         while (**pdf && **pdf != '>' && char_count < max_chars) {
             if (isxdigit(**pdf)) {
                 char hex_char = **pdf;
@@ -277,7 +276,7 @@ static String* parse_pdf_string(Input *input, const char **pdf) {
             (*pdf)++; // skip >
         }
     }
-    
+
     return stringbuf_to_string(sb);
 }
 
@@ -296,23 +295,23 @@ static bool is_digit_or_space_ahead(const char *pdf, int max_lookahead) {
 static Item parse_pdf_object(Input *input, const char **pdf) {
     static int call_count = 0;
     call_count++;
-    
+
     // prevent runaway recursion - much lower limit for safety
     if (call_count > 10) {
         printf("Warning: too many parse calls, stopping recursion\n");
         call_count--;
         return {.item = ITEM_NULL};
     }
-    
+
     skip_whitespace_and_comments(pdf);
-    
+
     if (!**pdf) {
         call_count--;
         return {.item = ITEM_NULL};
     }
-    
+
     Item result = {.item = ITEM_ERROR};
-    
+
     // Check for special PDF keywords first
     if (strncmp(*pdf, "endobj", 6) == 0) {
         *pdf += 6;
@@ -372,7 +371,7 @@ static Item parse_pdf_object(Input *input, const char **pdf) {
         Array* arr = parse_pdf_array(input, pdf);
         result = arr ? (Item){.item = (uint64_t)arr} : (Item){.item = ITEM_ERROR};
     }
-    // check for simple dictionaries (limited depth) 
+    // check for simple dictionaries (limited depth)
     else if (**pdf == '<' && *(*pdf + 1) == '<' && call_count <= 3) {
         Map* dict = parse_pdf_dictionary(input, pdf);
         if (dict) {
@@ -397,7 +396,7 @@ static Item parse_pdf_object(Input *input, const char **pdf) {
         advance_safely(pdf, 1);
         result = {.item = ITEM_NULL};
     }
-    
+
     call_count--;
     return result;
 }
@@ -407,76 +406,72 @@ static Item parse_pdf_indirect_ref(Input *input, const char **pdf) {
     const char* start_pos = *pdf;
     int obj_num = 0, gen_num = 0;
     char* end;
-    
+
     // Parse object number
     obj_num = strtol(*pdf, &end, 10);
     if (end == *pdf) return {.item = ITEM_ERROR}; // no conversion
-    
+
     *pdf = end;
     skip_whitespace_and_comments(pdf);
     if (!**pdf) return {.item = ITEM_ERROR};
-    
+
     // Parse generation number
     gen_num = strtol(*pdf, &end, 10);
     if (end == *pdf) return {.item = ITEM_ERROR}; // no conversion
-    
+
     *pdf = end;
     skip_whitespace_and_comments(pdf);
     if (**pdf != 'R') return {.item = ITEM_ERROR};
     (*pdf)++; // skip R
-    
+
     // Create a map to represent the indirect reference (more serializable than custom struct)
     Map* ref_map = map_pooled(input->pool);
     if (!ref_map) return {.item = ITEM_ERROR};
-    
+
     // Store type identifier
     String* type_key;
-    MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 5, (void**)&type_key);
-    if (err == MEM_POOL_ERR_OK) {
+    type_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+    if (type_key) {
         strcpy(type_key->chars, "type");
         type_key->len = 4;
         type_key->ref_cnt = 0;
-        
+
         String* type_value;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 14, (void**)&type_value);
-        if (err == MEM_POOL_ERR_OK) {
+        type_value = (String*)pool_calloc(input->pool, sizeof(String) + 14);
+        if (type_value) {
             strcpy(type_value->chars, "indirect_ref");
             type_value->len = 12;
             type_value->ref_cnt = 0;
-            
+
             Item type_item = {.item = s2it(type_value)};
             map_put(ref_map, type_key, type_item, input);
         }
     }
-    
+
     // Store object number
-    String* obj_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 12, (void**)&obj_key);
-    if (err == MEM_POOL_ERR_OK) {
+    String* obj_key = (String*)pool_calloc(input->pool, sizeof(String) + 12);
+    if (obj_key) {
         strcpy(obj_key->chars, "object_num");
         obj_key->len = 10;
         obj_key->ref_cnt = 0;
-        
-        double* obj_val;
-        err = pool_variable_alloc(input->pool, sizeof(double), (void**)&obj_val);
-        if (err == MEM_POOL_ERR_OK) {
+
+        double* obj_val = (double*)pool_calloc(input->pool, sizeof(double));
+        if (obj_val) {
             *obj_val = (double)obj_num;
             Item obj_item = {.item = d2it(obj_val)};
             map_put(ref_map, obj_key, obj_item, input);
         }
     }
-    
+
     // Store generation number
-    String* gen_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&gen_key);
-    if (err == MEM_POOL_ERR_OK) {
+    String* gen_key = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+    if (gen_key) {
         strcpy(gen_key->chars, "gen_num");
         gen_key->len = 7;
         gen_key->ref_cnt = 0;
-        
-        double* gen_val;
-        err = pool_variable_alloc(input->pool, sizeof(double), (void**)&gen_val);
-        if (err == MEM_POOL_ERR_OK) {
+
+        double* gen_val = (double*)pool_calloc(input->pool, sizeof(double));
+        if (gen_val) {
             *gen_val = (double)gen_num;
             Item gen_item = {.item = d2it(gen_val)};
             map_put(ref_map, gen_key, gen_item, input);
@@ -489,102 +484,102 @@ static Item parse_pdf_indirect_object(Input *input, const char **pdf) {
     // expects format "n m obj ... endobj"
     int obj_num = 0, gen_num = 0;
     char* end;
-    
+
     // Parse object number
     obj_num = strtol(*pdf, &end, 10);
     if (end == *pdf) return {.item = ITEM_ERROR};
-    
+
     *pdf = end;
     skip_whitespace_and_comments(pdf);
-    
+
     // Parse generation number
     gen_num = strtol(*pdf, &end, 10);
     if (end == *pdf) return {.item = ITEM_ERROR};
-    
+
     *pdf = end;
     skip_whitespace_and_comments(pdf);
-    
+
     // Check for "obj" keyword
     if (strncmp(*pdf, "obj", 3) != 0) return {.item = ITEM_ERROR};
     *pdf += 3;
     skip_whitespace_and_comments(pdf);
-    
+
     // Parse the object content
     Item content = parse_pdf_object(input, pdf);
-    
+
     // Skip to endobj (optional - for safety)
     const char* endobj_pos = strstr(*pdf, "endobj");
     if (endobj_pos) {
         *pdf = endobj_pos + 6; // skip "endobj"
     }
-    
+
     // Create a map to represent the indirect object
     Map* obj_map = map_pooled(input->pool);
     if (!obj_map) return content; // return content if we can't create wrapper
-    
+
     // Store type identifier
     String* type_key;
-    MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 5, (void**)&type_key);
-    if (err == MEM_POOL_ERR_OK) {
+    type_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+    if (type_key) {
         strcpy(type_key->chars, "type");
         type_key->len = 4;
         type_key->ref_cnt = 0;
-        
+
         String* type_value;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 16, (void**)&type_value);
-        if (err == MEM_POOL_ERR_OK) {
+        type_value = (String*)pool_calloc(input->pool, sizeof(String) + 16);
+        if (type_value) {
             strcpy(type_value->chars, "indirect_object");
             type_value->len = 15;
             type_value->ref_cnt = 0;
-            
+
             Item type_item = {.item = s2it(type_value)};
             map_put(obj_map, type_key, type_item, input);
         }
     }
-    
+
     // Store object number
     String* obj_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 12, (void**)&obj_key);
-    if (err == MEM_POOL_ERR_OK) {
+    obj_key = (String*)pool_calloc(input->pool, sizeof(String) + 12);
+    if (obj_key) {
         strcpy(obj_key->chars, "object_num");
         obj_key->len = 10;
         obj_key->ref_cnt = 0;
-        
+
         double* obj_val;
-        err = pool_variable_alloc(input->pool, sizeof(double), (void**)&obj_val);
-        if (err == MEM_POOL_ERR_OK) {
+        obj_val = (double*)pool_calloc(input->pool, sizeof(double));
+        if (obj_val) {
             *obj_val = (double)obj_num;
             Item obj_item = {.item = d2it(obj_val)};
             map_put(obj_map, obj_key, obj_item, input);
         }
     }
-    
+
     // Store generation number
     String* gen_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&gen_key);
-    if (err == MEM_POOL_ERR_OK) {
+    gen_key = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+    if (gen_key) {
         strcpy(gen_key->chars, "gen_num");
         gen_key->len = 7;
         gen_key->ref_cnt = 0;
-        
+
         double* gen_val;
-        err = pool_variable_alloc(input->pool, sizeof(double), (void**)&gen_val);
-        if (err == MEM_POOL_ERR_OK) {
+        gen_val = (double*)pool_calloc(input->pool, sizeof(double));
+        if (gen_val) {
             *gen_val = (double)gen_num;
             Item gen_item = {.item = d2it(gen_val)};
             map_put(obj_map, gen_key, gen_item, input);
         }
     }
-    
+
     // Store content
     if (content .item != ITEM_ERROR && content .item != ITEM_NULL) {
         String* content_key;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&content_key);
-        if (err == MEM_POOL_ERR_OK) {
+        content_key = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+        if (content_key) {
             strcpy(content_key->chars, "content");
             content_key->len = 7;
             content_key->ref_cnt = 0;
-            
+
             Item content_item = {.item = content.item};
             map_put(obj_map, content_key, content_item, input);
         }
@@ -595,101 +590,101 @@ static Item parse_pdf_indirect_object(Input *input, const char **pdf) {
 static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
     // expects stream data after dictionary
     if (strncmp(*pdf, "stream", 6) != 0) return {.item = ITEM_ERROR};
-    
+
     *pdf += 6; // skip stream
     skip_whitespace_and_comments(pdf);
-    
+
     // find end of stream
     const char* end_stream = strstr(*pdf, "endstream");
     if (!end_stream) return {.item = ITEM_ERROR};
-    
+
     // calculate data length
     int data_length = end_stream - *pdf;
     if (data_length > 1000) { // Safety limit for stream size
         data_length = 1000;
     }
-    
+
     // Create a map to represent the stream (more serializable than custom struct)
     Map* stream_map = map_pooled(input->pool);
     if (!stream_map) return {.item = ITEM_ERROR};
-    
+
     // Store type identifier
     String* type_key;
-    MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 5, (void**)&type_key);
-    if (err == MEM_POOL_ERR_OK) {
+    type_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+    if (type_key) {
         strcpy(type_key->chars, "type");
         type_key->len = 4;
         type_key->ref_cnt = 0;
-        
+
         String* type_value;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 7, (void**)&type_value);
-        if (err == MEM_POOL_ERR_OK) {
+        type_value = (String*)pool_calloc(input->pool, sizeof(String) + 7);
+        if (type_value) {
             strcpy(type_value->chars, "stream");
             type_value->len = 6;
             type_value->ref_cnt = 0;
-            
+
             Item type_item = {.item = s2it(type_value)};
             map_put(stream_map, type_key, type_item, input);
         }
     }
-    
+
     // Store dictionary if provided
     if (dict) {
         String* dict_key;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 11, (void**)&dict_key);
-        if (err == MEM_POOL_ERR_OK) {
+        dict_key = (String*)pool_calloc(input->pool, sizeof(String) + 11);
+        if (dict_key) {
             strcpy(dict_key->chars, "dictionary");
             dict_key->len = 10;
             dict_key->ref_cnt = 0;
-            
+
             Item dict_item = {.item = (uint64_t)dict};
             map_put(stream_map, dict_key, dict_item, input);
         }
     }
-    
+
     // Store data length
     String* length_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 7, (void**)&length_key);
-    if (err == MEM_POOL_ERR_OK) {
+    length_key = (String*)pool_calloc(input->pool, sizeof(String) + 7);
+    if (length_key) {
         strcpy(length_key->chars, "length");
         length_key->len = 6;
         length_key->ref_cnt = 0;
-        
+
         double* length_val;
-        err = pool_variable_alloc(input->pool, sizeof(double), (void**)&length_val);
-        if (err == MEM_POOL_ERR_OK) {
+        length_val = (double*)pool_calloc(input->pool, sizeof(double));
+        if (length_val) {
             *length_val = (double)data_length;
             Item length_item = {.item = d2it(length_val)};
             map_put(stream_map, length_key, length_item, input);
         }
     }
-    
+
     // Store stream data as a string (truncated for safety)
     String* data_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 5, (void**)&data_key);
-    if (err == MEM_POOL_ERR_OK) {
+    data_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+    if (data_key) {
         strcpy(data_key->chars, "data");
         data_key->len = 4;
         data_key->ref_cnt = 0;
-        
+
         String* stream_data;
-        err = pool_variable_alloc(input->pool, sizeof(String) + data_length + 1, (void**)&stream_data);
-        if (err == MEM_POOL_ERR_OK) {
+        stream_data = (String*)pool_calloc(input->pool, sizeof(String) + data_length + 1);
+        if (stream_data) {
             memcpy(stream_data->chars, *pdf, data_length);
             stream_data->chars[data_length] = '\0';
             stream_data->len = data_length;
             stream_data->ref_cnt = 0;
-            
+
             Item data_item = {.item = s2it(stream_data)};
             map_put(stream_map, data_key, data_item, input);
-            
+
             // Add content analysis for potential content streams
             if (data_length > 10 && data_length < 2000) { // Only analyze reasonably sized streams
                 Item content_analysis = analyze_pdf_content_stream(input, *pdf, data_length);
                 if (content_analysis .item != ITEM_NULL) {
                     String* analysis_key;
-                    err = pool_variable_alloc(input->pool, sizeof(String) + 9, (void**)&analysis_key);
-                    if (err == MEM_POOL_ERR_OK) {
+                    analysis_key = (String*)pool_calloc(input->pool, sizeof(String) + 9);
+                    if (analysis_key) {
                         strcpy(analysis_key->chars, "analysis");
                         analysis_key->len = 8;
                         analysis_key->ref_cnt = 0;
@@ -700,7 +695,7 @@ static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
             }
         }
     }
-    
+
     *pdf = end_stream + 9; // skip endstream
     return {.item = (uint64_t)stream_map};
 }
@@ -708,125 +703,125 @@ static Item parse_pdf_stream(Input *input, const char **pdf, Map* dict) {
 static Item parse_pdf_xref_table(Input *input, const char **pdf) {
     // expects "xref" followed by cross-reference entries
     if (strncmp(*pdf, "xref", 4) != 0) return {.item = ITEM_ERROR};
-    
+
     *pdf += 4; // skip "xref"
     skip_whitespace_and_comments(pdf);
-    
+
     // Create a map to represent the xref table
     Map* xref_map = map_pooled(input->pool);
     if (!xref_map) return {.item = ITEM_ERROR};
-    
+
     // Store type identifier
     String* type_key;
-    MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 5, (void**)&type_key);
-    if (err == MEM_POOL_ERR_OK) {
+    type_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+    if (type_key) {
         strcpy(type_key->chars, "type");
         type_key->len = 4;
         type_key->ref_cnt = 0;
-        
+
         String* type_value;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 11, (void**)&type_value);
-        if (err == MEM_POOL_ERR_OK) {
+        type_value = (String*)pool_calloc(input->pool, sizeof(String) + 11);
+        if (type_value) {
             strcpy(type_value->chars, "xref_table");
             type_value->len = 10;
             type_value->ref_cnt = 0;
-            
+
             Item type_item = {.item = s2it(type_value)};
             map_put(xref_map, type_key, type_item, input);
         }
     }
-    
+
     // Parse xref entries (limit for safety)
     Array* entries = array_pooled(input->pool);
     if (entries) {
         int entry_count = 0;
         int max_entries = 20; // Conservative limit
-        
+
         while (*pdf && entry_count < max_entries) {
             skip_whitespace_and_comments(pdf);
-            
+
             // Check if we've hit the trailer
             if (strncmp(*pdf, "trailer", 7) == 0) break;
-            
+
             // Try to parse a subsection header (starting_obj_num count)
             if (isdigit(**pdf)) {
                 int start_num = strtol(*pdf, (char**)pdf, 10);
                 skip_whitespace_and_comments(pdf);
-                
+
                 if (isdigit(**pdf)) {
                     int count = strtol(*pdf, (char**)pdf, 10);
                     skip_whitespace_and_comments(pdf);
-                    
+
                     // Limit the number of entries we process
                     if (count > 10) count = 10;
-                    
+
                     // Parse individual entries
                     for (int i = 0; i < count && entry_count < max_entries; i++) {
                         skip_whitespace_and_comments(pdf);
-                        
+
                         // Parse entry: offset generation flag
                         if (isdigit(**pdf)) {
                             int offset = strtol(*pdf, (char**)pdf, 10);
                             skip_whitespace_and_comments(pdf);
-                            
+
                             if (isdigit(**pdf)) {
                                 int generation = strtol(*pdf, (char**)pdf, 10);
                                 skip_whitespace_and_comments(pdf);
-                                
+
                                 // Parse flag (n or f)
                                 char flag = **pdf;
                                 if (flag == 'n' || flag == 'f') {
                                     (*pdf)++;
-                                    
+
                                     // Create entry map
                                     Map* entry_map = map_pooled(input->pool);
                                     if (entry_map) {
                                         if (entry_map->data) {
                                             // Store object number
                                             String* obj_key;
-                                            err = pool_variable_alloc(input->pool, sizeof(String) + 7, (void**)&obj_key);
-                                            if (err == MEM_POOL_ERR_OK) {
+                                            obj_key = (String*)pool_calloc(input->pool, sizeof(String) + 7);
+                                            if (obj_key) {
                                                 strcpy(obj_key->chars, "object");
                                                 obj_key->len = 6;
                                                 obj_key->ref_cnt = 0;
-                                                
+
                                                 double* obj_val;
-                                                err = pool_variable_alloc(input->pool, sizeof(double), (void**)&obj_val);
-                                                if (err == MEM_POOL_ERR_OK) {
+                                                obj_val = (double*)pool_calloc(input->pool, sizeof(double));
+                                                if (obj_val) {
                                                     *obj_val = (double)(start_num + i);
                                                     Item obj_item = {.item = d2it(obj_val)};
                                                     map_put(entry_map, obj_key, obj_item, input);
                                                 }
                                             }
-                                            
+
                                             // Store offset
                                             String* offset_key;
-                                            err = pool_variable_alloc(input->pool, sizeof(String) + 7, (void**)&offset_key);
-                                            if (err == MEM_POOL_ERR_OK) {
+                                            offset_key = (String*)pool_calloc(input->pool, sizeof(String) + 7);
+                                            if (offset_key) {
                                                 strcpy(offset_key->chars, "offset");
                                                 offset_key->len = 6;
                                                 offset_key->ref_cnt = 0;
-                                                
+
                                                 double* offset_val;
-                                                err = pool_variable_alloc(input->pool, sizeof(double), (void**)&offset_val);
-                                                if (err == MEM_POOL_ERR_OK) {
+                                                offset_val = (double*)pool_calloc(input->pool, sizeof(double));
+                                                if (offset_val) {
                                                     *offset_val = (double)offset;
                                                     Item offset_item = {.item = d2it(offset_val)};
                                                     map_put(entry_map, offset_key, offset_item, input);
                                                 }
                                             }
-                                            
+
                                             // Store flag
                                             String* flag_key;
-                                            err = pool_variable_alloc(input->pool, sizeof(String) + 5, (void**)&flag_key);
-                                            if (err == MEM_POOL_ERR_OK) {
+                                            flag_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+                                            if (flag_key) {
                                                 strcpy(flag_key->chars, "flag");
                                                 flag_key->len = 4;
                                                 flag_key->ref_cnt = 0;
-                                                
+
                                                 String* flag_val;
-                                                err = pool_variable_alloc(input->pool, sizeof(String) + 2, (void**)&flag_val);
-                                                if (err == MEM_POOL_ERR_OK) {
+                                                flag_val = (String*)pool_calloc(input->pool, sizeof(String) + 2);
+                                                if (flag_val) {
                                                     flag_val->chars[0] = flag;
                                                     flag_val->chars[1] = '\0';
                                                     flag_val->len = 1;
@@ -835,7 +830,7 @@ static Item parse_pdf_xref_table(Input *input, const char **pdf) {
                                                     map_put(entry_map, flag_key, flag_item, input);
                                                 }
                                             }
-                                            
+
                                             Item entry_item = {.item = (uint64_t)entry_map};
                                             array_append(entries, entry_item, input->pool);
                                             entry_count++;
@@ -852,11 +847,11 @@ static Item parse_pdf_xref_table(Input *input, const char **pdf) {
                 break; // not a valid entry
             }
         }
-        
+
         // Store entries in xref map
         String* entries_key;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&entries_key);
-        if (err == MEM_POOL_ERR_OK) {
+        entries_key = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+        if (entries_key) {
             strcpy(entries_key->chars, "entries");
             entries_key->len = 7;
             entries_key->ref_cnt = 0;
@@ -870,42 +865,42 @@ static Item parse_pdf_xref_table(Input *input, const char **pdf) {
 static Item parse_pdf_trailer(Input *input, const char **pdf) {
     // expects "trailer" followed by a dictionary
     if (strncmp(*pdf, "trailer", 7) != 0) return {.item = ITEM_ERROR};
-    
+
     *pdf += 7; // skip "trailer"
     skip_whitespace_and_comments(pdf);
-    
+
     // Parse the trailer dictionary
     Map* trailer_dict = parse_pdf_dictionary(input, pdf);
     if (!trailer_dict) return {.item = ITEM_ERROR};
-    
+
     // Create a wrapper map to indicate this is a trailer
     Map* trailer_map = map_pooled(input->pool);
     if (!trailer_map) return {.item = (uint64_t)trailer_dict};
-    
+
     // Store type identifier
     String* type_key;
-    MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 5, (void**)&type_key);
-    if (err == MEM_POOL_ERR_OK) {
+    type_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+    if (type_key) {
         strcpy(type_key->chars, "type");
         type_key->len = 4;
         type_key->ref_cnt = 0;
-        
+
         String* type_value;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&type_value);
-        if (err == MEM_POOL_ERR_OK) {
+        type_value = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+        if (type_value) {
             strcpy(type_value->chars, "trailer");
             type_value->len = 7;
             type_value->ref_cnt = 0;
-            
+
             Item type_item = {.item = s2it(type_value)};
             map_put(trailer_map, type_key, type_item, input);
         }
     }
-    
+
     // Store the dictionary
     String* dict_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 11, (void**)&dict_key);
-    if (err == MEM_POOL_ERR_OK) {
+    dict_key = (String*)pool_calloc(input->pool, sizeof(String) + 11);
+    if (dict_key) {
         strcpy(dict_key->chars, "dictionary");
         dict_key->len = 10;
         dict_key->ref_cnt = 0;
@@ -918,16 +913,15 @@ static Item parse_pdf_trailer(Input *input, const char **pdf) {
 // Analyze PDF content streams for basic information
 static Item analyze_pdf_content_stream(Input *input, const char *stream_data, int length) {
     if (!stream_data || length <= 0) return {.item = ITEM_NULL};
-    
+
     Map* analysis_map = map_pooled(input->pool);
     if (!analysis_map) return {.item = ITEM_NULL};
-    
-    MemPoolError err;
+
     // Count text objects (BT...ET blocks)
     int text_objects = 0;
     const char* pos = stream_data;
     const char* end = stream_data + length;
-    
+
     while (pos < end - 2) {
         if (pos[0] == 'B' && pos[1] == 'T' && (pos[2] == ' ' || pos[2] == '\n' || pos[2] == '\r')) {
             text_objects++;
@@ -935,7 +929,7 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
         }
         pos++;
     }
-    
+
     // Count basic operators (simplified analysis)
     int drawing_ops = 0;
     pos = stream_data;
@@ -949,55 +943,55 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
         }
         pos++;
     }
-    
+
     // Store analysis results
     String* type_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 5, (void**)&type_key);
-    if (err == MEM_POOL_ERR_OK) {
+    type_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+    if (type_key) {
         strcpy(type_key->chars, "type");
         type_key->len = 4;
         type_key->ref_cnt = 0;
-        
+
         String* type_value;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 17, (void**)&type_value);
-        if (err == MEM_POOL_ERR_OK) {
+        type_value = (String*)pool_calloc(input->pool, sizeof(String) + 17);
+        if (type_value) {
             strcpy(type_value->chars, "content_analysis");
             type_value->len = 16;
             type_value->ref_cnt = 0;
-            
+
             Item type_item = {.item = s2it(type_value)};
             map_put(analysis_map, type_key, type_item, input);
         }
     }
-    
+
     // Text objects count
     String* text_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 13, (void**)&text_key);
-    if (err == MEM_POOL_ERR_OK) {
+    text_key = (String*)pool_calloc(input->pool, sizeof(String) + 13);
+    if (text_key) {
         strcpy(text_key->chars, "text_objects");
         text_key->len = 12;
         text_key->ref_cnt = 0;
-        
+
         double* text_count;
-        err = pool_variable_alloc(input->pool, sizeof(double), (void**)&text_count);
-        if (err == MEM_POOL_ERR_OK) {
+        text_count = (double*)pool_calloc(input->pool, sizeof(double));
+        if (text_count) {
             *text_count = (double)text_objects;
             Item text_item = {.item = d2it(text_count)};
             map_put(analysis_map, text_key, text_item, input);
         }
     }
-    
+
     // Drawing operations count
     String* draw_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 12, (void**)&draw_key);
-    if (err == MEM_POOL_ERR_OK) {
+    draw_key = (String*)pool_calloc(input->pool, sizeof(String) + 12);
+    if (draw_key) {
         strcpy(draw_key->chars, "drawing_ops");
         draw_key->len = 11;
         draw_key->ref_cnt = 0;
-        
+
         double* draw_count;
-        err = pool_variable_alloc(input->pool, sizeof(double), (void**)&draw_count);
-        if (err == MEM_POOL_ERR_OK) {
+        draw_count = (double*)pool_calloc(input->pool, sizeof(double));
+        if (draw_count) {
             *draw_count = (double)drawing_ops;
             Item draw_item = {.item = d2it(draw_count)};
             map_put(analysis_map, draw_key, draw_item, input);
@@ -1009,35 +1003,34 @@ static Item analyze_pdf_content_stream(Input *input, const char *stream_data, in
 // Analyze font information from font dictionaries
 static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
     if (!font_dict) return {.item = ITEM_NULL};
-    
+
     Map* font_analysis = map_pooled(input->pool);
     if (!font_analysis) return {.item = ITEM_NULL};
-    
-    MemPoolError err;
+
     // Extract font information from the dictionary
     String* type_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 5, (void**)&type_key);
-    if (err == MEM_POOL_ERR_OK) {
+    type_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+    if (type_key) {
         strcpy(type_key->chars, "type");
         type_key->len = 4;
         type_key->ref_cnt = 0;
-        
+
         String* type_value;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 14, (void**)&type_value);
-        if (err == MEM_POOL_ERR_OK) {
+        type_value = (String*)pool_calloc(input->pool, sizeof(String) + 14);
+        if (type_value) {
             strcpy(type_value->chars, "font_analysis");
             type_value->len = 13;
             type_value->ref_cnt = 0;
-            
+
             Item type_item = {.item = s2it(type_value)};
             map_put(font_analysis, type_key, type_item, input);
         }
     }
-    
+
     // Copy relevant font properties (Type, Subtype, BaseFont, etc.)
     String* original_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 9, (void**)&original_key);
-    if (err == MEM_POOL_ERR_OK) {
+    original_key = (String*)pool_calloc(input->pool, sizeof(String) + 9);
+    if (original_key) {
         strcpy(original_key->chars, "original");
         original_key->len = 8;
         original_key->ref_cnt = 0;
@@ -1050,35 +1043,34 @@ static Item parse_pdf_font_descriptor(Input *input, Map* font_dict) {
 // Extract basic page information
 static Item extract_pdf_page_info(Input *input, Map* page_dict) {
     if (!page_dict) return {.item = ITEM_NULL};
-    
+
     Map* page_analysis = map_pooled(input->pool);
     if (!page_analysis) return {.item = ITEM_NULL};
-    
-    MemPoolError err;
+
     // Store type
     String* type_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 5, (void**)&type_key);
-    if (err == MEM_POOL_ERR_OK) {
+    type_key = (String*)pool_calloc(input->pool, sizeof(String) + 5);
+    if (type_key) {
         strcpy(type_key->chars, "type");
         type_key->len = 4;
         type_key->ref_cnt = 0;
-        
+
         String* type_value;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 13, (void**)&type_value);
-        if (err == MEM_POOL_ERR_OK) {
+        type_value = (String*)pool_calloc(input->pool, sizeof(String) + 13);
+        if (type_value) {
             strcpy(type_value->chars, "page_analysis");
             type_value->len = 12;
             type_value->ref_cnt = 0;
-            
+
             Item type_item = {.item = s2it(type_value)};
             map_put(page_analysis, type_key, type_item, input);
         }
     }
-    
+
     // Copy the original page dictionary for reference
     String* original_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 9, (void**)&original_key);
-    if (err == MEM_POOL_ERR_OK) {
+    original_key = (String*)pool_calloc(input->pool, sizeof(String) + 9);
+    if (original_key) {
         strcpy(original_key->chars, "original");
         original_key->len = 8;
         original_key->ref_cnt = 0;
@@ -1091,23 +1083,23 @@ static Item extract_pdf_page_info(Input *input, Map* page_dict) {
 void parse_pdf(Input* input, const char* pdf_string) {
     printf("pdf_parse\n");
     input->sb = stringbuf_new(input->pool);
-    
+
     const char* pdf = pdf_string;
-    
+
     // Validate input
     if (!pdf_string || !*pdf_string) {
         printf("Error: Empty PDF content\n");
         input->root = {.item = ITEM_ERROR};
         return;
     }
-    
+
     // Enhanced PDF header validation
     if (!is_valid_pdf_header(pdf)) {
         printf("Error: Invalid PDF format - must start with %%PDF-\n");
         input->root = {.item = ITEM_ERROR};
         return;
     }
-    
+
     // Create a simple map with basic PDF info
     Map* pdf_info = map_pooled(input->pool);
     if (!pdf_info) {
@@ -1115,7 +1107,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
         input->root = {.item = ITEM_ERROR};
         return;
     }
-    
+
     // Parse and store version with enhanced validation
     pdf += 5; // skip "%PDF-"
     StringBuf* version_sb = stringbuf_new(input->pool);
@@ -1124,7 +1116,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
         input->root = {.item = (uint64_t)pdf_info};
         return;
     }
-    
+
     int counter = 0;
     while (*pdf && *pdf != '\n' && *pdf != '\r' && counter < 10) {
         // Validate version format (should be digits and dots)
@@ -1137,38 +1129,38 @@ void parse_pdf(Input* input, const char* pdf_string) {
         counter++;
     }
     String* version = stringbuf_to_string(version_sb);
-    
+
     // Store version in map
     String* version_key;
-    MemPoolError err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&version_key);
-    if (err == MEM_POOL_ERR_OK) {
+    version_key = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+    if (version_key) {
         strcpy(version_key->chars, "version");
         version_key->len = 7;
         version_key->ref_cnt = 0;
         Item version_item = {.item = s2it(version)};
         map_put(pdf_info, version_key, version_item, input);
     }
-    
+
     skip_whitespace_and_comments(&pdf);
-    
+
     // Parse a few simple objects safely, and look for xref/trailer
     Array* objects = array_pooled(input->pool);
     Item xref_table = {.item = ITEM_NULL};
     Item trailer = {.item = ITEM_NULL};
-    
+
     if (objects) {
         int obj_count = 0;
         int max_objects = 5; // Very conservative limit
         int consecutive_errors = 0;
         const int max_consecutive_errors = 3;
-        
+
         while (*pdf && obj_count < max_objects && consecutive_errors < max_consecutive_errors) {
             skip_whitespace_and_comments(&pdf);
             if (!*pdf) break;
-            
+
             Item obj = {.item = ITEM_NULL};
             const char* position_before_parse = pdf;
-            
+
             // Check for xref table
             if (strncmp(pdf, "xref", 4) == 0) {
                 xref_table = parse_pdf_xref_table(input, &pdf);
@@ -1177,13 +1169,13 @@ void parse_pdf(Input* input, const char* pdf_string) {
                 }
                 continue; // Continue parsing to look for trailer
             }
-            
+
             // Check for trailer
             if (strncmp(pdf, "trailer", 7) == 0) {
                 trailer = parse_pdf_trailer(input, &pdf);
                 break; // trailer usually means we're at the end
             }
-            
+
             // Try to parse indirect object first (e.g., "1 0 obj")
             if (isdigit(*pdf)) {
                 const char* saved_pos = pdf;
@@ -1197,7 +1189,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                 // Try to parse a simple object
                 obj = parse_pdf_object(input, &pdf);
             }
-            
+
             if (obj .item != ITEM_ERROR && obj .item != ITEM_NULL) {
                 array_append(objects, obj, input->pool);
                 obj_count++;
@@ -1210,7 +1202,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                 }
             }
         }
-        
+
         // Always scan for xref and trailer sections, even if we've hit the object limit
         if (xref_table .item == ITEM_NULL || trailer .item == ITEM_NULL) {
             // Scan ahead for xref/trailer sections - start from current position if we haven't exceeded object limit,
@@ -1218,7 +1210,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
             const char* scan_pdf = (obj_count >= max_objects) ? pdf_string : pdf;
             int scan_limit = 10000; // Increased limit to handle larger PDFs
             int scanned = 0;
-            
+
             while (*scan_pdf && scanned < scan_limit) {
                 // Skip whitespace but be more careful about advancement
                 if (isspace(*scan_pdf) || *scan_pdf == '%') {
@@ -1227,7 +1219,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                     scanned += 10; // Count whitespace skipping as progress
                     continue;
                 }
-                
+
                 if (xref_table .item == ITEM_NULL && strncmp(scan_pdf, "xref", 4) == 0) {
                     // Check that it's a standalone keyword (not part of another word)
                     if (scan_pdf == pdf_string || isspace(*(scan_pdf - 1)) || *(scan_pdf - 1) == '\n' || *(scan_pdf - 1) == '\r') {
@@ -1239,7 +1231,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                         continue;
                     }
                 }
-                
+
                 if (trailer .item == ITEM_NULL && strncmp(scan_pdf, "trailer", 7) == 0) {
                     // Check that it's a standalone keyword
                     if (scan_pdf == pdf_string || isspace(*(scan_pdf - 1)) || *(scan_pdf - 1) == '\n' || *(scan_pdf - 1) == '\r') {
@@ -1251,7 +1243,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                         if (trailer .item != ITEM_ERROR) break; // Done after finding trailer
                     }
                 }
-                
+
                 // Check for startxref (PDF pointer to xref table)
                 if (strncmp(scan_pdf, "startxref", 9) == 0) {
                     scan_pdf += 9;
@@ -1274,7 +1266,7 @@ void parse_pdf(Input* input, const char* pdf_string) {
                     }
                     continue;
                 }
-                
+
                 // Check for linearization hint (for information only)
                 if (strncmp(scan_pdf, "%%EOF", 5) == 0) {
                     // Found end of file marker - continue scanning a bit more in case there's more after
@@ -1282,16 +1274,16 @@ void parse_pdf(Input* input, const char* pdf_string) {
                     scanned += 5;
                     continue;
                 }
-                
+
                 scan_pdf++;
                 scanned++;
             }
         }
-        
+
         // Store objects in map
         String* objects_key;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&objects_key);
-        if (err == MEM_POOL_ERR_OK) {
+        objects_key = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+        if (objects_key) {
             strcpy(objects_key->chars, "objects");
             objects_key->len = 7;
             objects_key->ref_cnt = 0;
@@ -1299,24 +1291,24 @@ void parse_pdf(Input* input, const char* pdf_string) {
             map_put(pdf_info, objects_key, objects_item, input);
         }
     }
-    
+
     // Store xref table if found
     if (xref_table .item != ITEM_NULL) {
         String* xref_key;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 11, (void**)&xref_key);
-        if (err == MEM_POOL_ERR_OK) {
+        xref_key = (String*)pool_calloc(input->pool, sizeof(String) + 11);
+        if (xref_key) {
             strcpy(xref_key->chars, "xref_table");
             xref_key->len = 10;
             xref_key->ref_cnt = 0;
             map_put(pdf_info, xref_key, xref_table, input);
         }
     }
-    
+
     // Store trailer if found
     if (trailer .item != ITEM_NULL) {
         String* trailer_key;
-        err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&trailer_key);
-        if (err == MEM_POOL_ERR_OK) {
+        trailer_key = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+        if (trailer_key) {
             strcpy(trailer_key->chars, "trailer");
             trailer_key->len = 7;
             trailer_key->ref_cnt = 0;
@@ -1326,59 +1318,59 @@ void parse_pdf(Input* input, const char* pdf_string) {
 
     // Add basic PDF statistics
     String* stats_key;
-    err = pool_variable_alloc(input->pool, sizeof(String) + 11, (void**)&stats_key);
-    if (err == MEM_POOL_ERR_OK) {
+    stats_key = (String*)pool_calloc(input->pool, sizeof(String) + 11);
+    if (stats_key) {
         strcpy(stats_key->chars, "statistics");
         stats_key->len = 10;
         stats_key->ref_cnt = 0;
-        
+
         // Create statistics map
         Map* stats_map = map_pooled(input->pool);
         if (stats_map) {
             if (stats_map->data) {
                 // Object count (use objects array length if available)
                 String* obj_count_key;
-                err = pool_variable_alloc(input->pool, sizeof(String) + 13, (void**)&obj_count_key);
-                if (err == MEM_POOL_ERR_OK) {
+                obj_count_key = (String*)pool_calloc(input->pool, sizeof(String) + 13);
+                if (obj_count_key) {
                     strcpy(obj_count_key->chars, "object_count");
                     obj_count_key->len = 12;
                     obj_count_key->ref_cnt = 0;
                     double* obj_count_val;
-                    err = pool_variable_alloc(input->pool, sizeof(double), (void**)&obj_count_val);
-                    if (err == MEM_POOL_ERR_OK) {
+                    obj_count_val = (double*)pool_calloc(input->pool, sizeof(double));
+                    if (obj_count_val) {
                         *obj_count_val = objects ? (double)objects->length : 0.0;
                         Item obj_count_item = {.item = d2it(obj_count_val)};
                         map_put(stats_map, obj_count_key, obj_count_item, input);
                     }
                 }
-                
+
                 // Has xref table
                 String* has_xref_key;
-                err = pool_variable_alloc(input->pool, sizeof(String) + 10, (void**)&has_xref_key);
-                if (err == MEM_POOL_ERR_OK) {
+                has_xref_key = (String*)pool_calloc(input->pool, sizeof(String) + 10);
+                if (has_xref_key) {
                     strcpy(has_xref_key->chars, "has_xref");
                     has_xref_key->len = 8;
                     has_xref_key->ref_cnt = 0;
                     Item has_xref_item = {.item = b2it(xref_table .item != ITEM_NULL)};
                     map_put(stats_map, has_xref_key, has_xref_item, input);
                 }
-                
+
                 // Has trailer
                 String* has_trailer_key;
-                err = pool_variable_alloc(input->pool, sizeof(String) + 12, (void**)&has_trailer_key);
-                if (err == MEM_POOL_ERR_OK) {
+                has_trailer_key = (String*)pool_calloc(input->pool, sizeof(String) + 12);
+                if (has_trailer_key) {
                     strcpy(has_trailer_key->chars, "has_trailer");
                     has_trailer_key->len = 11;
                     has_trailer_key->ref_cnt = 0;
                     Item has_trailer_item = {.item = b2it(trailer .item != ITEM_NULL)};
                     map_put(stats_map, has_trailer_key, has_trailer_item, input);
                 }
-                
+
                 // Count stream objects
                 int stream_count = 0;
                 int font_count = 0;
                 int page_count = 0;
-                
+
                 if (objects && objects->length > 0) {
                     for (int i = 0; i < objects->length && i < 20; i++) { // Safety limit
                         // Basic analysis of object types based on parsing results
@@ -1388,39 +1380,39 @@ void parse_pdf(Input* input, const char* pdf_string) {
                     // Reset counters for more accurate counting based on what we know
                     stream_count = 0; // Will be updated if we find actual streams
                 }
-                
+
                 // Stream count
                 String* stream_count_key;
-                err = pool_variable_alloc(input->pool, sizeof(String) + 13, (void**)&stream_count_key);
-                if (err == MEM_POOL_ERR_OK) {
+                stream_count_key = (String*)pool_calloc(input->pool, sizeof(String) + 13);
+                if (stream_count_key) {
                     strcpy(stream_count_key->chars, "stream_count");
                     stream_count_key->len = 12;
                     stream_count_key->ref_cnt = 0;
                     double* stream_count_val;
-                    err = pool_variable_alloc(input->pool, sizeof(double), (void**)&stream_count_val);
-                    if (err == MEM_POOL_ERR_OK) {
+                    stream_count_val = (double*)pool_calloc(input->pool, sizeof(double));
+                    if (stream_count_val) {
                         *stream_count_val = (double)stream_count;
                         Item stream_count_item = {.item = d2it(stream_count_val)};
                         map_put(stats_map, stream_count_key, stream_count_item, input);
                     }
                 }
-                
+
                 // PDF features detected
                 String* features_key;
-                err = pool_variable_alloc(input->pool, sizeof(String) + 9, (void**)&features_key);
-                if (err == MEM_POOL_ERR_OK) {
+                features_key = (String*)pool_calloc(input->pool, sizeof(String) + 9);
+                if (features_key) {
                     strcpy(features_key->chars, "features");
                     features_key->len = 8;
                     features_key->ref_cnt = 0;
-                    
+
                     // Create a features array
                     Array* features_array = array_pooled(input->pool);
                     if (features_array) {
                         // Add features based on what we've found
                         if (xref_table .item != ITEM_NULL) {
                             String* xref_feature;
-                            err = pool_variable_alloc(input->pool, sizeof(String) + 20, (void**)&xref_feature);
-                            if (err == MEM_POOL_ERR_OK) {
+                            xref_feature = (String*)pool_calloc(input->pool, sizeof(String) + 20);
+                            if (xref_feature) {
                                 strcpy(xref_feature->chars, "cross_reference_table");
                                 xref_feature->len = 19;
                                 xref_feature->ref_cnt = 0;
@@ -1428,11 +1420,11 @@ void parse_pdf(Input* input, const char* pdf_string) {
                                 array_append(features_array, xref_feature_item, input->pool);
                             }
                         }
-                        
+
                         if (trailer .item != ITEM_NULL) {
                             String* trailer_feature;
-                            err = pool_variable_alloc(input->pool, sizeof(String) + 8, (void**)&trailer_feature);
-                            if (err == MEM_POOL_ERR_OK) {
+                            trailer_feature = (String*)pool_calloc(input->pool, sizeof(String) + 8);
+                            if (trailer_feature) {
                                 strcpy(trailer_feature->chars, "trailer");
                                 trailer_feature->len = 7;
                                 trailer_feature->ref_cnt = 0;
@@ -1440,23 +1432,23 @@ void parse_pdf(Input* input, const char* pdf_string) {
                                 array_append(features_array, trailer_feature_item, input->pool);
                             }
                         }
-                        
+
                         String* objects_feature;
-                        err = pool_variable_alloc(input->pool, sizeof(String) + 16, (void**)&objects_feature);
-                        if (err == MEM_POOL_ERR_OK) {
+                        objects_feature = (String*)pool_calloc(input->pool, sizeof(String) + 16);
+                        if (objects_feature) {
                             strcpy(objects_feature->chars, "indirect_objects");
                             objects_feature->len = 15;
                             objects_feature->ref_cnt = 0;
                             Item objects_feature_item = {.item = s2it(objects_feature)};
                             array_append(features_array, objects_feature_item, input->pool);
                         }
-                        
+
                         Item features_item = {.item = (uint64_t)features_array};
                         map_put(stats_map, features_key, features_item, input);
                     }
                 }
             }
-            
+
             Item stats_item = {.item = (uint64_t)stats_map};
             map_put(pdf_info, stats_key, stats_item, input);
         }

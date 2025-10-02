@@ -2,7 +2,7 @@
 #define CSS_PROPERTIES_H
 
 #include "css_tokenizer.h"
-#include "../../lib/mem-pool/include/mem_pool.h"
+#include "../../lib/mempool.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -85,7 +85,7 @@ typedef struct css_property_db {
 } css_property_db_t;
 
 // Property lookup and validation functions
-css_property_db_t* css_property_db_create(VariableMemPool* pool);
+css_property_db_t* css_property_db_create(Pool* pool);
 void css_property_db_destroy(css_property_db_t* db);
 
 const css_property_def_t* css_property_lookup(const css_property_db_t* db, const char* name);
@@ -106,19 +106,19 @@ bool css_property_is_shorthand(const char* property_name);
 // Shorthand expansion
 const char** css_property_expand_shorthand(const css_property_db_t* db, const char* shorthand_name, 
                                           const css_token_t* tokens, int token_count, 
-                                          VariableMemPool* pool, int* expanded_count);
+                                          Pool* pool, int* expanded_count);
 
 // Global value handling
 bool css_value_is_global(const char* value);
 const char* css_property_get_initial_value(const css_property_db_t* db, const char* property_name);
 
 // Property name normalization
-char* css_property_normalize_name(const char* name, VariableMemPool* pool);
+char* css_property_normalize_name(const char* name, Pool* pool);
 bool css_property_names_equivalent(const char* name1, const char* name2);
 
 // Vendor prefix handling
 bool css_property_has_vendor_prefix(const char* name);
-char* css_property_remove_vendor_prefix(const char* name, VariableMemPool* pool);
+char* css_property_remove_vendor_prefix(const char* name, Pool* pool);
 const char* css_property_get_vendor_prefix(const char* name);
 
 // Property importance and specificity
@@ -137,7 +137,7 @@ typedef struct css_declaration {
 
 css_declaration_t* css_declaration_create(const char* property, css_token_t* tokens, 
                                         int token_count, css_importance_t importance, 
-                                        VariableMemPool* pool);
+                                        Pool* pool);
 bool css_declaration_validate(const css_property_db_t* db, css_declaration_t* decl);
 
 #ifdef __cplusplus

@@ -181,7 +181,7 @@ static void format_item(StringBuf* sb, Item item, const char* key_name) {
 }
 
 // main INI formatter function
-String* format_ini(VariableMemPool* pool, Item root_item) {
+String* format_ini(Pool* pool, Item root_item) {
     printf("format_ini: ENTRY - direct traversal version\n");
     fflush(stdout);
     

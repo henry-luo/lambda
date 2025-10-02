@@ -6,7 +6,7 @@
  * @brief Unified Schema and AST Type System for Lambda
  * @author GitHub Copilot
  * @license MIT
- * 
+ *
  * This header provides the unified type system that bridges schema validation
  * and AST building in Lambda Script. It integrates the schema parser functionality
  * into the main transpiler pipeline.
@@ -19,7 +19,7 @@ extern "C" {
 #include "../lib/hashmap.h"
 #include "../lib/arraylist.h"
 #include "../lib/strview.h"
-#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/mempool.h"
 
 #ifdef __cplusplus
 }
@@ -34,7 +34,7 @@ extern "C" {
 enum SchemaTypeId {
     LMD_SCHEMA_TYPE_START = LMD_TYPE_ERROR + 1,
     LMD_SCHEMA_PRIMITIVE,     // Built-in types (int, string, etc.)
-    LMD_SCHEMA_UNION,         // Type1 | Type2 
+    LMD_SCHEMA_UNION,         // Type1 | Type2
     LMD_SCHEMA_INTERSECTION,  // Type1 & Type2
     LMD_SCHEMA_ARRAY,         // [Type*] or [Type+] etc.
     LMD_SCHEMA_MAP,           // {field: Type, ...}
@@ -87,7 +87,7 @@ typedef struct SchemaMap {
 typedef struct SchemaElement {
     StrView tag;               // Element tag name
     SchemaMapField* attributes; // Element attributes
-    TypeSchema** content_types; // Content type array  
+    TypeSchema** content_types; // Content type array
     int content_count;         // Number of content types
     bool is_open;              // Allows additional attributes
 } SchemaElement;
@@ -145,7 +145,7 @@ typedef struct AstTypeDefinitionNode : AstSchemaTypeNode {
 
 // ==================== Type Registry ====================
 
-// Type definition entry in the registry  
+// Type definition entry in the registry
 typedef struct TypeDefinition {
     StrView name;                // Type name
     TypeSchema* schema_type;     // Schema representation
@@ -200,7 +200,7 @@ TypeDefinition* type_registry_lookup(TypeRegistry* registry, StrView name);
 TypeSchema* type_registry_resolve_reference(TypeRegistry* registry, StrView type_name);
 
 // Enhanced transpiler functions
-SchemaTranspiler* schema_transpiler_create(VariableMemPool* pool);
+SchemaTranspiler* schema_transpiler_create(Pool* pool);
 void schema_transpiler_destroy(SchemaTranspiler* transpiler);
 void schema_transpiler_enable_validation(SchemaTranspiler* transpiler);
 void schema_transpiler_add_type_definition(SchemaTranspiler* transpiler, StrView name, TypeSchema* schema);

@@ -98,7 +98,7 @@ typedef struct SysInfoManager SysInfoManager;
 
 SysInfoManager* sysinfo_manager_create(void);
 void sysinfo_manager_destroy(SysInfoManager* manager);
-Input* input_from_sysinfo(Url* url, VariableMemPool* pool);
+Input* input_from_sysinfo(Url* url, Pool* pool);
 bool is_sys_url(const char* url);
 
 #ifdef __cplusplus

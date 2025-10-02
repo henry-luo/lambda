@@ -289,7 +289,7 @@ static void format_jsx_item(StringBuf* sb, Item item) {
 }
 
 // Main JSX formatter entry point
-String* format_jsx(VariableMemPool* pool, Item root_item) {
+String* format_jsx(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     
     format_jsx_item(sb, root_item);

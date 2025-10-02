@@ -10,7 +10,7 @@
 #include "../ast.hpp"
 #include "../lambda-data.hpp"
 #include "../input/input.h"
-#include "../../lib/mem-pool/include/mem_pool.h"
+#include "../../lib/mempool.h"
 #include "../../lib/log.h"
 #include "../../lib/file.h"
 #include <cstdio>
@@ -19,7 +19,7 @@
 #include <unistd.h>
 
 // Forward declaration for suggest_corrections function
-extern "C" List* suggest_corrections(ValidationError* error, VariableMemPool* pool);
+extern "C" List* suggest_corrections(ValidationError* error, Pool* pool);
 
 // ==================== Validation Error System ====================
 // Note: ValidationResult and related structures now defined in validator.hpp
@@ -41,7 +41,7 @@ StrView strview_from_cstr(const char* str) {
 // Note: Error reporting functions now implemented in error_reporting.cpp
 
 // Schema validator stubs
-SchemaValidator* schema_validator_create(VariableMemPool* pool) {
+SchemaValidator* schema_validator_create(Pool* pool) {
     SchemaValidator* validator = (SchemaValidator*)pool_calloc(pool, sizeof(SchemaValidator));
     if (validator) {
         validator->pool = pool;
@@ -70,7 +70,7 @@ ValidationResult* validate_document(SchemaValidator* validator, Item document,
 }
 
 // Transpiler stub implementations (static to avoid conflicts)
-static void* transpiler_create(VariableMemPool* pool) {
+static void* transpiler_create(Pool* pool) {
     // Stub implementation - return null to indicate transpiler not available
     return nullptr;
 }
@@ -86,7 +86,7 @@ static void transpiler_destroy(void* transpiler) {
 
 // Enhanced validation context for AST validation
 typedef struct EnhancedValidationContext {
-    VariableMemPool* pool;
+    Pool* pool;
     PathSegment* current_path;
     int current_depth;
     int max_depth;
@@ -111,7 +111,7 @@ int strview_compare(const void *a, const void *b, void *udata) {
 }
 
 // Create enhanced validation context for AST validation
-EnhancedValidationContext* create_enhanced_validation_context(VariableMemPool* pool) {
+EnhancedValidationContext* create_enhanced_validation_context(Pool* pool) {
     EnhancedValidationContext* ctx = (EnhancedValidationContext*)pool_calloc(pool, sizeof(EnhancedValidationContext));
     if (!ctx) return nullptr;
 
@@ -137,7 +137,7 @@ EnhancedValidationContext* create_enhanced_validation_context(VariableMemPool* p
 }
 
 // Create path segment for error reporting
-PathSegment* create_path_segment(PathSegmentType type, const char* name, long index, VariableMemPool* pool) {
+PathSegment* create_path_segment(PathSegmentType type, const char* name, long index, Pool* pool) {
     PathSegment* segment = (PathSegment*)pool_calloc(pool, sizeof(PathSegment));
     if (!segment) return nullptr;
 
@@ -240,7 +240,7 @@ ValidationResult* validate_ast_node_recursive(AstNode* node, EnhancedValidationC
 }
 
 // Validate a Lambda AST using comprehensive validation
-ValidationResult* validate_lambda_ast(AstNode* ast, VariableMemPool* pool) {
+ValidationResult* validate_lambda_ast(AstNode* ast, Pool* pool) {
     if (!ast || !pool) {
         ValidationResult* result = create_validation_result(pool);
         ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
@@ -266,7 +266,7 @@ ValidationResult* validate_lambda_ast(AstNode* ast, VariableMemPool* pool) {
 }
 
 // Parse and validate a Lambda source file with full validation
-ValidationResult* validate_lambda_source(const char* source_content, VariableMemPool* pool) {
+ValidationResult* validate_lambda_source(const char* source_content, Pool* pool) {
     if (!source_content || !pool) {
         ValidationResult* result = create_validation_result(pool);
         ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
@@ -324,7 +324,7 @@ ValidationResult* validate_lambda_source(const char* source_content, VariableMem
 }
 
 // Read file and validate Lambda content with comprehensive validation
-ValidationResult* validate_lambda_file(const char* file_path, VariableMemPool* pool) {
+ValidationResult* validate_lambda_file(const char* file_path, Pool* pool) {
     if (!file_path || !pool) {
         ValidationResult* result = create_validation_result(pool);
         ValidationError* error = create_validation_error(VALID_ERROR_PARSE_ERROR,
@@ -386,9 +386,8 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
     }
 
     // Create memory pool for validation
-    VariableMemPool* pool = nullptr;
-    MemPoolError err = pool_variable_init(&pool, 1024 * 1024, MEM_POOL_NO_BEST_FIT);
-    if (err != MEM_POOL_ERR_OK || !pool) {
+    Pool* pool = pool_create();
+    if (!pool) {
         printf("Error: Failed to create memory pool\n");
         return nullptr;
     }
@@ -407,7 +406,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
         char* schema_contents = read_text_file(schema_file);
         if (!schema_contents) {
             printf("Error: Could not read schema file '%s'\n", schema_file);
-            pool_variable_destroy(pool);
+            pool_destroy(pool);
             return nullptr;
         }
 
@@ -416,7 +415,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
         if (!validator) {
             printf("Error: Failed to create schema validator\n");
             free(schema_contents);
-            pool_variable_destroy(pool);
+            pool_destroy(pool);
             return nullptr;
         }
 
@@ -438,7 +437,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
             printf("Error: Failed to load schema\n");
             schema_validator_destroy(validator);
             free(schema_contents);
-            pool_variable_destroy(pool);
+            pool_destroy(pool);
             return nullptr;
         }
 
@@ -448,7 +447,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
             printf("Error: Cannot get current working directory\n");
             schema_validator_destroy(validator);
             free(schema_contents);
-            pool_variable_destroy(pool);
+            pool_destroy(pool);
             return nullptr;
         }
 
@@ -492,7 +491,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
             printf("Error: Failed to parse data file\n");
             schema_validator_destroy(validator);
             free(schema_contents);
-            pool_variable_destroy(pool);
+            pool_destroy(pool);
             return nullptr;
         }
 
@@ -507,7 +506,7 @@ extern "C" ValidationResult* run_ast_validation(const char* data_file, const cha
 
     if (!validation_result) {
         printf("Error: Validation failed to run\n");
-        pool_variable_destroy(pool);
+        pool_destroy(pool);
         return nullptr;
     }
 

@@ -2,26 +2,26 @@
 #include "format.h"
 #include "../../lib/stringbuf.h"
 #include "../../lib/log.h"
-#include "../../lib/mem-pool/include/mem_pool.h"
+#include "../../lib/mempool.h"
 #include <string.h>
 #include <stdlib.h>
 
 // Forward declarations
 static void generate_latex_css(StringBuf* css_buf);
-static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPool* pool, int depth);
-static void process_element_content(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth);
-static void process_title(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth);
-static void process_author(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth);
-static void process_date(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth);
-static void process_maketitle(StringBuf* html_buf, VariableMemPool* pool, int depth);
-static void process_section(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth, const char* css_class);
-static void process_environment(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth);
-static void process_itemize(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth);
-static void process_enumerate(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth);
-static void process_quote(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth);
-static void process_verbatim(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth);
-static void process_text_command(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth, const char* css_class, const char* tag);
-static void process_item(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth);
+static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, int depth);
+static void process_element_content(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_title(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_author(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_date(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_maketitle(StringBuf* html_buf, Pool* pool, int depth);
+static void process_section(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class);
+static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_text_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, const char* tag);
+static void process_item(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
 static void append_escaped_text(StringBuf* html_buf, const char* text);
 static void append_indent(StringBuf* html_buf, int depth);
 
@@ -36,7 +36,7 @@ typedef struct {
 
 static DocumentState doc_state = {0};
 // Main API function
-void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_ast, VariableMemPool* pool) {
+void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_ast, Pool* pool) {
     if (!html_buf || !css_buf || !pool) {
         return;
     }
@@ -195,7 +195,7 @@ static void generate_latex_css(StringBuf* css_buf) {
 }
 
 // Process a LaTeX element and convert to HTML
-static void process_latex_element(StringBuf* html_buf, Item item, VariableMemPool* pool, int depth) {
+static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, int depth) {
     if (item.item == ITEM_NULL) {
         return;
     }
@@ -337,7 +337,7 @@ static bool is_block_element(Item item) {
 }
 
 // Process element content without paragraph wrapping (for titles, etc.)
-static void process_element_content_simple(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
+static void process_element_content_simple(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     if (!elem || !elem->items) {
         return;
     }
@@ -352,7 +352,7 @@ static void process_element_content_simple(StringBuf* html_buf, Element* elem, V
 }
 
 // Process element content with intelligent paragraph wrapping
-static void process_element_content(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
+static void process_element_content(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     if (!elem || !elem->items) {
         printf("DEBUG: process_element_content - elem or items is null\n");
         return;
@@ -408,7 +408,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Variable
 }
 
 // Process title command
-static void process_title(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
+static void process_title(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     if (!elem) return;
 
     // Store title for later use in maketitle
@@ -424,7 +424,7 @@ static void process_title(StringBuf* html_buf, Element* elem, VariableMemPool* p
 }
 
 // Process author command
-static void process_author(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
+static void process_author(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     if (!elem) return;
 
     // Store author for later use in maketitle
@@ -440,7 +440,7 @@ static void process_author(StringBuf* html_buf, Element* elem, VariableMemPool* 
 }
 
 // Process date command
-static void process_date(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
+static void process_date(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     if (!elem) return;
 
     // Store date for later use in maketitle
@@ -456,7 +456,7 @@ static void process_date(StringBuf* html_buf, Element* elem, VariableMemPool* po
 }
 
 // Process maketitle command
-static void process_maketitle(StringBuf* html_buf, VariableMemPool* pool, int depth) {
+static void process_maketitle(StringBuf* html_buf, Pool* pool, int depth) {
     append_indent(html_buf, depth);
 
     if (doc_state.title) {
@@ -481,7 +481,7 @@ static void process_maketitle(StringBuf* html_buf, VariableMemPool* pool, int de
 }
 
 // Process section commands
-static void process_section(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth, const char* css_class) {
+static void process_section(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class) {
     if (!elem) return;
 
     append_indent(html_buf, depth);
@@ -496,7 +496,7 @@ static void process_section(StringBuf* html_buf, Element* elem, VariableMemPool*
 }
 
 // Process environments (begin/end blocks)
-static void process_environment(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
+static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     if (!elem) return;
 
     // Get environment name from first child
@@ -529,7 +529,7 @@ static void process_environment(StringBuf* html_buf, Element* elem, VariableMemP
 }
 
 // Process itemize environment
-static void process_itemize(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
+static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<ul class=\"latex-itemize\">\n");
 
@@ -541,7 +541,7 @@ static void process_itemize(StringBuf* html_buf, Element* elem, VariableMemPool*
 }
 
 // Process enumerate environment
-static void process_enumerate(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
+static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<ol class=\"latex-enumerate\">\n");
 
@@ -553,7 +553,7 @@ static void process_enumerate(StringBuf* html_buf, Element* elem, VariableMemPoo
 }
 
 // Process quote environment
-static void process_quote(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
+static void process_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<div class=\"latex-quote\">\n");
 
@@ -564,7 +564,7 @@ static void process_quote(StringBuf* html_buf, Element* elem, VariableMemPool* p
 }
 
 // Process verbatim environment
-static void process_verbatim(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
+static void process_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<pre class=\"latex-verbatim\">");
 
@@ -574,7 +574,7 @@ static void process_verbatim(StringBuf* html_buf, Element* elem, VariableMemPool
 }
 
 // Process text formatting commands
-static void process_text_command(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth, const char* css_class, const char* tag) {
+static void process_text_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, const char* tag) {
     printf("DEBUG: process_text_command starting - css_class='%s', tag='%s'\n", css_class, tag);
 
     stringbuf_append_str(html_buf, "<");
@@ -597,7 +597,7 @@ static void process_text_command(StringBuf* html_buf, Element* elem, VariableMem
 }
 
 // Process item command
-static void process_item(StringBuf* html_buf, Element* elem, VariableMemPool* pool, int depth) {
+static void process_item(StringBuf* html_buf, Element* elem, Pool* pool, int depth) {
     append_indent(html_buf, depth);
     stringbuf_append_str(html_buf, "<li>");
 

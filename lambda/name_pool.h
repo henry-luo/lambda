@@ -6,19 +6,19 @@
 extern "C" {
 #endif
 
-#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/mempool.h"
 #include "../lib/strview.h"
 #include "../lib/hashmap.h"
 
 typedef struct NamePool {
-    VariableMemPool* pool;
+    Pool* pool;
     struct hashmap* names;      // C hashmap for String* storage
     struct NamePool* parent;    // Parent name pool for hierarchical lookup
     uint32_t ref_count;         // Reference counting for pool lifecycle
 } NamePool;
 
 // Core functions
-NamePool* name_pool_create(VariableMemPool* memory_pool, NamePool* parent);
+NamePool* name_pool_create(Pool* memory_pool, NamePool* parent);
 NamePool* name_pool_retain(NamePool* pool);
 void name_pool_release(NamePool* pool);
 

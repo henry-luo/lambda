@@ -8,12 +8,12 @@
 #define MAX_FIELD_COUNT 10000
 
 // Static memory pool for DateTime formatting
-static VariableMemPool* datetime_format_pool = NULL;
+static Pool* datetime_format_pool = NULL;
 
 // Initialize datetime formatting pool if needed
 static void init_datetime_format_pool() {
     if (!datetime_format_pool) {
-        pool_variable_init(&datetime_format_pool, 1024, 10); // Small pool for formatting strings
+        datetime_format_pool = pool_create(); // Small pool for formatting strings
     }
 }
 
@@ -68,7 +68,7 @@ void write_type(StrBuf* code_buf, Type *type) {
         break;
     case LMD_TYPE_ERROR:
         strbuf_append_str(code_buf, "Item");
-        break;        
+        break;
     case LMD_TYPE_BOOL:
         strbuf_append_str(code_buf, "bool");
         break;
@@ -84,10 +84,10 @@ void write_type(StrBuf* code_buf, Type *type) {
         break;
     case LMD_TYPE_DTIME:
         strbuf_append_str(code_buf, "DateTime");
-        break;        
+        break;
     case LMD_TYPE_DECIMAL:
         strbuf_append_str(code_buf, "Decimal*");
-        break;    
+        break;
     case LMD_TYPE_STRING:
         strbuf_append_str(code_buf, "String*");
         break;
@@ -162,9 +162,9 @@ void print_double(StrBuf *strbuf, double num) {
         strbuf_append_format(strbuf, "%.g", num);
         // remove the zero in exponent, like 'e07'
         char *end = strbuf->str + strbuf->length - 1;
-        if (*(end-1) == '0' && *(end-2) == '-' && *(end-3) == 'e') { 
+        if (*(end-1) == '0' && *(end-2) == '-' && *(end-3) == 'e') {
             *(end-1) = *end;  *end = '\0';
-            strbuf->length = end - strbuf->str; 
+            strbuf->length = end - strbuf->str;
         }
     }
     else {
@@ -211,7 +211,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
             print_named_items(strbuf, nest_map_type, nest_map->data, depth, indent, is_attrs);
         }
         else {
-            // printf("field %d: %p, name: %.*s, type: %d, data: %p\n", 
+            // printf("field %d: %p, name: %.*s, type: %d, data: %p\n",
             //     i, field, (int)field->name->length, field->name->str, field->type->type_id, data);
             // Safety check for field name and type
             if (!field->name || (uintptr_t)field->name < 0x1000) {
@@ -245,8 +245,8 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 break;
             case LMD_TYPE_BOOL:
                 strbuf_append_format(strbuf, "%s", *(bool*)data ? "true" : "false");
-                break;                    
-            case LMD_TYPE_INT:  
+                break;
+            case LMD_TYPE_INT:
                 strbuf_append_format(strbuf, "%d", *(int*)data);
                 break;
             case LMD_TYPE_INT64:
@@ -257,14 +257,14 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 break;
             case LMD_TYPE_DTIME: {
                 DateTime dt = *(DateTime*)data;
-                strbuf_append_str(strbuf, "t'"); 
+                strbuf_append_str(strbuf, "t'");
                 datetime_format_lambda(strbuf, &dt);
                 strbuf_append_char(strbuf, '\'');
                 break;
             }
             case LMD_TYPE_DECIMAL: {
                 Decimal *decimal = *(Decimal**)data;
-                print_decimal(strbuf, decimal);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+                print_decimal(strbuf, decimal);
                 break;
             }
             case LMD_TYPE_STRING: {
@@ -295,7 +295,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 break;
             }
             case LMD_TYPE_ARRAY:  case LMD_TYPE_ARRAY_INT:  case LMD_TYPE_ARRAY_INT64:  case LMD_TYPE_ARRAY_FLOAT:
-            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:  
+            case LMD_TYPE_LIST:  case LMD_TYPE_MAP:  case LMD_TYPE_ELEMENT:
             case LMD_TYPE_FUNC:  case LMD_TYPE_TYPE:
                 print_item(strbuf, *(Item*)data, depth, indent);
                 break;
@@ -306,7 +306,7 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
                 strbuf_append_str(strbuf, "[unknown]");
             }
         }
-        
+
         advance_field:
         ShapeEntry *next_field = field->next;
         field = next_field;
@@ -314,13 +314,13 @@ void print_named_items(StrBuf *strbuf, TypeMap *map_type, void* map_data, int de
 }
 
 void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) {
-    if (depth > MAX_DEPTH) { 
-        strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  
-        return; 
+    if (depth > MAX_DEPTH) {
+        strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");
+        return;
     }
-    if (!titem) { 
-        strbuf_append_str(strbuf, "null"); 
-        return; 
+    if (!titem) {
+        strbuf_append_str(strbuf, "null");
+        return;
     }
 
     switch (titem->type_id) {
@@ -385,10 +385,10 @@ void print_typeditem(StrBuf *strbuf, TypedItem *titem, int depth, char* indent) 
 void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     // limit depth to prevent infinite recursion
     if (depth > MAX_DEPTH) { strbuf_append_str(strbuf, "[MAX_DEPTH_REACHED]");  return; }
-    if (!item.item) { 
+    if (!item.item) {
         log_debug("TRACE: print_item - item is NULL, appending null");
-        strbuf_append_str(strbuf, "null"); 
-        return; 
+        strbuf_append_str(strbuf, "null");
+        return;
     }
 
     TypeId type_id = get_type_id(item);
@@ -460,7 +460,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     case LMD_TYPE_DTIME: {
         DateTime *dt = (DateTime*)item.pointer;
         if (dt) {
-            strbuf_append_str(strbuf, "t'"); 
+            strbuf_append_str(strbuf, "t'");
             datetime_format_lambda(strbuf, dt);
             strbuf_append_char(strbuf, '\'');
         }
@@ -483,9 +483,9 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             if (i > range->start) strbuf_append_str(strbuf, ", ");
             strbuf_append_int(strbuf, i);
         }
-        strbuf_append_char(strbuf, ']');        
+        strbuf_append_char(strbuf, ']');
         break;
-    }    
+    }
     case LMD_TYPE_LIST: {
         List *list = item.list;
         // printf("print list: %p, length: %ld, depth: %d\n", list, list->length, depth);
@@ -516,7 +516,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
             strbuf_append_format(strbuf, "%d", array->items[i]);
         }
         strbuf_append_char(strbuf, ']');
-        break;       
+        break;
     }
     case LMD_TYPE_ARRAY_INT64: {
         strbuf_append_str(strbuf, "[");
@@ -547,7 +547,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
         if (indent && map_type->length > 0) {
             strbuf_append_char(strbuf, '\n');
             for (int i = 0; i < depth; i++) strbuf_append_str(strbuf, indent);
-        }        
+        }
         strbuf_append_char(strbuf, '}');
         break;
     }
@@ -594,7 +594,7 @@ void print_item(StrBuf *strbuf, Item item, int depth, char* indent) {
     case LMD_TYPE_ERROR: {
         strbuf_append_str(strbuf, "error");
         break;
-    }    
+    }
     case LMD_TYPE_ANY:
         strbuf_append_str(strbuf, "any");
         break;
@@ -623,7 +623,7 @@ char* format_type(Type *type) {
     case LMD_TYPE_ANY:
         return "any";
     case LMD_TYPE_ERROR:
-        return "ERROR";        
+        return "ERROR";
     case LMD_TYPE_BOOL:
         return "bool";
     case LMD_TYPE_INT:
@@ -715,10 +715,10 @@ void print_const(Script *script, Type* type) {
     }
     case LMD_TYPE_STRING:  case LMD_TYPE_SYMBOL: case LMD_TYPE_BINARY: {
         String* string = (String*)data;
-        log_debug("[const@%d, %s, %p, '%.*s']", const_type->const_index, 
+        log_debug("[const@%d, %s, %p, '%.*s']", const_type->const_index,
             type_name, string, (int)string->len, string->chars);
         break;
-    }    
+    }
     case LMD_TYPE_DECIMAL: {
         Decimal *decimal = (Decimal*)data;
         StrBuf *strbuf = strbuf_new();
@@ -762,13 +762,13 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         }
         break;
     case AST_NODE_UNARY:
-        log_debug("[unary expr %.*s:%s]", (int)((AstUnaryNode*)node)->op_str.length, 
+        log_debug("[unary expr %.*s:%s]", (int)((AstUnaryNode*)node)->op_str.length,
             ((AstUnaryNode*)node)->op_str.str, type_name);
         print_ast_node(script, ((AstUnaryNode*)node)->operand, indent + 1);
         break;
     case AST_NODE_BINARY: {
         AstBinaryNode* bnode = (AstBinaryNode*)node;
-        log_debug("[binary expr %.*s.%d:%s]", (int)bnode->op_str.length, bnode->op_str.str, 
+        log_debug("[binary expr %.*s.%d:%s]", (int)bnode->op_str.length, bnode->op_str.str,
             bnode->op, type_name);
         print_ast_node(script, bnode->left, indent + 1);
         print_ast_node(script, bnode->right, indent + 1);
@@ -781,7 +781,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         print_label(indent + 1, "then:");
         print_ast_node(script, if_node->then, indent + 1);
         if (if_node->otherwise) {
-            print_label(indent + 1, "else:");            
+            print_label(indent + 1, "else:");
             print_ast_node(script, if_node->otherwise, indent + 1);
         }
         break;
@@ -807,7 +807,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
             declare = declare->next;
         }
         break;
-    }    
+    }
     case AST_NODE_LET_STAM:  case AST_NODE_PUB_STAM: {
         log_debug("[%s stam:%s]", node->node_type == AST_NODE_PUB_STAM ? "pub" : "let", type_name);
         AstNode *declare = ((AstLetNode*)node)->declare;
@@ -865,14 +865,14 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
             print_label(indent + 1, "item:");
             print_ast_node(script, item, indent + 1);
             item = item->next;
-        }        
+        }
         break;
     }
     case AST_NODE_LIST:  case AST_NODE_CONTENT:  case AST_NODE_CONTENT_TYPE: {
         AstListNode* list_node = (AstListNode*)node;
-        log_debug("[%s:%s[%ld]]", 
-            node->node_type == AST_NODE_CONTENT_TYPE ? "content_type" : 
-            node->node_type == AST_NODE_CONTENT ? "content" : "list", 
+        log_debug("[%s:%s[%ld]]",
+            node->node_type == AST_NODE_CONTENT_TYPE ? "content_type" :
+            node->node_type == AST_NODE_CONTENT ? "content" : "list",
             type_name, list_node->list_type->length);
         AstNode *ld = list_node->declare;
         if (!ld) {
@@ -882,14 +882,14 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
             print_label(indent + 1, "declare:");
             print_ast_node(script, ld, indent + 1);
             ld = ld->next;
-        }        
+        }
         AstNode *li = list_node->item;
         while (li) {
             print_label(indent + 1, "item:");
             print_ast_node(script, li, indent + 1);
             li = li->next;
-        }        
-        break; 
+        }
+        break;
     }
     case AST_NODE_MAP: {
         log_debug("[map expr:%s]", type_name);
@@ -922,14 +922,14 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         log_debug("[%s expr:%s]", node->node_type == AST_NODE_MEMBER_EXPR ? "member" : "index", type_name);
         print_label(indent + 1, "object:");
         print_ast_node(script, ((AstFieldNode*)node)->object, indent + 1);
-        print_label(indent + 1, "field:");     
+        print_label(indent + 1, "field:");
         print_ast_node(script, ((AstFieldNode*)node)->field, indent + 1);
         break;
     case AST_NODE_CALL_EXPR: {
         Type *type = node->type;
         log_debug("[call expr:%s,const:%d]", type_name, type->is_const);
         print_ast_node(script, ((AstCallNode*)node)->function, indent + 1);
-        print_label(indent + 1, "args:"); 
+        print_label(indent + 1, "args:");
         AstNode* arg = ((AstCallNode*)node)->argument;
         while (arg) {
             log_debug("  (arg:%s)", arg->type ? type_info[arg->type->type_id].name : "unknown");
@@ -948,14 +948,14 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
         AstFuncNode* func = (AstFuncNode*)node;
         if (node->node_type == AST_NODE_FUNC_EXPR) {
             log_debug("[fn expr:%s]", type_name);
-        } 
+        }
         else if (node->node_type == AST_NODE_FUNC) {
             log_debug("[fn: %.*s:%s]", (int)func->name->len, func->name->chars, type_name);
         }
         else {
             log_debug("[pn: %.*s:%s]", (int)func->name->len, func->name->chars, type_name);
         }
-        print_label(indent + 1, "params:"); 
+        print_label(indent + 1, "params:");
         AstNode* fn_param = (AstNode*)func->param;
         while (fn_param) {
             print_ast_node(script, fn_param, indent + 1);
@@ -978,9 +978,9 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
             print_label(indent + 1, "item:");
             print_ast_node(script, ls_item, indent + 1);
             ls_item = ls_item->next;
-        }        
+        }
         break;
-    }        
+    }
     case AST_NODE_ARRAY_TYPE: {
         log_debug("[array type:%s]", type_name);
         AstNode *arr_item = ((AstArrayNode*)node)->item;
@@ -988,7 +988,7 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
             print_label(indent + 1, "item:");
             print_ast_node(script, arr_item, indent + 1);
             arr_item = arr_item->next;
-        }        
+        }
         break;
     }
     case AST_NODE_MAP_TYPE: {
@@ -1016,25 +1016,25 @@ void print_ast_node(Script *script, AstNode *node, int indent) {
     case AST_NODE_FUNC_TYPE: {
         log_debug("[func type:%s]", type_name);
         AstFuncNode* ft = (AstFuncNode*)node;
-        print_label(indent + 1, "params:"); 
+        print_label(indent + 1, "params:");
         AstNode* ft_param = (AstNode*)ft->param;
         while (ft_param) {
             print_ast_node(script, ft_param, indent + 1);
             ft_param = ft_param->next;
-        }    
+        }
         break;
     }
     case AST_NODE_BINARY_TYPE: {
         AstBinaryNode* bt_node = (AstBinaryNode*)node;
-        log_debug("[binary type %.*s.%d:%s]", (int)bt_node->op_str.length, bt_node->op_str.str, 
+        log_debug("[binary type %.*s.%d:%s]", (int)bt_node->op_str.length, bt_node->op_str.str,
             bt_node->op, type_name);
         print_ast_node(script, bt_node->left, indent + 1);
-        print_ast_node(script, bt_node->right, indent + 1);        
+        print_ast_node(script, bt_node->right, indent + 1);
         break;
     }
     case AST_NODE_UNARY_TYPE: {
         AstUnaryNode* ut_node = (AstUnaryNode*)node;
-        log_debug("[unary type %.*s.%d:%s]", (int)ut_node->op_str.length, ut_node->op_str.str, 
+        log_debug("[unary type %.*s.%d:%s]", (int)ut_node->op_str.length, ut_node->op_str.str,
             ut_node->op, type_name);
         print_ast_node(script, ut_node->operand, indent + 1);
         break;

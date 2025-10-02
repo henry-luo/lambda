@@ -460,7 +460,7 @@ static void format_ascii_math_item(StringBuf* sb, Item item, int depth) {
 }
 
 // Main ASCII math formatter function
-String* format_math_ascii_standalone(VariableMemPool* pool, Item root_item) {
+String* format_math_ascii_standalone(Pool* pool, Item root_item) {
     printf("DEBUG: format_math_ascii_standalone called with item=0x%lx\n", root_item.item);
     fflush(stdout);
     StringBuf* sb = stringbuf_new(pool);
