@@ -79,7 +79,7 @@ MemPoolError pool_variable_init(VariableMemPool **pool, size_t grow_size, uint16
 
 MemPoolError pool_variable_alloc(VariableMemPool *pool, size_t size, void **ptr);
 
-void* pool_calloc(VariableMemPool* pool, size_t size);
+void* pool_variable_calloc(VariableMemPool* pool, size_t size);
 void* pool_variable_realloc(VariableMemPool *pool, void *ptr,  size_t data_size, size_t new_size);
 
 /**
@@ -88,7 +88,7 @@ void* pool_variable_realloc(VariableMemPool *pool, void *ptr,  size_t data_size,
 MemPoolError pool_variable_is_associated(VariableMemPool *pool, void *ptr);
 
 /*
- * Before appending to the free list, this function will attempt to merge neighbouring memory blocks 
+ * Before appending to the free list, this function will attempt to merge neighbouring memory blocks
  * (including the space used by their headers) in the given buffer.
  */
 MemPoolError pool_variable_free(VariableMemPool *pool, void *ptr);

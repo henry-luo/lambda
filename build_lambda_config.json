@@ -335,7 +335,8 @@
                 "curl",
                 "ssl",
                 "crypto",
-                "zlib"
+                "zlib",
+                "jemalloc"
             ],
             "defines": [
                 "SIMPLE_SCHEMA_PARSER"
@@ -391,9 +392,7 @@
                 "lib/log.c",
                 "lib/datetime.c",
                 "lib/string.c",
-                "lib/mem-pool/src/variable.c",
-                "lib/mem-pool/src/buffer.c",
-                "lib/mem-pool/src/utils.c",
+                "lib/mempool.c",
                 "lib/file.c",
                 "lib/url.c",
                 "lib/url_parser.c",
@@ -403,7 +402,6 @@
             "includes": [
                 "lambda/tree-sitter/lib/include",
                 "lambda/tree-sitter-lambda/bindings/c",
-                "lib/mem-pool/include",
                 "lexbor/source",
                 "."
             ],
@@ -432,7 +430,8 @@
                 "zlib",
                 "bzip2",
                 "png",
-                "expat"
+                "expat",
+                "jemalloc"
             ],
             "lib_dirs": [
                 "/opt/homebrew/lib",
@@ -973,7 +972,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_stringbuf_gtest.exe"
                     },
@@ -988,18 +988,6 @@
                             "gtest_main"
                         ],
                         "binary": "test_strview_gtest.exe"
-                    },
-                    {
-                        "source": "test_variable_pool_gtest.cpp",
-                        "name": "🏊 Variable Pool Tests (GTest)",
-                        "dependencies": [
-                            "lambda-lib"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main"
-                        ],
-                        "binary": "test_variable_pool_gtest.exe"
                     },
                     {
                         "source": "test_num_stack_gtest.cpp",
@@ -1021,7 +1009,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_datetime_gtest.exe"
                     },
@@ -1074,16 +1063,18 @@
                         "binary": "test_basic_gtest.exe"
                     },
                     {
-                        "source": "test_mempool.c",
-                        "name": "🚀 Unified Memory Pool Tests (C)",
+                        "source": "test_mempool_gtest.cpp",
+                        "name": "🚀 Unified Memory Pool Tests (GTest)",
                         "dependencies": [],
                         "libraries": [
+                            "gtest",
+                            "gtest_main",
                             "jemalloc"
                         ],
                         "additional_sources": [
                             "lib/mempool.c"
                         ],
-                        "binary": "test_mempool.exe"
+                        "binary": "test_mempool_gtest.exe"
                     },
                     {
                         "_DISABLED_source": "test_mempool_simple_gtest.cpp",
@@ -1169,7 +1160,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_math_gtest.exe"
                     },
@@ -1181,7 +1173,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_math_ascii_gtest.exe"
                     },
@@ -1193,7 +1186,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_markup_roundtrip_gtest.exe"
                     },
@@ -1205,7 +1199,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_input_roundtrip_gtest.exe"
                     },
@@ -1241,7 +1236,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_sysinfo_gtest.exe"
                     },
@@ -1253,7 +1249,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_jsx_roundtrip_new_gtest.exe"
                     },
@@ -1277,7 +1274,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_css_tokenizer_gtest.exe"
                     },
@@ -1289,7 +1287,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_css_parser_gtest.exe"
                     },
@@ -1301,7 +1300,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_css_integration_gtest.exe"
                     },
@@ -1313,7 +1313,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_css_files_safe_gtest.exe"
                     },
@@ -1325,7 +1326,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_css_frameworks_gtest.exe"
                     },
@@ -1361,7 +1363,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test_latex_html_fixtures_gtest.exe",
                         "additional_sources": [
@@ -1403,7 +1406,8 @@
                         ],
                         "libraries": [
                             "gtest",
-                            "gtest_main"
+                            "gtest_main",
+                            "jemalloc"
                         ],
                         "binary": "test/test_ast_validator_gtest.exe"
                     }

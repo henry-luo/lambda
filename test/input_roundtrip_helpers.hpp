@@ -16,8 +16,8 @@
 extern "C" {
     Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor);
     Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
-    String* format_data(Item item, String* type, String* flavor, VariableMemPool *pool);
-    
+    String* format_data(Item item, String* type, String* flavor, Pool *pool);
+
     // Use actual URL library functions
     Url* url_parse(const char* input);
     Url* url_parse_with_base(const char* input, const Url* base);

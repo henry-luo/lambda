@@ -9,7 +9,7 @@
 
 extern "C" {
     Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
-    String* format_data(Item item, String* type, String* flavor, VariableMemPool* pool);
+    String* format_data(Item item, String* type, String* flavor, Pool* pool);
     Url* parse_url(Url* base, const char* url_str);
     Url* get_current_dir(void);
 }
@@ -19,11 +19,11 @@ protected:
     void SetUp() override {
         // Setup code if needed
     }
-    
+
     void TearDown() override {
         // Cleanup code if needed
     }
-    
+
     // Helper function to read file content
     static char* read_file_content(const char* filepath) {
         FILE* file = fopen(filepath, "r");
@@ -31,38 +31,38 @@ protected:
             printf("Failed to open file: %s\n", filepath);
             return NULL;
         }
-        
+
         fseek(file, 0, SEEK_END);
         long length = ftell(file);
         fseek(file, 0, SEEK_SET);
-        
+
         char* content = (char*)malloc(length + 1);
         if (!content) {
             fclose(file);
             return NULL;
         }
-        
+
         fread(content, 1, length, file);
         content[length] = '\0';
         fclose(file);
-        
+
         return content;
     }
-    
+
     // Helper function to normalize JSX for comparison
     static char* normalize_jsx(const char* jsx) {
         if (!jsx) return NULL;
-        
+
         size_t len = strlen(jsx);
         char* normalized = (char*)malloc(len + 1);
         if (!normalized) return NULL;
-        
+
         size_t write_pos = 0;
         bool in_tag = false;
-        
+
         for (size_t i = 0; i < len; i++) {
             char c = jsx[i];
-            
+
             if (c == '<') {
                 in_tag = true;
                 normalized[write_pos++] = c;
@@ -91,66 +91,66 @@ protected:
                 normalized[write_pos++] = c;
             }
         }
-        
+
         // Remove trailing whitespace
         while (write_pos > 0 && normalized[write_pos - 1] == ' ') {
             write_pos--;
         }
-        
+
         normalized[write_pos] = '\0';
         return normalized;
     }
-    
+
     // Helper function to perform JSX roundtrip test
     void test_jsx_roundtrip_file(const char* filename) {
         printf("Testing JSX roundtrip for: %s\n", filename);
-        
+
         char filepath[256];
         snprintf(filepath, sizeof(filepath), "test/input/%s", filename);
-        
+
         // Read original JSX content
         char* original_content = read_file_content(filepath);
         ASSERT_NE(original_content, nullptr) << "Failed to read JSX file: " << filepath;
-        
+
         // Parse JSX
         Url* cwd = get_current_dir();
         Url* url = parse_url(cwd, filepath);
         ASSERT_NE(url, nullptr) << "Failed to parse URL";
-        
+
         // Create a simple JSX type string structure
         static String jsx_type_struct = {4, 1, {'j', 's', 'x', '\0'}};
         String* jsx_type = &jsx_type_struct;
-        
+
         Input* input = input_from_source(original_content, url, jsx_type, NULL);
         ASSERT_NE(input, nullptr) << "Failed to create input from JSX source";
         ASSERT_NE(input->root.item, ITEM_NULL) << "JSX parsing failed - no root element";
-        
+
         // Format back to JSX
         String* formatted = format_data(input->root, jsx_type, NULL, input->pool);
         ASSERT_NE(formatted, nullptr) << "JSX formatting failed";
         ASSERT_NE(formatted->chars, nullptr) << "Formatted JSX is null";
-        
+
         printf("Original: %s\n", original_content);
         printf("Formatted: %s\n", formatted->chars);
-        
+
         // Normalize both for comparison
         char* normalized_original = normalize_jsx(original_content);
         char* normalized_formatted = normalize_jsx(formatted->chars);
-        
+
         ASSERT_NE(normalized_original, nullptr) << "Failed to normalize original JSX";
         ASSERT_NE(normalized_formatted, nullptr) << "Failed to normalize formatted JSX";
-        
+
         printf("Normalized original: %s\n", normalized_original);
         printf("Normalized formatted: %s\n", normalized_formatted);
-        
+
         // Compare normalized versions
         ASSERT_STREQ(normalized_original, normalized_formatted) << "JSX roundtrip failed for " << filename;
-        
+
         // Cleanup
         free(original_content);
         free(normalized_original);
         free(normalized_formatted);
-        
+
         printf("JSX roundtrip test passed for: %s\n", filename);
     }
 };
@@ -179,22 +179,22 @@ TEST_F(JSXRoundtripTest, self_closing_tags) {
 // Test JSX expressions parsing
 TEST_F(JSXRoundtripTest, jsx_expressions) {
     const char* jsx_with_expressions = "<div>{name} is {age} years old</div>";
-    
+
     Url* cwd = get_current_dir();
     Url* url = parse_url(cwd, "test.jsx");
     // Create a simple JSX type string structure
     static String jsx_type_struct = {4, 1, {'j', 's', 'x', '\0'}};
     String* jsx_type = &jsx_type_struct;
-    
+
     Input* input = input_from_source(jsx_with_expressions, url, jsx_type, NULL);
-    
+
     ASSERT_NE(input, nullptr);
     ASSERT_NE(input->root.item, ITEM_NULL);
-    
+
     // Format back
     String* formatted = format_data(input->root, jsx_type, NULL, input->pool);
     ASSERT_NE(formatted, nullptr);
-    
+
     printf("JSX with expressions - Original: %s\n", jsx_with_expressions);
     printf("JSX with expressions - Formatted: %s\n", formatted->chars);
 }
@@ -202,22 +202,22 @@ TEST_F(JSXRoundtripTest, jsx_expressions) {
 // Test JSX attributes
 TEST_F(JSXRoundtripTest, jsx_attributes) {
     const char* jsx_with_attrs = "<button className=\"btn\" onClick={handleClick} disabled>Click</button>";
-    
+
     Url* cwd = get_current_dir();
     Url* url = parse_url(cwd, "test.jsx");
     // Create a simple JSX type string structure
     static String jsx_type_struct = {4, 1, {'j', 's', 'x', '\0'}};
     String* jsx_type = &jsx_type_struct;
-    
+
     Input* input = input_from_source(jsx_with_attrs, url, jsx_type, NULL);
-    
+
     ASSERT_NE(input, nullptr);
     ASSERT_NE(input->root.item, ITEM_NULL);
-    
+
     // Format back
     String* formatted = format_data(input->root, jsx_type, NULL, input->pool);
     ASSERT_NE(formatted, nullptr);
-    
+
     printf("JSX with attributes - Original: %s\n", jsx_with_attrs);
     printf("JSX with attributes - Formatted: %s\n", formatted->chars);
 }

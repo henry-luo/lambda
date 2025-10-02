@@ -4,7 +4,7 @@
 #include "../../lambda/format/format-latex-html.h"
 #include "../../lambda/input/input.h"
 #include "../../lib/stringbuf.h"
-#include "../../lib/mem-pool/include/mem_pool.h"
+#include "../../lib/mempool.h"
 #include <filesystem>
 #include <iostream>
 
@@ -14,9 +14,8 @@ void parse_latex(Input* input, const char* latex_string);
 class LatexHtmlFixtureTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // Initialize memory pool with original small size to reproduce crash
-        MemPoolError err1 = pool_variable_init(&pool, 1024, MEM_POOL_NO_BEST_FIT);
-        ASSERT_EQ(err1, MEM_POOL_ERR_OK);
+        // Initialize memory pool
+        pool = pool_create();
         ASSERT_NE(pool, nullptr);
 
         // Create string buffers with default capacity
@@ -32,7 +31,7 @@ protected:
     void TearDown() override {
         // Cleanup memory pool (this will cleanup string buffers too)
         if (pool) {
-            pool_variable_destroy(pool);
+            pool_destroy(pool);
         }
     }
 
@@ -108,7 +107,7 @@ protected:
         return report.str();
     }
 
-    VariableMemPool* pool;
+    Pool* pool;
     StringBuf* html_buf;
     StringBuf* css_buf;
     HtmlComparator comparator;

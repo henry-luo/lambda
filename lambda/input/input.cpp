@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include "../../lib/log.h"  // add logging support
-#include "../../file.h"
+#include "../../lib/file.h"
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 

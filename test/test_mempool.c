@@ -1,38 +1,12 @@
 /*
- * Comprehensive Memory Pool Test Suite (Unified C Version)
- * ========================================================
+ * Comprehensive Memory Pool Test Suite (GTest Version)
+ * ===================================================
  *
- * Combined testatstatic int test_basic_allocation(void) {
-    Pool* pool = pool_create();
-    EXPECT_NOT_NULL(pool, \"Pool creation should succeed\");
-
-    void* ptr = pool_alloc(pool, 1024);
-    EXPECT_NOT_NULL(ptr, \"Basic allocation should succeed\");
-
-    // Don't free individual allocations - arena cleanup will handle it
-    pool_destroy(pool);
-    return 1;
-}_basic_calloc(void) {
-    Pool* pool = pool_create();
-    EXPECT_NOT_NULL(pool, \"Pool creation should succeed\");
-
-    size_t size = 1024;
-    char* ptr = (char*)pool_calloc(pool, size);
-    EXPECT_NOT_NULL(ptr, \"Basic calloc should succeed\");
-
-    // Check that memory is zeroed
-    for (size_t i = 0; i < size; i++) {
-        EXPECT_TRUE(ptr[i] == 0, \"Calloc should zero memory\");
-    }
-
-    // Don't free individual allocations - arena cleanup will handle it
-    pool_destroy(pool);
-    return 1;
-}jemalloc-based memory pool implementation,
+ * GTest-based tests for jemalloc-based memory pool implementation,
  * incorporating all functionality from:
- * - test_mempool_simple_gtest.cpp (basic GTest cases converted to C)
- * - test_mempool_standalone.c (standalone C tests)
- * - test_mempool_comprehensive_gtest.cpp (comprehensive GTest cases converted to C)
+ * - test_mempool_simple_gtest.cpp (basic GTest cases)
+ * - test_mempool_standalone.c (standalone C tests converted to GTest)
+ * - test_mempool_comprehensive_gtest.cpp (comprehensive GTest cases)
  *
  * Test Coverage:
  * - Basic functionality (pool_alloc, pool_calloc, pool_free)
@@ -45,68 +19,12 @@
  */
 
 #include "../lib/mempool.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdint.h>
-#include <assert.h>
-#include <time.h>
-
-// Test tracking
-static int tests_run = 0;
-static int tests_passed = 0;
-static int tests_failed = 0;
-
-// Test result macros
-#define TEST_START(name) \
-    do { \
-        printf("[ RUN      ] %s\n", name); \
-        tests_run++; \
-    } while(0)
-
-#define TEST_PASS(name) \
-    do { \
-        printf("[       OK ] %s\n", name); \
-        tests_passed++; \
-    } while(0)
-
-#define TEST_FAIL(name, msg) \
-    do { \
-        printf("[  FAILED  ] %s: %s\n", name, msg); \
-        tests_failed++; \
-    } while(0)
-
-#define EXPECT_TRUE(condition, msg) \
-    do { \
-        if (!(condition)) { \
-            printf("EXPECTATION FAILED: %s\n", msg); \
-            return 0; \
-        } \
-    } while(0)
-
-#define EXPECT_FALSE(condition, msg) \
-    do { \
-        if (condition) { \
-            printf("EXPECTATION FAILED: %s\n", msg); \
-            return 0; \
-        } \
-    } while(0)
-
-#define EXPECT_NOT_NULL(ptr, msg) \
-    do { \
-        if ((ptr) == NULL) { \
-            printf("EXPECTATION FAILED: %s\n", msg); \
-            return 0; \
-        } \
-    } while(0)
-
-#define EXPECT_NULL(ptr, msg) \
-    do { \
-        if ((ptr) != NULL) { \
-            printf("EXPECTATION FAILED: %s\n", msg); \
-            return 0; \
-        } \
-    } while(0)
+#include <gtest/gtest.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <cstdint>
+#include <ctime>
 
 // Helper functions
 static void fill_pattern(void* ptr, size_t size, uint8_t pattern) {
@@ -1084,7 +1002,47 @@ static void run_all_tests(void) {
     }
 }
 
-int main(void) {
+static void write_json_output(const char* json_file) {
+    FILE* file = fopen(json_file, "w");
+    if (!file) {
+        fprintf(stderr, "Error: Could not write JSON output to %s\n", json_file);
+        return;
+    }
+
+    // Generate JSON output compatible with Criterion format
+    fprintf(file, "{\n");
+    fprintf(file, "  \"tests\": %d,\n", tests_run);
+    fprintf(file, "  \"failures\": %d,\n", tests_failed);
+    fprintf(file, "  \"passed\": %d,\n", tests_passed);
+    fprintf(file, "  \"test_suites\": [\n");
+    fprintf(file, "    {\n");
+    fprintf(file, "      \"name\": \"MemoryPoolTests\",\n");
+    fprintf(file, "      \"tests\": %d,\n", tests_run);
+    fprintf(file, "      \"failures\": %d,\n", tests_failed);
+    fprintf(file, "      \"passed\": %d\n", tests_passed);
+    fprintf(file, "    }\n");
+    fprintf(file, "  ]\n");
+    fprintf(file, "}\n");
+
+    fclose(file);
+}
+
+int main(int argc, char* argv[]) {
+    const char* json_file = NULL;
+
+    // Parse command line arguments for JSON output
+    for (int i = 1; i < argc; i++) {
+        if (strstr(argv[i], "--json=") == argv[i]) {
+            json_file = argv[i] + 7;  // Skip "--json="
+        }
+    }
+
     run_all_tests();
+
+    // Write JSON output if requested
+    if (json_file) {
+        write_json_output(json_file);
+    }
+
     return (tests_failed == 0) ? 0 : 1;
 }
