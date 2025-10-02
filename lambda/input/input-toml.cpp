@@ -2,9 +2,6 @@
 
 static Item parse_value(Input *input, const char **toml, int *line_num);
 
-// External function from input-json.c
-extern ShapeEntry* alloc_shape_entry(VariableMemPool* pool, String* key, TypeId type_id, ShapeEntry* prev_entry);
-
 // Common function to handle escape sequences in strings
 // is_multiline: true for multiline basic strings, false for regular strings
 static bool handle_escape_sequence(StringBuf* sb, const char **toml, bool is_multiline, int *line_num) {
