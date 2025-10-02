@@ -3,9 +3,6 @@
 #include "../lib/string.h"
 #include "lambda-data.hpp"
 
-// String creation helper - reuse existing string creation functions
-extern String* string_from_chars(const char* str, size_t len, VariableMemPool* pool);
-
 // Entry structure for the hashmap
 typedef struct NamePoolEntry {
     String* name;               // The actual String object being stored
