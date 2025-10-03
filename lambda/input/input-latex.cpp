@@ -152,7 +152,7 @@ static Array* parse_command_arguments(Input *input, const char **latex) {
             if (content_chars) {
                 memcpy(content_chars, arg_sb->str->chars, content_len);
                 content_chars[content_len] = '\0';
-                
+
                 String *arg_string = input_create_string(input, content_chars);
                 if (arg_string) {
                     printf("DEBUG: Parsed argument: '%.*s' (length: %u)\n", (int)arg_string->len, arg_string->chars, arg_string->len);
@@ -189,33 +189,34 @@ static Item parse_latex_command(Input *input, const char **latex) {
     }
 
     printf("DEBUG: Parsing command '%.*s' at position: '%.30s'\n", (int)cmd_name->len, cmd_name->chars, *latex);
-    
+
     // Handle control symbols (LaTeX-JS style: escape c:[$%#&{}_\-,/@])
     if (cmd_name->len == 1) {
         char escaped_char = cmd_name->chars[0];
         printf("DEBUG: Processing control symbol: \\%c\n", escaped_char);
-        
+
         // Handle control symbols that produce literal characters
-        if (escaped_char == '$' || escaped_char == '%' || escaped_char == '#' || 
-            escaped_char == '&' || escaped_char == '{' || escaped_char == '}' || 
+        if (escaped_char == '$' || escaped_char == '%' || escaped_char == '#' ||
+            escaped_char == '&' || escaped_char == '{' || escaped_char == '}' ||
             escaped_char == '_') {
-            
+
             printf("DEBUG: Converting control symbol \\%c to literal '%c'\n", escaped_char, escaped_char);
             StringBuf* text_sb = input->sb;
             stringbuf_reset(text_sb);
             stringbuf_append_char(text_sb, escaped_char);
-            
+
             String* text_str = stringbuf_to_string(text_sb);
             return {.item = (uint64_t)text_str};
         }
         // Handle special control symbols
         else if (escaped_char == ',') {
-            // \, = thin space
+            // \, = thin space (use regular space for better compatibility)
             printf("DEBUG: Converting \\, to thin space\n");
             StringBuf* text_sb = input->sb;
             stringbuf_reset(text_sb);
-            stringbuf_append_str(text_sb, "\u2009"); // Unicode thin space
-            
+            // stringbuf_append_str(text_sb, "\u2009"); // Unicode thin space
+            stringbuf_append_char(text_sb, ' '); // Regular space for compatibility
+
             String* text_str = stringbuf_to_string(text_sb);
             return {.item = (uint64_t)text_str};
         }
@@ -225,7 +226,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
             StringBuf* text_sb = input->sb;
             stringbuf_reset(text_sb);
             stringbuf_append_str(text_sb, "\u00AD"); // Unicode soft hyphen
-            
+
             String* text_str = stringbuf_to_string(text_sb);
             return {.item = (uint64_t)text_str};
         }
@@ -235,7 +236,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
             StringBuf* text_sb = input->sb;
             stringbuf_reset(text_sb);
             stringbuf_append_str(text_sb, "\u200C"); // Unicode ZWNJ
-            
+
             String* text_str = stringbuf_to_string(text_sb);
             return {.item = (uint64_t)text_str};
         }
@@ -245,7 +246,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
             StringBuf* text_sb = input->sb;
             stringbuf_reset(text_sb);
             stringbuf_append_str(text_sb, "\u200B"); // Unicode zero-width space
-            
+
             String* text_str = stringbuf_to_string(text_sb);
             return {.item = (uint64_t)text_str};
         }
@@ -255,12 +256,12 @@ static Item parse_latex_command(Input *input, const char **latex) {
             if (**latex == '{' && *(*latex + 1) == '}') {
                 (*latex) += 2; // Skip {}
             }
-            
+
             printf("DEBUG: Converting \\%c to literal '%c'\n", escaped_char, escaped_char);
             StringBuf* text_sb = input->sb;
             stringbuf_reset(text_sb);
             stringbuf_append_char(text_sb, escaped_char);
-            
+
             String* text_str = stringbuf_to_string(text_sb);
             return {.item = (uint64_t)text_str};
         }
@@ -275,7 +276,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
             return {.item = (uint64_t)element};
         }
     }
-    
+
     // Handle line break commands
     if (strcmp(cmd_name->chars, "\\") == 0 || strcmp(cmd_name->chars, "newline") == 0) {
         // printf("DEBUG: Processing line break command: %s\n", cmd_name->chars);
@@ -286,7 +287,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
         }
         return {.item = (uint64_t)element};
     }
-    
+
     if (strcmp(cmd_name->chars, "par") == 0) {
         // Create a paragraph break element
         Element* element = create_latex_element(input, "par");
@@ -295,13 +296,47 @@ static Item parse_latex_command(Input *input, const char **latex) {
         }
         return {.item = (uint64_t)element};
     }
-    
+
+    // Handle verb command
+    if (strcmp(cmd_name->chars, "verb") == 0) {
+        printf("DEBUG: Processing verb command\n");
+        // Parse \verb|text| or \verb/text/ etc.
+        if (**latex) {
+            char delimiter = **latex;
+            (*latex)++; // Skip delimiter
+
+            // Find closing delimiter
+            StringBuf* verb_sb = input->sb;
+            stringbuf_reset(verb_sb);
+
+            while (**latex && **latex != delimiter) {
+                stringbuf_append_char(verb_sb, **latex);
+                (*latex)++;
+            }
+
+            if (**latex == delimiter) {
+                (*latex)++; // Skip closing delimiter
+            }
+
+            String* verb_text = stringbuf_to_string(verb_sb);
+
+            // Create verb element
+            Element* element = create_latex_element(input, "verb");
+            if (element && verb_text) {
+                list_push((List*)element, {.item = s2it(verb_text)});
+                ((TypeElmt*)element->type)->content_length = 1;
+                return {.item = (uint64_t)element};
+            }
+        }
+        return {.item = ITEM_ERROR};
+    }
+
     // Handle special multi-character escape sequences
     if (strcmp(cmd_name->chars, "textbackslash") == 0) {
         StringBuf* text_sb = input->sb;
         stringbuf_reset(text_sb);
         stringbuf_append_char(text_sb, '\\');
-        
+
         String* text_str = stringbuf_to_string(text_sb);
         return {.item = (uint64_t)text_str};
     }
@@ -324,19 +359,19 @@ static Item parse_latex_command(Input *input, const char **latex) {
         // \item commands don't take arguments in braces
         // Their content is everything until the next \item or \end{environment}
         printf("DEBUG: Parsing \\item command content\n");
-        
+
         skip_whitespace(latex);
-        
+
         // Parse content until next \item or \end
         StringBuf* content_sb = input->sb;
         stringbuf_reset(content_sb);
-        
+
         while (**latex) {
             // Stop at next \item or \end
             if (strncmp(*latex, "\\item", 5) == 0 || strncmp(*latex, "\\end{", 5) == 0) {
                 break;
             }
-            
+
             // Handle escaped characters
             if (**latex == '\\') {
                 // This might be a command within the item content
@@ -352,7 +387,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
                 (*latex)++;
             }
         }
-        
+
         // Add the content as a child of the item element
         if (content_sb->length > 0) {
             String *content_string = stringbuf_to_string(content_sb);
@@ -362,15 +397,15 @@ static Item parse_latex_command(Input *input, const char **latex) {
                 if (trimmed_content) {
                     strncpy(trimmed_content, content_string->chars, content_string->len);
                     trimmed_content[content_string->len] = '\0';
-                    
+
                     // Simple trim - remove leading/trailing whitespace
                     char* start = trimmed_content;
                     while (*start && (*start == ' ' || *start == '\t' || *start == '\n' || *start == '\r')) start++;
-                    
+
                     char* end = start + strlen(start) - 1;
                     while (end > start && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) end--;
                     *(end + 1) = '\0';
-                    
+
                     if (strlen(start) > 0) {
                         String *trimmed_string = input_create_string(input, start);
                         if (trimmed_string) {
@@ -383,7 +418,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
             }
             stringbuf_reset(content_sb);
         }
-        
+
         // Set content length
         ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
         return {.item = (uint64_t)element};
@@ -397,15 +432,15 @@ static Item parse_latex_command(Input *input, const char **latex) {
         // This is an environment begin - create element with environment name as tag
         if (args && args->length > 0) {
             printf("DEBUG: Processing \\begin command with %lld arguments\n", args->length);
-            
+
             // Extract environment name from the successfully parsed argument
             const char* env_name = "itemize"; // Default
-            
+
             // Try to access the first argument which contains the environment name
             if (args && args->length > 0 && args->items) {
                 Item first_arg = args->items[0];
                 TypeId arg_type = get_type_id(first_arg);
-                
+
                 if (arg_type == LMD_TYPE_STRING) {
                     String* env_string = (String*)first_arg.pointer;
                     if (env_string && env_string->chars && env_string->len > 0 && env_string->len < 50) {
@@ -415,7 +450,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
                     }
                 }
             }
-            
+
             // printf("DEBUG: Final environment name: '%s'\n", env_name);
             // printf("DEBUG: Detected environment: %s\n", env_name);
             // printf("DEBUG: Creating environment element for: '%s'\n", env_name);
@@ -800,25 +835,47 @@ static Item parse_latex_element(Input *input, const char **latex) {
                 printf("DEBUG: Found LaTeX command, breaking with %d chars collected\n", text_chars);
                 break;
             }
+        } else if (**latex == '-') {
+            // Handle LaTeX dash ligatures: -- (en dash) and --- (em dash)
+            if (*(*latex + 1) == '-') {
+                if (*(*latex + 2) == '-') {
+                    // Three dashes: --- → em dash (—)
+                    stringbuf_append_str(text_sb, "—");
+                    (*latex) += 3;
+                    text_chars += 3;
+                } else {
+                    // Two dashes: -- → en dash (–)
+                    stringbuf_append_str(text_sb, "–");
+                    (*latex) += 2;
+                    text_chars += 2;
+                }
+            } else {
+                // Single dash: regular hyphen
+                stringbuf_append_char(text_sb, **latex);
+                (*latex)++;
+                text_chars++;
+            }
         } else if (**latex == '$' || **latex == '%') {
-            // Math mode or comment, break
+            // Math mode, break
+            printf("DEBUG: Found math, breaking with %d chars collected\n", text_chars);
             break;
         } else if (**latex == '\n') {
             // Check for paragraph break (double newline)
             if (*(*latex + 1) == '\n') {
-                // Found paragraph break, stop parsing text here
+                // Found paragraph break, stop parsing text here and create paragraph break element
                 printf("DEBUG: Found paragraph break at position %d\n", text_chars);
                 break;
             } else {
                 // Single newline, include in text
                 stringbuf_append_char(text_sb, **latex);
                 (*latex)++;
+                text_chars++;
             }
         } else {
             stringbuf_append_char(text_sb, **latex);
             (*latex)++;
+            text_chars++;
         }
-        text_chars++;
     }
 
     printf("DEBUG: Text parsing finished, text_sb->length = %zu\n", text_sb->length);
@@ -890,14 +947,14 @@ void parse_latex(Input* input, const char* latex_string) {
         }
         // Skip whitespace and paragraph breaks
         skip_whitespace(&latex);
-        
+
         // Skip paragraph breaks (double newlines)
         while (*latex == '\n' && *(latex + 1) == '\n') {
             latex += 2; // Skip the double newline
             skip_whitespace(&latex); // Skip any additional whitespace
             printf("DEBUG: Skipped paragraph break\n");
         }
-        
+
         element_count++;
     }
 
