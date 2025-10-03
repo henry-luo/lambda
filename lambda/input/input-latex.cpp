@@ -182,6 +182,58 @@ static Item parse_latex_command(Input *input, const char **latex) {
     }
 
     printf("DEBUG: Parsing command '%.*s' at position: '%.30s'\n", (int)cmd_name->len, cmd_name->chars, *latex);
+    
+    // Handle single-character escape sequences as literal text
+    if (cmd_name->len == 1) {
+        char escaped_char = cmd_name->chars[0];
+        printf("DEBUG: Single char escape: '%c'\n", escaped_char);
+        if (escaped_char == '#' || escaped_char == '$' || escaped_char == '&' || 
+            escaped_char == '%' || escaped_char == '_' || escaped_char == '{' || 
+            escaped_char == '}' || escaped_char == '~' || escaped_char == '^') {
+            
+            printf("DEBUG: Converting escape sequence \\%c to literal '%c'\n", escaped_char, escaped_char);
+            // Create a text string with the literal character
+            StringBuf* text_sb = input->sb;
+            stringbuf_reset(text_sb);
+            stringbuf_append_char(text_sb, escaped_char);
+            
+            String* text_str = stringbuf_to_string(text_sb);
+            return {.item = (uint64_t)text_str};
+        }
+        // Handle backslash escape (\\)
+        else if (escaped_char == '\\') {
+            StringBuf* text_sb = input->sb;
+            stringbuf_reset(text_sb);
+            stringbuf_append_char(text_sb, '\\');
+            
+            String* text_str = stringbuf_to_string(text_sb);
+            return {.item = (uint64_t)text_str};
+        }
+        // Handle ^ and ~ which might have {} after them
+        else if (escaped_char == '^' || escaped_char == '~') {
+            // Check if followed by {}
+            if (**latex == '{' && *(*latex + 1) == '}') {
+                (*latex) += 2; // Skip {}
+            }
+            
+            StringBuf* text_sb = input->sb;
+            stringbuf_reset(text_sb);
+            stringbuf_append_char(text_sb, escaped_char);
+            
+            String* text_str = stringbuf_to_string(text_sb);
+            return {.item = (uint64_t)text_str};
+        }
+    }
+    
+    // Handle special multi-character escape sequences
+    if (strcmp(cmd_name->chars, "textbackslash") == 0) {
+        StringBuf* text_sb = input->sb;
+        stringbuf_reset(text_sb);
+        stringbuf_append_char(text_sb, '\\');
+        
+        String* text_str = stringbuf_to_string(text_sb);
+        return {.item = (uint64_t)text_str};
+    }
 
     // Handle \end{} commands - these are handled implicitly by environment parsing
     if (strcmp(cmd_name->chars, "end") == 0) {
@@ -680,6 +732,17 @@ static Item parse_latex_element(Input *input, const char **latex) {
         } else if (**latex == '$' || **latex == '%') {
             // Math mode or comment, break
             break;
+        } else if (**latex == '\n') {
+            // Check for paragraph break (double newline)
+            if (*(*latex + 1) == '\n') {
+                // Found paragraph break, stop parsing text here
+                printf("DEBUG: Found paragraph break at position %d\n", text_chars);
+                break;
+            } else {
+                // Single newline, include in text
+                stringbuf_append_char(text_sb, **latex);
+                (*latex)++;
+            }
         } else {
             stringbuf_append_char(text_sb, **latex);
             (*latex)++;
@@ -754,7 +817,16 @@ void parse_latex(Input* input, const char* latex_string) {
         } else {
             printf("DEBUG: Element %d was null (likely \\end{} or comment)\n", element_count);
         }
+        // Skip whitespace and paragraph breaks
         skip_whitespace(&latex);
+        
+        // Skip paragraph breaks (double newlines)
+        while (*latex == '\n' && *(latex + 1) == '\n') {
+            latex += 2; // Skip the double newline
+            skip_whitespace(&latex); // Skip any additional whitespace
+            printf("DEBUG: Skipped paragraph break\n");
+        }
+        
         element_count++;
     }
 
