@@ -10,6 +10,7 @@
 static void generate_latex_css(StringBuf* css_buf);
 static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, int depth);
 static void process_element_content(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_element_content_simple(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
 static void process_title(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
 static void process_author(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
 static void process_date(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
@@ -165,6 +166,9 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
     
     // Reset to normal
     stringbuf_append_str(css_buf, ".latex-textnormal { font-family: serif; font-weight: normal; font-style: normal; font-variant: normal; }\n");
+    
+    // Verbatim styles
+    stringbuf_append_str(css_buf, ".latex-verbatim { font-family: 'Courier New', 'Lucida Console', monospace; background-color: #f5f5f5; padding: 0.2em 0.4em; border-radius: 3px; }\n");
 
     // List styles
     stringbuf_append_str(css_buf, ".latex-itemize {\n");
@@ -388,6 +392,11 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         else if (strcmp(cmd_name, "par") == 0) {
             // Par creates a paragraph break - handled by paragraph logic
             // This is a no-op in HTML since paragraph breaks are handled by the paragraph wrapper
+        }
+        else if (strcmp(cmd_name, "verb") == 0) {
+            stringbuf_append_str(html_buf, "<code class=\"latex-verbatim\">");
+            process_element_content_simple(html_buf, elem, pool, depth);
+            stringbuf_append_str(html_buf, "</code>");
         }
         else if (strcmp(cmd_name, "item") == 0) {
             process_item(html_buf, elem, pool, depth);
