@@ -314,6 +314,7 @@ typedef struct Context {
     Url* cwd;  // current working directory
     void* (*context_alloc)(int size, TypeId type_id);
     bool run_main; // whether to run main procedure on start
+    bool disable_string_merging; // disable automatic string merging in list_push
 } Context;
 
 #ifndef LAMBDA_STATIC

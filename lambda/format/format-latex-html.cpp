@@ -150,6 +150,21 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
     stringbuf_append_str(css_buf, ".latex-large { font-size: 1.2em; }\n");
     stringbuf_append_str(css_buf, ".latex-Large { font-size: 1.4em; }\n");
     stringbuf_append_str(css_buf, ".latex-huge { font-size: 2em; }\n");
+    
+    // Font family classes
+    stringbuf_append_str(css_buf, ".latex-textrm { font-family: serif; }\n");
+    stringbuf_append_str(css_buf, ".latex-textsf { font-family: sans-serif; }\n");
+    
+    // Font weight classes
+    stringbuf_append_str(css_buf, ".latex-textmd { font-weight: normal; }\n");
+    
+    // Font shape classes
+    stringbuf_append_str(css_buf, ".latex-textup { font-style: normal; }\n");
+    stringbuf_append_str(css_buf, ".latex-textsl { font-style: oblique; }\n");
+    stringbuf_append_str(css_buf, ".latex-textsc { font-variant: small-caps; }\n");
+    
+    // Reset to normal
+    stringbuf_append_str(css_buf, ".latex-textnormal { font-family: serif; font-weight: normal; font-style: normal; font-variant: normal; }\n");
 
     // List styles
     stringbuf_append_str(css_buf, ".latex-itemize {\n");
@@ -346,6 +361,34 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         else if (strcmp(cmd_name, "huge") == 0) {
             process_text_command(html_buf, elem, pool, depth, "latex-huge", "span");
         }
+        else if (strcmp(cmd_name, "textrm") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-textrm", "span");
+        }
+        else if (strcmp(cmd_name, "textsf") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-textsf", "span");
+        }
+        else if (strcmp(cmd_name, "textmd") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-textmd", "span");
+        }
+        else if (strcmp(cmd_name, "textup") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-textup", "span");
+        }
+        else if (strcmp(cmd_name, "textsl") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-textsl", "span");
+        }
+        else if (strcmp(cmd_name, "textsc") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-textsc", "span");
+        }
+        else if (strcmp(cmd_name, "textnormal") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-textnormal", "span");
+        }
+        else if (strcmp(cmd_name, "linebreak") == 0) {
+            stringbuf_append_str(html_buf, "<br>");
+        }
+        else if (strcmp(cmd_name, "par") == 0) {
+            // Par creates a paragraph break - handled by paragraph logic
+            // This is a no-op in HTML since paragraph breaks are handled by the paragraph wrapper
+        }
         else if (strcmp(cmd_name, "item") == 0) {
             process_item(html_buf, elem, pool, depth);
         }
@@ -418,7 +461,8 @@ static bool is_block_element(Item item) {
             strcmp(cmd_name, "verbatim") == 0 ||
             strcmp(cmd_name, "center") == 0 ||
             strcmp(cmd_name, "flushleft") == 0 ||
-            strcmp(cmd_name, "flushright") == 0);
+            strcmp(cmd_name, "flushright") == 0 ||
+            strcmp(cmd_name, "par") == 0);
 }
 
 // Process element content without paragraph wrapping (for titles, etc.)
@@ -469,25 +513,13 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                 // Process block element directly
                 process_latex_element(html_buf, content_item, pool, depth);
             } else if (is_text || is_inline) {
-                if (is_text) {
-                    // Each text element gets its own paragraph
-                    // Close any existing paragraph
-                    if (in_paragraph) {
-                        stringbuf_append_str(html_buf, "</p>\n");
-                    }
-                    // Open new paragraph for this text
+                // Open paragraph if not already in one
+                if (!in_paragraph) {
                     stringbuf_append_str(html_buf, "<p>");
                     in_paragraph = true;
-                    // Process text content
-                    process_latex_element(html_buf, content_item, pool, depth);
-                } else {
-                    // Inline elements stay in the same paragraph
-                    if (!in_paragraph) {
-                        stringbuf_append_str(html_buf, "<p>");
-                        in_paragraph = true;
-                    }
-                    process_latex_element(html_buf, content_item, pool, depth);
                 }
+                // Process inline content (both text and inline elements)
+                process_latex_element(html_buf, content_item, pool, depth);
             } else {
                 // Unknown content type - treat as inline if we're in a paragraph context
                 if (!in_paragraph) {

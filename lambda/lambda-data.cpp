@@ -282,8 +282,9 @@ void list_push(List *list, Item item) {
         return;
     }
     else if (type_id == LMD_TYPE_STRING) {
-        // need to merge with previous string if any
-        if (list->length > 0) {
+        // need to merge with previous string if any (unless disabled)
+        // printf("DEBUG: list_push: string merging disabled = %d\n", input_context->disable_string_merging);
+        if (list->length > 0 && !input_context->disable_string_merging) {
             Item prev_item = list->items[list->length - 1];
             if (get_type_id(prev_item) == LMD_TYPE_STRING) {
                 String *prev_str = (String*)prev_item.pointer;
