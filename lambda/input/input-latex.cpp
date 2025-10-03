@@ -863,8 +863,17 @@ static Item parse_latex_element(Input *input, const char **latex) {
             printf("DEBUG: Found math, breaking with %d chars collected\n", text_chars);
             break;
         } else if (**latex == '\n') {
-            // Check for paragraph break (double newline)
-            if (*(*latex + 1) == '\n') {
+            // Check for paragraph break (newline + additional newlines, like LaTeX-JS)
+            const char* lookahead = *latex + 1;
+            // Skip spaces and comments after first newline
+            while (*lookahead == ' ' || *lookahead == '\t') lookahead++;
+            if (*lookahead == '%') {
+                // Skip comment line
+                while (*lookahead && *lookahead != '\n') lookahead++;
+                if (*lookahead == '\n') lookahead++;
+            }
+            // Check if there's another newline (paragraph break)
+            if (*lookahead == '\n') {
                 // Found paragraph break, stop parsing text here
                 printf("DEBUG: Found paragraph break at position %d\n", text_chars);
                 break;
@@ -885,32 +894,59 @@ static Item parse_latex_element(Input *input, const char **latex) {
 
     if (text_sb->length > 0) {
         printf("DEBUG: Processing collected text\n");
-        String *text_string = stringbuf_to_string(text_sb);
-        if (!text_string) {
-            printf("DEBUG: stringbuf_to_string failed\n");
-            stringbuf_reset(text_sb);
-            parse_depth--;
-            return {.item = ITEM_NULL};
-        }
-
-        // Only return non-whitespace text
-        bool has_non_whitespace = false;
-        for (int i = 0; i < text_string->len; i++) {
-            if (!isspace(text_string->chars[i])) {
-                has_non_whitespace = true;
-                break;
+        String* text_str = stringbuf_to_string(text_sb);
+        printf("DEBUG: Returning text node: '%.*s' (length: %zu)\n", 
+               (int)text_str->len, text_str->chars, text_str->len);
+        
+        // Check if we stopped due to a paragraph break and create parbreak element if needed
+        if (**latex == '\n' && *(*latex + 1) == '\n') {
+            printf("DEBUG: Text parsing detected paragraph break, will create parbreak element\n");
+            // Skip the paragraph break so main loop doesn't see it
+            (*latex) += 2;
+            skip_whitespace(latex);
+            
+            // Create and return a compound element with text + parbreak
+            Element* compound = create_latex_element(input, "textblock");
+            if (compound) {
+                // CRITICAL DEBUG: Check text_str type before adding
+                Item text_item = {.item = s2it(text_str)};  // Use proper s2it() function
+                TypeId text_type = get_type_id(text_item);
+                printf("DEBUG: Text item type before adding to textblock: %d\n", text_type);
+                if (text_type > LMD_TYPE_ERROR) {
+                    printf("ERROR: Invalid text type %d in textblock creation!\n", text_type);
+                    printf("ERROR: text_str=%p, text_str->len=%zu\n", text_str, text_str ? text_str->len : 0);
+                }
+                
+                // Add the text using proper s2it() function
+                list_push((List*)compound, {.item = s2it(text_str)});
+                
+                // Add a parbreak marker
+                Element* parbreak = create_latex_element(input, "parbreak");
+                if (parbreak) {
+                    Item parbreak_item = {.item = (uint64_t)parbreak};
+                    TypeId parbreak_type = get_type_id(parbreak_item);
+                    printf("DEBUG: Parbreak item type: %d\n", parbreak_type);
+                    if (parbreak_type > LMD_TYPE_ERROR) {
+                        printf("ERROR: Invalid parbreak type %d in textblock creation!\n", parbreak_type);
+                    }
+                    list_push((List*)compound, {.item = (uint64_t)parbreak});
+                }
+                
+                // Check compound element type
+                Item compound_item = {.item = (uint64_t)compound};
+                TypeId compound_type = get_type_id(compound_item);
+                printf("DEBUG: Compound textblock type: %d\n", compound_type);
+                if (compound_type > LMD_TYPE_ERROR) {
+                    printf("ERROR: Invalid compound type %d in textblock creation!\n", compound_type);
+                }
+                
+                parse_depth--;
+                return {.item = (uint64_t)compound};
             }
         }
-
-        if (has_non_whitespace) {
-            printf("DEBUG: Returning text node: '%.*s' (length: %u)\n", (int)text_string->len, text_string->chars, text_string->len);
-            parse_depth--;
-            return {.item = s2it(text_string)};
-        } else {
-            printf("DEBUG: Text node is whitespace-only, skipping: '%.*s'\n", (int)text_string->len, text_string->chars);
-        }
-    } else {
-        stringbuf_reset(text_sb);
+        
+        parse_depth--;
+        return {.item = s2it(text_str)};  // Use proper s2it() function
     }
 
     parse_depth--;
@@ -940,33 +976,55 @@ void parse_latex(Input* input, const char* latex_string) {
 
         Item element = parse_latex_element(input, &latex);
         if (element .item != ITEM_NULL && element .item != ITEM_ERROR) {
+            // CRITICAL DEBUG: Check for invalid type values before adding to root
+            TypeId elem_type = get_type_id(element);
+            if (elem_type > LMD_TYPE_ERROR) {
+                printf("ERROR: Invalid type %d detected in parse_latex! Max valid type is %d\n", elem_type, LMD_TYPE_ERROR);
+                printf("ERROR: Element details - element.item=0x%llx, element.pointer=%p\n", (unsigned long long)element.item, element.pointer);
+                printf("ERROR: Element count: %d\n", element_count);
+                printf("ERROR: Raw memory dump of Item:\n");
+                unsigned char* bytes = (unsigned char*)&element;
+                for (int j = 0; j < sizeof(Item); j++) {
+                    printf("  byte[%d] = 0x%02x\n", j, bytes[j]);
+                }
+                break; // Stop parsing on invalid type
+            }
+            
             list_push((List*)root_element, element);
-            printf("DEBUG: Added element %d to root\n", element_count);
+            printf("DEBUG: Added element %d to root (type=%d)\n", element_count, elem_type);
         } else if (element.item == ITEM_ERROR) {
             printf("DEBUG: Error parsing element %d\n", element_count);
             break;
         } else {
             printf("DEBUG: Element %d was null (likely \\end{} or comment)\n", element_count);
         }
-        // Check for paragraph breaks before skipping whitespace
-        if (*latex == '\n' && *(latex + 1) == '\n') {
-            printf("DEBUG: Creating paragraph break element\n");
-            
-            // Create a paragraph break element
-            Element* par_element = create_latex_element(input, "par");
-            if (par_element) {
-                list_push((List*)root_element, {.item = (uint64_t)par_element});
-                printf("DEBUG: Added paragraph break element to root\n");
-            }
-        }
-        
-        // Skip whitespace and paragraph breaks
+        // Skip whitespace first
         skip_whitespace(&latex);
         
-        // Skip any remaining paragraph breaks
-        while (*latex == '\n' && *(latex + 1) == '\n') {
-            latex += 2; // Skip the double newline
-            skip_whitespace(&latex); // Skip any additional whitespace
+        // Check for paragraph breaks and create paragraph break elements
+        if (*latex == '\n') {
+            const char* lookahead = latex + 1;
+            // Skip spaces and comments after first newline
+            while (*lookahead == ' ' || *lookahead == '\t') lookahead++;
+            if (*lookahead == '%') {
+                // Skip comment line
+                while (*lookahead && *lookahead != '\n') lookahead++;
+                if (*lookahead == '\n') lookahead++;
+            }
+            // If there's another newline, create paragraph break element
+            if (*lookahead == '\n') {
+                printf("DEBUG: Creating paragraph break element in main loop\n");
+                
+                // Create a paragraph break element
+                Element* par_element = create_latex_element(input, "parbreak");
+                if (par_element) {
+                    list_push((List*)root_element, {.item = (uint64_t)par_element});
+                    printf("DEBUG: Added paragraph break element to root\n");
+                }
+                
+                latex = lookahead + 1; // Skip to after the second newline
+                skip_whitespace(&latex); // Skip any additional whitespace
+            }
         }
 
         element_count++;
