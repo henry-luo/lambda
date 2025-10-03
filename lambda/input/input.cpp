@@ -459,6 +459,7 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         input = input_new(abs_url);
         context.pool = input->pool;  context.consts = NULL;
         context.cwd = NULL;  context.run_main = false;
+        context.disable_string_merging = false;  // default: allow string merging
         input_context = &context;
 
         if (strcmp(effective_type, "json") == 0) {
@@ -492,7 +493,11 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
             parse_html(input, source);
         }
         else if (strcmp(effective_type, "latex") == 0) {
+            // Disable string merging for LaTeX parsing to preserve separate elements
+            bool prev_disable_string_merging = input_context->disable_string_merging;
+            input_context->disable_string_merging = true;
             parse_latex(input, source);
+            input_context->disable_string_merging = prev_disable_string_merging;
         }
         else if (strcmp(effective_type, "rtf") == 0) {
             parse_rtf(input, source);

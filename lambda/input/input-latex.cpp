@@ -73,6 +73,13 @@ static String* parse_latex_string_content(Input *input, const char **latex, char
 static String* parse_command_name(Input *input, const char **latex) {
     StringBuf* sb = input->sb;
 
+    // Handle single-character control symbols (LaTeX-JS style)
+    if (**latex && strchr("$%#&{}_\\-,/@^~", **latex)) {
+        stringbuf_append_char(sb, **latex);
+        (*latex)++;
+        return stringbuf_to_string(sb);
+    }
+
     // Command names can contain letters and sometimes numbers
     while (**latex && (isalpha(**latex) || (**latex == '*'))) {
         stringbuf_append_char(sb, **latex);
@@ -183,16 +190,17 @@ static Item parse_latex_command(Input *input, const char **latex) {
 
     printf("DEBUG: Parsing command '%.*s' at position: '%.30s'\n", (int)cmd_name->len, cmd_name->chars, *latex);
     
-    // Handle single-character escape sequences as literal text
+    // Handle control symbols (LaTeX-JS style: escape c:[$%#&{}_\-,/@])
     if (cmd_name->len == 1) {
         char escaped_char = cmd_name->chars[0];
-        printf("DEBUG: Single char escape: '%c'\n", escaped_char);
-        if (escaped_char == '#' || escaped_char == '$' || escaped_char == '&' || 
-            escaped_char == '%' || escaped_char == '_' || escaped_char == '{' || 
-            escaped_char == '}' || escaped_char == '~' || escaped_char == '^') {
+        printf("DEBUG: Processing control symbol: \\%c\n", escaped_char);
+        
+        // Handle control symbols that produce literal characters
+        if (escaped_char == '$' || escaped_char == '%' || escaped_char == '#' || 
+            escaped_char == '&' || escaped_char == '{' || escaped_char == '}' || 
+            escaped_char == '_') {
             
-            printf("DEBUG: Converting escape sequence \\%c to literal '%c'\n", escaped_char, escaped_char);
-            // Create a text string with the literal character
+            printf("DEBUG: Converting control symbol \\%c to literal '%c'\n", escaped_char, escaped_char);
             StringBuf* text_sb = input->sb;
             stringbuf_reset(text_sb);
             stringbuf_append_char(text_sb, escaped_char);
@@ -200,11 +208,43 @@ static Item parse_latex_command(Input *input, const char **latex) {
             String* text_str = stringbuf_to_string(text_sb);
             return {.item = (uint64_t)text_str};
         }
-        // Handle backslash escape (\\)
-        else if (escaped_char == '\\') {
+        // Handle special control symbols
+        else if (escaped_char == ',') {
+            // \, = thin space
+            printf("DEBUG: Converting \\, to thin space\n");
             StringBuf* text_sb = input->sb;
             stringbuf_reset(text_sb);
-            stringbuf_append_char(text_sb, '\\');
+            stringbuf_append_str(text_sb, "\u2009"); // Unicode thin space
+            
+            String* text_str = stringbuf_to_string(text_sb);
+            return {.item = (uint64_t)text_str};
+        }
+        else if (escaped_char == '-') {
+            // \- = soft hyphen
+            printf("DEBUG: Converting \\- to soft hyphen\n");
+            StringBuf* text_sb = input->sb;
+            stringbuf_reset(text_sb);
+            stringbuf_append_str(text_sb, "\u00AD"); // Unicode soft hyphen
+            
+            String* text_str = stringbuf_to_string(text_sb);
+            return {.item = (uint64_t)text_str};
+        }
+        else if (escaped_char == '/') {
+            // \/ = zero-width non-joiner
+            printf("DEBUG: Converting \\/ to ZWNJ\n");
+            StringBuf* text_sb = input->sb;
+            stringbuf_reset(text_sb);
+            stringbuf_append_str(text_sb, "\u200C"); // Unicode ZWNJ
+            
+            String* text_str = stringbuf_to_string(text_sb);
+            return {.item = (uint64_t)text_str};
+        }
+        else if (escaped_char == '@') {
+            // \@ = zero-width space (prevent space collapsing)
+            printf("DEBUG: Converting \\@ to zero-width space\n");
+            StringBuf* text_sb = input->sb;
+            stringbuf_reset(text_sb);
+            stringbuf_append_str(text_sb, "\u200B"); // Unicode zero-width space
             
             String* text_str = stringbuf_to_string(text_sb);
             return {.item = (uint64_t)text_str};
@@ -216,6 +256,7 @@ static Item parse_latex_command(Input *input, const char **latex) {
                 (*latex) += 2; // Skip {}
             }
             
+            printf("DEBUG: Converting \\%c to literal '%c'\n", escaped_char, escaped_char);
             StringBuf* text_sb = input->sb;
             stringbuf_reset(text_sb);
             stringbuf_append_char(text_sb, escaped_char);
@@ -223,6 +264,36 @@ static Item parse_latex_command(Input *input, const char **latex) {
             String* text_str = stringbuf_to_string(text_sb);
             return {.item = (uint64_t)text_str};
         }
+        // Handle line break (\\)
+        else if (escaped_char == '\\') {
+            printf("DEBUG: Converting \\\\ to line break\n");
+            // Create a line break element
+            Element* element = create_latex_element(input, "linebreak");
+            if (!element) {
+                return {.item = ITEM_ERROR};
+            }
+            return {.item = (uint64_t)element};
+        }
+    }
+    
+    // Handle line break commands
+    if (strcmp(cmd_name->chars, "\\") == 0 || strcmp(cmd_name->chars, "newline") == 0) {
+        // printf("DEBUG: Processing line break command: %s\n", cmd_name->chars);
+        // Create a line break element
+        Element* element = create_latex_element(input, "linebreak");
+        if (!element) {
+            return {.item = ITEM_ERROR};
+        }
+        return {.item = (uint64_t)element};
+    }
+    
+    if (strcmp(cmd_name->chars, "par") == 0) {
+        // Create a paragraph break element
+        Element* element = create_latex_element(input, "par");
+        if (!element) {
+            return {.item = ITEM_ERROR};
+        }
+        return {.item = (uint64_t)element};
     }
     
     // Handle special multi-character escape sequences
@@ -705,7 +776,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
             printf("DEBUG: Found backslash at position %d\n", text_chars);
             // Check if this is an escaped character or command
             const char* next_char = *latex + 1;
-            if (next_char && strchr("{\\}$&#^_%~", *next_char)) {
+            if (next_char && strchr("{}$&#^_%~", *next_char)) {
                 // This is an escaped character
                 (*latex)++; // Skip backslash
                 switch (**latex) {
@@ -831,7 +902,9 @@ void parse_latex(Input* input, const char* latex_string) {
     }
 
     printf("DEBUG: Parsed %d elements total\n", element_count);
+    printf("DEBUG: Root element list length: %lld\n", ((List*)root_element)->length);
     ((TypeElmt*)root_element->type)->content_length = ((List*)root_element)->length;
+    printf("DEBUG: Set content_length to: %lld\n", ((TypeElmt*)root_element->type)->content_length);
 
     input->root = {.item = (uint64_t)root_element};
     printf("DEBUG: LaTeX parsing completed\n");
