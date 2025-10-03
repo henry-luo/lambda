@@ -152,14 +152,53 @@ static Array* parse_command_arguments(Input *input, const char **latex) {
             if (content_chars) {
                 memcpy(content_chars, arg_sb->str->chars, content_len);
                 content_chars[content_len] = '\0';
-
-                String *arg_string = input_create_string(input, content_chars);
-                if (arg_string) {
-                    printf("DEBUG: Parsed argument: '%.*s' (length: %u)\n", (int)arg_string->len, arg_string->chars, arg_string->len);
-                    Item arg_item = {.item = s2it(arg_string)};
-                    array_append(args, arg_item, input->pool);
+                
+                printf("DEBUG: Parsed argument: '%.*s' (length: %zu)\n", (int)content_len, content_chars, content_len);
+                
+                // Parse the argument content as LaTeX instead of treating it as raw string
+                // Create a temporary input context for parsing the argument
+                Input* arg_input = input_new(NULL);
+                if (arg_input) {
+                    arg_input->pool = input->pool; // Share the same memory pool
+                    arg_input->sb = stringbuf_new(input->pool);
+                    
+                    // Parse the argument content as LaTeX
+                    const char* arg_latex = content_chars;
+                    Element* arg_element = create_latex_element(input, "argument");
+                    if (arg_element) {
+                        // Parse each element within the argument
+                        while (*arg_latex) {
+                            skip_whitespace(&arg_latex);
+                            if (!*arg_latex) break;
+                            
+                            Item parsed_item = parse_latex_element(arg_input, &arg_latex);
+                            if (parsed_item.item != ITEM_NULL && parsed_item.item != ITEM_ERROR) {
+                                list_push((List*)arg_element, parsed_item);
+                            } else if (parsed_item.item == ITEM_ERROR) {
+                                break;
+                            }
+                        }
+                        
+                        // Add the parsed argument element
+                        Item arg_item = {.item = (uint64_t)arg_element};
+                        array_append(args, arg_item, input->pool);
+                        printf("DEBUG: Added parsed argument element with %lld items\n", ((List*)arg_element)->length);
+                    }
+                    
+                    // Cleanup temporary input (but keep the pool)
+                    if (arg_input->sb) {
+                        // Don't free the stringbuf as it uses the shared pool
+                    }
+                    free(arg_input);
                 } else {
-                    printf("DEBUG: input_create_string failed\n");
+                    // Fallback to string if parsing fails
+                    String *arg_string = input_create_string(input, content_chars);
+                    if (arg_string) {
+                        Item arg_item = {.item = s2it(arg_string)};
+                        array_append(args, arg_item, input->pool);
+                    } else {
+                        printf("DEBUG: input_create_string failed\n");
+                    }
                 }
             } else {
                 printf("DEBUG: Failed to allocate memory for argument\n");
