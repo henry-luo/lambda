@@ -294,7 +294,11 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
 
 
         // Handle different LaTeX commands
-        if (strcmp(cmd_name, "documentclass") == 0) {
+        if (strcmp(cmd_name, "argument") == 0) {
+            // Process argument content (nested LaTeX) without paragraph wrapping
+            process_element_content_simple(html_buf, elem, pool, depth);
+            return;
+        } else if (strcmp(cmd_name, "documentclass") == 0) {
             // Skip documentclass - it's metadata
             return;
         }
