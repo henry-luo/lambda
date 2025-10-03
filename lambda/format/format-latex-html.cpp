@@ -20,6 +20,7 @@ static void process_itemize(StringBuf* html_buf, Element* elem, Pool* pool, int 
 static void process_enumerate(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
 static void process_quote(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
 static void process_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
+static void process_alignment_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class);
 static void process_text_command(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class, const char* tag);
 static void process_item(StringBuf* html_buf, Element* elem, Pool* pool, int depth);
 static void append_escaped_text(StringBuf* html_buf, const char* text);
@@ -126,6 +127,30 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
     stringbuf_append_str(css_buf, "  font-style: italic;\n");
     stringbuf_append_str(css_buf, "}\n");
 
+    stringbuf_append_str(css_buf, ".latex-emph {\n");
+    stringbuf_append_str(css_buf, "  font-style: italic;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    stringbuf_append_str(css_buf, ".latex-texttt {\n");
+    stringbuf_append_str(css_buf, "  font-family: 'Courier New', monospace;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    stringbuf_append_str(css_buf, ".latex-underline {\n");
+    stringbuf_append_str(css_buf, "  text-decoration: underline;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    stringbuf_append_str(css_buf, ".latex-sout {\n");
+    stringbuf_append_str(css_buf, "  text-decoration: line-through;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    // Font size classes
+    stringbuf_append_str(css_buf, ".latex-tiny { font-size: 0.5em; }\n");
+    stringbuf_append_str(css_buf, ".latex-small { font-size: 0.8em; }\n");
+    stringbuf_append_str(css_buf, ".latex-normalsize { font-size: 1em; }\n");
+    stringbuf_append_str(css_buf, ".latex-large { font-size: 1.2em; }\n");
+    stringbuf_append_str(css_buf, ".latex-Large { font-size: 1.4em; }\n");
+    stringbuf_append_str(css_buf, ".latex-huge { font-size: 2em; }\n");
+
     // List styles
     stringbuf_append_str(css_buf, ".latex-itemize {\n");
     stringbuf_append_str(css_buf, "  margin: 1rem 0;\n");
@@ -139,6 +164,22 @@ void format_latex_to_html(StringBuf* html_buf, StringBuf* css_buf, Item latex_as
 
     stringbuf_append_str(css_buf, ".latex-item {\n");
     stringbuf_append_str(css_buf, "  margin: 0.5rem 0;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    // Alignment environment styles
+    stringbuf_append_str(css_buf, ".latex-center {\n");
+    stringbuf_append_str(css_buf, "  text-align: center;\n");
+    stringbuf_append_str(css_buf, "  margin: 1rem 0;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    stringbuf_append_str(css_buf, ".latex-flushleft {\n");
+    stringbuf_append_str(css_buf, "  text-align: left;\n");
+    stringbuf_append_str(css_buf, "  margin: 1rem 0;\n");
+    stringbuf_append_str(css_buf, "}\n");
+
+    stringbuf_append_str(css_buf, ".latex-flushright {\n");
+    stringbuf_append_str(css_buf, "  text-align: right;\n");
+    stringbuf_append_str(css_buf, "  margin: 1rem 0;\n");
     stringbuf_append_str(css_buf, "}\n");
 
     // Close document container
@@ -221,6 +262,8 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         int name_len = name.length < 63 ? name.length : 63;
         strncpy(cmd_name, name.str, name_len);
         cmd_name[name_len] = '\0';
+        
+        // printf("DEBUG: Processing command '%s' (length: %d)\n", cmd_name, name_len);
 
 
         // Handle different LaTeX commands
@@ -252,18 +295,56 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         else if (strcmp(cmd_name, "begin") == 0) {
             process_environment(html_buf, elem, pool, depth);
         }
+        else if (strcmp(cmd_name, "center") == 0) {
+            process_alignment_environment(html_buf, elem, pool, depth, "latex-center");
+        }
+        else if (strcmp(cmd_name, "flushleft") == 0) {
+            process_alignment_environment(html_buf, elem, pool, depth, "latex-flushleft");
+        }
+        else if (strcmp(cmd_name, "flushright") == 0) {
+            process_alignment_environment(html_buf, elem, pool, depth, "latex-flushright");
+        }
+        else if (strcmp(cmd_name, "quote") == 0) {
+            process_quote(html_buf, elem, pool, depth);
+        }
+        else if (strcmp(cmd_name, "verbatim") == 0) {
+            process_verbatim(html_buf, elem, pool, depth);
+        }
         else if (strcmp(cmd_name, "textbf") == 0) {
-            printf("DEBUG: Processing textbf command\n");
             process_text_command(html_buf, elem, pool, depth, "latex-textbf", "span");
-            printf("DEBUG: Finished processing textbf command\n");
         }
         else if (strcmp(cmd_name, "textit") == 0) {
-            printf("DEBUG: Processing textit command\n");
             process_text_command(html_buf, elem, pool, depth, "latex-textit", "span");
-            printf("DEBUG: Finished processing textit command\n");
         }
         else if (strcmp(cmd_name, "emph") == 0) {
             process_text_command(html_buf, elem, pool, depth, "latex-emph", "span");
+        }
+        else if (strcmp(cmd_name, "texttt") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-texttt", "span");
+        }
+        else if (strcmp(cmd_name, "underline") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-underline", "span");
+        }
+        else if (strcmp(cmd_name, "sout") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-sout", "span");
+        }
+        else if (strcmp(cmd_name, "tiny") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-tiny", "span");
+        }
+        else if (strcmp(cmd_name, "small") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-small", "span");
+        }
+        else if (strcmp(cmd_name, "normalsize") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-normalsize", "span");
+        }
+        else if (strcmp(cmd_name, "large") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-large", "span");
+        }
+        else if (strcmp(cmd_name, "Large") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-Large", "span");
+        }
+        else if (strcmp(cmd_name, "huge") == 0) {
+            process_text_command(html_buf, elem, pool, depth, "latex-huge", "span");
         }
         else if (strcmp(cmd_name, "item") == 0) {
             process_item(html_buf, elem, pool, depth);
@@ -278,7 +359,8 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
         }
         else {
             // Generic element - process children
-            printf("DEBUG: Processing generic element: %s\n", cmd_name);
+            // printf("DEBUG: Processing generic element: '%s' (length: %d)\n", cmd_name, name_len);
+            // printf("DEBUG: Checking texttt comparison: strcmp('%s', 'texttt') = %d\n", cmd_name, strcmp(cmd_name, "texttt"));
             process_element_content(html_buf, elem, pool, depth);
         }
     }
@@ -333,7 +415,10 @@ static bool is_block_element(Item item) {
             strcmp(cmd_name, "itemize") == 0 ||
             strcmp(cmd_name, "enumerate") == 0 ||
             strcmp(cmd_name, "quote") == 0 ||
-            strcmp(cmd_name, "verbatim") == 0);
+            strcmp(cmd_name, "verbatim") == 0 ||
+            strcmp(cmd_name, "center") == 0 ||
+            strcmp(cmd_name, "flushleft") == 0 ||
+            strcmp(cmd_name, "flushright") == 0);
 }
 
 // Process element content without paragraph wrapping (for titles, etc.)
@@ -392,7 +477,11 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                 // Process inline content
                 process_latex_element(html_buf, content_item, pool, depth);
             } else {
-                // Unknown content type - process directly
+                // Unknown content type - treat as inline if we're in a paragraph context
+                if (!in_paragraph) {
+                    stringbuf_append_str(html_buf, "<p>");
+                    in_paragraph = true;
+                }
                 process_latex_element(html_buf, content_item, pool, depth);
             }
 
@@ -523,6 +612,15 @@ static void process_environment(StringBuf* html_buf, Element* elem, Pool* pool, 
                 else if (strcmp(env_name->chars, "verbatim") == 0) {
                     process_verbatim(html_buf, elem, pool, depth);
                 }
+                else if (strcmp(env_name->chars, "center") == 0) {
+                    process_alignment_environment(html_buf, elem, pool, depth, "latex-center");
+                }
+                else if (strcmp(env_name->chars, "flushleft") == 0) {
+                    process_alignment_environment(html_buf, elem, pool, depth, "latex-flushleft");
+                }
+                else if (strcmp(env_name->chars, "flushright") == 0) {
+                    process_alignment_environment(html_buf, elem, pool, depth, "latex-flushright");
+                }
             }
         }
     }
@@ -571,6 +669,19 @@ static void process_verbatim(StringBuf* html_buf, Element* elem, Pool* pool, int
     process_element_content(html_buf, elem, pool, depth);
 
     stringbuf_append_str(html_buf, "</pre>\n");
+}
+
+// Process alignment environments (center, flushleft, flushright)
+static void process_alignment_environment(StringBuf* html_buf, Element* elem, Pool* pool, int depth, const char* css_class) {
+    append_indent(html_buf, depth);
+    stringbuf_append_str(html_buf, "<div class=\"");
+    stringbuf_append_str(html_buf, css_class);
+    stringbuf_append_str(html_buf, "\">\n");
+
+    process_element_content(html_buf, elem, pool, depth + 1);
+
+    append_indent(html_buf, depth);
+    stringbuf_append_str(html_buf, "</div>\n");
 }
 
 // Process text formatting commands
