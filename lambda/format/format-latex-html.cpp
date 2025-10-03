@@ -405,6 +405,9 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             // Render literal character content with HTML escaping
             process_element_content_simple(html_buf, elem, pool, depth);
         }
+        else if (strcmp(cmd_name, "textbackslash") == 0) {
+            stringbuf_append_char(html_buf, '\\'); // Render backslash
+        }
         else if (strcmp(cmd_name, "item") == 0) {
             process_item(html_buf, elem, pool, depth);
         }
@@ -518,9 +521,29 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
             bool is_block = is_block_element(content_item);
             bool is_text = (item_type == LMD_TYPE_STRING);
             bool is_inline = (item_type == LMD_TYPE_ELEMENT && !is_block);
+            
+            // Check if this is a paragraph break element
+            bool is_par_break = false;
+            if (item_type == LMD_TYPE_ELEMENT) {
+                Element* elem_ptr = (Element*)content_item.pointer;
+                if (elem_ptr && elem_ptr->type) {
+                    StrView elem_name = ((TypeElmt*)elem_ptr->type)->name;
+                    if (elem_name.length == 3 && strncmp(elem_name.str, "par", 3) == 0) {
+                        is_par_break = true;
+                    }
+                }
+            }
 
             // Handle paragraph wrapping logic
-            if (is_block) {
+            if (is_par_break) {
+                // Close current paragraph and force new paragraph for next content
+                if (in_paragraph) {
+                    stringbuf_append_str(html_buf, "</p>\n");
+                    in_paragraph = false;
+                }
+                // Don't process the par element itself, just use it as a break marker
+                // The next text/inline element will start a new paragraph
+            } else if (is_block) {
                 // Close any open paragraph before block element
                 if (in_paragraph) {
                     stringbuf_append_str(html_buf, "</p>\n");

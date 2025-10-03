@@ -200,6 +200,13 @@ static Item parse_latex_command(Input *input, const char **latex) {
             escaped_char == '&' || escaped_char == '{' || escaped_char == '}' ||
             escaped_char == '_' || escaped_char == '^' || escaped_char == '~') {
 
+            // Handle ^ and ~ which might have {} after them
+            if (escaped_char == '^' || escaped_char == '~') {
+                if (**latex == '{' && *(*latex + 1) == '}') {
+                    (*latex) += 2; // Skip {}
+                }
+            }
+            
             printf("DEBUG: Converting control symbol \\%c to literal '%c' element\n", escaped_char, escaped_char);
             
             // Create element with the character as content to avoid string merging
@@ -257,21 +264,6 @@ static Item parse_latex_command(Input *input, const char **latex) {
             StringBuf* text_sb = input->sb;
             stringbuf_reset(text_sb);
             stringbuf_append_str(text_sb, "\u200B"); // Unicode zero-width space
-
-            String* text_str = stringbuf_to_string(text_sb);
-            return {.item = (uint64_t)text_str};
-        }
-        // Handle ^ and ~ which might have {} after them
-        else if (escaped_char == '^' || escaped_char == '~') {
-            // Check if followed by {}
-            if (**latex == '{' && *(*latex + 1) == '}') {
-                (*latex) += 2; // Skip {}
-            }
-
-            printf("DEBUG: Converting \\%c to literal '%c'\n", escaped_char, escaped_char);
-            StringBuf* text_sb = input->sb;
-            stringbuf_reset(text_sb);
-            stringbuf_append_char(text_sb, escaped_char);
 
             String* text_str = stringbuf_to_string(text_sb);
             return {.item = (uint64_t)text_str};
@@ -344,12 +336,12 @@ static Item parse_latex_command(Input *input, const char **latex) {
 
     // Handle special multi-character escape sequences
     if (strcmp(cmd_name->chars, "textbackslash") == 0) {
-        StringBuf* text_sb = input->sb;
-        stringbuf_reset(text_sb);
-        stringbuf_append_char(text_sb, '\\');
-
-        String* text_str = stringbuf_to_string(text_sb);
-        return {.item = (uint64_t)text_str};
+        // Create textbackslash element to avoid string merging
+        Element* element = create_latex_element(input, "textbackslash");
+        if (!element) {
+            return {.item = ITEM_ERROR};
+        }
+        return {.item = (uint64_t)element};
     }
 
     // Handle \end{} commands - these are handled implicitly by environment parsing
@@ -873,7 +865,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
         } else if (**latex == '\n') {
             // Check for paragraph break (double newline)
             if (*(*latex + 1) == '\n') {
-                // Found paragraph break, stop parsing text here and create paragraph break element
+                // Found paragraph break, stop parsing text here
                 printf("DEBUG: Found paragraph break at position %d\n", text_chars);
                 break;
             } else {
@@ -959,11 +951,19 @@ void parse_latex(Input* input, const char* latex_string) {
         // Skip whitespace and paragraph breaks
         skip_whitespace(&latex);
 
-        // Skip paragraph breaks (double newlines)
+        // Handle paragraph breaks (double newlines) by creating par elements
         while (*latex == '\n' && *(latex + 1) == '\n') {
             latex += 2; // Skip the double newline
             skip_whitespace(&latex); // Skip any additional whitespace
-            printf("DEBUG: Skipped paragraph break\n");
+            printf("DEBUG: Creating paragraph break element\n");
+            
+            // Create a paragraph break element
+            Element* par_element = create_latex_element(input, "par");
+            if (par_element) {
+                Element* root_element = (Element*)input->root.pointer;
+                list_push((List*)root_element, {.item = (uint64_t)par_element});
+                printf("DEBUG: Added paragraph break element to root\n");
+            }
         }
 
         element_count++;
