@@ -198,27 +198,38 @@ static Item parse_latex_command(Input *input, const char **latex) {
         // Handle control symbols that produce literal characters
         if (escaped_char == '$' || escaped_char == '%' || escaped_char == '#' ||
             escaped_char == '&' || escaped_char == '{' || escaped_char == '}' ||
-            escaped_char == '_') {
+            escaped_char == '_' || escaped_char == '^' || escaped_char == '~') {
 
-            printf("DEBUG: Converting control symbol \\%c to literal '%c'\n", escaped_char, escaped_char);
+            printf("DEBUG: Converting control symbol \\%c to literal '%c' element\n", escaped_char, escaped_char);
+            
+            // Create element with the character as content to avoid string merging
+            Element* element = create_latex_element(input, "literal");
+            if (!element) {
+                return {.item = ITEM_ERROR};
+            }
+            
+            // Add the literal character as content
             StringBuf* text_sb = input->sb;
             stringbuf_reset(text_sb);
             stringbuf_append_char(text_sb, escaped_char);
-
-            String* text_str = stringbuf_to_string(text_sb);
-            return {.item = (uint64_t)text_str};
+            String* char_str = stringbuf_to_string(text_sb);
+            
+            if (char_str) {
+                list_push((List*)element, {.item = s2it(char_str)});
+                ((TypeElmt*)element->type)->content_length = 1;
+            }
+            
+            return {.item = (uint64_t)element};
         }
         // Handle special control symbols
         else if (escaped_char == ',') {
-            // \, = thin space (use regular space for better compatibility)
-            printf("DEBUG: Converting \\, to thin space\n");
-            StringBuf* text_sb = input->sb;
-            stringbuf_reset(text_sb);
-            // stringbuf_append_str(text_sb, "\u2009"); // Unicode thin space
-            stringbuf_append_char(text_sb, ' '); // Regular space for compatibility
-
-            String* text_str = stringbuf_to_string(text_sb);
-            return {.item = (uint64_t)text_str};
+            // \, = thin space - create element to avoid string merging
+            printf("DEBUG: Converting \\, to thin space element\n");
+            Element* element = create_latex_element(input, "thinspace");
+            if (!element) {
+                return {.item = ITEM_ERROR};
+            }
+            return {.item = (uint64_t)element};
         }
         else if (escaped_char == '-') {
             // \- = soft hyphen
