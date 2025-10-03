@@ -469,13 +469,25 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                 // Process block element directly
                 process_latex_element(html_buf, content_item, pool, depth);
             } else if (is_text || is_inline) {
-                // Open paragraph if not already in one
-                if (!in_paragraph) {
+                if (is_text) {
+                    // Each text element gets its own paragraph
+                    // Close any existing paragraph
+                    if (in_paragraph) {
+                        stringbuf_append_str(html_buf, "</p>\n");
+                    }
+                    // Open new paragraph for this text
                     stringbuf_append_str(html_buf, "<p>");
                     in_paragraph = true;
+                    // Process text content
+                    process_latex_element(html_buf, content_item, pool, depth);
+                } else {
+                    // Inline elements stay in the same paragraph
+                    if (!in_paragraph) {
+                        stringbuf_append_str(html_buf, "<p>");
+                        in_paragraph = true;
+                    }
+                    process_latex_element(html_buf, content_item, pool, depth);
                 }
-                // Process inline content
-                process_latex_element(html_buf, content_item, pool, depth);
             } else {
                 // Unknown content type - treat as inline if we're in a paragraph context
                 if (!in_paragraph) {
