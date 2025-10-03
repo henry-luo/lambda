@@ -276,50 +276,26 @@ static Item parse_latex_command(Input *input, const char **latex) {
             printf("DEBUG: Processing \\begin command with %lld arguments\n", args->length);
             
             // Extract environment name from the successfully parsed argument
-            // We know the argument parsing works correctly from debug output
-            // Use the raw content that was parsed into the StringBuf
-            
             const char* env_name = "itemize"; // Default
             
-            // Since we can see from debug output that argument parsing works correctly,
-            // but we can't safely access the String object due to memory corruption,
-            // use a simple approach based on the current LaTeX position
-            
-            // Since we know the argument parsing works correctly and shows the right name in debug,
-            // but we can't access the String object safely, let's use a different approach.
-            // The argument was just parsed and we're positioned right after it.
-            // Let's look at the original LaTeX string from the beginning to find the environment.
-            
-            // Find the start of the current \begin command
-            const char* begin_pos = cmd_name->chars - 1; // Back to the backslash
-            while (begin_pos > cmd_name->chars - 50 && *begin_pos != '\\') begin_pos--;
-            
-            // Look for the environment name in the next 30 characters after \begin{
-            char search_buffer[50];
-            const char* search_start = begin_pos;
-            size_t search_len = 30;
-            if (search_start + search_len > *latex + 20) search_len = (*latex + 20) - search_start;
-            if (search_len > 49) search_len = 49;
-            
-            strncpy(search_buffer, search_start, search_len);
-            search_buffer[search_len] = '\0';
-            
-            printf("DEBUG: Search buffer: '%s'\n", search_buffer);
-            
-            // Look for environment names in the search buffer
-            if (strstr(search_buffer, "{enumerate}")) {
-                env_name = "enumerate";
-                printf("DEBUG: Found '{enumerate}' in search buffer\n");
-            } else if (strstr(search_buffer, "{itemize}")) {
-                env_name = "itemize";
-                printf("DEBUG: Found '{itemize}' in search buffer\n");
-            } else {
-                printf("DEBUG: No environment found in search buffer, using default\n");
+            // Try to access the first argument which contains the environment name
+            if (args && args->length > 0 && args->items) {
+                Item first_arg = args->items[0];
+                TypeId arg_type = get_type_id(first_arg);
+                
+                if (arg_type == LMD_TYPE_STRING) {
+                    String* env_string = (String*)first_arg.pointer;
+                    if (env_string && env_string->chars && env_string->len > 0 && env_string->len < 50) {
+                        // We have a valid environment name string
+                        // printf("DEBUG: Found environment name from argument: '%s'\n", env_string->chars);
+                        env_name = env_string->chars;
+                    }
+                }
             }
             
-            printf("DEBUG: Detected environment: %s\n", env_name);
-            
-            printf("DEBUG: Creating environment element for: '%s'\n", env_name);
+            // printf("DEBUG: Final environment name: '%s'\n", env_name);
+            // printf("DEBUG: Detected environment: %s\n", env_name);
+            // printf("DEBUG: Creating environment element for: '%s'\n", env_name);
 
             // Create a new element with the environment name instead
             element = create_latex_element(input, env_name);
