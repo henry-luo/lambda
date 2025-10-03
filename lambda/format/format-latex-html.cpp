@@ -398,6 +398,13 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
             process_element_content_simple(html_buf, elem, pool, depth);
             stringbuf_append_str(html_buf, "</code>");
         }
+        else if (strcmp(cmd_name, "thinspace") == 0) {
+            stringbuf_append_char(html_buf, ' '); // Render as regular space
+        }
+        else if (strcmp(cmd_name, "literal") == 0) {
+            // Render literal character content with HTML escaping
+            process_element_content_simple(html_buf, elem, pool, depth);
+        }
         else if (strcmp(cmd_name, "item") == 0) {
             process_item(html_buf, elem, pool, depth);
         }
