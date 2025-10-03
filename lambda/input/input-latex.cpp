@@ -948,22 +948,25 @@ void parse_latex(Input* input, const char* latex_string) {
         } else {
             printf("DEBUG: Element %d was null (likely \\end{} or comment)\n", element_count);
         }
-        // Skip whitespace and paragraph breaks
-        skip_whitespace(&latex);
-
-        // Handle paragraph breaks (double newlines) by creating par elements
-        while (*latex == '\n' && *(latex + 1) == '\n') {
-            latex += 2; // Skip the double newline
-            skip_whitespace(&latex); // Skip any additional whitespace
+        // Check for paragraph breaks before skipping whitespace
+        if (*latex == '\n' && *(latex + 1) == '\n') {
             printf("DEBUG: Creating paragraph break element\n");
             
             // Create a paragraph break element
             Element* par_element = create_latex_element(input, "par");
             if (par_element) {
-                Element* root_element = (Element*)input->root.pointer;
                 list_push((List*)root_element, {.item = (uint64_t)par_element});
                 printf("DEBUG: Added paragraph break element to root\n");
             }
+        }
+        
+        // Skip whitespace and paragraph breaks
+        skip_whitespace(&latex);
+        
+        // Skip any remaining paragraph breaks
+        while (*latex == '\n' && *(latex + 1) == '\n') {
+            latex += 2; // Skip the double newline
+            skip_whitespace(&latex); // Skip any additional whitespace
         }
 
         element_count++;
