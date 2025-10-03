@@ -261,6 +261,14 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
     }
 
     TypeId type = get_type_id(item);
+    
+    // CRITICAL DEBUG: Check for invalid type values
+    if (type > LMD_TYPE_ERROR) {
+        printf("ERROR: Invalid type %d detected in process_latex_element! Max valid type is %d\n", type, LMD_TYPE_ERROR);
+        printf("ERROR: Item details - item.item=0x%llx, item.pointer=%p\n", (unsigned long long)item.item, item.pointer);
+        printf("ERROR: Stack trace: depth=%d\n", depth);
+        return;
+    }
 
     if (type == LMD_TYPE_ELEMENT) {
         Element* elem = item.element;
@@ -511,38 +519,115 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
     // Process element items with intelligent paragraph grouping
     if (elem->length > 0 && elem->length < 1000) { // Reasonable limit
         bool in_paragraph = false;
+        bool need_new_paragraph = false;
 
         for (int i = 0; i < elem->length; i++) {
             printf("DEBUG: Processing element content item %d\n", i);
             Item content_item = elem->items[i];
             TypeId item_type = get_type_id(content_item);
             printf("DEBUG: Content item %d has type %d\n", i, item_type);
+            
+            // CRITICAL DEBUG: Check for invalid type values
+            if (item_type > LMD_TYPE_ERROR) {
+                printf("ERROR: Invalid type %d detected in process_element_content! Max valid type is %d\n", item_type, LMD_TYPE_ERROR);
+                printf("ERROR: Item details - item.item=0x%llx, item.pointer=%p\n", (unsigned long long)content_item.item, content_item.pointer);
+                printf("ERROR: Element index: %d, elem->length: %lld\n", i, elem->length);
+                printf("ERROR: Raw memory dump of Item:\n");
+                unsigned char* bytes = (unsigned char*)&content_item;
+                for (int j = 0; j < sizeof(Item); j++) {
+                    printf("  byte[%d] = 0x%02x\n", j, bytes[j]);
+                }
+                continue; // Skip processing this invalid item
+            }
 
             bool is_block = is_block_element(content_item);
             bool is_text = (item_type == LMD_TYPE_STRING);
             bool is_inline = (item_type == LMD_TYPE_ELEMENT && !is_block);
             
-            // Check if this is a paragraph break element
+            // Check if this is a paragraph break element or textblock
             bool is_par_break = false;
+            bool is_textblock = false;
             if (item_type == LMD_TYPE_ELEMENT) {
                 Element* elem_ptr = (Element*)content_item.pointer;
                 if (elem_ptr && elem_ptr->type) {
                     StrView elem_name = ((TypeElmt*)elem_ptr->type)->name;
-                    if (elem_name.length == 3 && strncmp(elem_name.str, "par", 3) == 0) {
+                    printf("DEBUG: Element name: '%.*s' (length: %zu)\n", (int)elem_name.length, elem_name.str, elem_name.length);
+                    if ((elem_name.length == 3 && strncmp(elem_name.str, "par", 3) == 0) ||
+                        (elem_name.length == 8 && strncmp(elem_name.str, "parbreak", 8) == 0)) {
                         is_par_break = true;
+                        printf("DEBUG: Detected par break element\n");
+                    } else if (elem_name.length == 9 && strncmp(elem_name.str, "textblock", 9) == 0) {
+                        is_textblock = true;
+                        printf("DEBUG: Detected textblock element\n");
                     }
                 }
             }
-
+            
             // Handle paragraph wrapping logic
-            if (is_par_break) {
+            if (is_textblock) {
+                // Process textblock: text + parbreak
+                Element* textblock_elem = (Element*)content_item.pointer;
+                printf("DEBUG: Processing textblock with length: %lld\n", textblock_elem ? textblock_elem->length : -1);
+                if (textblock_elem && textblock_elem->items && textblock_elem->length >= 1) {
+                    // Process the text part
+                    Item text_item = textblock_elem->items[0];
+                    printf("DEBUG: First item type: %d (LMD_TYPE_STRING=%d)\n", get_type_id(text_item), LMD_TYPE_STRING);
+                    if (get_type_id(text_item) == LMD_TYPE_STRING) {
+                        printf("DEBUG: Processing text item in textblock\n");
+                    } else {
+                        printf("DEBUG: First item is not a string, processing as element\n");
+                        // Process as element instead
+                        if (!in_paragraph || need_new_paragraph) {
+                            if (need_new_paragraph && in_paragraph) {
+                                stringbuf_append_str(html_buf, "</p>\n");
+                            }
+                            stringbuf_append_str(html_buf, "<p>");
+                            in_paragraph = true;
+                            need_new_paragraph = false;
+                        }
+                        process_latex_element(html_buf, text_item, pool, depth);
+                    }
+                    
+                    // Original string processing
+                    if (get_type_id(text_item) == LMD_TYPE_STRING) {
+                        if (!in_paragraph || need_new_paragraph) {
+                            if (need_new_paragraph && in_paragraph) {
+                                stringbuf_append_str(html_buf, "</p>\n");
+                            }
+                            stringbuf_append_str(html_buf, "<p>");
+                            in_paragraph = true;
+                            need_new_paragraph = false;
+                        }
+                        process_latex_element(html_buf, text_item, pool, depth);
+                    }
+                    
+                    // Check if there's a parbreak (should be second element)
+                    if (textblock_elem->length >= 2) {
+                        Item parbreak_item = textblock_elem->items[1];
+                        if (get_type_id(parbreak_item) == LMD_TYPE_ELEMENT) {
+                            Element* parbreak_elem = (Element*)parbreak_item.pointer;
+                            if (parbreak_elem && parbreak_elem->type) {
+                                StrView parbreak_name = ((TypeElmt*)parbreak_elem->type)->name;
+                                if (parbreak_name.length == 8 && strncmp(parbreak_name.str, "parbreak", 8) == 0) {
+                                    // Close current paragraph and force new paragraph for next content
+                                    if (in_paragraph) {
+                                        stringbuf_append_str(html_buf, "</p>\n");
+                                        in_paragraph = false;
+                                    }
+                                    need_new_paragraph = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (is_par_break) {
                 // Close current paragraph and force new paragraph for next content
                 if (in_paragraph) {
                     stringbuf_append_str(html_buf, "</p>\n");
                     in_paragraph = false;
                 }
+                need_new_paragraph = true;
                 // Don't process the par element itself, just use it as a break marker
-                // The next text/inline element will start a new paragraph
             } else if (is_block) {
                 // Close any open paragraph before block element
                 if (in_paragraph) {
@@ -552,10 +637,15 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
                 // Process block element directly
                 process_latex_element(html_buf, content_item, pool, depth);
             } else if (is_text || is_inline) {
-                // Open paragraph if not already in one
-                if (!in_paragraph) {
+                // Handle paragraph creation based on context
+                if (!in_paragraph || need_new_paragraph) {
+                    if (need_new_paragraph && in_paragraph) {
+                        // This shouldn't happen since par breaks close paragraphs
+                        stringbuf_append_str(html_buf, "</p>\n");
+                    }
                     stringbuf_append_str(html_buf, "<p>");
                     in_paragraph = true;
+                    need_new_paragraph = false;
                 }
                 // Process inline content (both text and inline elements)
                 process_latex_element(html_buf, content_item, pool, depth);
