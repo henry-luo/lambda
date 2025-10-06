@@ -903,7 +903,7 @@ class LayoutTester {
                         detailedDiffs.forEach(propDiff => {
                             const status = propDiff.withinTolerance ? '✅' : '❌';
                             const pct = propDiff.difference > 0 ? `(${((propDiff.difference / textTolerance) * 100).toFixed(1)}% of tolerance)` : '';
-                            console.log(`${getIndent()}   ${status} ${propDiff.property}: ${propDiff.difference.toFixed(2)}px ${pct}`);
+                            console.log(`${getIndent()}   ${status} ${propDiff.property} diff: ${propDiff.difference.toFixed(2)}px ${pct}`);
                             console.log(`${getIndent()}     Radiant: ${propDiff.radiant}, Browser: ${propDiff.browser}`);
                         });
                     }
