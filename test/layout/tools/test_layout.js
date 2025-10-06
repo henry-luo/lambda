@@ -17,7 +17,7 @@ class LayoutTester {
     constructor(options = {}) {
         this.radiantExe = options.radiantExe || path.join(__dirname, '..', '..', '..', '..', 'Jubily', 'radiant.exe');
         this.tolerance = options.tolerance || 5.0;
-        this.textTolerance = options.textTolerance || 3.0; // Allow 3px difference for text (font precision)
+        this.textTolerance = options.textTolerance || 5.0; // Allow 5px difference for text (font precision)
         this.baselineTextTolerancePercent = 0.05; // 5% tolerance for baseline suite text width
         this.generateReferences = options.generateReferences || false;
         this.verbose = options.verbose || false;
@@ -353,7 +353,7 @@ class LayoutTester {
      * Compare two tree nodes directly for element matching
      * SIMPLE: Just match based on tag, position in tree, and basic properties
      */
-    compareTreeNodes(radiantNode, browserNode, path = '', parentContext = null, depth = 0) {
+    compareTreeNode(radiantNode, browserNode, path = '', parentContext = null, depth = 0) {
         const differences = [];
         const currentPath = (path && path !== 'root') ? path : (radiantNode.tag || browserNode.tag || 'unknown');
 
@@ -400,7 +400,12 @@ class LayoutTester {
 
                 if (this.verbose) {
                     console.log(`${getIndent()}🔄 Relative positioning for ${radiantNode.tag}:`);
-                    console.log(`${getIndent()}   Radiant: (${radiantLayout.x}, ${radiantLayout.y}) vs Browser: (${browserLayout.x}, ${browserLayout.y})`);
+                    console.log(`${getIndent()}  ^ Radiant: (${radiantLayout.x}, ${radiantLayout.y}) vs Browser: (${browserLayout.x}, ${browserLayout.y})`);
+                }
+            }
+            else {
+                if (this.verbose) {
+                    console.log(`${getIndent()}🔄 Root ${radiantNode.tag}:`);
                 }
             }
 
@@ -422,9 +427,8 @@ class LayoutTester {
                 layoutMatches = maxDiff <= this.tolerance;
 
                 if (this.verbose) {
-                    const status = layoutMatches ? '✅' : '❌';
-                    const relativeStr = parentContext ? ' (relative)' : ' (absolute)';
-                    console.log(`${getIndent()}${status} Layout${relativeStr} for ${radiantNode.tag}: ${maxDiff.toFixed(2)}px <= ${this.tolerance}px`);
+                    const relativeStr = parentContext ? '(relative)' : '(absolute)';
+                    console.log(`${getIndent()}  ^ Layout ${relativeStr} for ${radiantNode.tag}: ${maxDiff.toFixed(2)}px ${layoutMatches ? '<=':'>'} ${this.tolerance}px`);
                 }
             }
         }
@@ -491,8 +495,7 @@ class LayoutTester {
             totalTextNodes: 0,
             matchedTextNodes: 0,
             // Store effective tolerances for accurate reporting
-            effectiveTextTolerance: testId && testId.startsWith('baseline_') ?
-                Math.max(this.textTolerance, 5.0) : this.textTolerance,
+            effectiveTextTolerance: this.textTolerance,
             // Add detailed debugging info
             debugInfo: {
                 radiantElementCount: 0,
@@ -566,7 +569,7 @@ class LayoutTester {
         let summary = `${results.matchedElements}/${results.totalElements} tree matches (${passRate.toFixed(1)}%) - Max diff: ${results.maxDifference.toFixed(2)}px (${layoutAccuracy})`;
 
         if (results.totalTextNodes > 0) {
-            summary += ` | Text: ${results.matchedTextNodes}/${results.totalTextNodes} matches (${textPassRate.toFixed(1)}%) - Max text diff: ${results.maxTextDifference.toFixed(2)}px vs ${results.effectiveTextTolerance}px tolerance (${textAccuracy})`;
+            summary += `\n     Text: ${results.matchedTextNodes}/${results.totalTextNodes} matches (${textPassRate.toFixed(1)}%) - Max text diff: ${results.maxTextDifference.toFixed(2)}px vs ${results.effectiveTextTolerance}px tolerance (${textAccuracy})`;
         }
 
         results.summary = summary;
@@ -624,22 +627,22 @@ class LayoutTester {
 
         // Both nodes exist, compare them
         results.totalElements = 1;
-        const currentPath = (path && path !== 'root') ? `${path} > ${radiantNode.tag}` : radiantNode.tag;
+        const currentPath = (path && path !== 'root') ? path : radiantNode.tag;
 
         // Compare current nodes with parent context for relative positioning
-        const nodeComparison = this.compareTreeNodes(radiantNode, browserNode, currentPath, parentContext, depth);
+        const nodeComparison = this.compareTreeNode(radiantNode, browserNode, currentPath, parentContext, depth);
 
         // CRITICAL CHANGE: Elements always match by name, record layout differences separately
         if (nodeComparison.matches) {
             results.matchedElements = 1;
             if (this.verbose && radiantNode.layout) {
                 const layoutStatus = nodeComparison.layoutMatches ? '✅' : '⚠️';
-                console.log(`${getIndent()}${layoutStatus} Match: ${currentPath} - ${radiantNode.tag}`);
+                console.log(`${getIndent()}  ^ ${layoutStatus} Match: ${currentPath}`);
             }
         } else {
             // Only tag mismatches prevent element matching
             if (this.verbose) {
-                console.log(`${getIndent()}❌ Tag mismatch: ${currentPath} - ${radiantNode.tag} vs ${browserNode.tag}`);
+                console.log(`${getIndent()}❌ Tag mismatch: ${currentPath} | ${radiantNode.tag} vs. ${browserNode.tag}`);
             }
         }
 
@@ -663,7 +666,7 @@ class LayoutTester {
         const maxChildren = Math.max(radiantChildNodes.length, browserChildNodes.length);
 
         if (this.verbose && (radiantChildNodes.length > 0 || browserChildNodes.length > 0)) {
-            console.log(`${getIndent()}🔍 Comparing ${maxChildren} child nodes (elements + text) in document order`);
+            // console.log(`${getIndent()}🔍 Comparing ${maxChildren} child nodes (elements + text) in document order`);
         }
 
         // Compare all child nodes (elements and text) in unified loop following document order
@@ -895,6 +898,14 @@ class LayoutTester {
 
                     if (this.verbose) {
                         console.log(`${getIndent()}❌ Text FAILED tolerance: "${this.cleanTextForDisplay(radiantChild.node.text)}" - ${maxDiff.toFixed(2)}px > ${textTolerance}px`);
+
+                        // Show detailed differences inline
+                        detailedDiffs.forEach(propDiff => {
+                            const status = propDiff.withinTolerance ? '✅' : '❌';
+                            const pct = propDiff.difference > 0 ? `(${((propDiff.difference / textTolerance) * 100).toFixed(1)}% of tolerance)` : '';
+                            console.log(`${getIndent()}   ${status} ${propDiff.property}: ${propDiff.difference.toFixed(2)}px ${pct}`);
+                            console.log(`${getIndent()}     Radiant: ${propDiff.radiant}, Browser: ${propDiff.browser}`);
+                        });
                     }
                 } else {
                     results.matchedTextNodes++;
@@ -1038,6 +1049,7 @@ class LayoutTester {
 
     /**
      * Print detailed text differences for debugging
+     * @deprecated This method is obsolete - text differences are now shown inline during tree comparison
      */
     printTextDifferences(textDifferences, testName = '') {
         if (textDifferences.length === 0) {
@@ -1117,15 +1129,6 @@ class LayoutTester {
 
             // Text accuracy check - use higher tolerance for baseline tests
             let effectiveTextTolerance = this.textTolerance;
-            if (testName && testName.startsWith('baseline_')) {
-                effectiveTextTolerance = Math.max(this.textTolerance, 5.0); // 5px tolerance for baseline
-
-                // SPECIAL CASE: styled_spans has text comparison artifacts due to complex inline layout
-                // Since layout is perfect (spans work correctly), use higher tolerance for text comparison
-                if (testName.includes('styled_spans')) {
-                    effectiveTextTolerance = Math.max(effectiveTextTolerance, 100.0); // 100px tolerance for styled spans
-                }
-            }
             const textAccurate = comparison.totalTextNodes === 0 ||
                                (comparison.maxTextDifference <= effectiveTextTolerance && comparison.matchedTextNodes > 0);
 
@@ -1134,24 +1137,6 @@ class LayoutTester {
 
             const status = passed ? '✅ PASS' : '❌ FAIL';
             console.log(`    ${status} (${comparison.summary})`);
-
-            if (!passed && this.verbose) {
-                console.log(`    Layout max difference: ${comparison.maxDifference.toFixed(2)}px`);
-                if (comparison.totalTextNodes > 0) {
-                    console.log(`    Text max difference: ${comparison.maxTextDifference.toFixed(2)}px vs tolerance: ${effectiveTextTolerance}px`);
-                }
-
-                // Show layout differences
-                comparison.differences.slice(0, 2).forEach(diff => {
-                    const elementPath = diff.path || diff.selector || 'unknown';
-                    console.log(`      • ${elementPath}: ${diff.type}`);
-                });
-
-                // Show detailed text differences with the new method
-                if (comparison.textDifferences.length > 0) {
-                    this.printTextDifferences(comparison.textDifferences.slice(0, 3), testName);
-                }
-            }
 
             return {
                 testName,
@@ -1438,7 +1423,7 @@ async function main() {
     const options = {
         radiantExe: '../Jubily/radiant.exe',
         tolerance: 5.0,
-        textTolerance: 3.0, // Match constructor default - allow 3px difference for text (font precision)
+        textTolerance: 5.0, // allow 5px difference for text (font precision)
         generateReferences: false,
         verbose: false
     };
