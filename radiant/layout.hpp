@@ -12,6 +12,7 @@ typedef struct StyleContext {
     struct StyleNode* prev_node;
     lxb_css_parser_t *css_parser;
 } StyleContext;
+
 typedef struct Blockbox {
     int width, height;  // given width and height for the inner content of the block
     int advance_y;  // advance_y includes padding.top and border.top of current block

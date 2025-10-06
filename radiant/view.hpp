@@ -5,12 +5,10 @@
 extern "C" {
 #endif
 #include <GLFW/glfw3.h>
-#ifndef FLEX_TEST_MODE
 #include <fontconfig/fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <thorvg_capi.h>
-#endif
 #ifdef __cplusplus
 }
 #endif
@@ -98,11 +96,7 @@ typedef struct ImageSurface {
     // image pixels, 32-bits per pixel, RGBA format
     // pack order is [R] [G] [B] [A], high bit -> low bit
     void *pixels;          // A pointer to the pixels of the surface, the pixels are writeable if non-NULL
-#ifndef FLEX_TEST_MODE
-    Tvg_Paint* pic;       // ThorVG picture for SVG image
-#else
-    void* pic;            // Placeholder for test mode
-#endif
+    Tvg_Paint* pic;        // ThorVG picture for SVG image
     int max_render_width;  // maximum width for rendering the image
     lxb_url_t* url;        // the resolved absolute URL of the image
 } ImageSurface;
@@ -427,11 +421,7 @@ typedef struct StateStore {
 // layout, rendering context structs
 typedef struct {
     FontProp style;  // current font style
-#ifndef FLEX_TEST_MODE
     FT_Face face;  // current font face
-#else
-    void* face;    // Placeholder for test mode
-#endif
     float space_width;  // width of a space character of the current font
     int current_font_size;  // font size of current element
 } FontBox;
@@ -454,13 +444,8 @@ typedef struct {
     ImageSurface* surface;  // rendering surface of a window
 
     // font handling
-#ifndef FLEX_TEST_MODE
     FcConfig *font_config;
     FT_Library ft_library;
-#else
-    void* font_config;     // Placeholder for test mode
-    void* ft_library;      // Placeholder for test mode
-#endif
     struct hashmap* fontface_map;  // cache of font faces loaded
     FontProp default_font;  // default font style
     char** fallback_fonts;  // fallback fonts
@@ -478,10 +463,7 @@ typedef struct {
     MouseState mouse_state; // current mouse state
 } UiContext;
 
-#ifndef FLEX_TEST_MODE
 extern FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
 extern FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint);
-#endif
 extern void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop);
-
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
