@@ -1,0 +1,166 @@
+[view-block:html, x:0, y:0, wd:1200, hg:446
+  {}
+  [view-block:body, x:8, y:8, wd:1184, hg:430
+    {font:{family:'Arial', size:16, style:normal, weight:normal, decoration:none}}
+    {margin:{left:8, right:8, top:8, bottom:8} padding:{left:0, right:0, top:0, bottom:0}}
+    [view-block:h1, x:0, y:0, wd:1184, hg:36
+      {color:#ffff0000 }
+      {font:{family:'Arial', size:32, style:normal, weight:bold, decoration:none}}
+      text:'Hello, World!!!', start:0, len:15, x:0, y:0, wd:221, hg:17
+    ]
+    [view-block:p, x:0, y:36, wd:1184, hg:24
+      {line-hg:0.000000 txt-align:justify txt-indent:0.000000 ls-sty-type:0
+      min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 box-sizing:content-box }
+      {margin:{left:0, right:0, top:0, bottom:0} padding:{left:0, right:0, top:0, bottom:0}}
+      text:'你好, Привет, this is a paragraph with a ', start:0, len:49, x:0, y:4, wd:284, hg:17
+      [view-inline:b, x:284, y:0, wd:103, hg:19
+        {font:{family:'Arial', size:16, style:normal, weight:bold, decoration:none}}
+        text:'long long line', start:0, len:14, x:284, y:4, wd:103, hg:17
+      ]
+      text:' of text to test ', start:0, len:17, x:387, y:4, wd:96, hg:17
+      [view-inline:i, x:483, y:0, wd:119, hg:24
+        {font:{family:'Arial', size:20, style:italic, weight:normal, decoration:none}}
+        text:'text wrapping', start:0, len:13, x:483, y:0, wd:119, hg:17
+      ]
+      text:'.', start:0, len:1, x:602, y:4, wd:4, hg:17
+    ]
+    text:'this is ', start:5, len:8, x:0, y:88, wd:45, hg:17
+    [view-inline:u, x:45, y:60, wd:91, hg:19
+      {color:#ff0000ff }
+      {font:{family:'Arial', size:16, style:normal, weight:normal, decoration:underline}}
+      text:'dangling text', start:0, len:13, x:45, y:88, wd:91, hg:17
+    ]
+    text:' from sample file^    ', start:0, len:22, x:136, y:88, wd:120, hg:17
+    [view-inline-block:center, x:256, y:60, wd:150, hg:43
+      {line-hg:0.000000 txt-align:center txt-indent:0.000000 ls-sty-type:0
+      min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 box-sizing:content-box given-wd:150 }
+      {bgcolor:#ffe6d8ad margin:{left:0, right:0, top:0, bottom:0} padding:{left:0, right:0, top:0, bottom:0}}
+      [view-inline:span, x:0, y:0, wd:91, hg:19
+        {cursor:wait vertical-align:middle }
+        text:'centered text', start:0, len:13, x:29, y:12, wd:91, hg:43
+      ]
+    ]
+    [view-inline-block:div, x:418, y:60, wd:150, hg:32
+      {line-hg:0.000000 txt-align:left txt-indent:0.000000 ls-sty-type:0
+      min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 box-sizing:content-box given-wd:150 }
+      {cursor:pointer }
+      {bgcolor:#ff00ffff margin:{left:12, right:12, top:12, bottom:12} padding:{left:0, right:0, top:0, bottom:0}}
+      text:'text ', start:9, len:5, x:0, y:0, wd:29, hg:32
+      [view-inline-block:span, x:29, y:13, wd:110, hg:19
+        {line-hg:0.000000 txt-align:left txt-indent:0.000000 ls-sty-type:0
+        min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 box-sizing:content-box given-wd:110 }
+        {vertical-align:bottom }
+        {bgcolor:#ffffcccc margin:{left:0, right:0, top:0, bottom:0} padding:{left:0, right:0, top:0, bottom:0}}
+        text:'bottom aligned', start:0, len:14, x:0, y:0, wd:105, hg:16
+      ]
+    ]
+    [view-inline:s, x:580, y:60, wd:215, hg:56
+      {color:#ff008000 }
+      {font:{family:'Arial', size:16, style:normal, weight:normal, decoration:line-through}}
+      text:'^        text in green and line-through^    ', start:0, len:44, x:580, y:88, wd:215, hg:17
+    ]
+    [view-inline:span, x:795, y:60, wd:113, hg:56
+      {color:#ff0000ff }
+      text:'span with class^    ', start:9, len:20, x:795, y:88, wd:113, hg:17
+    ]
+    [view-block:custom-elmt, x:0, y:116, wd:364, hg:68
+      {line-hg:0.000000 txt-align:left txt-indent:0.000000 ls-sty-type:0
+      min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 box-sizing:content-box given-wd:300 }
+      {cursor:pointer }
+      {font:{family:'Palatino', size:16, style:normal, weight:normal, decoration:none}}
+      {bgcolor:#ff90ee90 margin:{left:0, right:0, top:0, bottom:0} padding:{left:24, right:24, top:8, bottom:8}}
+      {border:{t-color:#ffe22b8a, r-color:#0, b-color:#ffe22b8a, l-color:#ff8080f0,
+        t-wd:8, r-wd:8, b-wd:8, l-wd:8, t-sty:35, r-sty:35, b-sty:35, l-sty:35
+        tl-rds:0, tr-rds:0, br-rds:0, bl-rds:0}
+      text:'custom element div with ', start:9, len:24, x:32, y:16, wd:181, hg:17
+      text:'width & color and padding^    ', start:0, len:30, x:32, y:34, wd:198, hg:17
+    ]
+    text:'list:^    ', start:5, len:10, x:0, y:278, wd:28, hg:17
+    [view-inline-block:div, x:28, y:184, wd:120, hg:109
+      {line-hg:0.000000 txt-align:left txt-indent:0.000000 ls-sty-type:0
+      min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 box-sizing:content-box given-wd:120 }
+      {bgcolor:#ffffffcc margin:{left:0, right:0, top:0, bottom:0} padding:{left:0, right:0, top:0, bottom:0}}
+      [view-block:ul, x:0, y:16, wd:120, hg:77
+        {line-hg:0.000000 txt-align:left txt-indent:0.000000 ls-sty-type:401
+        min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 box-sizing:content-box }
+        {bgcolor:#ffccccff margin:{left:0, right:0, top:16, bottom:16} padding:{left:40, right:0, top:0, bottom:0}}
+        [view-list-item:li, x:40, y:0, wd:80, hg:18
+          text:'list item 1', start:0, len:11, x:0, y:0, wd:67, hg:17
+        ]
+        [view-block:div, x:50, y:18, wd:65, hg:36
+          {bgcolor:#ffdcf5f5 margin:{left:10, right:5, top:0, bottom:5} padding:{left:0, right:0, top:0, bottom:0}}
+          text:'div ', start:17, len:4, x:0, y:0, wd:25, hg:17
+          text:'inside', start:21, len:6, x:0, y:18, wd:43, hg:17
+        ]
+        [view-list-item:li, x:40, y:59, wd:80, hg:18
+          text:'list item 3', start:0, len:11, x:0, y:0, wd:67, hg:17
+        ]
+      ]
+    ]
+    [view-inline-block:div, x:148, y:248, wd:50, hg:45
+      {line-hg:0.000000 txt-align:left txt-indent:0.000000 ls-sty-type:0
+      min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 box-sizing:content-box given-wd:50 given-hg:45 }
+      {bgcolor:#ffffccff margin:{left:0, right:0, top:0, bottom:0} padding:{left:0, right:0, top:0, bottom:0}}
+      text:'some', start:9, len:4, x:0, y:0, wd:39, hg:17
+      text:'text^    ', start:0, len:9, x:0, y:18, wd:29, hg:17
+    ]
+    text:'^    list 2:^    ', start:0, len:17, x:198, y:278, wd:45, hg:17
+    [view-inline-block:ol, x:243, y:223, wd:120, hg:54
+      {line-hg:0.000000 txt-align:left txt-indent:0.000000 ls-sty-type:404
+      min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 box-sizing:content-box given-wd:80 }
+      {bgcolor:#ffffffcc margin:{left:0, right:0, top:16, bottom:16} padding:{left:40, right:0, top:0, bottom:0}}
+      [view-list-item:li, x:40, y:0, wd:80, hg:18
+        {cursor:pointer }
+        text:'list item 1', start:0, len:11, x:0, y:0, wd:67, hg:17
+      ]
+      [view-list-item:li, x:40, y:18, wd:80, hg:36
+        text:'item 2', start:0, len:6, x:0, y:0, wd:43, hg:17
+        text:'2nd line', start:0, len:8, x:0, y:18, wd:57, hg:17
+      ]
+    ]
+    [view-block:div, x:0, y:309, wd:1184, hg:3
+      {line-hg:0.000000 txt-align:left txt-indent:0.000000 ls-sty-type:0
+      min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 box-sizing:content-box given-hg:1 }
+      {bgcolor:#ffffcccc margin:{left:0, right:0, top:0, bottom:0} padding:{left:0, right:0, top:0, bottom:0}}
+      {border:{t-color:#ffff6666, r-color:#ffff6666, b-color:#ffff6666, l-color:#ffff6666,
+        t-wd:1, r-wd:1, b-wd:1, l-wd:1, t-sty:35, r-sty:35, b-sty:35, l-sty:35
+        tl-rds:0, tr-rds:0, br-rds:0, bl-rds:0}
+    ]
+    [view-block:p, x:0, y:312, wd:1184, hg:44
+      {line-hg:0.000000 txt-align:justify txt-indent:0.000000 ls-sty-type:0
+      min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 box-sizing:content-box }
+      {margin:{left:0, right:0, top:0, bottom:0} padding:{left:0, right:0, top:0, bottom:0}}
+      text:'jpg: ', start:9, len:5, x:0, y:25, wd:30, hg:17
+      [view-inline-block:img, x:30, y:0, wd:59, hg:40
+        {bgcolor:#ff00a5ff margin:{left:0, right:0, top:0, bottom:0} padding:{left:0, right:0, top:0, bottom:0}}
+      ]
+      text:'^        png: ', start:0, len:14, x:89, y:25, wd:39, hg:17
+      [view-inline-block:img, x:128, y:10, wd:40, hg:30
+        {bgcolor:#ff00a5ff margin:{left:0, right:0, top:0, bottom:0} padding:{left:0, right:0, top:0, bottom:0}}
+      ]
+      text:'^        svg: ', start:0, len:14, x:168, y:25, wd:37, hg:17
+      [view-inline-block:img, x:205, y:10, wd:30, hg:30
+        {bgcolor:#ff00a5ff margin:{left:0, right:0, top:0, bottom:0} padding:{left:0, right:0, top:0, bottom:0}}
+      ]
+      [view-inline-block:img, x:235, y:10, wd:40, hg:30
+        {bgcolor:#ff00a5ff margin:{left:0, right:0, top:0, bottom:0} padding:{left:0, right:0, top:0, bottom:0}}
+      ]
+    ]
+    [view-block:div, x:10, y:366, wd:204, hg:54
+      {line-hg:0.000000 txt-align:left txt-indent:0.000000 ls-sty-type:0
+      min-wd:0.000000 max-wd:0.000000 min-hg:0.000000 max-hg:0.000000 box-sizing:content-box given-wd:200 given-hg:50 }
+      {overflow-x:auto overflow-y:auto hz-overflow:true vt-overflow:true }
+      {bgcolor:#ff00d7ff margin:{left:10, right:10, top:10, bottom:10} padding:{left:0, right:0, top:0, bottom:0}}
+      {border:{t-color:#ff6666ff, r-color:#ff6666ff, b-color:#ff6666ff, l-color:#ff6666ff,
+        t-wd:2, r-wd:2, b-wd:2, l-wd:2, t-sty:35, r-sty:35, b-sty:35, l-sty:35
+        tl-rds:0, tr-rds:0, br-rds:0, bl-rds:0}
+      [view-inline:u, x:2, y:2, wd:268, hg:37
+        {font:{family:'Arial', size:16, style:normal, weight:normal, decoration:underline}}
+        text:'Some text and some ', start:0, len:19, x:2, y:2, wd:149, hg:17
+        text:'longggggggggggggggggggggggg-text', start:19, len:32, x:2, y:20, wd:268, hg:17
+      ]
+      text:'Some text', start:9, len:9, x:2, y:38, wd:71, hg:17
+      text:'Some text', start:9, len:9, x:2, y:56, wd:71, hg:17
+    ]
+  ]
+]

@@ -382,8 +382,8 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
             else if (view->type == RDT_VIEW_INLINE) {
                 strbuf_append_char_n(buf, ' ', indent);
                 ViewSpan* span = (ViewSpan*)view;
-                strbuf_append_format(buf, "[view-inline:%s\n",
-                    span->node->name());
+                strbuf_append_format(buf, "[view-inline:%s, x:%d, y:%d, wd:%d, hg:%d\n",
+                    span->node->name(), span->x, span->y, span->width, span->height);
                 print_inline_props(span, buf, indent + 2);
                 print_view_group((ViewGroup*)view, buf, indent + 2);
                 strbuf_append_char_n(buf, ' ', indent);
@@ -431,16 +431,19 @@ void write_string_to_file(const char *filename, const char *text) {
     fclose(file); // Close file
 }
 
-void print_view_tree(ViewGroup* view_root, float pixel_ratio) {
+void print_view_tree(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio) {
     StrBuf* buf = strbuf_new_cap(1024);
     print_block((ViewBlock*)view_root, buf, 0);
     log_debug("=================\nView tree:");
     log_debug("%s", buf->str);
     log_debug("=================\n");
-    write_string_to_file("view_tree.txt", buf->str);
+    char vfile[1024], *last_slash;
+    last_slash = strrchr((const char*)url->path.str.data, '/');
+    snprintf(vfile, sizeof(vfile), "./view_tree_%s.txt", last_slash + 1);
+    write_string_to_file(vfile, buf->str);
     strbuf_free(buf);
     // also generate JSON output
-    print_view_tree_json(view_root, pixel_ratio);
+    print_view_tree_json(view_root, url, pixel_ratio);
 }
 
 // Helper function to get view type name for JSON
@@ -478,6 +481,37 @@ void append_json_string(StrBuf* buf, const char* str) {
         }
     }
     strbuf_append_char(buf, '"');
+}
+
+void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio) {
+    // calculate absolute position for view
+    int abs_x = view->x;
+    int abs_y = view->y;
+    // Calculate absolute position by traversing up the parent chain
+    ViewGroup* parent = view->parent;
+    while (parent && (parent->type == RDT_VIEW_BLOCK || parent->type == RDT_VIEW_INLINE_BLOCK ||
+        parent->type == RDT_VIEW_LIST_ITEM || parent->type == RDT_VIEW_TABLE ||
+        parent->type == RDT_VIEW_TABLE_ROW_GROUP || parent->type == RDT_VIEW_TABLE_ROW ||
+        parent->type == RDT_VIEW_TABLE_CELL)) {
+        abs_x += parent->x;
+        abs_y += parent->y;
+        parent = parent->parent;
+    }
+
+    // Convert absolute view dimensions to CSS pixels
+    int css_x = (int)round(abs_x / pixel_ratio);
+    int css_y = (int)round(abs_y / pixel_ratio);
+    int css_width = (int)round(view->width / pixel_ratio);
+    int css_height = (int)round(view->height / pixel_ratio);
+
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"x\": %d,\n", css_x);
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"y\": %d,\n", css_y);
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"width\": %d,\n", css_width);
+    strbuf_append_char_n(buf, ' ', indent + 4);
+    strbuf_append_format(buf, "\"height\": %d\n", css_height);
 }
 
 // Recursive JSON generation for view blocks
@@ -539,6 +573,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             case RDT_VIEW_BLOCK:
                 tag_name = "div";
                 break;
+            case RDT_VIEW_INLINE:
             case RDT_VIEW_INLINE_BLOCK:
                 tag_name = "span";
                 break;
@@ -609,29 +644,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     }
     strbuf_append_str(buf, ",\n");
 
-    // CRITICAL FIX: Use relative positioning for Radiant's coordinate system
-    // Radiant uses relative positioning where each element's x,y is relative to its parent
-    // Do NOT calculate absolute positions - this breaks the relative positioning system
-    int css_x = (int)round(block->x / pixel_ratio);
-    int css_y = (int)round(block->y / pixel_ratio);
-    int css_width = (int)round(block->width / pixel_ratio);
-    int css_height = (int)round(block->height / pixel_ratio);
-
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"x\": %d,\n", css_x);
-
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"y\": %d,\n", css_y);
-
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"width\": %d,\n", css_width);
-
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"height\": %d\n", css_height);
-
+    print_bounds_json(block, buf, indent, pixel_ratio);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
 
@@ -812,12 +827,14 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             child->type == RDT_VIEW_TABLE_ROW_GROUP || child->type == RDT_VIEW_TABLE_ROW ||
             child->type == RDT_VIEW_TABLE_CELL) {
             print_block_json((ViewBlock*)child, buf, indent + 4, pixel_ratio);
-        } else if (child->type == RDT_VIEW_TEXT) {
+        }
+        else if (child->type == RDT_VIEW_TEXT) {
             print_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
-        } else if (child->type == RDT_VIEW_INLINE) {
-            // CRITICAL FIX: Handle inline elements (spans) with their children
+        }
+        else if (child->type == RDT_VIEW_INLINE) {
             print_inline_json((ViewSpan*)child, buf, indent + 4, pixel_ratio);
-        } else {
+        }
+        else {
             // Handle other view types
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "{\n");
@@ -895,41 +912,7 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-
-    // CRITICAL FIX: Calculate absolute position for text nodes (same as block elements)
-    int abs_x = text->x;
-    int abs_y = text->y;
-
-    // Calculate absolute position by traversing up the parent chain
-    ViewGroup* parent = text->parent;
-    while (parent && (parent->type == RDT_VIEW_BLOCK || parent->type == RDT_VIEW_INLINE_BLOCK ||
-                      parent->type == RDT_VIEW_LIST_ITEM || parent->type == RDT_VIEW_TABLE ||
-                      parent->type == RDT_VIEW_TABLE_ROW_GROUP || parent->type == RDT_VIEW_TABLE_ROW ||
-                      parent->type == RDT_VIEW_TABLE_CELL)) {
-        ViewBlock* parent_block = (ViewBlock*)parent;
-        abs_x += parent_block->x;
-        abs_y += parent_block->y;
-        parent = parent_block->parent;
-    }
-
-    // Convert absolute text dimensions to CSS pixels
-    int css_x = (int)round(abs_x / pixel_ratio);
-    int css_y = (int)round(abs_y / pixel_ratio);
-    int css_width = (int)round(text->width / pixel_ratio);
-    int css_height = (int)round(text->height / pixel_ratio);
-
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"x\": %d,\n", css_x);
-
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"y\": %d,\n", css_y);
-
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"width\": %d,\n", css_width);
-
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"height\": %d\n", css_height);
-
+    print_bounds_json(text, buf, indent, pixel_ratio);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}\n");
 
@@ -1020,6 +1003,12 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
         append_json_string(buf, tag_name);
     }
     strbuf_append_str(buf, ",\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"layout\": {\n");
+    print_bounds_json(span, buf, indent, pixel_ratio);
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "}\n");
 
     // CSS properties (enhanced to match text output)
     strbuf_append_char_n(buf, ' ', indent + 2);
@@ -1116,7 +1105,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 }
 
 // Main JSON generation function
-void print_view_tree_json(ViewGroup* view_root, float pixel_ratio) {
+void print_view_tree_json(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio) {
     StrBuf* json_buf = strbuf_new_cap(2048);
 
     strbuf_append_str(json_buf, "{\n");
@@ -1145,9 +1134,13 @@ void print_view_tree_json(ViewGroup* view_root, float pixel_ratio) {
     }
     strbuf_append_str(json_buf, "\n}\n");
 
-    // Write to file in /tmp directory for easier access
+    // Write to file in both ./ and /tmp directory for easier access
+    char buf[1024], *last_slash;
+    last_slash = strrchr((const char*)url->path.str.data, '/');
+    snprintf(buf, sizeof(buf), "./view_tree_%s.json", last_slash + 1);
+    write_string_to_file(buf, json_buf->str);
+    log_debug("JSON layout data written to: %.*s.json\n", (int)url->path.str.length, url->path.str.data);
     write_string_to_file("/tmp/view_tree.json", json_buf->str);
-
-    printf("JSON layout data written to: /tmp/view_tree.json\n");
+    log_debug("JSON layout data written to: /tmp/view_tree.json\n");
     strbuf_free(json_buf);
 }

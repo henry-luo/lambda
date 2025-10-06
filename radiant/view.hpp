@@ -198,15 +198,16 @@ typedef struct {
 typedef struct View View;
 typedef struct ViewGroup ViewGroup;
 
+// view always has x, y, wd, hg; otherwise, it is a property group
 struct View {
     ViewType type;
     DomNode *node;  // DOM node abstraction instead of direct lexbor dependency
     View* next;
     ViewGroup* parent;  // corrected the type to ViewGroup
+    int x, y, width, height;  // x, y relative to the parent block, width, height forms the BORDER box of the block
 };
 
 typedef struct ViewText : View {
-    int x, y, width, height;  // bounds for the text, x, y relative to the parent block
     int start_index, length;  // start and length of the text in the style node
 } ViewText;
 
@@ -335,8 +336,6 @@ typedef struct {
 } EmbedProp;
 
 typedef struct ViewBlock : ViewSpan {
-    // x, y, width, height forms the BORDER box of the block
-    int x, y, width, height;  // x, y are relative to the parent block
     int content_width, content_height;  // width and height of the child content including padding
     BlockProp* blk;  // block specific style properties
     ScrollProp* scroller;  // handles overflow

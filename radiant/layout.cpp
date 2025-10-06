@@ -99,20 +99,20 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         int item_height = text_view->height;
         // for text, baseline is at font.ascender
         int item_baseline = (int)(lycon->font.face->size->metrics.ascender / 64);
-        int vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height, 
+        int vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
         text_view->y = lycon->block.advance_y + max(vertical_offset, 0);
     } else if (view->type == RDT_VIEW_INLINE_BLOCK) {
         ViewBlock* block = (ViewBlock*)view;
-        int item_height = block->height + (block->bound ? 
+        int item_height = block->height + (block->bound ?
             block->bound->margin.top + block->bound->margin.bottom : 0);
         int item_baseline = block->height + (block->bound ? block->bound->margin.top: 0);
-        PropValue align = block->in_line && block->in_line->vertical_align ? 
+        PropValue align = block->in_line && block->in_line->vertical_align ?
             block->in_line->vertical_align : lycon->line.vertical_align;
-        int vertical_offset = calculate_vertical_align_offset(align, item_height, 
+        int vertical_offset = calculate_vertical_align_offset(align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
         block->y = lycon->block.advance_y + max(vertical_offset, 0);
-        log_debug("vertical-adjusted-inline-block: y=%d, adv=%d, offset=%d, line=%d, blk=%d", 
+        log_debug("vertical-adjusted-inline-block: y=%d, adv=%d, offset=%d, line=%d, blk=%d",
             block->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height);
     } else if (view->type == RDT_VIEW_INLINE) {
         // for inline elements, apply to all children
@@ -172,7 +172,7 @@ void line_align(LayoutContext* lycon) {
                     span_line_align(lycon, offset, span);
                 }
                 view = view->next;
-            } while (view);            
+            } while (view);
         }
     }
     printf("end of line align\n");
@@ -190,11 +190,11 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
         span->font->font_style = LXB_CSS_VALUE_ITALIC;
         break;
     case LXB_TAG_U:
-        if (!span->font) { span->font = alloc_font_prop(lycon); }    
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->text_deco = LXB_CSS_VALUE_UNDERLINE;
         break;
     case LXB_TAG_S:
-        if (!span->font) { span->font = alloc_font_prop(lycon); }    
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->text_deco = LXB_CSS_VALUE_LINE_THROUGH;
         break;
     case LXB_TAG_FONT: {
@@ -210,7 +210,7 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
         // anchor style
         if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
         span->in_line->cursor = LXB_CSS_VALUE_POINTER;
-        span->in_line->color = color_name_to_rgb(LXB_CSS_VALUE_BLUE);   
+        span->in_line->color = color_name_to_rgb(LXB_CSS_VALUE_BLUE);
         span->font = alloc_font_prop(lycon);
         span->font->text_deco = LXB_CSS_VALUE_UNDERLINE;
         break;
@@ -228,19 +228,21 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->elmt = elmt;
 
     ViewSpan* span = (ViewSpan*)alloc_view(lycon, RDT_VIEW_INLINE, elmt);
+    span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
+    span->width = 0;  span->height = 0;
     span->display = display;
     // resolve element default styles
     resolve_inline_default(lycon, span);
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
-    
+
     if (span->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, span->font);
     }
     if (span->in_line && span->in_line->vertical_align) {
         lycon->line.vertical_align = span->in_line->vertical_align;
     }
-    // line.max_ascender and max_descender to be changed only when there's output from the span   
+    // line.max_ascender and max_descender to be changed only when there's output from the span
 
     // layout inline content
     DomNode *child = elmt->first_child();
@@ -252,9 +254,12 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         } while (child);
         lycon->parent = span->parent;
     }
+
+    span->width = lycon->line.advance_x - span->x;
+    span->height = lycon->block.advance_y + lycon->line.max_ascender + lycon->line.max_descender - span->y;
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
     lycon->prev_view = (View*)span;
-    printf("inline view: %d, self %p, child %p\n", span->type, span, span->child);
+    printf("inline view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d\n", span->type, span->child, span->x, span->y, span->width, span->height);
 }
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
@@ -267,18 +272,18 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         printf("Element: %s\n", node->name());
         lxb_html_element_t *elmt = node->as_element();
         DisplayValue display = resolve_display(elmt);
-        
+
         // Debug: print display values for all elements to diagnose grid issue
-        printf("DEBUG: Element %s - outer=%d, inner=%d (GRID=%d, FLEX=%d, FLOW=%d)\n", 
-               node->name(), display.outer, display.inner, 
+        printf("DEBUG: Element %s - outer=%d, inner=%d (GRID=%d, FLEX=%d, FLOW=%d)\n",
+               node->name(), display.outer, display.inner,
                LXB_CSS_VALUE_GRID, LXB_CSS_VALUE_FLEX, LXB_CSS_VALUE_FLOW);
-        
+
         // Debug: print display values for table elements
         if (node->tag() == LXB_TAG_TABLE) {
-            printf("DEBUG: TABLE element - outer=%d, inner=%d (LXB_CSS_VALUE_TABLE=%d)\n", 
+            printf("DEBUG: TABLE element - outer=%d, inner=%d (LXB_CSS_VALUE_TABLE=%d)\n",
                    display.outer, display.inner, LXB_CSS_VALUE_TABLE);
         }
-        
+
         // Check for flex container first
         if (display.inner == LXB_CSS_VALUE_FLEX) {
             // This element is a flex container - route to flex layout
@@ -298,7 +303,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
             layout_table_box(lycon, node, display);
             return;
         }
-        
+
         switch (display.outer) {
         case LXB_CSS_VALUE_BLOCK:  case LXB_CSS_VALUE_INLINE_BLOCK:
         case LXB_CSS_VALUE_LIST_ITEM:
@@ -325,7 +330,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     else {
         printf("layout unknown node type: %d\n", node->type);
         // skip the node
-    }    
+    }
 }
 
 void load_style(LayoutContext* lycon, unsigned char* style_source) {
@@ -346,7 +351,7 @@ void load_style(LayoutContext* lycon, unsigned char* style_source) {
             printf("Failed to parse CSS StyleSheet\n");
         }
     }
-    lxb_css_parser_destroy(parser, true);    
+    lxb_css_parser_destroy(parser, true);
 }
 
 void apply_header_style(LayoutContext* lycon) {
@@ -372,7 +377,7 @@ void apply_header_style(LayoutContext* lycon) {
                     // lxb_dom_attr_t* rel = lxb_dom_element_attr_by_id((lxb_dom_element_t *)child_elmt, LXB_DOM_ATTR_REL);
                     // load and parse linked stylesheet
                     lxb_dom_attr_t* href = lxb_dom_element_attr_by_id((lxb_dom_element_t *)child_elmt, LXB_DOM_ATTR_HREF);
-                    
+
                     if (href) {
                         lxb_url_t* abs_url = parse_lexbor_url(lycon->ui_context->document->url, (const char*)href->value->data);
                         if (!abs_url) {
@@ -417,7 +422,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     lycon->elmt = elmt;
     lycon->font.style = lycon->ui_context->default_font;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
-    lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;  
+    lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;
     // CRITICAL FIX: Let HTML element auto-size to content instead of forcing viewport height
     // This matches browser behavior where HTML element fits content, not viewport
     lycon->block.height = 0;  // Will be calculated based on content
@@ -439,7 +444,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     html->scroller->overflow_y = LXB_CSS_VALUE_AUTO;
     lycon->block.given_width = lycon->ui_context->window_width;
     // CRITICAL FIX: Don't force HTML height to viewport - let it auto-size to content
-    lycon->block.given_height = -1;  // -1 means auto-size to content    
+    lycon->block.given_height = -1;  // -1 means auto-size to content
     // load CSS stylesheets
     dom_node_resolve_style(elmt, lycon);
 
@@ -447,7 +452,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
         setup_font(lycon->ui_context, &lycon->font, lycon->font.face->family_name, html->font);
     }
     if (lycon->root_font_size < 0) {
-        lycon->root_font_size = lycon->font.current_font_size < 0 ? 
+        lycon->root_font_size = lycon->font.current_font_size < 0 ?
             lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
     }
     lycon->block.init_ascender = lycon->font.face->size->metrics.ascender >> 6;
@@ -461,10 +466,10 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
         memset(body_node, 0, sizeof(DomNode));
         body_node->type = LEXBOR_ELEMENT;
         body_node->lxb_node = (lxb_dom_node_t*)lexbor_body;
-        
+
         printf("DEBUG: Created proper body DOM node: %p\n", (void*)body_node);
-        layout_block(lycon, body_node, 
-            (DisplayValue){.outer = LXB_CSS_VALUE_BLOCK, .inner = LXB_CSS_VALUE_FLOW});  
+        layout_block(lycon, body_node,
+            (DisplayValue){.outer = LXB_CSS_VALUE_BLOCK, .inner = LXB_CSS_VALUE_FLOW});
     } else {
         printf("ERROR: No body element found in DOM tree\n");
     }
@@ -475,10 +480,10 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
 void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
-    
+
     // Initialize text flow logging
     init_text_flow_logging();
-    
+
     // Process @font-face rules before layout begins
     // This is a simplified implementation - in a full system, this would be done during CSS parsing
     if (doc && doc->dom_tree) {
@@ -487,12 +492,12 @@ void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
         // This should be replaced with actual CSS parsing
         parse_font_face_rule(lycon, NULL); // NULL rule for hardcoded implementation
     }
-    
+
     // most browsers use a generic sans-serif font as the default
     // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
     // default font size in HTML is 16 px for most browsers
     setup_font(uicon, &lycon->font, uicon->default_font.family, &lycon->ui_context->default_font);
-    
+
     // Initialize float context to NULL - will be created when needed
     lycon->current_float_context = NULL;
     printf("DEBUG: Layout context initialized with NULL float context\n");
@@ -531,6 +536,6 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     printf("end layout\n");
     layout_cleanup(&lycon);
 
-    if (doc->view_tree && doc->view_tree->root) 
-        print_view_tree((ViewGroup*)doc->view_tree->root, uicon->pixel_ratio);
+    if (doc->view_tree && doc->view_tree->root)
+        print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, uicon->pixel_ratio);
 }
