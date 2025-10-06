@@ -77,8 +77,6 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node);
 void free_view(ViewTree* tree, View* view);
 
 // Memory pool functions for test compatibility
-void init_view_pool(LayoutContext* lycon);
-void cleanup_view_pool(LayoutContext* lycon);
 ViewBlock* alloc_view_block(LayoutContext* lycon);
 
 void line_break(LayoutContext* lycon);
@@ -115,8 +113,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 int calculate_chrome_line_height(int font_size, float pixel_ratio);
 
 // View tree printing functions
-void print_view_tree(ViewGroup* view_root, float pixel_ratio);
-void print_view_tree_json(ViewGroup* view_root, float pixel_ratio);
+void print_view_tree(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio);
+void print_view_tree_json(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio);
 void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_ratio);
 void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio);
 void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_ratio);
