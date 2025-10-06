@@ -5,7 +5,7 @@
 #include <string.h>
 AlignType resolve_align_type(PropValue value);
 
-int resolve_length_value(LayoutContext* lycon, uintptr_t property, 
+int resolve_length_value(LayoutContext* lycon, uintptr_t property,
     const lxb_css_value_length_percentage_t *value);
 
 lxb_status_t style_print_callback(const lxb_char_t *data, size_t len, void *ctx) {
@@ -57,7 +57,7 @@ Color color_name_to_rgb(PropValue color_name) {
         case LXB_CSS_VALUE_DARKOLIVEGREEN: c = 0x556B2F;  break;
         case LXB_CSS_VALUE_DARKORANGE: c = 0xFF8C00;  break;
         case LXB_CSS_VALUE_DARKORCHID: c = 0x9932CC;  break;
-        case LXB_CSS_VALUE_DARKRED: c = 0x8B0000;  break;   
+        case LXB_CSS_VALUE_DARKRED: c = 0x8B0000;  break;
         case LXB_CSS_VALUE_DARKSALMON: c = 0xE9967A;  break;
         case LXB_CSS_VALUE_DARKSEAGREEN: c = 0x8FBC8F;  break;
         case LXB_CSS_VALUE_DARKSLATEBLUE: c = 0x483D8B;  break;
@@ -76,7 +76,7 @@ Color color_name_to_rgb(PropValue color_name) {
         case LXB_CSS_VALUE_FUCHSIA: c = 0xFF00FF;  break;
         case LXB_CSS_VALUE_GAINSBORO: c = 0xDCDCDC;  break;
         case LXB_CSS_VALUE_GHOSTWHITE: c = 0xF8F8FF;  break;
-        case LXB_CSS_VALUE_GOLD: c = 0xFFD700;  break;  
+        case LXB_CSS_VALUE_GOLD: c = 0xFFD700;  break;
         case LXB_CSS_VALUE_GOLDENROD: c = 0xDAA520;  break;
         case LXB_CSS_VALUE_GRAY: c = 0x808080;  break;
         case LXB_CSS_VALUE_GREEN: c = 0x008000;  break;
@@ -240,7 +240,7 @@ void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* d
         printf("got decl\n");
         lxb_css_property_font_size_t* font_size = decl->u.font_size;
         printf("resolving font length\n");
-        lycon->font.current_font_size = resolve_length_value(lycon, 
+        lycon->font.current_font_size = resolve_length_value(lycon,
             LXB_CSS_PROPERTY_FONT_SIZE, &font_size->length);
         return;
     }
@@ -249,7 +249,7 @@ void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* d
     printf("resolved font size\n");
 }
 
-int resolve_length_value(LayoutContext* lycon, uintptr_t property, 
+int resolve_length_value(LayoutContext* lycon, uintptr_t property,
     const lxb_css_value_length_percentage_t *value) {
     int result = 0;
     log_debug("length value type %d", value->type);
@@ -265,7 +265,7 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         // absolute units
         case LXB_CSS_UNIT_Q:  // 1Q = 1cm / 40
             result = value->u.length.num * (96 / 2.54 / 40) * lycon->ui_context->pixel_ratio;
-            break;            
+            break;
         case LXB_CSS_UNIT_CM:  // 96px / 2.54
             result = value->u.length.num * (96 / 2.54) * lycon->ui_context->pixel_ratio;
             break;
@@ -293,8 +293,8 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
             if (lycon->root_font_size < 0) {
                 printf("resolving font size for rem value");
                 resolve_font_size(lycon, NULL);
-                lycon->root_font_size = lycon->font.current_font_size < 0 ? 
-                    lycon->ui_context->default_font.font_size : lycon->font.current_font_size;                
+                lycon->root_font_size = lycon->font.current_font_size < 0 ?
+                    lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
             }
             result = value->u.length.num * lycon->root_font_size;
             break;
@@ -311,7 +311,7 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
             break;
         default:
             result = 0;
-            printf("Unknown unit: %d\n", value->u.length.unit);    
+            printf("Unknown unit: %d\n", value->u.length.unit);
         }
         break;
     case LXB_CSS_VALUE__PERCENTAGE:
@@ -319,20 +319,20 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
             result = value->u.percentage.num * lycon->font.style.font_size / 100;
         } else {
             // todo: handle % based on property
-            printf("DEBUG: Percentage calculation: %.2f%% of parent width %d = %.2f\n", 
-                   value->u.percentage.num, lycon->block.pa_block->width, 
+            printf("DEBUG: Percentage calculation: %.2f%% of parent width %d = %.2f\n",
+                   value->u.percentage.num, lycon->block.pa_block->width,
                    value->u.percentage.num * lycon->block.pa_block->width / 100);
             result = value->u.percentage.num * lycon->block.pa_block->width / 100;
         }
         break;
     case LXB_CSS_VALUE_AUTO:
         log_info("length value: auto");
-        result = (property == LXB_CSS_PROPERTY_MARGIN || property == LXB_CSS_PROPERTY_MARGIN_LEFT || 
+        result = (property == LXB_CSS_PROPERTY_MARGIN || property == LXB_CSS_PROPERTY_MARGIN_LEFT ||
             property == LXB_CSS_PROPERTY_MARGIN_RIGHT) ? LENGTH_AUTO : 0;
         break;
     case 12:  // Handle actual parsed value for 'auto'
         printf("DEBUG: Found auto value (type 12) for property %d\n", property);
-        if (property == LXB_CSS_PROPERTY_MARGIN || property == LXB_CSS_PROPERTY_MARGIN_LEFT || 
+        if (property == LXB_CSS_PROPERTY_MARGIN || property == LXB_CSS_PROPERTY_MARGIN_LEFT ||
             property == LXB_CSS_PROPERTY_MARGIN_RIGHT) {
             result = LENGTH_AUTO;
         } else if (property == LXB_CSS_PROPERTY_WIDTH || property == LXB_CSS_PROPERTY_HEIGHT) {
@@ -350,7 +350,7 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
 }
 
 // resolve property 'margin', and put result in 'spacing'
-void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property, 
+void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     const lxb_css_property_margin_t *margin, uint32_t specificity, Spacing* spacing) {
     int value_cnt = 0;  Spacing sp;
     log_debug("resolving margin property");
@@ -396,10 +396,10 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     if (specificity > spacing->bottom_specificity) {
         spacing->bottom = sp.bottom == LENGTH_AUTO ? 0 : sp.bottom;
         spacing->bottom_specificity = specificity;
-    }  
+    }
     if (specificity > spacing->right_specificity) {
         // only margin-left and right support auto value
-        spacing->right = sp.right;   
+        spacing->right = sp.right;
         spacing->right_specificity = specificity;
     }
     if (specificity > spacing->left_specificity) {
@@ -411,20 +411,20 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
 DisplayValue resolve_display(lxb_html_element_t* elmt) {
     PropValue outer_display, inner_display;
     // determine element 'display'
-    int name = elmt->element.node.local_name;  // todo: should check ns as well 
-    switch (name) { 
-        case LXB_TAG_BODY: case LXB_TAG_H1: case LXB_TAG_H2: case LXB_TAG_H3: 
+    int name = elmt->element.node.local_name;  // todo: should check ns as well
+    switch (name) {
+        case LXB_TAG_BODY: case LXB_TAG_H1: case LXB_TAG_H2: case LXB_TAG_H3:
         case LXB_TAG_H4: case LXB_TAG_H5: case LXB_TAG_H6:
-        case LXB_TAG_P: case LXB_TAG_DIV: case LXB_TAG_CENTER: 
-        case LXB_TAG_UL: case LXB_TAG_OL: 
-        case LXB_TAG_HEADER: case LXB_TAG_MAIN: case LXB_TAG_SECTION: case LXB_TAG_FOOTER: 
+        case LXB_TAG_P: case LXB_TAG_DIV: case LXB_TAG_CENTER:
+        case LXB_TAG_UL: case LXB_TAG_OL:
+        case LXB_TAG_HEADER: case LXB_TAG_MAIN: case LXB_TAG_SECTION: case LXB_TAG_FOOTER:
         case LXB_TAG_ARTICLE: case LXB_TAG_ASIDE: case LXB_TAG_NAV:
         case LXB_TAG_ADDRESS: case LXB_TAG_BLOCKQUOTE:
-        case LXB_TAG_DETAILS: case LXB_TAG_DIALOG: case LXB_TAG_FIGURE: 
-        case LXB_TAG_MENU:         
+        case LXB_TAG_DETAILS: case LXB_TAG_DIALOG: case LXB_TAG_FIGURE:
+        case LXB_TAG_MENU:
             outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = LXB_CSS_VALUE_FLOW;
             break;
-        case LXB_TAG_LI:  case LXB_TAG_SUMMARY: 
+        case LXB_TAG_LI:  case LXB_TAG_SUMMARY:
             outer_display = LXB_CSS_VALUE_LIST_ITEM;  inner_display = LXB_CSS_VALUE_FLOW;
             break;
         case LXB_TAG_IMG:
@@ -456,12 +456,12 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
     }
     // get CSS display if specified
     if (elmt->element.style != NULL) {
-        const lxb_css_rule_declaration_t* display_decl = 
+        const lxb_css_rule_declaration_t* display_decl =
             lxb_dom_element_style_by_id((lxb_dom_element_t*)elmt, LXB_CSS_PROPERTY_DISPLAY);
         if (display_decl) {
-            printf("DEBUG: CSS display found - a=%d, b=%d (GRID=%d)\n", 
+            printf("DEBUG: CSS display found - a=%d, b=%d (GRID=%d)\n",
                    display_decl->u.display->a, display_decl->u.display->b, LXB_CSS_VALUE_GRID);
-            log_debug("display_value: %s, %s\n", lxb_css_value_by_id(display_decl->u.display->a)->name, 
+            log_debug("display_value: %s, %s\n", lxb_css_value_by_id(display_decl->u.display->a)->name,
                 lxb_css_value_by_id(display_decl->u.display->b)->name);
             if (display_decl->u.display->b == LXB_CSS_VALUE__UNDEF) {
                 // map single display value
@@ -553,7 +553,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     ViewSpan* span = (ViewSpan*)lycon->view;
     ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
     Color c;  int length;
-    
+
     // Debug: Print the property type we're processing
     if (declr->type == 86) {
         printf("DEBUG: Found property 86! LXB_CSS_PROPERTY_POSITION=%d\n", LXB_CSS_PROPERTY_POSITION);
@@ -566,11 +566,11 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_LINE_HEIGHT: {
         lxb_css_property_line_height_t* line_height = declr->u.line_height;
         switch (line_height->type) {
-        case LXB_CSS_VALUE__NUMBER: 
+        case LXB_CSS_VALUE__NUMBER:
             lycon->block.line_height = line_height->u.number.num * lycon->font.style.font_size;
             printf("property number: %lf\n", line_height->u.number.num);
             break;
-        case LXB_CSS_VALUE__LENGTH:      
+        case LXB_CSS_VALUE__LENGTH:
             lycon->block.line_height = line_height->u.length.num;
             printf("property unit: %d\n", line_height->u.length.unit);
             break;
@@ -589,11 +589,11 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_VERTICAL_ALIGN: {
         lxb_css_property_vertical_align_t* vertical_align = declr->u.vertical_align;
-        PropValue valign = vertical_align->alignment.type ? 
+        PropValue valign = vertical_align->alignment.type ?
             vertical_align->alignment.type : vertical_align->shift.type;
         if (!span->in_line) {
             span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
-        } 
+        }
         span->in_line->vertical_align = valign;
         break;
     }
@@ -641,7 +641,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound) {
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
-        resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_PADDING, 
+        resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_PADDING,
             (lxb_css_property_margin_t*)padding, specificity, &span->bound->padding);
         break;
     }
@@ -652,60 +652,60 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_value_length_percentage_t *space = declr->u.margin_left;
         if (!span->bound) {
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-        }       
-        
+        }
+
         // Check for auto margins (important for flexbox)
         bool is_auto = (space->type == LXB_CSS_VALUE_AUTO);
         int space_length = is_auto ? 0 : resolve_length_value(lycon, declr->type, (lxb_css_value_length_percentage_t *)space);
-        
+
         switch (declr->type) {
         case LXB_CSS_PROPERTY_MARGIN_LEFT:
             if (specificity > span->bound->margin.left_specificity) {
-                span->bound->margin.left = space_length;  
+                span->bound->margin.left = space_length;
                 span->bound->margin.left_specificity = specificity;
                 span->margin_left_auto = is_auto;
             }
             break;
         case LXB_CSS_PROPERTY_MARGIN_RIGHT:
             if (specificity > span->bound->margin.right_specificity) {
-                span->bound->margin.right = space_length;  
-                span->bound->margin.right_specificity = specificity; 
+                span->bound->margin.right = space_length;
+                span->bound->margin.right_specificity = specificity;
                 span->margin_right_auto = is_auto;
             }
             break;
         case LXB_CSS_PROPERTY_MARGIN_TOP:
             if (specificity > span->bound->margin.top_specificity) {
-                span->bound->margin.top = space_length;  
-                span->bound->margin.top_specificity = specificity; 
+                span->bound->margin.top = space_length;
+                span->bound->margin.top_specificity = specificity;
                 span->margin_top_auto = is_auto;
             }
             break;
         case LXB_CSS_PROPERTY_MARGIN_BOTTOM:
             if (specificity > span->bound->margin.bottom_specificity) {
-                span->bound->margin.bottom = space_length;  
-                span->bound->margin.bottom_specificity = specificity; 
+                span->bound->margin.bottom = space_length;
+                span->bound->margin.bottom_specificity = specificity;
                 span->margin_bottom_auto = is_auto;
             }
             break;
-        case LXB_CSS_PROPERTY_PADDING_LEFT: 
+        case LXB_CSS_PROPERTY_PADDING_LEFT:
             if (specificity > span->bound->padding.left_specificity) {
                 span->bound->padding.left = space_length;
                 span->bound->padding.left_specificity = specificity;
             }
             break;
-        case LXB_CSS_PROPERTY_PADDING_RIGHT: 
+        case LXB_CSS_PROPERTY_PADDING_RIGHT:
             if (specificity > span->bound->padding.right_specificity) {
                 span->bound->padding.right = space_length;
                 span->bound->padding.right_specificity = specificity;
             }
             break;
-        case LXB_CSS_PROPERTY_PADDING_TOP: 
+        case LXB_CSS_PROPERTY_PADDING_TOP:
             if (specificity > span->bound->padding.top_specificity) {
                 span->bound->padding.top = space_length;
                 span->bound->padding.top_specificity = specificity; // Updated from space->specificity
             }
             break;
-        case LXB_CSS_PROPERTY_PADDING_BOTTOM: 
+        case LXB_CSS_PROPERTY_PADDING_BOTTOM:
             if (specificity > span->bound->padding.bottom_specificity) {
                 span->bound->padding.bottom = space_length;
                 span->bound->padding.bottom_specificity = specificity; // Updated from space->specificity
@@ -774,8 +774,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 span->bound->border->width.right_specificity = specificity;
             }
         }
-        span->bound->border->top_style = span->bound->border->right_style = 
-        span->bound->border->bottom_style = span->bound->border->left_style = 
+        span->bound->border->top_style = span->bound->border->right_style =
+        span->bound->border->bottom_style = span->bound->border->left_style =
             border_top->style;
         break;
     }
@@ -822,8 +822,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->bound->border->width.right = length;
             span->bound->border->width.right_specificity = specificity;
         }
-        span->bound->border->top_style = span->bound->border->right_style = 
-        span->bound->border->bottom_style = span->bound->border->left_style = 
+        span->bound->border->top_style = span->bound->border->right_style =
+        span->bound->border->bottom_style = span->bound->border->left_style =
             border->style;
         break;
     }
@@ -873,12 +873,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        
+
         PropValue top_style = LXB_CSS_VALUE__UNDEF;
         PropValue right_style = LXB_CSS_VALUE__UNDEF;
         PropValue bottom_style = LXB_CSS_VALUE__UNDEF;
         PropValue left_style = LXB_CSS_VALUE__UNDEF;
-        
+
         int style_values = 0;
         if (border_style->top != LXB_CSS_VALUE__UNDEF) {
             top_style = border_style->top;
@@ -896,7 +896,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             left_style = border_style->left;
             style_values++;
         }
-        
+
         switch (style_values) {
         case 1:
             span->bound->border->top_style = top_style;
@@ -977,11 +977,11 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS, 
+        resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_BORDER_RADIUS,
             (lxb_css_property_margin_t*)border_radius, specificity, &span->bound->border->radius);
         break;
     }
-    /*    
+    /*
     case LXB_CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS:
         const lxb_css_property_border_top_left_radius_t *top_left_radius = declr->u.border_top_left_radius;
         if (!span->bound) {
@@ -990,18 +990,18 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        
-        int tl_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS, 
+
+        int tl_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS,
             &top_left_radius->horizontal);
-        int tl_v = top_left_radius->vertical.type != LXB_CSS_VALUE__UNDEF ? 
+        int tl_v = top_left_radius->vertical.type != LXB_CSS_VALUE__UNDEF ?
             resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS, &top_left_radius->vertical) : tl_h;
-            
+
         if (specificity > span->bound->border->top_radius.left_specificity) {
             span->bound->border->top_radius.left = (tl_h + tl_v) / 2;
             span->bound->border->top_radius.left_specificity = specificity;
         }
         break;
-        
+
     case LXB_CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS:
         const lxb_css_property_border_top_right_radius_t *top_right_radius = declr->u.border_top_right_radius;
         if (!span->bound) {
@@ -1010,18 +1010,18 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        
-        int tr_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS, 
+
+        int tr_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS,
             &top_right_radius->horizontal);
-        int tr_v = top_right_radius->vertical.type != LXB_CSS_VALUE__UNDEF ? 
+        int tr_v = top_right_radius->vertical.type != LXB_CSS_VALUE__UNDEF ?
             resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS, &top_right_radius->vertical) : tr_h;
-            
+
         if (specificity > span->bound->border->top_radius.right_specificity) {
             span->bound->border->top_radius.right = (tr_h + tr_v) / 2;
             span->bound->border->top_radius.right_specificity = specificity;
         }
         break;
-        
+
     case LXB_CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS:
         const lxb_css_property_border_bottom_right_radius_t *bottom_right_radius = declr->u.border_bottom_right_radius;
         if (!span->bound) {
@@ -1030,18 +1030,18 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        
-        int br_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS, 
+
+        int br_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS,
             &bottom_right_radius->horizontal);
-        int br_v = bottom_right_radius->vertical.type != LXB_CSS_VALUE__UNDEF ? 
+        int br_v = bottom_right_radius->vertical.type != LXB_CSS_VALUE__UNDEF ?
             resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS, &bottom_right_radius->vertical) : br_h;
-            
+
         if (specificity > span->bound->border->bottom_radius.right_specificity) {
             span->bound->border->bottom_radius.right = (br_h + br_v) / 2;
             span->bound->border->bottom_radius.right_specificity = specificity;
         }
         break;
-        
+
     case LXB_CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS:
         const lxb_css_property_border_bottom_left_radius_t *bottom_left_radius = declr->u.border_bottom_left_radius;
         if (!span->bound) {
@@ -1050,12 +1050,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        
-        int bl_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS, 
+
+        int bl_h = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS,
             &bottom_left_radius->horizontal);
-        int bl_v = bottom_left_radius->vertical.type != LXB_CSS_VALUE__UNDEF ? 
+        int bl_v = bottom_left_radius->vertical.type != LXB_CSS_VALUE__UNDEF ?
             resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS, &bottom_left_radius->vertical) : bl_h;
-            
+
         if (specificity > span->bound->border->bottom_radius.left_specificity) {
             span->bound->border->bottom_radius.left = (bl_h + bl_v) / 2;
             span->bound->border->bottom_radius.left_specificity = specificity;
@@ -1085,6 +1085,13 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         printf("font style property: %d\n", font_style->type);
         break;
     }
+    case LXB_CSS_PROPERTY_FONT_WEIGHT: {
+        const lxb_css_property_font_weight_t *font_weight = declr->u.font_weight;
+        printf("font weight property: %d\n", font_weight->type);
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->font_weight = font_weight->type;
+        break;
+    }
     case LXB_CSS_PROPERTY_TEXT_DECORATION: {
         const lxb_css_property_text_decoration_t *text_decoration = declr->u.text_decoration;
         printf("text decoration property: %d\n", text_decoration->line.type);
@@ -1106,7 +1113,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_width_t *width = declr->u.width;
         lycon->block.given_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_WIDTH, width);
         printf("width property: %d\n", lycon->block.given_width);
-        
+
         // Store the raw width value for box-sizing calculations
         if (block) {
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
@@ -1118,7 +1125,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_height_t *height = declr->u.height;
         lycon->block.given_height = resolve_length_value(lycon, LXB_CSS_PROPERTY_HEIGHT, height);
         printf("height property: %d\n", lycon->block.given_height);
-        
+
         // Store the raw height value for box-sizing calculations
         if (block) {
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
@@ -1181,12 +1188,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_POSITION: {
         printf("DEBUG: Entering LXB_CSS_PROPERTY_POSITION case!\n");
-        if (!block) { 
+        if (!block) {
             printf("DEBUG: No block available for position property\n");
-            break; 
+            break;
         }
         const lxb_css_property_position_t *position = declr->u.position;
-        printf("DEBUG: CSS position property parsed: value=%d (STATIC=%d, RELATIVE=%d, ABSOLUTE=%d, FIXED=%d)\n", 
+        printf("DEBUG: CSS position property parsed: value=%d (STATIC=%d, RELATIVE=%d, ABSOLUTE=%d, FIXED=%d)\n",
                   position->type, LXB_CSS_VALUE_STATIC, LXB_CSS_VALUE_RELATIVE, LXB_CSS_VALUE_ABSOLUTE, LXB_CSS_VALUE_FIXED);
         if (!block->position) {
             block->position = alloc_position_prop(lycon);
@@ -1243,7 +1250,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_CLEAR: {
         if (!block) { break; }
         const lxb_css_property_clear_t *clear = declr->u.clear;
-        printf("DEBUG: CSS clear property parsed: value=%d (LEFT=47, RIGHT=48, BOTH=372, NONE=%d)\n", 
+        printf("DEBUG: CSS clear property parsed: value=%d (LEFT=47, RIGHT=48, BOTH=372, NONE=%d)\n",
                clear->type, LXB_CSS_VALUE_NONE);
         if (!block->position) {
             block->position = alloc_position_prop(lycon);
@@ -1277,7 +1284,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_FLEX_DIRECTION: {
         if (!block) { break; }
         const lxb_css_property_flex_direction_t *flex_direction = declr->u.flex_direction;
-        alloc_flex_container_prop(lycon, block); 
+        alloc_flex_container_prop(lycon, block);
         // CRITICAL FIX: Now that enums align with Lexbor constants, we can use them directly
         block->embed->flex_container->direction = (FlexDirection)flex_direction->type;
         break;
@@ -1302,7 +1309,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             block->embed->flex_container->wrap = (FlexWrap)flex_flow->wrap;
         }
         break;
-    }   
+    }
     case LXB_CSS_PROPERTY_JUSTIFY_CONTENT: {
         if (!block) { break; }
         const lxb_css_property_justify_content_t *justify_content = declr->u.justify_content;
@@ -1322,7 +1329,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_ALIGN_CONTENT: {
         if (!block) { break; }
         const lxb_css_property_align_content_t *align_content = declr->u.align_content;
-        alloc_flex_container_prop(lycon, block); 
+        alloc_flex_container_prop(lycon, block);
         // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
         block->embed->flex_container->align_content = (AlignType)align_content->type;
         break;
@@ -1343,14 +1350,14 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         // handle flex-grow
         if (flex->grow.type != LXB_CSS_VALUE__UNDEF) {
             span->flex_grow = flex->grow.number.num;
-        } 
+        }
         else {
             span->flex_grow = 1;  // Default for 'flex: auto'
         }
         // handle flex-shrink
         if (flex->shrink.type != LXB_CSS_VALUE__UNDEF) {
             span->flex_shrink = flex->shrink.number.num;
-        } 
+        }
         else {
             span->flex_shrink = 1;  // Default for 'flex: auto'
         }
@@ -1373,7 +1380,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_FLEX_GROW: {
         const lxb_css_property_flex_grow_t *flex_grow = declr->u.flex_grow;
         span->flex_grow = flex_grow->number.num;
-        
+
         // CRITICAL FIX: If flex-basis is not explicitly set, default to auto (-1)
         // This matches CSS Flexbox specification where flex-basis defaults to auto
         if (span->flex_basis == 0 && !span->flex_basis_is_percent) {
@@ -1403,11 +1410,11 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
         break;
     }
-    
+
     // Enhanced flexbox properties for new implementation
     // Note: aspect-ratio property not available in current lexbor version
     // Will be handled through custom properties when needed
-    
+
     // Enhanced flexbox properties are handled through existing cases above
     // Additional properties like aspect-ratio will be handled as custom properties
 
@@ -1418,14 +1425,14 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY__CUSTOM: { // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
         log_debug("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
-        
+
         // Handle aspect-ratio as custom property until lexbor supports it
         if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "aspect-ratio", 12) == 0) {
             // Parse aspect-ratio value (simplified parsing)
             // Format: "width / height" or just "ratio"
             const char* value_str = (const char*)custom->value.data;
             float ratio = 0.0f;
-            
+
             // Simple parsing - look for number before slash or standalone number
             char* endptr;
             float width = strtof(value_str, &endptr);
@@ -1439,17 +1446,17 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                     ratio = width; // Single number format
                 }
             }
-            
+
             if (ratio > 0) {
                 span->aspect_ratio = ratio;
                 log_debug("Set aspect-ratio: %f\n", ratio);
             }
         }
-        
+
         // Handle justify-content space-evenly as custom property since lexbor doesn't support it
         if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "justify-content", 15) == 0) {
             const char* value_str = (const char*)custom->value.data;
-            
+
             // Check if the value is "space-evenly"
             if (custom->value.length == 12 && strncmp(value_str, "space-evenly", 12) == 0) {
                 // Set justify-content to space-evenly using our custom constant
@@ -1464,11 +1471,11 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         // Handle gap property as custom property until lexbor supports it
         if (custom->name.length == 3 && strncmp((const char*)custom->name.data, "gap", 3) == 0) {
             const char* value_str = (const char*)custom->value.data;
-            
+
             // Parse gap value (e.g., "10px", "1em", "20")
             char* endptr;
             float gap_value = strtof(value_str, &endptr);
-            
+
             if (endptr != value_str && gap_value >= 0) {
                 // Convert to pixels based on unit
                 int gap_px = 0;
@@ -1479,7 +1486,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 } else {
                     gap_px = (int)(gap_value * lycon->ui_context->pixel_ratio); // Assume pixels if no unit
                 }
-                
+
                 // Set gap on appropriate container type
                 if (block) {
                     // Check if this is a grid container
@@ -1500,23 +1507,23 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         // Handle CSS Grid properties as custom properties until lexbor supports them
-        printf("DEBUG: Processing custom property: %.*s (length=%zu) = %.*s\n", 
+        printf("DEBUG: Processing custom property: %.*s (length=%zu) = %.*s\n",
                (int)custom->name.length, (const char*)custom->name.data, custom->name.length,
                (int)custom->value.length, (const char*)custom->value.data);
-        
+
         // grid-template-rows
         if (custom->name.length == 18 && strncmp((const char*)custom->name.data, "grid-template-rows", 18) == 0) {
             printf("DEBUG: grid-template-rows matched! block=%p\n", block);
             if (block) {
                 printf("DEBUG: Inside grid-template-rows block processing\n");
                 alloc_grid_container_prop(lycon, block);
-                
+
                 // Enhanced parsing for advanced features
                 char template_str[256];
                 int len = min((int)custom->value.length, 255);
                 strncpy(template_str, (const char*)custom->value.data, len);
                 template_str[len] = '\0';
-                
+
                 // Parse the template string (handles minmax, repeat, etc.)
                 printf("DEBUG: About to parse grid-template-rows: '%s'\n", template_str);
                 if (block->embed->grid_container->grid_template_rows) {
@@ -1525,25 +1532,25 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 } else {
                     printf("DEBUG: grid_template_rows is NULL!\n");
                 }
-                
+
                 printf("DEBUG: Set grid-template-rows: %s\n", template_str);
                 log_debug("Set grid-template-rows: %s\n", template_str);
             }
         }
-        
+
         // grid-template-columns
         if (custom->name.length == 21 && strncmp((const char*)custom->name.data, "grid-template-columns", 21) == 0) {
             printf("DEBUG: grid-template-columns matched! block=%p\n", block);
             if (block) {
                 printf("DEBUG: Inside grid-template-columns block processing\n");
                 alloc_grid_container_prop(lycon, block);
-                
+
                 // Enhanced parsing for advanced features
                 char template_str[256];
                 int len = min((int)custom->value.length, 255);
                 strncpy(template_str, (const char*)custom->value.data, len);
                 template_str[len] = '\0';
-                
+
                 // Parse the template string (handles minmax, repeat, etc.)
                 printf("DEBUG: About to parse grid-template-columns: '%s'\n", template_str);
                 if (block->embed->grid_container->grid_template_columns) {
@@ -1552,12 +1559,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 } else {
                     printf("DEBUG: grid_template_columns is NULL!\n");
                 }
-                
+
                 printf("DEBUG: Set grid-template-columns: %s\n", template_str);
                 log_debug("Set grid-template-columns: %s\n", template_str);
             }
         }
-        
+
         // grid-template-areas
         if (custom->name.length == 19 && strncmp((const char*)custom->name.data, "grid-template-areas", 19) == 0) {
             printf("DEBUG: grid-template-areas matched! block=%p\n", block);
@@ -1565,7 +1572,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 printf("DEBUG: Inside grid-template-areas block processing\n");
                 alloc_grid_container_prop(lycon, block);
                 printf("DEBUG: Grid container allocated, grid_container=%p\n", block->embed->grid_container);
-                
+
                 // Parse grid template areas
                 char areas_str[256];
                 int len = min((int)custom->value.length, 255);
@@ -1577,7 +1584,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 log_debug("Set grid-template-areas: %s\n", areas_str);
             }
         }
-        
+
         // grid-row-start, grid-row-end, grid-column-start, grid-column-end
         if (custom->name.length == 14 && strncmp((const char*)custom->name.data, "grid-row-start", 14) == 0) {
             char* endptr;
@@ -1588,7 +1595,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 log_debug("Set grid-row-start: %d\n", line_value);
             }
         }
-        
+
         if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "grid-row-end", 12) == 0) {
             char* endptr;
             int line_value = strtol((const char*)custom->value.data, &endptr, 10);
@@ -1598,7 +1605,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 log_debug("Set grid-row-end: %d\n", line_value);
             }
         }
-        
+
         if (custom->name.length == 17 && strncmp((const char*)custom->name.data, "grid-column-start", 17) == 0) {
             char* endptr;
             int line_value = strtol((const char*)custom->value.data, &endptr, 10);
@@ -1608,7 +1615,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 log_debug("Set grid-column-start: %d\n", line_value);
             }
         }
-        
+
         if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "grid-column-end", 15) == 0) {
             char* endptr;
             int line_value = strtol((const char*)custom->value.data, &endptr, 10);
@@ -1618,7 +1625,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 log_debug("Set grid-column-end: %d\n", line_value);
             }
         }
-        
+
         // grid-area
         if (custom->name.length == 9 && strncmp((const char*)custom->name.data, "grid-area", 9) == 0) {
             // Copy the grid area name
@@ -1631,13 +1638,13 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->grid_area[len] = '\0';
             log_debug("Set grid-area: %s\n", span->grid_area);
         }
-        
+
         // row-gap and column-gap for grid
         if (custom->name.length == 7 && strncmp((const char*)custom->name.data, "row-gap", 7) == 0) {
             const char* value_str = (const char*)custom->value.data;
             char* endptr;
             float gap_value = strtof(value_str, &endptr);
-            
+
             if (endptr != value_str && gap_value >= 0) {
                 int gap_px = (int)(gap_value * lycon->ui_context->pixel_ratio);
                 if (block) {
@@ -1647,12 +1654,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 }
             }
         }
-        
+
         if (custom->name.length == 10 && strncmp((const char*)custom->name.data, "column-gap", 10) == 0) {
             const char* value_str = (const char*)custom->value.data;
             char* endptr;
             float gap_value = strtof(value_str, &endptr);
-            
+
             if (endptr != value_str && gap_value >= 0) {
                 int gap_px = (int)(gap_value * lycon->ui_context->pixel_ratio);
                 if (block) {
@@ -1662,33 +1669,33 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 }
             }
         }
-        
+
         // grid-auto-flow
         if (custom->name.length == 14 && strncmp((const char*)custom->name.data, "grid-auto-flow", 14) == 0) {
             if (block) {
                 alloc_grid_container_prop(lycon, block);
-                
+
                 const char* value_str = (const char*)custom->value.data;
-                
+
                 // Parse grid-auto-flow values (can be "row", "column", "row dense", "column dense")
                 if (strstr(value_str, "row")) {
                     block->embed->grid_container->grid_auto_flow = LXB_CSS_VALUE_ROW;
                 } else if (strstr(value_str, "column")) {
                     block->embed->grid_container->grid_auto_flow = LXB_CSS_VALUE_COLUMN;
                 }
-                
+
                 // Check for dense packing
                 if (strstr(value_str, "dense")) {
                     block->embed->grid_container->is_dense_packing = true;
                     log_debug("Enabled dense packing for grid auto-flow\n");
                 }
-                
+
                 log_debug("Set grid-auto-flow: %.*s\n", (int)custom->value.length, custom->value.data);
             }
         }
     }
     }
-    
+
     return LXB_STATUS_OK;
 }
 
