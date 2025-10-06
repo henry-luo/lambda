@@ -62,7 +62,7 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Styled Text Spans\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; font-size: 16px; }\n        .text-container {\n            width: 400px;\n            background-color: #f5f5f5;\n            padding: 20px;\n        }\n        .bold-text {\n            font-weight: bold;\n        }\n        .colored-text {\n            color: #ff0000;\n        }\n        .larger-text {\n            font-size: 20px;\n        }\n    \n\n\n    \n        This is bold text and this is red text and this is larger text in a paragraph.\n    \n    \n    \n    {\n        \"test_id\": \"baseline_503_styled_spans\",\n        \"category\": \"baseline\",\n        \"features\": [\"inline-spans\", \"font-weight\", \"color\", \"mixed-styling\"],\n        \"description\": \"Text with inline spans having different font styles and colors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html\", \"https://www.w3.org/TR/CSS22/colors.html\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Paragraph with bold, red, and larger text spans inline\"\n    }",
+    "textContent": "Baseline Test: Styled Text Spans\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; font-size: 16px; }\n        .text-container {\n            width: 400px;\n            background-color: #f5f5f5;\n            padding: 20px;\n        }\n        .bold-text {\n            font-weight: bold;\n        }\n        .colored-text {\n            color: #ff0000;\n        }\n        .larger-text {\n            font-size: 20px;\n        }\n    \n\n\n    \n        This is bold text and this is red text and so does larger text in a paragraph.\n    \n\n    \n    {\n        \"test_id\": \"baseline_503_styled_spans\",\n        \"category\": \"baseline\",\n        \"features\": [\"inline-spans\", \"font-weight\", \"color\", \"mixed-styling\"],\n        \"description\": \"Text with inline spans having different font styles and colors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html\", \"https://www.w3.org/TR/CSS22/colors.html\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Paragraph with bold, red, and larger text spans inline\"\n    }",
     "hasTextNodes": false,
     "textNodes": [],
     "childCount": 2,
@@ -440,7 +440,7 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "This is bold text and this is red text and this is larger text in a paragraph.\n    \n    \n    \n    {\n        \"test_id\": \"baseline_503_styled_spans\",\n        \"category\": \"baseline\",\n        \"features\": [\"inline-spans\", \"font-weight\", \"color\", \"mixed-styling\"],\n        \"description\": \"Text with inline spans having different font styles and colors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html\", \"https://www.w3.org/TR/CSS22/colors.html\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Paragraph with bold, red, and larger text spans inline\"\n    }",
+        "textContent": "This is bold text and this is red text and so does larger text in a paragraph.\n    \n\n    \n    {\n        \"test_id\": \"baseline_503_styled_spans\",\n        \"category\": \"baseline\",\n        \"features\": [\"inline-spans\", \"font-weight\", \"color\", \"mixed-styling\"],\n        \"description\": \"Text with inline spans having different font styles and colors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html\", \"https://www.w3.org/TR/CSS22/colors.html\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Paragraph with bold, red, and larger text spans inline\"\n    }",
         "hasTextNodes": false,
         "textNodes": [],
         "childCount": 2,
@@ -504,7 +504,7 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This is bold text and this is red text and this is larger text in a paragraph.",
+            "textContent": "This is bold text and this is red text and so does larger text in a paragraph.",
             "hasTextNodes": true,
             "textNodes": [
               {
@@ -544,15 +544,15 @@
                 "endOffset": 13
               },
               {
-                "text": " and this is ",
+                "text": " and so does ",
                 "parentElement": "div",
                 "rects": [
                   {
                     "x": 271.64,
                     "y": 24,
-                    "width": 80.94,
+                    "width": 96.08,
                     "height": 17,
-                    "right": 352.58,
+                    "right": 367.72,
                     "bottom": 41
                   }
                 ],
@@ -761,7 +761,7 @@
                 "layout": {
                   "x": 20,
                   "y": 20,
-                  "width": 383.72,
+                  "width": 398.86,
                   "height": 45,
                   "contentWidth": 0,
                   "contentHeight": 0,
@@ -817,11 +817,11 @@
                     "parentElement": "span",
                     "rects": [
                       {
-                        "x": 352.58,
+                        "x": 367.72,
                         "y": 20,
                         "width": 51.14,
                         "height": 22,
-                        "right": 403.72,
+                        "right": 418.86,
                         "bottom": 42
                       },
                       {

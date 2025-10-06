@@ -234,43 +234,12 @@ class LayoutTester {
 
     /**
      * Extract text nodes from browser tree structure recursively
+     * @deprecated This method is obsolete - text nodes are now extracted and compared inline during tree traversal
+     * @see getBrowserTextFragmentsFromElement for extracting text fragments from a single element
      */
     extractBrowserTextNodesFromTree(treeNode, textNodes = []) {
-        if (!treeNode) return textNodes;
-
-        // Add text nodes from current element
-        if (treeNode.textNodes && treeNode.textNodes.length > 0) {
-            treeNode.textNodes.forEach((textNode, index) => {
-                if (textNode.rects && textNode.rects.length > 0) {
-                    // Each rect represents a line fragment
-                    textNode.rects.forEach((rect, rectIndex) => {
-                        textNodes.push({
-                            selector: `${treeNode.selector || treeNode.tag}_text_${index}_${rectIndex}`,
-                            tag: 'text',
-                            layout: {
-                                x: rect.x,
-                                y: rect.y,
-                                width: rect.width,
-                                height: rect.height
-                            },
-                            text: textNode.text,
-                            parentElement: textNode.parentElement,
-                            isTextNode: true,
-                            treePath: `${treeNode.selector || treeNode.tag} > text`
-                        });
-                    });
-                }
-            });
-        }
-
-        // Recursively process children
-        if (treeNode.children && Array.isArray(treeNode.children)) {
-            treeNode.children.forEach(child => {
-                this.extractBrowserTextNodesFromTree(child, textNodes);
-            });
-        }
-
-        return textNodes;
+        console.warn('⚠️  extractBrowserTextNodesFromTree is deprecated - using inline text comparison during tree traversal instead');
+        return [];
     }
 
     /**
@@ -381,202 +350,19 @@ class LayoutTester {
     }
 
     /**
-     * Compare text node positioning between Radiant and browser
-     */
-    compareTextNodes(radiantTextNodes, browserTextNodes, testId = null) {
-        // CRITICAL ENHANCEMENT: Handle Radiant's multiple text nodes vs Browser's single text node with multiple rects
-
-        if (this.verbose) {
-            console.log(`\n🔍 TEXT NODE COMPARISON:`);
-            console.log(`   📝 Radiant Text Nodes: ${radiantTextNodes.length}`);
-            console.log(`   📝 Browser Text Nodes: ${browserTextNodes.length}`);
-        }
-
-        // Flatten browser text nodes with rects into individual positioned fragments
-        const browserTextFragments = [];
-        browserTextNodes.forEach((browserTextNode, nodeIndex) => {
-            if (browserTextNode.rects && browserTextNode.rects.length > 0) {
-                // Browser has multiple rects for wrapped text - create fragment for each rect
-                browserTextNode.rects.forEach((rect, rectIndex) => {
-                    browserTextFragments.push({
-                        text: browserTextNode.text, // Full text content
-                        layout: {
-                            x: rect.x,
-                            y: rect.y,
-                            width: rect.width,
-                            height: rect.height
-                        },
-                        rectIndex: rectIndex,
-                        totalRects: browserTextNode.rects.length,
-                        parentText: browserTextNode.text,
-                        nodeIndex: nodeIndex
-                    });
-
-                    if (this.verbose) {
-                        console.log(`   📋 Browser Fragment ${browserTextFragments.length}: "${browserTextNode.text.substring(0, 20)}..." - ${rect.width}x${rect.height} at (${rect.x},${rect.y})`);
-                    }
-                });
-            } else if (browserTextNode.layout) {
-                // Browser has single rect - treat as single fragment
-                browserTextFragments.push({
-                    text: browserTextNode.text,
-                    layout: browserTextNode.layout,
-                    rectIndex: 0,
-                    totalRects: 1,
-                    parentText: browserTextNode.text,
-                    nodeIndex: nodeIndex
-                });
-
-                if (this.verbose) {
-                    const layout = browserTextNode.layout;
-                    console.log(`   📋 Browser Fragment ${browserTextFragments.length}: "${browserTextNode.text.substring(0, 20)}..." - ${layout.width}x${layout.height} at (${layout.x},${layout.y})`);
-                }
-            }
-        });
-
-        const results = {
-            totalTextNodes: Math.max(radiantTextNodes.length, browserTextFragments.length),
-            matchedTextNodes: 0,
-            textDifferences: [],
-            maxTextDifference: 0
-        };
-
-        if (this.verbose) {
-            console.log(`   📊 Total Text Fragments to Compare: ${results.totalTextNodes}`);
-        }
-
-        if (results.totalTextNodes === 0) {
-            return results; // No text to compare
-        }
-
-        // Create spatial lookup for browser text fragments
-        const browserFragmentMap = new Map();
-        browserTextFragments.forEach((fragment, index) => {
-            // Create spatial keys for position-based matching
-            const posKey = `${Math.round(fragment.layout.x/5)*5}_${Math.round(fragment.layout.y/5)*5}`;
-            const yKey = `y_${Math.round(fragment.layout.y/2)*2}`; // Group by Y position (line)
-
-            if (!browserFragmentMap.has(posKey)) browserFragmentMap.set(posKey, []);
-            if (!browserFragmentMap.has(yKey)) browserFragmentMap.set(yKey, []);
-
-            browserFragmentMap.get(posKey).push(fragment);
-            browserFragmentMap.get(yKey).push(fragment);
-            browserFragmentMap.set(`index_${index}`, fragment);
-        });
-
-        // Compare each Radiant text node against browser fragments
-        radiantTextNodes.forEach((radiantText, index) => {
-            const posKey = `${Math.round(radiantText.layout.x/5)*5}_${Math.round(radiantText.layout.y/5)*5}`;
-            const yKey = `y_${Math.round(radiantText.layout.y/2)*2}`;
-
-            // Try to find matching browser fragment by position
-            let bestMatch = null;
-            let bestDistance = Infinity;
-
-            // Check position-based matches first
-            const posMatches = browserFragmentMap.get(posKey) || [];
-            const yMatches = browserFragmentMap.get(yKey) || [];
-            const candidateFragments = [...new Set([...posMatches, ...yMatches])];
-
-            // If no position matches, check all fragments
-            if (candidateFragments.length === 0) {
-                candidateFragments.push(...browserTextFragments);
-            }
-
-            candidateFragments.forEach(fragment => {
-                const distance = Math.sqrt(
-                    Math.pow(radiantText.layout.x - fragment.layout.x, 2) +
-                    Math.pow(radiantText.layout.y - fragment.layout.y, 2)
-                );
-
-                if (distance < bestDistance) {
-                    bestDistance = distance;
-                    bestMatch = fragment;
-                }
-            });
-
-            if (!bestMatch) {
-                results.textDifferences.push({
-                    type: 'missing_in_browser',
-                    text: radiantText.text,
-                    radiant: radiantText.layout,
-                    browser: null
-                });
-                return;
-            }
-
-            // Compare positions using the best matching fragment
-            const diffs = this.compareElementLayout(radiantText.layout, bestMatch.layout);
-            if (diffs.length > 0) {
-                const maxDiff = Math.max(...diffs.map(d => d.difference));
-                results.maxTextDifference = Math.max(results.maxTextDifference, maxDiff);
-
-                // Use higher tolerance for baseline tests during comparison
-                const effectiveTextTolerance = testId && testId.startsWith('baseline_') ?
-                    Math.max(this.textTolerance, 5.0) : this.textTolerance;
-
-                if (this.verbose) {
-                    console.log(`   🔍 Text tolerance for ${testId || 'test'}: ${effectiveTextTolerance}px (base: ${this.textTolerance}px)`);
-                    console.log(`   📏 Text difference: ${maxDiff.toFixed(2)}px vs tolerance ${effectiveTextTolerance}px`);
-                }
-
-                if (maxDiff > effectiveTextTolerance) {
-                    // Create detailed breakdown of each property difference
-                    const detailedDiffs = diffs.map(diff => ({
-                        property: diff.property,
-                        radiant: diff.radiant,
-                        browser: diff.browser,
-                        difference: diff.difference,
-                        withinTolerance: diff.difference <= effectiveTextTolerance
-                    }));
-
-                    results.textDifferences.push({
-                        type: 'text_position_difference',
-                        text: radiantText.text.substring(0, 50) + (radiantText.text.length > 50 ? '...' : ''),
-                        radiant: radiantText.layout,
-                        browser: bestMatch.layout,
-                        differences: diffs,
-                        detailedDifferences: detailedDiffs,
-                        maxDifference: maxDiff,
-                        effectiveTextTolerance: effectiveTextTolerance,
-                        // Additional context for debugging
-                        browserFragment: {
-                            rectIndex: bestMatch.rectIndex,
-                            totalRects: bestMatch.totalRects,
-                            parentText: bestMatch.parentText.substring(0, 50) + (bestMatch.parentText.length > 50 ? '...' : '')
-                        }
-                    });
-
-                    if (this.verbose) {
-                        console.log(`   ❌ Text FAILED tolerance check:`);
-                        console.log(`      Text: "${radiantText.text.substring(0, 30)}..."`);
-                        console.log(`      Max diff: ${maxDiff.toFixed(2)}px > tolerance: ${effectiveTextTolerance}px`);
-                        detailedDiffs.forEach(diff => {
-                            const status = diff.withinTolerance ? '✅' : '❌';
-                            console.log(`      ${status} ${diff.property}: ${diff.difference.toFixed(2)}px (${diff.radiant} vs ${diff.browser})`);
-                        });
-                    }
-                } else {
-                    results.matchedTextNodes++;
-                    if (this.verbose) {
-                        console.log(`   ✅ Text PASSED tolerance check: ${maxDiff.toFixed(2)}px <= ${effectiveTextTolerance}px`);
-                    }
-                }
-            } else {
-                results.matchedTextNodes++;
-            }
-        });
-
-        return results;
-    }
-
-    /**
      * Compare two tree nodes directly for element matching
      * SIMPLE: Just match based on tag, position in tree, and basic properties
      */
-    compareTreeNodes(radiantNode, browserNode, path = '', parentContext = null) {
+    compareTreeNodes(radiantNode, browserNode, path = '', parentContext = null, depth = 0) {
         const differences = [];
         const currentPath = (path && path !== 'root') ? path : (radiantNode.tag || browserNode.tag || 'unknown');
+
+        // Helper function to create proper indentation based on tree depth
+        const getIndent = (level = depth) => {
+            const baseIndent = '   '; // Base 3-space indentation
+            const treeIndent = '  '.repeat(level); // 2 spaces per depth level
+            return baseIndent + treeIndent;
+        };
 
         // CRITICAL CHANGE: Always match elements by tag name first
         // Layout differences are recorded but don't prevent element matching
@@ -596,7 +382,7 @@ class LayoutTester {
             // CRITICAL CHANGE: Use relative positioning for child elements
             let radiantLayout = radiantNode.layout;
             let browserLayout = browserNode.layout;
-            
+
             // If we have parent context, convert to relative positioning
             if (parentContext) {
                 radiantLayout = {
@@ -611,17 +397,17 @@ class LayoutTester {
                     width: browserNode.layout.width,
                     height: browserNode.layout.height
                 };
-                
+
                 if (this.verbose) {
-                    console.log(`   🔄 Relative positioning for ${radiantNode.tag}:`);
-                    console.log(`      Radiant: (${radiantLayout.x}, ${radiantLayout.y}) vs Browser: (${browserLayout.x}, ${browserLayout.y})`);
+                    console.log(`${getIndent()}🔄 Relative positioning for ${radiantNode.tag}:`);
+                    console.log(`${getIndent()}   Radiant: (${radiantLayout.x}, ${radiantLayout.y}) vs Browser: (${browserLayout.x}, ${browserLayout.y})`);
                 }
             }
-            
+
             const layoutDiffs = this.compareElementLayout(radiantLayout, browserLayout);
             if (layoutDiffs.length > 0) {
                 const maxDiff = Math.max(...layoutDiffs.map(d => d.difference));
-                
+
                 // Record layout differences but don't fail element matching
                 differences.push({
                     type: 'layout_difference',
@@ -632,22 +418,22 @@ class LayoutTester {
                     maxDifference: maxDiff,
                     isRelative: !!parentContext
                 });
-                
+
                 layoutMatches = maxDiff <= this.tolerance;
-                
+
                 if (this.verbose) {
                     const status = layoutMatches ? '✅' : '❌';
                     const relativeStr = parentContext ? ' (relative)' : ' (absolute)';
-                    console.log(`   ${status} Layout${relativeStr} for ${radiantNode.tag}: ${maxDiff.toFixed(2)}px <= ${this.tolerance}px`);
+                    console.log(`${getIndent()}${status} Layout${relativeStr} for ${radiantNode.tag}: ${maxDiff.toFixed(2)}px <= ${this.tolerance}px`);
                 }
             }
         }
 
         // CRITICAL: Element always matches by name, layout quality is separate
-        return { 
-            matches: true, 
+        return {
+            matches: true,
             layoutMatches: layoutMatches,
-            differences: differences 
+            differences: differences
         };
     }
 
@@ -699,9 +485,11 @@ class LayoutTester {
             matchedElements: 0,
             differences: [],
             maxDifference: 0,
-            // Enhanced with text node results
+            // Enhanced with integrated text node results
             textDifferences: [],
             maxTextDifference: 0,
+            totalTextNodes: 0,
+            matchedTextNodes: 0,
             // Store effective tolerances for accurate reporting
             effectiveTextTolerance: testId && testId.startsWith('baseline_') ?
                 Math.max(this.textTolerance, 5.0) : this.textTolerance,
@@ -730,36 +518,33 @@ class LayoutTester {
         browserTree = this.filterBrowserTree(browserTree);
 
         if (this.verbose) {
-            console.log(`\n🌳 TREE-BASED COMPARISON:`);
-            console.log(`   📊 Comparing element tree, filtered out <head>, <script>, <style>, and <br>`);
+            console.log(`\n🌳 INTEGRATED TREE-BASED COMPARISON:`);
+            console.log(`   📊 Comparing element tree with text nodes inline, filtered out <head>, <script>, <style>, and <br>`);
         }
 
-        // Recursive tree comparison
+        // Recursive tree comparison with integrated text node checking
         const initialPath = radiantTree?.tag || browserTree?.tag || 'root';
-        const comparison = this.compareTreesRecursively(radiantTree, browserTree, initialPath);
+        const comparison = this.compareTreesRecursively(radiantTree, browserTree, initialPath, null, results.effectiveTextTolerance, 0);
 
+        // Copy results from integrated comparison
         results.totalElements = comparison.totalElements;
         results.matchedElements = comparison.matchedElements;
         results.differences = comparison.differences;
         results.maxDifference = comparison.maxDifference;
 
-        // Extract and compare text nodes from both trees
-        const radiantTextNodes = this.extractTextNodesFromTree(radiantTree);
-        const browserTextNodes = this.extractTextNodesFromTree(browserTree);
+        // Copy text node results from integrated comparison
+        results.totalTextNodes = comparison.totalTextNodes;
+        results.matchedTextNodes = comparison.matchedTextNodes;
+        results.textDifferences = comparison.textDifferences;
+        results.maxTextDifference = comparison.maxTextDifference;
 
-        results.debugInfo.radiantTextNodeCount = radiantTextNodes.length;
-        results.debugInfo.browserTextNodeCount = browserTextNodes.length;
-
-        // Compare text nodes
-        const textComparison = this.compareTextNodes(radiantTextNodes, browserTextNodes, testId);
-        results.totalTextNodes = textComparison.totalTextNodes;
-        results.matchedTextNodes = textComparison.matchedTextNodes;
-        results.textDifferences = textComparison.textDifferences;
-        results.maxTextDifference = textComparison.maxTextDifference;
+        // Update debug info
+        results.debugInfo.radiantTextNodeCount = results.totalTextNodes;
+        results.debugInfo.browserTextNodeCount = results.totalTextNodes; // Approximation since we compare pairwise
 
         if (this.verbose) {
             const testDisplayName = testId ? ` for ${testId}` : '';
-            console.log(`\n🌳 TREE COMPARISON SUMMARY${testDisplayName}:`);
+            console.log(`\n🌳 INTEGRATED TREE COMPARISON SUMMARY${testDisplayName}:`);
             console.log(`   ✅ Matched Elements: ${results.matchedElements}/${results.totalElements}`);
             console.log(`   📏 Max Layout Diff: ${results.maxDifference.toFixed(2)}px`);
 
@@ -790,14 +575,26 @@ class LayoutTester {
     }
 
     /**
-     * Recursively compare two trees element by element with parent context
+     * Recursively compare two trees element by element with parent context, including text nodes
      */
-    compareTreesRecursively(radiantNode, browserNode, path = '', parentContext = null) {
+    compareTreesRecursively(radiantNode, browserNode, path = '', parentContext = null, effectiveTextTolerance = null, depth = 0) {
         const results = {
             totalElements: 0,
             matchedElements: 0,
             differences: [],
-            maxDifference: 0
+            maxDifference: 0,
+            // Add text node tracking directly in tree comparison
+            totalTextNodes: 0,
+            matchedTextNodes: 0,
+            textDifferences: [],
+            maxTextDifference: 0
+        };
+
+        // Helper function to create proper indentation based on tree depth
+        const getIndent = (level = depth) => {
+            const baseIndent = '   '; // Base 3-space indentation
+            const treeIndent = '  '.repeat(level); // 2 spaces per depth level
+            return baseIndent + treeIndent;
         };
 
         if (!radiantNode && !browserNode) {
@@ -819,7 +616,7 @@ class LayoutTester {
 
             if (this.verbose) {
                 const missingIn = radiantNode ? 'browser' : 'radiant';
-                console.log(`   ❌ Missing in ${missingIn}: ${elementPath} (${presentNode.tag})`);
+                console.log(`${getIndent()}❌ Missing in ${missingIn}: ${elementPath} (${presentNode.tag})`);
             }
 
             return results;
@@ -830,19 +627,19 @@ class LayoutTester {
         const currentPath = (path && path !== 'root') ? `${path} > ${radiantNode.tag}` : radiantNode.tag;
 
         // Compare current nodes with parent context for relative positioning
-        const nodeComparison = this.compareTreeNodes(radiantNode, browserNode, currentPath, parentContext);
+        const nodeComparison = this.compareTreeNodes(radiantNode, browserNode, currentPath, parentContext, depth);
 
         // CRITICAL CHANGE: Elements always match by name, record layout differences separately
         if (nodeComparison.matches) {
             results.matchedElements = 1;
             if (this.verbose && radiantNode.layout) {
                 const layoutStatus = nodeComparison.layoutMatches ? '✅' : '⚠️';
-                console.log(`   ${layoutStatus} Match: ${currentPath} - ${radiantNode.tag}`);
+                console.log(`${getIndent()}${layoutStatus} Match: ${currentPath} - ${radiantNode.tag}`);
             }
         } else {
             // Only tag mismatches prevent element matching
             if (this.verbose) {
-                console.log(`   ❌ Tag mismatch: ${currentPath} - ${radiantNode.tag} vs ${browserNode.tag}`);
+                console.log(`${getIndent()}❌ Tag mismatch: ${currentPath} - ${radiantNode.tag} vs ${browserNode.tag}`);
             }
         }
 
@@ -860,42 +657,66 @@ class LayoutTester {
             browser: browserNode.layout
         } : null;
 
-        // Compare children with parent context
-        const radiantChildren = radiantNode.children || [];
-        const browserChildren = browserNode.children || [];
-        const maxChildren = Math.max(radiantChildren.length, browserChildren.length);
+        // NEW: Get all child nodes (elements + text nodes) in document order
+        const radiantChildNodes = this.getAllChildNodesInOrder(radiantNode, currentPath);
+        const browserChildNodes = this.getAllChildNodesInOrder(browserNode, currentPath);
+        const maxChildren = Math.max(radiantChildNodes.length, browserChildNodes.length);
 
+        if (this.verbose && (radiantChildNodes.length > 0 || browserChildNodes.length > 0)) {
+            console.log(`${getIndent()}🔍 Comparing ${maxChildren} child nodes (elements + text) in document order`);
+        }
+
+        // Compare all child nodes (elements and text) in unified loop following document order
         for (let i = 0; i < maxChildren; i++) {
-            const radiantChild = radiantChildren[i] || null;
-            const browserChild = browserChildren[i] || null;
+            const radiantChild = radiantChildNodes[i] || null;
+            const browserChild = browserChildNodes[i] || null;
 
-            const childResults = this.compareTreesRecursively(radiantChild, browserChild, currentPath, childParentContext);
+            const childResults = this.compareChildNodesInOrder(
+                radiantChild, browserChild, currentPath, childParentContext, effectiveTextTolerance, depth + 1
+            );
 
-            // Merge results
+            // Merge results including text nodes
             results.totalElements += childResults.totalElements;
             results.matchedElements += childResults.matchedElements;
             results.differences.push(...childResults.differences);
             results.maxDifference = Math.max(results.maxDifference, childResults.maxDifference);
+
+            // Merge text node results
+            results.totalTextNodes += childResults.totalTextNodes;
+            results.matchedTextNodes += childResults.matchedTextNodes;
+            results.textDifferences.push(...childResults.textDifferences);
+            results.maxTextDifference = Math.max(results.maxTextDifference, childResults.maxTextDifference);
         }
 
         return results;
     }
 
     /**
-     * Extract text nodes from tree structure recursively
+     * Get all child nodes (elements + text nodes) from a node in their natural order
      */
-    extractTextNodesFromTree(node, textNodes = [], path = '') {
-        if (!node) return textNodes;
+    getAllChildNodesInOrder(node, parentPath) {
+        if (!node) return [];
 
-        const currentPath = path ? `${path} > ${node.tag}` : node.tag;
+        const childNodes = [];
 
-        // Add text nodes from current element
-        if (node.textNodes && node.textNodes.length > 0) {
-            node.textNodes.forEach((textNode, index) => {
-                if (textNode.rects && textNode.rects.length > 0) {
-                    textNode.rects.forEach((rect, rectIndex) => {
-                        textNodes.push({
-                            selector: `${currentPath}_text_${index}_${rectIndex}`,
+        // For proper document order, we need to interleave text nodes and elements
+        // based on their position in the original HTML DOM structure
+
+        const elements = node.children || [];
+        const textNodes = node.textNodes || [];
+
+        // Simple approach: alternate between text and elements
+        // Text nodes typically appear between elements in HTML like:
+        // text0 <element0/> text1 <element1/> text2 <element2/> text3
+
+        for (let i = 0; i <= Math.max(elements.length, textNodes.length); i++) {
+            // Add text node if it exists at this position
+            if (i < textNodes.length && textNodes[i].rects && textNodes[i].rects.length > 0) {
+                const textNode = textNodes[i];
+                textNode.rects.forEach((rect, rectIndex) => {
+                    childNodes.push({
+                        type: 'text',
+                        node: {
                             tag: 'text',
                             layout: {
                                 x: rect.x,
@@ -904,23 +725,287 @@ class LayoutTester {
                                 height: rect.height
                             },
                             text: textNode.text,
-                            parentElement: textNode.parentElement,
-                            isTextNode: true,
-                            treePath: currentPath
-                        });
+                            textIndex: i,
+                            rectIndex: rectIndex
+                        },
+                        index: i,
+                        rectIndex: rectIndex,
+                        path: `${parentPath}_text_${i}_${rectIndex}`
                     });
-                }
-            });
+                });
+            }
+
+            // Add element if it exists at this position
+            if (i < elements.length) {
+                childNodes.push({
+                    type: 'element',
+                    node: elements[i],
+                    index: i,
+                    path: `${parentPath} > ${elements[i].tag}`
+                });
+            }
         }
 
-        // Process children recursively
-        if (node.children && Array.isArray(node.children)) {
-            node.children.forEach(child => {
-                this.extractTextNodesFromTree(child, textNodes, currentPath);
-            });
+        return childNodes;
+    }
+
+    /**
+     * Compare child nodes (element or text) in document order
+     */
+    compareChildNodesInOrder(radiantChild, browserChild, parentPath, parentContext, effectiveTextTolerance, depth) {
+        const results = {
+            totalElements: 0,
+            matchedElements: 0,
+            differences: [],
+            maxDifference: 0,
+            totalTextNodes: 0,
+            matchedTextNodes: 0,
+            textDifferences: [],
+            maxTextDifference: 0
+        };
+
+        // Helper function for indentation
+        const getIndent = (level = depth) => {
+            const baseIndent = '   ';
+            const treeIndent = '  '.repeat(level);
+            return baseIndent + treeIndent;
+        };
+
+        if (!radiantChild && !browserChild) {
+            return results; // Both null, nothing to compare
         }
+
+        if (!radiantChild || !browserChild) {
+            // One tree has a node the other doesn't
+            const presentChild = radiantChild || browserChild;
+            const childPath = presentChild.path;
+
+            if (presentChild.type === 'element') {
+                results.totalElements = 1;
+                results.differences.push({
+                    type: radiantChild ? 'extra_in_radiant' : 'missing_in_radiant',
+                    path: childPath,
+                    radiant: radiantChild ? { tag: radiantChild.node.tag, layout: radiantChild.node.layout } : null,
+                    browser: browserChild ? { tag: browserChild.node.tag, layout: browserChild.node.layout } : null
+                });
+
+                if (this.verbose) {
+                    const missingIn = radiantChild ? 'browser' : 'radiant';
+                    console.log(`${getIndent()}❌ Missing ${presentChild.type} in ${missingIn}: ${childPath} (${presentChild.node.tag})`);
+                }
+            } else if (presentChild.type === 'text') {
+                results.totalTextNodes = 1;
+                results.textDifferences.push({
+                    type: radiantChild ? 'extra_text_in_radiant' : 'missing_text_in_radiant',
+                    text: presentChild.node.text,
+                    radiant: radiantChild ? presentChild.node.layout : null,
+                    browser: browserChild ? browserChild.node.layout : null,
+                    elementPath: parentPath
+                });
+
+                if (this.verbose) {
+                    const missingIn = radiantChild ? 'browser' : 'radiant';
+                    console.log(`${getIndent()}❌ Missing text in ${missingIn}: "${this.cleanTextForDisplay(presentChild.node.text)}"`);
+                }
+            }
+
+            return results;
+        }
+
+        // Both nodes exist - check if they're the same type
+        if (radiantChild.type !== browserChild.type) {
+            // Type mismatch - element vs text
+            if (this.verbose) {
+                console.log(`${getIndent()}❌ Node type mismatch: ${radiantChild.type} vs ${browserChild.type}`);
+            }
+
+            // Count as both element and text difference depending on types
+            if (radiantChild.type === 'element' || browserChild.type === 'element') {
+                results.totalElements = 1;
+                results.differences.push({
+                    type: 'node_type_mismatch',
+                    path: radiantChild.path,
+                    radiant: { type: radiantChild.type, tag: radiantChild.node.tag },
+                    browser: { type: browserChild.type, tag: browserChild.node.tag }
+                });
+            }
+            if (radiantChild.type === 'text' || browserChild.type === 'text') {
+                results.totalTextNodes = 1;
+                results.textDifferences.push({
+                    type: 'node_type_mismatch',
+                    radiant: radiantChild.type === 'text' ? radiantChild.node.text : null,
+                    browser: browserChild.type === 'text' ? browserChild.node.text : null,
+                    elementPath: parentPath
+                });
+            }
+
+            return results;
+        }
+
+        // Same type - compare appropriately
+        if (radiantChild.type === 'element') {
+            // Element comparison - recurse with compareTreesRecursively
+            const elementResults = this.compareTreesRecursively(
+                radiantChild.node, browserChild.node,
+                radiantChild.path, parentContext, effectiveTextTolerance, depth
+            );
+
+            // Copy all results
+            results.totalElements = elementResults.totalElements;
+            results.matchedElements = elementResults.matchedElements;
+            results.differences = elementResults.differences;
+            results.maxDifference = elementResults.maxDifference;
+            results.totalTextNodes = elementResults.totalTextNodes;
+            results.matchedTextNodes = elementResults.matchedTextNodes;
+            results.textDifferences = elementResults.textDifferences;
+            results.maxTextDifference = elementResults.maxTextDifference;
+
+        } else if (radiantChild.type === 'text') {
+            // Text node comparison
+            results.totalTextNodes = 1;
+
+            const textTolerance = effectiveTextTolerance || this.textTolerance;
+            const diffs = this.compareElementLayout(radiantChild.node.layout, browserChild.node.layout);
+
+            if (diffs.length > 0) {
+                const maxDiff = Math.max(...diffs.map(d => d.difference));
+                results.maxTextDifference = Math.max(results.maxTextDifference, maxDiff);
+
+                if (maxDiff > textTolerance) {
+                    const detailedDiffs = diffs.map(diff => ({
+                        property: diff.property,
+                        radiant: diff.radiant,
+                        browser: diff.browser,
+                        difference: diff.difference,
+                        withinTolerance: diff.difference <= textTolerance
+                    }));
+
+                    results.textDifferences.push({
+                        type: 'text_position_difference',
+                        text: radiantChild.node.text.substring(0, 50) + (radiantChild.node.text.length > 50 ? '...' : ''),
+                        radiant: radiantChild.node.layout,
+                        browser: browserChild.node.layout,
+                        differences: diffs,
+                        detailedDifferences: detailedDiffs,
+                        maxDifference: maxDiff,
+                        effectiveTextTolerance: textTolerance,
+                        elementPath: parentPath,
+                        documentOrder: radiantChild.documentOrder
+                    });
+
+                    if (this.verbose) {
+                        console.log(`${getIndent()}❌ Text FAILED tolerance: "${this.cleanTextForDisplay(radiantChild.node.text)}" - ${maxDiff.toFixed(2)}px > ${textTolerance}px`);
+                    }
+                } else {
+                    results.matchedTextNodes++;
+                    if (this.verbose) {
+                        console.log(`${getIndent()}✅ Text PASSED tolerance: "${this.cleanTextForDisplay(radiantChild.node.text)}" - ${maxDiff.toFixed(2)}px <= ${textTolerance}px`);
+                    }
+                }
+            } else {
+                results.matchedTextNodes++;
+                if (this.verbose) {
+                    console.log(`${getIndent()}✅ Text perfect match: "${this.cleanTextForDisplay(radiantChild.node.text)}"`);
+                }
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * Clean text for display by removing newlines and normalizing whitespace
+     */
+    cleanTextForDisplay(text, maxLength = 30) {
+        if (!text) return '';
+
+        // Replace newlines and multiple whitespace with single spaces
+        const cleaned = text.replace(/\s+/g, ' ').trim();
+
+        // Truncate if needed
+        if (cleaned.length > maxLength) {
+            return cleaned.substring(0, maxLength) + '...';
+        }
+
+        return cleaned;
+    }
+
+    /**
+     * Extract text nodes from a single element (not recursive)
+     */
+    getTextNodesFromElement(element, elementPath) {
+        const textNodes = [];
+
+        if (!element || !element.textNodes) {
+            return textNodes;
+        }
+
+        element.textNodes.forEach((textNode, index) => {
+            if (textNode.rects && textNode.rects.length > 0) {
+                textNode.rects.forEach((rect, rectIndex) => {
+                    textNodes.push({
+                        selector: `${elementPath}_text_${index}_${rectIndex}`,
+                        tag: 'text',
+                        layout: {
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height
+                        },
+                        text: textNode.text,
+                        parentElement: textNode.parentElement,
+                        isTextNode: true,
+                        treePath: elementPath
+                    });
+                });
+            }
+        });
 
         return textNodes;
+    }
+
+    /**
+     * Extract browser text fragments from a single element (not recursive)
+     */
+    getBrowserTextFragmentsFromElement(element, elementPath) {
+        const textFragments = [];
+
+        if (!element || !element.textNodes) {
+            return textFragments;
+        }
+
+        element.textNodes.forEach((textNode, nodeIndex) => {
+            if (textNode.rects && textNode.rects.length > 0) {
+                // Browser has multiple rects for wrapped text - create fragment for each rect
+                textNode.rects.forEach((rect, rectIndex) => {
+                    textFragments.push({
+                        text: textNode.text,
+                        layout: {
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height
+                        },
+                        rectIndex: rectIndex,
+                        totalRects: textNode.rects.length,
+                        parentText: textNode.text,
+                        nodeIndex: nodeIndex
+                    });
+                });
+            } else if (textNode.layout) {
+                // Browser has single rect - treat as single fragment
+                textFragments.push({
+                    text: textNode.text,
+                    layout: textNode.layout,
+                    rectIndex: 0,
+                    totalRects: 1,
+                    parentText: textNode.text,
+                    nodeIndex: nodeIndex
+                });
+            }
+        });
+
+        return textFragments;
     }
 
     compareElementLayout(radiant, browser) {
@@ -960,11 +1045,11 @@ class LayoutTester {
             return;
         }
 
-        console.log(`\\n📝 DETAILED TEXT DIFFERENCES for ${testName}:`);
+        console.log(`\n📝 DETAILED TEXT DIFFERENCES for ${testName}:`);
         console.log(`   Found ${textDifferences.length} text positioning issues:`);
 
         textDifferences.forEach((diff, index) => {
-            console.log(`\\n   ${index + 1}. Text: \"${diff.text}\"`);
+            console.log(`   ${index + 1}. Text: \"${diff.text}\"`);
             console.log(`      Max Difference: ${diff.maxDifference.toFixed(2)}px vs ${diff.effectiveTextTolerance}px tolerance`);
 
             if (diff.detailedDifferences) {
@@ -1026,7 +1111,7 @@ class LayoutTester {
 
             // FOCUS: Layout accuracy is the primary success criteria
             // Pass if layout differences are within tolerance, regardless of element structure differences
-            
+
             const layoutAccurate = comparison.maxDifference <= this.tolerance;
             const hasLayoutMatches = comparison.matchedElements > 0;
 
