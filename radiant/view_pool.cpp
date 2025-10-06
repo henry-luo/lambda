@@ -439,7 +439,7 @@ void print_view_tree(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio) {
     log_debug("=================\n");
     char vfile[1024], *last_slash;
     last_slash = strrchr((const char*)url->path.str.data, '/');
-    snprintf(vfile, sizeof(vfile), "./view_tree_%s.txt", last_slash + 1);
+    snprintf(vfile, sizeof(vfile), "./test_ouput/view_tree_%s.txt", last_slash + 1);
     write_string_to_file(vfile, buf->str);
     strbuf_free(buf);
     // also generate JSON output
@@ -1008,7 +1008,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
     strbuf_append_str(buf, "\"layout\": {\n");
     print_bounds_json(span, buf, indent, pixel_ratio);
     strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "}\n");
+    strbuf_append_str(buf, "},\n");
 
     // CSS properties (enhanced to match text output)
     strbuf_append_char_n(buf, ' ', indent + 2);
@@ -1137,7 +1137,7 @@ void print_view_tree_json(ViewGroup* view_root, lxb_url_t* url, float pixel_rati
     // Write to file in both ./ and /tmp directory for easier access
     char buf[1024], *last_slash;
     last_slash = strrchr((const char*)url->path.str.data, '/');
-    snprintf(buf, sizeof(buf), "./view_tree_%s.json", last_slash + 1);
+    snprintf(buf, sizeof(buf), "./test_ouput/view_tree_%s.json", last_slash + 1);
     write_string_to_file(buf, json_buf->str);
     log_debug("JSON layout data written to: %.*s.json\n", (int)url->path.str.length, url->path.str.data);
     write_string_to_file("/tmp/view_tree.json", json_buf->str);
