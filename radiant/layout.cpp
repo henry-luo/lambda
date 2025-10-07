@@ -306,10 +306,6 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 }
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
-    if (!node) {
-        log_debug("Error: null node passed to layout_flow_node");
-        return;
-    }
     log_debug("layout node %s", node->name());
     if (node->is_element()) {
         log_debug("Element: %s", node->name());
@@ -365,10 +361,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     }
     else if (node->is_text()) {
         const unsigned char* str = node->text_data();
-        log_debug("Text: %s", str);
-        if (str && *str && !is_only_whitespace((const char*)str)) {
-            layout_text(lycon, node);
-        }
+        log_debug("Text: '%s'", str);
+        layout_text(lycon, node);
     }
     else {
         log_debug("layout unknown node type: %d", node->type);

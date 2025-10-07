@@ -82,8 +82,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
 // Layout block in flex context
 void layout_block_in_flex_context(LayoutContext* lycon, ViewBlock* block, ViewBlock* flex_parent) {
     if (!block || !flex_parent) return;
-
-    log_debug("Layout block in flex context\n");
+    log_debug("Layout block in flex context");
 
     // Save current context
     Blockbox pa_block = lycon->block;
