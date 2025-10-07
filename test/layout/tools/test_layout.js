@@ -400,12 +400,13 @@ class LayoutTester {
 
                 if (this.verbose) {
                     console.log(`${getIndent()}🔄 Relative positioning for ${radiantNode.tag}:`);
-                    console.log(`${getIndent()}  ^ Radiant: (${radiantLayout.x}, ${radiantLayout.y}) vs Browser: (${browserLayout.x}, ${browserLayout.y})`);
+                    console.log(`${getIndent()}  ^ Radiant: (${radiantLayout.x}, ${radiantLayout.y}, ${radiantLayout.width}, ${radiantLayout.height}) vs Browser: (${browserLayout.x}, ${browserLayout.y}, ${browserLayout.width}, ${browserLayout.height})`);
                 }
             }
             else {
                 if (this.verbose) {
                     console.log(`${getIndent()}🔄 Root ${radiantNode.tag}:`);
+                    console.log(`${getIndent()}  ^ Radiant: (${radiantLayout.x}, ${radiantLayout.y}, ${radiantLayout.width}, ${radiantLayout.height}) vs Browser: (${browserLayout.x}, ${browserLayout.y}, ${browserLayout.width}, ${browserLayout.height})`);
                 }
             }
 
@@ -428,7 +429,8 @@ class LayoutTester {
 
                 if (this.verbose) {
                     const relativeStr = parentContext ? '(relative)' : '(absolute)';
-                    console.log(`${getIndent()}  ^ Layout ${relativeStr} for ${radiantNode.tag}: ${maxDiff.toFixed(2)}px ${layoutMatches ? '<=':'>'} ${this.tolerance}px`);
+                    const layoutDetails = layoutDiffs.map(d => `${d.property}:${d.difference.toFixed(1)}px`).join(', ');
+                    console.log(`${getIndent()}  ^ Layout ${relativeStr} for ${radiantNode.tag}: ${maxDiff.toFixed(2)}px ${layoutMatches ? '<=':'>'} ${this.tolerance}px (${layoutDetails})`);
                 }
             }
         }
@@ -898,6 +900,8 @@ class LayoutTester {
 
                     if (this.verbose) {
                         console.log(`${getIndent()}❌ Text FAILED tolerance: "${this.cleanTextForDisplay(radiantChild.node.text)}" - ${maxDiff.toFixed(2)}px > ${textTolerance}px`);
+                        console.log(`${getIndent()}   Radiant: (${radiantChild.node.layout.x}, ${radiantChild.node.layout.y}, ${radiantChild.node.layout.width}, ${radiantChild.node.layout.height})`);
+                        console.log(`${getIndent()}   Browser: (${browserChild.node.layout.x}, ${browserChild.node.layout.y}, ${browserChild.node.layout.width}, ${browserChild.node.layout.height})`);
 
                         // Show detailed differences inline
                         detailedDiffs.forEach(propDiff => {
@@ -911,12 +915,17 @@ class LayoutTester {
                     results.matchedTextNodes++;
                     if (this.verbose) {
                         console.log(`${getIndent()}✅ Text PASSED tolerance: "${this.cleanTextForDisplay(radiantChild.node.text)}" - ${maxDiff.toFixed(2)}px <= ${textTolerance}px`);
+                        if (maxDiff > 0) {
+                            console.log(`${getIndent()}   Radiant: (${radiantChild.node.layout.x}, ${radiantChild.node.layout.y}, ${radiantChild.node.layout.width}, ${radiantChild.node.layout.height})`);
+                            console.log(`${getIndent()}   Browser: (${browserChild.node.layout.x}, ${browserChild.node.layout.y}, ${browserChild.node.layout.width}, ${browserChild.node.layout.height})`);
+                        }
                     }
                 }
             } else {
                 results.matchedTextNodes++;
                 if (this.verbose) {
                     console.log(`${getIndent()}✅ Text perfect match: "${this.cleanTextForDisplay(radiantChild.node.text)}"`);
+                    console.log(`${getIndent()}   Layout: (${radiantChild.node.layout.x}, ${radiantChild.node.layout.y}, ${radiantChild.node.layout.width}, ${radiantChild.node.layout.height})`);
                 }
             }
         }
@@ -1039,7 +1048,8 @@ class LayoutTester {
                     property: prop,
                     radiant: radiantVal,
                     browser: browserVal,
-                    difference: diff
+                    difference: diff,
+                    formattedDiff: `${prop}: R=${radiantVal} B=${browserVal} (Δ${diff.toFixed(1)}px)`
                 });
             }
         }
