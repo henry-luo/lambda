@@ -229,7 +229,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_enter();
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
-    log_debug("<<layout block %s (display.inner=%d)\n", elmt->name(), display.inner);
+    log_debug("<<layout block %s (display.inner=%d)", elmt->name(), display.inner);
 
     // Check if this block is a flex item
     ViewBlock* parent_block = (ViewBlock*)lycon->parent;
@@ -737,7 +737,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             int offset = calculate_vertical_align_offset(
                 block->in_line->vertical_align, block->height, lycon->block.line_height,
                 lycon->line.max_ascender, block->height);
-            block->y = lycon->block.advance_y + offset + (block->bound ? block->bound->margin.top : 0);
+            block->y = lycon->block.advance_y + offset;  // block->bound->margin.top will be added below
             log_debug("vertical-aligned-inline-block: offset %d, line %d, block %d, adv: %d, y: %d, va:%d, %d",
                 offset, lycon->block.line_height, block->height, lycon->block.advance_y, block->y,
                 block->in_line->vertical_align, LXB_CSS_VALUE_BOTTOM);
