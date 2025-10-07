@@ -1,1 +1,79 @@
-null
+{
+  "squared": [
+    1,
+    4,
+    9,
+    16,
+    25,
+    36,
+    49,
+    64,
+    81,
+    100
+  ],
+  "lengths": [
+    5,
+    5,
+    10,
+    6
+  ],
+  "evens": [
+    2,
+    4,
+    6,
+    8,
+    10
+  ],
+  "longWords": [
+    "javascript",
+    "lambda"
+  ],
+  "sum": 55,
+  "product": 3628800,
+  "concatenated": " hello world javascript lambda",
+  "max": 10,
+  "letterCounts": {
+    "h": 1,
+    "e": 1,
+    "l": 4,
+    "o": 2,
+    "w": 1,
+    "r": 2,
+    "d": 2,
+    "j": 1,
+    "a": 4,
+    "v": 1,
+    "s": 1,
+    "c": 1,
+    "i": 1,
+    "p": 1,
+    "t": 1,
+    "m": 1,
+    "b": 1
+  },
+  "sideEffectResult": [
+    3,
+    6,
+    9
+  ],
+  "processedNumbers": 98,
+  "passingStudents": [
+    {
+      "name": "Alice",
+      "grade": 85
+    },
+    {
+      "name": "Bob",
+      "grade": 92
+    },
+    {
+      "name": "Diana",
+      "grade": 96
+    }
+  ],
+  "averageGrade": 87.75,
+  "topStudent": {
+    "name": "Diana",
+    "grade": 96
+  }
+}

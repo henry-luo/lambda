@@ -1,1 +1,30 @@
-null
+{
+  "message": "Welcome to JavaScript ES6!",
+  "multiline": "This is a\nmulti-line\ntemplate literal",
+  "greeting": "Hello, World!",
+  "calculatorResult": 30,
+  "point": {
+    "x": 10,
+    "y": 20
+  },
+  "doubled": [
+    2,
+    4,
+    6,
+    8,
+    10,
+    12,
+    14,
+    16,
+    18,
+    20
+  ],
+  "evens": [
+    2,
+    4,
+    6,
+    8,
+    10
+  ],
+  "sum": 55
+}

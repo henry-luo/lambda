@@ -1,1 +1,24 @@
-null
+{
+  "doubled": [
+    2,
+    4,
+    6,
+    8,
+    10
+  ],
+  "tripled": [
+    3,
+    6,
+    9,
+    12,
+    15
+  ],
+  "evens": [
+    2,
+    4
+  ],
+  "finalValue": 17,
+  "count1a": 1,
+  "count1b": 2,
+  "count2a": 1
+}

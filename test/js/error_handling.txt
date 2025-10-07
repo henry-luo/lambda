@@ -1,1 +1,2 @@
-null
+Data processed successfully
+Data processing failed
