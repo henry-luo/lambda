@@ -227,6 +227,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
 }
 
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
+    log_enter();
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
     log_debug("<<layout block %s (display.inner=%d)\n", elmt->name(), display.inner);
 
@@ -253,12 +254,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         (display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM : RDT_VIEW_BLOCK),
         elmt);
     block->display = display;
-
-    // Validate nested layout structure
-    if (!validate_nested_layout_structure(block)) {
-        log_warn("Invalid nested layout structure detected\n");
-        return;
-    }
 
     // handle element default styles
     float em_size = 0;  size_t value_len;  const lxb_char_t *value;
@@ -512,7 +507,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         }
     }
 
-    log_debug("setting up block blk\n");
+    log_debug("setting up block blk");
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
     }
@@ -536,10 +531,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
             }
             content_width = max(content_width - padding_and_border, 0);
-            printf("box-sizing: border-box - given_width=%d, padding+border=%d, content_width=%d\n",
+            log_debug("box-sizing: border-box - given_width=%d, padding+border=%d, content_width=%d",
                    lycon->block.given_width, padding_and_border, content_width);
         } else {
-            printf("box-sizing: content-box - given_width=%d, content_width=%d\n",
+            log_debug("box-sizing: content-box - given_width=%d, content_width=%d",
                    lycon->block.given_width, content_width);
         }
     }
@@ -570,10 +565,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 }
             }
             content_height = max(content_height - padding_and_border, 0);
-            printf("box-sizing: border-box - given_height=%d, padding+border=%d, content_height=%d\n",
+            log_debug("box-sizing: border-box - given_height=%d, padding+border=%d, content_height=%d",
                    lycon->block.given_height, padding_and_border, content_height);
         } else {
-            printf("box-sizing: content-box - given_height=%d, content_height=%d\n",
+            log_debug("box-sizing: content-box - given_height=%d, content_height=%d",
                    lycon->block.given_height, content_height);
         }
     }
@@ -634,14 +629,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->line.right = lycon->block.width;
     }
 
-    log_debug("layout-block-sizes: x:%d, y:%d, wd:%d, hg:%d, line-hg:%d, given-w:%d, given-h:%d\n",
+    log_debug("layout-block-sizes: x:%d, y:%d, wd:%d, hg:%d, line-hg:%d, given-w:%d, given-h:%d",
         block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
 
     // layout block content
     if (elmt_name != LXB_TAG_IMG) {
         // Special handling for flex containers
         if (display.inner == LXB_CSS_VALUE_FLEX) {
-            log_debug("Setting up flex container for %s\n", elmt->name());
+            log_debug("Setting up flex container for %s", elmt->name());
             // Flex container setup is handled in layout_block_content
         }
         layout_block_content(lycon, block, display);
@@ -650,7 +645,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // check for margin collapsing with children
     if (block->bound) {
         // collapse top margin with first child block
-        log_debug("check margin collapsing\n");
+        log_debug("check margin collapsing");
         if ((!block->bound->border || block->bound->border->width.top == 0) &&
             block->bound->padding.top == 0 && block->child) {
             View* first_child = block->child;
@@ -663,7 +658,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     block->height -= first_child_block->bound->margin.top;
                     first_child_block->bound->margin.top = 0;
                     first_child_block->y = 0;
-                    log_debug("collapsed top margin %d between block and first child\n", margin_top);
+                    log_debug("collapsed top margin %d between block and first child", margin_top);
                 }
             }
         }
@@ -679,7 +674,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     block->height -= last_child_block->bound->margin.bottom;
                     block->bound->margin.bottom = margin_bottom;
                     last_child_block->bound->margin.bottom = 0;
-                    log_debug("collapsed bottom margin %d between block and last child\n", margin_bottom);
+                    log_debug("collapsed bottom margin %d between block and last child", margin_bottom);
                 }
             }
         }
@@ -687,52 +682,50 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // Apply CSS positioning after normal layout
     if (block->position) {
-        printf("DEBUG: Found position property: type=%d (RELATIVE=334, ABSOLUTE=335, FIXED=337)\n", block->position->position);
-        printf("DEBUG: Position offsets: top=%d(%s), right=%d(%s), bottom=%d(%s), left=%d(%s)\n",
+        log_debug("DEBUG: Found position property: type=%d (RELATIVE=334, ABSOLUTE=335, FIXED=337)", block->position->position);
+        log_debug("DEBUG: Position offsets: top=%d(%s), right=%d(%s), bottom=%d(%s), left=%d(%s)",
             block->position->top, block->position->has_top ? "set" : "unset",
             block->position->right, block->position->has_right ? "set" : "unset",
             block->position->bottom, block->position->has_bottom ? "set" : "unset",
             block->position->left, block->position->has_left ? "set" : "unset");
 
         if (block->position->position == 334) {  // LXB_CSS_VALUE_RELATIVE
-            printf("DEBUG: Applying relative positioning\n");
+            log_debug("DEBUG: Applying relative positioning");
             layout_relative_positioned(lycon, block);
         } else if (block->position->position == 335 || block->position->position == 337) {  // ABSOLUTE or FIXED
-            printf("DEBUG: Applying absolute positioning\n");
+            log_debug("DEBUG: Applying absolute positioning");
             layout_absolute_positioned(lycon, block);
         } else {
-            printf("DEBUG: Position type %d not handled yet\n", block->position->position);
+            log_debug("DEBUG: Position type %d not handled yet", block->position->position);
         }
     } else {
-        printf("DEBUG: No position property found for element %s\n", elmt->name());
+        log_debug("DEBUG: No position property found for element %s", elmt->name());
     }
 
     // Apply CSS float layout after positioning
     if (block->position && element_has_float(block)) {
-        printf("DEBUG: Element has float property, applying float layout\n");
+        log_debug("DEBUG: Element has float property, applying float layout");
         layout_float_element(lycon, block);
     }
 
     // Apply CSS clear property after float layout
     if (block->position && block->position->clear != LXB_CSS_VALUE_NONE) {
-        printf("DEBUG: Element has clear property, applying clear layout\n");
+        log_debug("DEBUG: Element has clear property, applying clear layout");
         layout_clear_element(lycon, block);
     }
 
     // flow the block in parent context
-    log_debug("flow block in parent context\n");
+    log_debug("flow block in parent context");
     lycon->block = pa_block;  lycon->font = pa_font;  lycon->line = pa_line;
 
     // Skip normal flow positioning for absolutely positioned elements
     if (block->position && (block->position->position == LXB_CSS_VALUE_ABSOLUTE ||
         block->position->position == LXB_CSS_VALUE_FIXED)) {
-        printf("DEBUG: Skipping normal flow positioning for absolutely positioned element\n");
+        log_debug("DEBUG: Skipping normal flow positioning for absolutely positioned element");
         // Absolutely positioned elements don't participate in normal flow
         // Their position was already set by the positioning code above
-        lycon->prev_view = (View*)block;
-        return;
     }
-    if (display.outer == LXB_CSS_VALUE_INLINE_BLOCK) {
+    else if (display.outer == LXB_CSS_VALUE_INLINE_BLOCK) {
         if (!lycon->line.start_view) lycon->line.start_view = (View*)block;
         if (lycon->line.advance_x + block->width > lycon->line.right) {
             line_break(lycon);
@@ -741,11 +734,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             block->x = lycon->line.advance_x;
         }
         if (block->in_line && block->in_line->vertical_align) {
-            block->y = lycon->block.advance_y + calculate_vertical_align_offset(
+            int offset = calculate_vertical_align_offset(
                 block->in_line->vertical_align, block->height, lycon->block.line_height,
                 lycon->line.max_ascender, block->height);
-            log_debug("vertical-aligned-inline-block: line %d, block %d, adv: %d, y: %d, va:%d, %d",
-                lycon->block.line_height, block->height, lycon->block.advance_y, block->y,
+            block->y = lycon->block.advance_y + offset + (block->bound ? block->bound->margin.top : 0);
+            log_debug("vertical-aligned-inline-block: offset %d, line %d, block %d, adv: %d, y: %d, va:%d, %d",
+                offset, lycon->block.line_height, block->height, lycon->block.advance_y, block->y,
                 block->in_line->vertical_align, LXB_CSS_VALUE_BOTTOM);
         } else {
             block->y = lycon->block.advance_y;
@@ -756,6 +750,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             block->y += block->bound->margin.top;
             lycon->line.advance_x += block->bound->margin.left + block->bound->margin.right;
         }
+        log_debug("inline-block in line: x: %d, y: %d, adv-x: %d, mg-left: %d, mg-top: %d",
+            block->x, block->y, lycon->line.advance_x, block->bound ? block->bound->margin.left : 0, block->bound ? block->bound->margin.top : 0);
         // update baseline
         if (block->in_line && block->in_line->vertical_align != LXB_CSS_VALUE_BASELINE) {
             int block_flow_height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
@@ -772,8 +768,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             }
         }
         // line got content
-        lycon->line.is_line_start = false;
-        lycon->line.has_space = false;  lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
+        lycon->line.reset_space();
     }
     else { // normal block
         if (block->bound) {
@@ -786,7 +781,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                     collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
                     block->y -= collapse;
                     prev_block->bound->margin.bottom = 0;
-                    log_debug("collapsed margin %d between sibling blocks\n", collapse);
+                    log_debug("collapsed margin %d between sibling blocks", collapse);
                 }
             }
             lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom - collapse;
@@ -799,5 +794,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         assert(lycon->line.is_line_start);
     }
     lycon->prev_view = (View*)block;
-    log_debug("block view: %d, end block>>\n", block->type);
+    log_debug("block view: %d, end block>>", block->type);
+    log_leave();
 }

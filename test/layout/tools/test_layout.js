@@ -400,13 +400,13 @@ class LayoutTester {
 
                 if (this.verbose) {
                     console.log(`${getIndent()}🔄 Relative positioning for ${radiantNode.tag}:`);
-                    console.log(`${getIndent()}  ^ Radiant: (${radiantLayout.x}, ${radiantLayout.y}, ${radiantLayout.width}, ${radiantLayout.height}) vs Browser: (${browserLayout.x}, ${browserLayout.y}, ${browserLayout.width}, ${browserLayout.height})`);
+                    console.log(`${getIndent()}  ^ Radiant: (${radiantLayout.x}, ${radiantLayout.y}, ${radiantLayout.width}, ${radiantLayout.height}) vs. Browser: (${browserLayout.x}, ${browserLayout.y}, ${browserLayout.width}, ${browserLayout.height})`);
                 }
             }
             else {
                 if (this.verbose) {
                     console.log(`${getIndent()}🔄 Root ${radiantNode.tag}:`);
-                    console.log(`${getIndent()}  ^ Radiant: (${radiantLayout.x}, ${radiantLayout.y}, ${radiantLayout.width}, ${radiantLayout.height}) vs Browser: (${browserLayout.x}, ${browserLayout.y}, ${browserLayout.width}, ${browserLayout.height})`);
+                    console.log(`${getIndent()}  ^ Radiant: (${radiantLayout.x}, ${radiantLayout.y}, ${radiantLayout.width}, ${radiantLayout.height}) vs. Browser: (${browserLayout.x}, ${browserLayout.y}, ${browserLayout.width}, ${browserLayout.height})`);
                 }
             }
 
@@ -900,8 +900,7 @@ class LayoutTester {
 
                     if (this.verbose) {
                         console.log(`${getIndent()}❌ Text FAILED tolerance: "${this.cleanTextForDisplay(radiantChild.node.text)}" - ${maxDiff.toFixed(2)}px > ${textTolerance}px`);
-                        console.log(`${getIndent()}   Radiant: (${radiantChild.node.layout.x}, ${radiantChild.node.layout.y}, ${radiantChild.node.layout.width}, ${radiantChild.node.layout.height})`);
-                        console.log(`${getIndent()}   Browser: (${browserChild.node.layout.x}, ${browserChild.node.layout.y}, ${browserChild.node.layout.width}, ${browserChild.node.layout.height})`);
+                        console.log(`${getIndent()}   Radiant: (${radiantChild.node.layout.x}, ${radiantChild.node.layout.y}, ${radiantChild.node.layout.width}, ${radiantChild.node.layout.height}) vs. Browser: (${browserChild.node.layout.x}, ${browserChild.node.layout.y}, ${browserChild.node.layout.width}, ${browserChild.node.layout.height})`);
 
                         // Show detailed differences inline
                         detailedDiffs.forEach(propDiff => {
