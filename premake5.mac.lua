@@ -508,6 +508,7 @@ project "lambda"
         "lambda/js/build_js_ast.cpp",
         "lambda/js/transpile_js.cpp",
         "lambda/js/js_runtime.cpp",
+        "lambda/js/js_print.cpp",
         "lambda/input/css_tokenizer.c",
         "lambda/input/css_properties.c",
         "lambda/input/css_parser.c",

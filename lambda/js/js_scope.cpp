@@ -253,11 +253,18 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     TSNode root = ts_tree_root_node(tp->tree);
     
     // Build JavaScript AST
+    log_debug("Building JavaScript AST...");
     JsAstNode* js_ast = build_js_ast(tp, root);
     if (!js_ast) {
         log_error("Failed to build JavaScript AST");
         return (Item){.item = ITEM_ERROR};
     }
+    
+    // Print JavaScript AST for debugging
+    log_debug("JavaScript AST built successfully. Printing AST:");
+    printf("=== JavaScript AST ===\n");
+    print_js_ast_node(js_ast, 0);
+    printf("=== End JavaScript AST ===\n");
     
     // Generate C code
     transpile_js_ast_root(tp, js_ast);
@@ -272,16 +279,18 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     
     // Get generated C code
     char* c_code = tp->code_buf->str;
-    log_debug("Generated JavaScript C code:\n%s", c_code);
+    log_debug("Generated JavaScript C code (length: %zu):", strlen(c_code));
     
-    // Debug: Print C code length and full content
-    printf("DEBUG: Generated C code length: %zu\n", strlen(c_code));
+    // Print generated C code for debugging
+    printf("=== Generated C Code ===\n");
     if (strlen(c_code) > 0) {
-        printf("DEBUG: Full generated C code:\n%s\n", c_code);
+        printf("%s\n", c_code);
     } else {
-        printf("DEBUG: Generated C code is empty!\n");
+        printf("(empty)\n");
+        log_error("Generated C code is empty!");
         return (Item){.item = ITEM_NULL};
     }
+    printf("=== End Generated C Code ===\n");
     
     // For now, let's implement a simple direct execution approach
     // TODO: Implement proper MIR compilation of C code
