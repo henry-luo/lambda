@@ -803,26 +803,36 @@ void transpile_js_class_declaration(JsTranspiler* tp, JsClassNode* class_node) {
 
 // Transpile JavaScript variable declaration
 void transpile_js_variable_declaration(JsTranspiler* tp, JsVariableDeclarationNode* var_node) {
+    printf("DEBUG: transpile_js_variable_declaration called\n");
     JsAstNode* declarator = var_node->declarations;
     
+    printf("DEBUG: Variable declaration has declarators: %s\n", declarator ? "YES" : "NO");
+    
     while (declarator) {
+        printf("DEBUG: Processing declarator with node_type: %d\n", declarator->node_type);
+        
         if (declarator->node_type == JS_AST_NODE_VARIABLE_DECLARATOR) {
             JsVariableDeclaratorNode* decl = (JsVariableDeclaratorNode*)declarator;
             
+            printf("DEBUG: Generating variable declaration\n");
             strbuf_append_str(tp->code_buf, "\n  Item ");
             transpile_js_identifier(tp, (JsIdentifierNode*)decl->id);
             
             if (decl->init) {
+                printf("DEBUG: Variable has initializer\n");
                 strbuf_append_str(tp->code_buf, " = ");
                 transpile_js_box_item(tp, decl->init);
             } else {
+                printf("DEBUG: Variable has no initializer\n");
                 strbuf_append_str(tp->code_buf, " = ITEM_NULL"); // undefined
             }
             
             strbuf_append_char(tp->code_buf, ';');
+            printf("DEBUG: Variable declaration generated\n");
         }
         declarator = declarator->next;
     }
+    printf("DEBUG: transpile_js_variable_declaration completed\n");
 }
 
 // Transpile JavaScript expression
@@ -900,6 +910,7 @@ void transpile_js_statement(JsTranspiler* tp, JsAstNode* stmt) {
     
     switch (stmt->node_type) {
         case JS_AST_NODE_VARIABLE_DECLARATION:
+            printf("DEBUG: Handling JS_AST_NODE_VARIABLE_DECLARATION\n");
             transpile_js_variable_declaration(tp, (JsVariableDeclarationNode*)stmt);
             break;
         case JS_AST_NODE_FUNCTION_DECLARATION:
@@ -958,7 +969,7 @@ void transpile_js_statement(JsTranspiler* tp, JsAstNode* stmt) {
             break;
         }
         default:
-            printf("DEBUG: Unhandled statement type: %d\n", stmt->node_type);
+            printf("DEBUG: Unhandled statement type: %d (JS_AST_NODE_VARIABLE_DECLARATION=%d)\n", stmt->node_type, JS_AST_NODE_VARIABLE_DECLARATION);
             log_error("Unsupported JavaScript statement type: %d", stmt->node_type);
     }
 }
@@ -982,21 +993,37 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
     strbuf_append_str(tp->code_buf, "  // Initialize JavaScript global object\n");
     strbuf_append_str(tp->code_buf, "  js_init_global_object();\n\n");
     
-    strbuf_append_str(tp->code_buf, "  Item result = ");
-    
-    // Transpile all statements
+    // Transpile all statements first
     JsAstNode* stmt = program->body;
+    JsAstNode* last_expr_stmt = NULL;
     bool has_content = false;
+    
     printf("DEBUG: Program has body: %s\n", stmt ? "YES" : "NO");
     while (stmt) {
         printf("DEBUG: Processing statement node_type: %d\n", stmt->node_type);
-        transpile_js_statement(tp, stmt);
+        
+        if (stmt->node_type == JS_AST_NODE_EXPRESSION_STATEMENT) {
+            // Save the last expression statement for the result
+            last_expr_stmt = stmt;
+        } else {
+            // Generate other statements (like variable declarations)
+            transpile_js_statement(tp, stmt);
+        }
+        
         has_content = true;
         stmt = stmt->next;
     }
     printf("DEBUG: Total statements processed, has_content: %s\n", has_content ? "YES" : "NO");
     
-    if (!has_content) {
+    // Generate the final result assignment
+    strbuf_append_str(tp->code_buf, "\n  Item result = ");
+    
+    if (last_expr_stmt) {
+        printf("DEBUG: Generating final result from last expression statement\n");
+        transpile_js_statement(tp, last_expr_stmt);
+    } else if (!has_content) {
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+    } else {
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
     }
     

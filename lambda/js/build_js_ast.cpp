@@ -596,11 +596,14 @@ JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node) {
 
 // Build JavaScript variable declaration node
 JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
+    printf("DEBUG: build_js_variable_declaration called\n");
     JsVariableDeclarationNode* var_decl = (JsVariableDeclarationNode*)alloc_js_ast_node(tp, JS_AST_NODE_VARIABLE_DECLARATION, var_node, sizeof(JsVariableDeclarationNode));
     
     // Determine variable kind (var, let, const)
     TSNode first_child = ts_node_child(var_node, 0);
     StrView kind_source = js_node_source(tp, first_child);
+    
+    printf("DEBUG: Variable kind: %.*s\n", (int)kind_source.length, kind_source.str);
     
     if (strncmp(kind_source.str, "var", 3) == 0) {
         var_decl->kind = JS_VAR_VAR;
@@ -612,14 +615,21 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
     
     // Build declarators
     uint32_t child_count = ts_node_named_child_count(var_node);
+    printf("DEBUG: Variable declaration has %u named children\n", child_count);
     JsAstNode* prev_declarator = NULL;
     
     for (uint32_t i = 0; i < child_count; i++) {
+        printf("DEBUG: Processing child %u\n", i);
         TSNode declarator_node = ts_node_named_child(var_node, i);
-        TSSymbol symbol = ts_node_symbol(declarator_node);
+        printf("DEBUG: Got declarator node\n");
+        const char* declarator_type = ts_node_type(declarator_node);
+        printf("DEBUG: Declarator type: %s\n", declarator_type);
         
-        if (symbol == sym_variable_declarator) {
+        if (strcmp(declarator_type, "variable_declarator") == 0) {
+            printf("DEBUG: Found variable_declarator\n");
+            printf("DEBUG: About to allocate declarator node\n");
             JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)alloc_js_ast_node(tp, JS_AST_NODE_VARIABLE_DECLARATOR, declarator_node, sizeof(JsVariableDeclaratorNode));
+            printf("DEBUG: Allocated declarator node successfully\n");
             
             // Get identifier
             TSNode id_node = ts_node_child_by_field_id(declarator_node, JS_FIELD_NAME);

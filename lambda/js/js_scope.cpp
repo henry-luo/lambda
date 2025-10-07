@@ -274,10 +274,10 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     char* c_code = tp->code_buf->str;
     log_debug("Generated JavaScript C code:\n%s", c_code);
     
-    // Debug: Print C code length and first part
+    // Debug: Print C code length and full content
     printf("DEBUG: Generated C code length: %zu\n", strlen(c_code));
     if (strlen(c_code) > 0) {
-        printf("DEBUG: First 200 chars of C code: %.200s\n", c_code);
+        printf("DEBUG: Full generated C code:\n%s\n", c_code);
     } else {
         printf("DEBUG: Generated C code is empty!\n");
         return (Item){.item = ITEM_NULL};
