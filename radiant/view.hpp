@@ -423,6 +423,7 @@ typedef struct {
     FT_Face face;  // current font face
     float space_width;  // width of a space character of the current font
     int current_font_size;  // font size of current element
+    bool has_kerning;  // whether the font has kerning
 } FontBox;
 
 // rendering context structs

@@ -22,6 +22,7 @@ void line_init(LayoutContext* lycon) {
     lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
     lycon->line.start_view = NULL;
     lycon->line.line_start_font = lycon->font;
+    lycon->line.prev_glyph_index = 0; // reset kerning state
 
     // Phase 6: Apply line box adjustment for floats
     // Use the shared float context from the layout context
@@ -175,7 +176,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     lycon->prev_view = (View*)text;
     text->start_index = str - text_start;
     int font_height = lycon->font.face->size->metrics.height >> 6;
-    text->x = lycon->line.advance_x;  text->height = lycon->block.line_height;
+    text->x = lycon->line.advance_x;
+    text->height = lycon->block.line_height;
     if (lycon->line.vertical_align == LXB_CSS_VALUE_MIDDLE) {
         log_debug("middle-aligned-text: font %d, line %d", font_height, lycon->block.line_height);
         text->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;
@@ -196,11 +198,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     // layout the text glyphs
     do {
         int wd;
-        if (is_space(*str)) {
+        uint32_t codepoint = *str;
+        if (is_space(codepoint)) {
             wd = lycon->font.space_width;
         }
         else {
-            uint32_t codepoint = *str;
             if (codepoint >= 128) { // unicode char
                 int bytes = utf8_to_codepoint(str, &codepoint);
                 if (bytes <= 0) { // invalid utf8 char
@@ -211,6 +213,19 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             else { next_ch = str + 1; }
             FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.face, &lycon->font.style, codepoint);
             wd = glyph ? (glyph->advance.x >> 6) : lycon->font.space_width;
+        }
+        // handle kerning
+        if (lycon->font.has_kerning) {
+            FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.face, codepoint);
+            if (lycon->line.prev_glyph_index) {
+                FT_Vector kerning;
+                FT_Get_Kerning(lycon->font.face, lycon->line.prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
+                if (kerning.x) {
+                    text->x += (kerning.x >> 6);
+                    log_debug("apply kerning: %d to char '%c'", kerning.x >> 6, *str);
+                }
+            }
+            lycon->line.prev_glyph_index = glyph_index;
         }
         // printf("char: %c, width: %d\n", *str, wd);
         text->width += wd;
