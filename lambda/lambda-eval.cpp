@@ -264,6 +264,58 @@ double it2d(Item itm) {
     return 0;
 }
 
+bool it2b(Item itm) {
+    if (itm.type_id == LMD_TYPE_BOOL) {
+        return itm.bool_val != 0;
+    }
+    // Convert other types to boolean following JavaScript rules
+    else if (itm.type_id == LMD_TYPE_NULL) {
+        return false;
+    }
+    else if (itm.type_id == LMD_TYPE_INT) {
+        return itm.int_val != 0;
+    }
+    else if (itm.type_id == LMD_TYPE_FLOAT) {
+        double d = *(double*)itm.pointer;
+        return !isnan(d) && d != 0.0;
+    }
+    else if (itm.type_id == LMD_TYPE_STRING) {
+        String* str = (String*)itm.pointer;
+        return str && str->len > 0;
+    }
+    // Objects are truthy
+    return true;
+}
+
+int it2i(Item itm) {
+    if (itm.type_id == LMD_TYPE_INT) {
+        return itm.int_val;
+    }
+    else if (itm.type_id == LMD_TYPE_INT64) {
+        return (int)*(int64_t*)itm.pointer;
+    }
+    else if (itm.type_id == LMD_TYPE_FLOAT) {
+        return (int)*(double*)itm.pointer;
+    }
+    else if (itm.type_id == LMD_TYPE_BOOL) {
+        return itm.bool_val ? 1 : 0;
+    }
+    return 0;
+}
+
+String* it2s(Item itm) {
+    if (itm.type_id == LMD_TYPE_STRING) {
+        return (String*)itm.pointer;
+    }
+    // For other types, we'd need to convert to string
+    // For now, return a default string
+    static String* null_str = nullptr;
+    if (!null_str) {
+        null_str = heap_strcpy("null", 4);
+    }
+    return null_str;
+}
+
 Function* to_fn(fn_ptr ptr) {
     log_debug("create fn %p", ptr);
     Function *fn = (Function*)calloc(1, sizeof(Function));

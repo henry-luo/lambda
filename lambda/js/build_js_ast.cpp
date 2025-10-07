@@ -10,9 +10,62 @@ extern "C" {
     const TSLanguage *tree_sitter_javascript(void);
 }
 
+// Temporary stubs for missing Tree-sitter symbols until library is integrated
+#ifndef sym_number
+#define sym_number 1
+#define sym_undefined 2
+#define sym_subscript_expression 3
+#define sym_arrow_function 4
+#define sym_statement_block 5
+#define sym_variable_declarator 6
+#define sym_binary_expression 7
+#define sym_unary_expression 8
+#define sym_call_expression 9
+#define sym_member_expression 10
+#define sym_object 11
+#define sym_function_expression 12
+#define sym_ternary_expression 13
+#define sym_template_string 14
+#define sym_variable_declaration 15
+#define sym_lexical_declaration 16
+#define sym_function_declaration 17
+#define sym_identifier 18
+#define sym_if_statement 19
+#define sym_while_statement 20
+#define sym_for_statement 21
+#define sym_return_statement 22
+#define sym_break_statement 23
+#define sym_continue_statement 24
+#define sym_try_statement 25
+#define sym_throw_statement 26
+#define sym_class_declaration 27
+#define sym_expression_statement 28
+#define sym_template_chars 29
+#define sym_program 30
+#define field_arguments 33
+#define field_property 34
+#define field_value 35
+#define field_parameters 36
+#define field_condition 37
+#define field_consequence 38
+#define field_alternative 39
+#define field_key 40
+#endif
+
 // Utility function to get Tree-sitter node source
 #define js_node_source(transpiler, node) {.str = (transpiler)->source + ts_node_start_byte(node), \
      .length = ts_node_end_byte(node) - ts_node_start_byte(node) }
+
+// Forward declarations
+JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node);
+JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node);
+JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node);
+JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node);
+JsAstNode* build_js_try_statement(JsTranspiler* tp, TSNode try_node);
+JsAstNode* build_js_throw_statement(JsTranspiler* tp, TSNode throw_node);
+JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node);
+JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node);
+JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node);
 
 // Allocate JavaScript AST node
 JsAstNode* alloc_js_ast_node(JsTranspiler* tp, JsAstNodeType node_type, TSNode node, size_t size) {
@@ -88,7 +141,7 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
     } else if (symbol == JS_SYM_STRING) {
         literal->literal_type = JS_LITERAL_STRING;
         // Remove quotes and handle escape sequences
-        String* str_val = name_pool_create_string(tp->name_pool, source.str + 1, source.length - 2);
+        String* str_val = name_pool_create_len(tp->name_pool, source.str + 1, source.length - 2);
         literal->value.string_value = str_val;
         literal->base.type = &TYPE_STRING;
     } else if (symbol == JS_SYM_TRUE) {
@@ -911,8 +964,12 @@ JsAstNode* build_js_class_body(JsTranspiler* tp, TSNode body_node) {
 JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
     JsMethodDefinitionNode* method = (JsMethodDefinitionNode*)alloc_js_ast_node(tp, JS_AST_NODE_METHOD_DEFINITION, method_node, sizeof(JsMethodDefinitionNode));
     
+    // Initialize method properties
+    method->computed = false;
+    method->static_method = false;
+    
     // Get method key
-    TSNode key_node = ts_node_child_by_field_id(method_node, JS_FIELD_NAME);
+    TSNode key_node = ts_node_child_by_field_id(method_node, field_key);
     if (!ts_node_is_null(key_node)) {
         method->key = build_js_expression(tp, key_node);
     }
@@ -923,12 +980,7 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
         method->value = build_js_function(tp, value_node);
     }
     
-    // Determine method kind
-    method->kind = JS_METHOD_METHOD; // Default
-    method->computed = false;
-    method->static_method = false;
-    
-    // TODO: Check for constructor, getter, setter, static modifiers
+    // TODO: Parse method modifiers (constructor, getter, setter, static)
     
     method->base.type = &TYPE_FUNC;
     return (JsAstNode*)method;
@@ -938,7 +990,7 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root) {
     TSSymbol symbol = ts_node_symbol(root);
     
-    if (symbol == JS_SYM_PROGRAM) {
+    if (symbol == sym_program) {
         return build_js_program(tp, root);
     } else {
         log_error("Expected program node, got: %d", symbol);

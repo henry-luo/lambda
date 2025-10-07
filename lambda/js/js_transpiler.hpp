@@ -136,12 +136,12 @@ void js_transpiler_destroy(JsTranspiler* tp);
 bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length);
 Item js_transpiler_compile(JsTranspiler* tp);
 
-// Main entry point
-extern "C" Item transpile_js_to_c(Runtime* runtime, const char* js_source, const char* filename);
-
 #ifdef __cplusplus
 }
 #endif
+
+// Main entry point (C++ linkage)
+Item transpile_js_to_c(Runtime* runtime, const char* js_source, const char* filename);
 
 // JavaScript runtime function declarations (js_runtime.cpp)
 #ifdef __cplusplus

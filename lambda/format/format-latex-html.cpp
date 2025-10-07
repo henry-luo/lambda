@@ -265,7 +265,7 @@ static void process_latex_element(StringBuf* html_buf, Item item, Pool* pool, in
     // CRITICAL DEBUG: Check for invalid type values
     if (type > LMD_TYPE_ERROR) {
         printf("ERROR: Invalid type %d detected in process_latex_element! Max valid type is %d\n", type, LMD_TYPE_ERROR);
-        printf("ERROR: Item details - item.item=0x%llx, item.pointer=%p\n", (unsigned long long)item.item, item.pointer);
+        log_error("Item details - item.item=0x%llx, item.pointer=%llu", (unsigned long long)item.item, (unsigned long long)item.pointer);
         printf("ERROR: Stack trace: depth=%d\n", depth);
         return;
     }
@@ -534,7 +534,7 @@ static void process_element_content(StringBuf* html_buf, Element* elem, Pool* po
             // CRITICAL DEBUG: Check for invalid type values
             if (item_type > LMD_TYPE_ERROR) {
                 printf("ERROR: Invalid type %d detected in process_element_content! Max valid type is %d\n", item_type, LMD_TYPE_ERROR);
-                printf("ERROR: Item details - item.item=0x%llx, item.pointer=%p\n", (unsigned long long)content_item.item, content_item.pointer);
+                log_error("Item details - item.item=0x%llx, item.pointer=%llu", (unsigned long long)content_item.item, (unsigned long long)content_item.pointer);
                 printf("ERROR: Element index: %d, elem->length: %lld\n", i, elem->length);
                 printf("ERROR: Raw memory dump of Item:\n");
                 unsigned char* bytes = (unsigned char*)&content_item;

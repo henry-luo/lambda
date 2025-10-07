@@ -298,7 +298,7 @@ define run_make_with_error_summary
 endef
 
 # Combined tree-sitter libraries target
-tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB)
+tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
 
 # Build tree-sitter without Unicode/ICU dependencies (minimal build)
 # Uses the amalgamated lib.c file approach recommended by ChatGPT
@@ -646,6 +646,7 @@ clean-test:
 	@rm -f test/test_radiant_text_flow_gtest.exe 2>/dev/null || true
 	@rm -f test/test_radiant_font_face_gtest.exe 2>/dev/null || true
 	@rm -f test/test_radiant_layout_gtest.exe 2>/dev/null || true
+	@rm -f test/test_js_gtest.exe 2>/dev/null || true
 	@rm -f test/test_flex_core_validation.exe 2>/dev/null || true
 	@rm -f test/test_flex_simple.exe 2>/dev/null || true
 	@rm -f test/test_flex_minimal.exe 2>/dev/null || true
