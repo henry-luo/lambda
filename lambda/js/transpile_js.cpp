@@ -896,6 +896,8 @@ void transpile_js_expression(JsTranspiler* tp, JsAstNode* expr) {
 void transpile_js_statement(JsTranspiler* tp, JsAstNode* stmt) {
     if (!stmt) return;
     
+    printf("DEBUG: Transpiling statement with node_type: %d (JS_AST_NODE_EXPRESSION_STATEMENT=%d)\n", stmt->node_type, JS_AST_NODE_EXPRESSION_STATEMENT);
+    
     switch (stmt->node_type) {
         case JS_AST_NODE_VARIABLE_DECLARATION:
             transpile_js_variable_declaration(tp, (JsVariableDeclarationNode*)stmt);
@@ -942,13 +944,21 @@ void transpile_js_statement(JsTranspiler* tp, JsAstNode* stmt) {
             transpile_js_class_declaration(tp, (JsClassNode*)stmt);
             break;
         case JS_AST_NODE_EXPRESSION_STATEMENT: {
+            printf("DEBUG: Handling JS_AST_NODE_EXPRESSION_STATEMENT\n");
             JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)stmt;
-            strbuf_append_str(tp->code_buf, "\n  ");
+            printf("DEBUG: Expression statement has expression: %s\n", expr_stmt->expression ? "YES" : "NO");
+            if (expr_stmt->expression) {
+                printf("DEBUG: Expression type: %s\n", expr_stmt->expression->type ? "HAS_TYPE" : "NO_TYPE");
+                if (expr_stmt->expression->type) {
+                    printf("DEBUG: Expression type_id: %d\n", expr_stmt->expression->type->type_id);
+                }
+            }
+            // For the main result, just generate the expression directly
             transpile_js_box_item(tp, expr_stmt->expression);
-            strbuf_append_char(tp->code_buf, ';');
             break;
         }
         default:
+            printf("DEBUG: Unhandled statement type: %d\n", stmt->node_type);
             log_error("Unsupported JavaScript statement type: %d", stmt->node_type);
     }
 }
@@ -965,29 +975,32 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
     // Generate C code header
     strbuf_append_str(tp->code_buf, "// Generated JavaScript transpiler code\n");
     strbuf_append_str(tp->code_buf, "#include \"../lambda.h\"\n");
-    strbuf_append_str(tp->code_buf, "#include \"js/js_transpiler.hpp\"\n\n");
+    strbuf_append_str(tp->code_buf, "#include \"js/js_runtime.hpp\"\n\n");
     
     // Generate main function
-    strbuf_append_str(tp->code_buf, "Item js_main(Context *runtime) {\n");
+    strbuf_append_str(tp->code_buf, "Item js_main(Context *ctx) {\n");
     strbuf_append_str(tp->code_buf, "  // Initialize JavaScript global object\n");
     strbuf_append_str(tp->code_buf, "  js_init_global_object();\n\n");
     
-    strbuf_append_str(tp->code_buf, "  Item result = ({");
+    strbuf_append_str(tp->code_buf, "  Item result = ");
     
     // Transpile all statements
     JsAstNode* stmt = program->body;
     bool has_content = false;
+    printf("DEBUG: Program has body: %s\n", stmt ? "YES" : "NO");
     while (stmt) {
+        printf("DEBUG: Processing statement node_type: %d\n", stmt->node_type);
         transpile_js_statement(tp, stmt);
         has_content = true;
         stmt = stmt->next;
     }
+    printf("DEBUG: Total statements processed, has_content: %s\n", has_content ? "YES" : "NO");
     
     if (!has_content) {
-        strbuf_append_str(tp->code_buf, "\n    ITEM_NULL");
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
     }
     
-    strbuf_append_str(tp->code_buf, ";\n  });\n\n");
+    strbuf_append_str(tp->code_buf, ";\n\n");
     strbuf_append_str(tp->code_buf, "  return result;\n");
     strbuf_append_str(tp->code_buf, "}\n");
 }

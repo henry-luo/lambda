@@ -128,34 +128,34 @@ JsOperator js_operator_from_string(const char* op_str, size_t len) {
 
 // Build JavaScript literal node
 JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
-    TSSymbol symbol = ts_node_symbol(literal_node);
+    const char* node_type = ts_node_type(literal_node);
     JsLiteralNode* literal = (JsLiteralNode*)alloc_js_ast_node(tp, JS_AST_NODE_LITERAL, literal_node, sizeof(JsLiteralNode));
     
     StrView source = js_node_source(tp, literal_node);
     
-    if (symbol == JS_SYM_NUMBER) {
+    if (strcmp(node_type, "number") == 0) {
         literal->literal_type = JS_LITERAL_NUMBER;
         char* endptr;
         literal->value.number_value = strtod(source.str, &endptr);
         literal->base.type = &TYPE_FLOAT; // All JS numbers are float64
-    } else if (symbol == JS_SYM_STRING) {
+    } else if (strcmp(node_type, "string") == 0) {
         literal->literal_type = JS_LITERAL_STRING;
         // Remove quotes and handle escape sequences
         String* str_val = name_pool_create_len(tp->name_pool, source.str + 1, source.length - 2);
         literal->value.string_value = str_val;
         literal->base.type = &TYPE_STRING;
-    } else if (symbol == JS_SYM_TRUE) {
+    } else if (strcmp(node_type, "true") == 0) {
         literal->literal_type = JS_LITERAL_BOOLEAN;
         literal->value.boolean_value = true;
         literal->base.type = &TYPE_BOOL;
-    } else if (symbol == JS_SYM_FALSE) {
+    } else if (strcmp(node_type, "false") == 0) {
         literal->literal_type = JS_LITERAL_BOOLEAN;
         literal->value.boolean_value = false;
         literal->base.type = &TYPE_BOOL;
-    } else if (symbol == JS_SYM_NULL) {
+    } else if (strcmp(node_type, "null") == 0) {
         literal->literal_type = JS_LITERAL_NULL;
         literal->base.type = &TYPE_NULL;
-    } else if (symbol == JS_SYM_UNDEFINED) {
+    } else if (strcmp(node_type, "undefined") == 0) {
         literal->literal_type = JS_LITERAL_UNDEFINED;
         literal->base.type = &TYPE_NULL; // Map undefined to null in Lambda
     }
@@ -654,123 +654,113 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
 
 // Build JavaScript expression from Tree-sitter node
 JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
-    TSSymbol symbol = ts_node_symbol(expr_node);
+    const char* node_type = ts_node_type(expr_node);
     
-    switch (symbol) {
-        case JS_SYM_IDENTIFIER:
-            return build_js_identifier(tp, expr_node);
-        case JS_SYM_NUMBER:
-        case JS_SYM_STRING:
-        case JS_SYM_TRUE:
-        case JS_SYM_FALSE:
-        case JS_SYM_NULL:
-        case JS_SYM_UNDEFINED:
-            return build_js_literal(tp, expr_node);
-        case JS_SYM_BINARY_EXPRESSION:
-            return build_js_binary_expression(tp, expr_node);
-        case JS_SYM_UNARY_EXPRESSION:
-            return build_js_unary_expression(tp, expr_node);
-        case JS_SYM_CALL_EXPRESSION:
-            return build_js_call_expression(tp, expr_node);
-        case JS_SYM_MEMBER_EXPRESSION:
-        case JS_SYM_SUBSCRIPT_EXPRESSION:
-            return build_js_member_expression(tp, expr_node);
-        case JS_SYM_ARRAY_EXPRESSION:
-            return build_js_array_expression(tp, expr_node);
-        case JS_SYM_OBJECT_EXPRESSION:
-            return build_js_object_expression(tp, expr_node);
-        case JS_SYM_FUNCTION_EXPRESSION:
-        case JS_SYM_ARROW_FUNCTION:
-            return build_js_function(tp, expr_node);
-        case JS_SYM_CONDITIONAL_EXPRESSION: {
-            JsConditionalNode* cond = (JsConditionalNode*)alloc_js_ast_node(tp, JS_AST_NODE_CONDITIONAL_EXPRESSION, expr_node, sizeof(JsConditionalNode));
-            
-            // Get test condition
-            TSNode test_node = ts_node_child_by_field_name(expr_node, "condition", 9);
-            if (!ts_node_is_null(test_node)) {
-                cond->test = build_js_expression(tp, test_node);
-            }
-            
-            // Get consequent (true branch)
-            TSNode consequent_node = ts_node_child_by_field_name(expr_node, "consequence", 11);
-            if (!ts_node_is_null(consequent_node)) {
-                cond->consequent = build_js_expression(tp, consequent_node);
-            }
-            
-            // Get alternate (false branch)
-            TSNode alternate_node = ts_node_child_by_field_name(expr_node, "alternative", 11);
-            if (!ts_node_is_null(alternate_node)) {
-                cond->alternate = build_js_expression(tp, alternate_node);
-            }
-            
-            // Type is union of consequent and alternate types
-            if (cond->consequent && cond->alternate) {
-                if (cond->consequent->type->type_id == cond->alternate->type->type_id) {
-                    cond->base.type = cond->consequent->type;
-                } else {
-                    cond->base.type = &TYPE_ANY;
-                }
+    if (strcmp(node_type, "identifier") == 0) {
+        return build_js_identifier(tp, expr_node);
+    } else if (strcmp(node_type, "number") == 0 || strcmp(node_type, "string") == 0 || 
+               strcmp(node_type, "true") == 0 || strcmp(node_type, "false") == 0 ||
+               strcmp(node_type, "null") == 0 || strcmp(node_type, "undefined") == 0) {
+        return build_js_literal(tp, expr_node);
+    } else if (strcmp(node_type, "binary_expression") == 0) {
+        return build_js_binary_expression(tp, expr_node);
+    } else if (strcmp(node_type, "unary_expression") == 0) {
+        return build_js_unary_expression(tp, expr_node);
+    } else if (strcmp(node_type, "call_expression") == 0) {
+        return build_js_call_expression(tp, expr_node);
+    } else if (strcmp(node_type, "member_expression") == 0 || strcmp(node_type, "subscript_expression") == 0) {
+        return build_js_member_expression(tp, expr_node);
+    } else if (strcmp(node_type, "array") == 0) {
+        return build_js_array_expression(tp, expr_node);
+    } else if (strcmp(node_type, "object") == 0) {
+        return build_js_object_expression(tp, expr_node);
+    } else if (strcmp(node_type, "function_expression") == 0 || strcmp(node_type, "arrow_function") == 0) {
+        return build_js_function(tp, expr_node);
+    } else if (strcmp(node_type, "ternary_expression") == 0) {
+        JsConditionalNode* cond = (JsConditionalNode*)alloc_js_ast_node(tp, JS_AST_NODE_CONDITIONAL_EXPRESSION, expr_node, sizeof(JsConditionalNode));
+        
+        // Get test condition
+        TSNode test_node = ts_node_child_by_field_name(expr_node, "condition", 9);
+        if (!ts_node_is_null(test_node)) {
+            cond->test = build_js_expression(tp, test_node);
+        }
+        
+        // Get consequent (true branch)
+        TSNode consequent_node = ts_node_child_by_field_name(expr_node, "consequence", 11);
+        if (!ts_node_is_null(consequent_node)) {
+            cond->consequent = build_js_expression(tp, consequent_node);
+        }
+        
+        // Get alternate (false branch)
+        TSNode alternate_node = ts_node_child_by_field_name(expr_node, "alternative", 11);
+        if (!ts_node_is_null(alternate_node)) {
+            cond->alternate = build_js_expression(tp, alternate_node);
+        }
+        
+        // Type is union of consequent and alternate types
+        if (cond->consequent && cond->alternate) {
+            if (cond->consequent->type->type_id == cond->alternate->type->type_id) {
+                cond->base.type = cond->consequent->type;
             } else {
                 cond->base.type = &TYPE_ANY;
             }
-            
-            return (JsAstNode*)cond;
+        } else {
+            cond->base.type = &TYPE_ANY;
         }
-        case sym_template_string: {
-            return build_js_template_literal(tp, expr_node);
-        }
-        default:
-            log_error("Unsupported JavaScript expression type: %d", symbol);
-            return NULL;
+        
+        return (JsAstNode*)cond;
+    } else if (strcmp(node_type, "template_string") == 0) {
+        return build_js_template_literal(tp, expr_node);
+    } else {
+        log_error("Unsupported JavaScript expression type: %s", node_type);
+        return NULL;
     }
 }
 
 // Build JavaScript statement from Tree-sitter node
 JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
-    TSSymbol symbol = ts_node_symbol(stmt_node);
+    const char* node_type = ts_node_type(stmt_node);
     
-    switch (symbol) {
-        case JS_SYM_VARIABLE_DECLARATION:
-        case JS_SYM_LEXICAL_DECLARATION:
-            return build_js_variable_declaration(tp, stmt_node);
-        case JS_SYM_FUNCTION_DECLARATION:
-            return build_js_function(tp, stmt_node);
-        case JS_SYM_IF_STATEMENT:
-            return build_js_if_statement(tp, stmt_node);
-        case JS_SYM_WHILE_STATEMENT:
-            return build_js_while_statement(tp, stmt_node);
-        case JS_SYM_FOR_STATEMENT:
-            return build_js_for_statement(tp, stmt_node);
-        case JS_SYM_RETURN_STATEMENT:
-            return build_js_return_statement(tp, stmt_node);
-        case JS_SYM_BLOCK_STATEMENT:
-            return build_js_block_statement(tp, stmt_node);
-        case JS_SYM_BREAK_STATEMENT: {
-            JsAstNode* break_stmt = alloc_js_ast_node(tp, JS_AST_NODE_BREAK_STATEMENT, stmt_node, sizeof(JsAstNode));
-            break_stmt->type = &TYPE_NULL;
-            return break_stmt;
-        }
-        case JS_SYM_CONTINUE_STATEMENT: {
-            JsAstNode* continue_stmt = alloc_js_ast_node(tp, JS_AST_NODE_CONTINUE_STATEMENT, stmt_node, sizeof(JsAstNode));
-            continue_stmt->type = &TYPE_NULL;
-            return continue_stmt;
-        }
-        case sym_try_statement:
-            return build_js_try_statement(tp, stmt_node);
-        case sym_throw_statement:
-            return build_js_throw_statement(tp, stmt_node);
-        case sym_class_declaration:
-            return build_js_class_declaration(tp, stmt_node);
-        case JS_SYM_EXPRESSION_STATEMENT: {
-            JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)alloc_js_ast_node(tp, JS_AST_NODE_EXPRESSION_STATEMENT, stmt_node, sizeof(JsExpressionStatementNode));
-            TSNode expr_node = ts_node_named_child(stmt_node, 0);
-            expr_stmt->expression = build_js_expression(tp, expr_node);
-            expr_stmt->base.type = expr_stmt->expression->type;
-            return (JsAstNode*)expr_stmt;
-        }
-        default:
-            log_error("Unsupported JavaScript statement type: %d", symbol);
-            return NULL;
+    if (strcmp(node_type, "variable_declaration") == 0 || strcmp(node_type, "lexical_declaration") == 0) {
+        return build_js_variable_declaration(tp, stmt_node);
+    } else if (strcmp(node_type, "function_declaration") == 0) {
+        return build_js_function(tp, stmt_node);
+    } else if (strcmp(node_type, "if_statement") == 0) {
+        return build_js_if_statement(tp, stmt_node);
+    } else if (strcmp(node_type, "while_statement") == 0) {
+        return build_js_while_statement(tp, stmt_node);
+    } else if (strcmp(node_type, "for_statement") == 0) {
+        return build_js_for_statement(tp, stmt_node);
+    } else if (strcmp(node_type, "return_statement") == 0) {
+        return build_js_return_statement(tp, stmt_node);
+    } else if (strcmp(node_type, "statement_block") == 0) {
+        return build_js_block_statement(tp, stmt_node);
+    } else if (strcmp(node_type, "break_statement") == 0) {
+        JsAstNode* break_stmt = alloc_js_ast_node(tp, JS_AST_NODE_BREAK_STATEMENT, stmt_node, sizeof(JsAstNode));
+        break_stmt->type = &TYPE_NULL;
+        return break_stmt;
+    } else if (strcmp(node_type, "continue_statement") == 0) {
+        JsAstNode* continue_stmt = alloc_js_ast_node(tp, JS_AST_NODE_CONTINUE_STATEMENT, stmt_node, sizeof(JsAstNode));
+        continue_stmt->type = &TYPE_NULL;
+        return continue_stmt;
+    } else if (strcmp(node_type, "try_statement") == 0) {
+        return build_js_try_statement(tp, stmt_node);
+    } else if (strcmp(node_type, "throw_statement") == 0) {
+        return build_js_throw_statement(tp, stmt_node);
+    } else if (strcmp(node_type, "class_declaration") == 0) {
+        return build_js_class_declaration(tp, stmt_node);
+    } else if (strcmp(node_type, "expression_statement") == 0) {
+        JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)alloc_js_ast_node(tp, JS_AST_NODE_EXPRESSION_STATEMENT, stmt_node, sizeof(JsExpressionStatementNode));
+        TSNode expr_node = ts_node_named_child(stmt_node, 0);
+        expr_stmt->expression = build_js_expression(tp, expr_node);
+        expr_stmt->base.type = expr_stmt->expression->type;
+        return (JsAstNode*)expr_stmt;
+    } else if (strcmp(node_type, "comment") == 0) {
+        // Skip comments - they don't generate any code
+        return NULL;
+    } else {
+        log_error("Unsupported JavaScript statement type: %s", node_type);
+        return NULL;
     }
 }
 
@@ -988,12 +978,12 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
 
 // Main AST building entry point
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root) {
-    TSSymbol symbol = ts_node_symbol(root);
+    const char* node_type = ts_node_type(root);
     
-    if (symbol == sym_program) {
+    if (strcmp(node_type, "program") == 0) {
         return build_js_program(tp, root);
     } else {
-        log_error("Expected program node, got: %d", symbol);
+        log_error("Expected program node, got: %s", node_type);
         return NULL;
     }
 }
