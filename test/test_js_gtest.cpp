@@ -69,6 +69,9 @@ char* execute_js_script(const char* script_path) {
     }
     
     // Extract result from "##### Script" marker (same as Lambda tests)
+    if (!full_output) {
+        return nullptr;
+    }
     char* marker = strstr(full_output, "##### Script");
     if (marker) {
         char* result_start = strchr(marker, '\n');

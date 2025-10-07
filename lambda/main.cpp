@@ -658,8 +658,6 @@ int main(int argc, char *argv[]) {
         if (argc >= 3) {
             // Test specific JavaScript file
             const char* js_file = argv[2];
-            printf("Testing JavaScript file: %s\n", js_file);
-            
             char* js_source = read_text_file(js_file);
             if (!js_source) {
                 printf("Error: Could not read file '%s'\n", js_file);
@@ -670,9 +668,10 @@ int main(int argc, char *argv[]) {
             
             Item result = transpile_js_to_c(&runtime, js_source, js_file);
             
+            printf("##### Script '%s' executed: #####\n", js_file);
             StrBuf *output = strbuf_new_cap(256);
             print_root_item(output, result);
-            printf("JavaScript result: %s\n", output->str);
+            printf("%s\n", output->str);
             strbuf_free(output);
             
             free(js_source);

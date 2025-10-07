@@ -134,7 +134,7 @@ void js_warning(JsTranspiler* tp, TSNode node, const char* format, ...);
 JsTranspiler* js_transpiler_create(Runtime* runtime);
 void js_transpiler_destroy(JsTranspiler* tp);
 bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length);
-Item js_transpiler_compile(JsTranspiler* tp);
+Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime);
 
 #ifdef __cplusplus
 }
