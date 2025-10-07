@@ -36,11 +36,45 @@ String* js_create_temp_var_name(JsTranspiler* tp) {
 
 // Boxing function for JavaScript values
 void transpile_js_box_item(JsTranspiler* tp, JsAstNode* item) {
-    if (!item || !item->type) {
-        log_debug("transpile_js_box_item: NULL item or type");
+    printf("DEBUG: transpile_js_box_item called with item: %p\n", item);
+    fflush(stdout);
+    
+    if (!item) {
+        printf("DEBUG: Item is NULL, returning ITEM_NULL\n");
+        fflush(stdout);
+        log_debug("transpile_js_box_item: NULL item");
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
         return;
     }
+    
+    printf("DEBUG: Item type: %p, node_type: %d\n", item->type, item->node_type);
+    fflush(stdout);
+    
+    if (!item->type) {
+        printf("DEBUG: Item type is NULL, returning ITEM_NULL\n");
+        fflush(stdout);
+        log_debug("transpile_js_box_item: NULL type");
+        strbuf_append_str(tp->code_buf, "ITEM_NULL");
+        return;
+    }
+    
+    // Special handling for identifiers to avoid type corruption issues
+    if (item->node_type == JS_AST_NODE_IDENTIFIER) {
+        printf("DEBUG: Handling identifier node, avoiding type access\n");
+        fflush(stdout);
+        JsIdentifierNode* id = (JsIdentifierNode*)item;
+        if (id->name) {
+            strbuf_append_char(tp->code_buf, '_');
+            strbuf_append_str(tp->code_buf, "js_");
+            strbuf_append_str(tp->code_buf, id->name->chars);
+        } else {
+            strbuf_append_str(tp->code_buf, "_js_unknown");
+        }
+        return;
+    }
+    
+    printf("DEBUG: Accessing type_id for type: %p\n", item->type);
+    fflush(stdout);
     
     switch (item->type->type_id) {
         case LMD_TYPE_NULL:
@@ -911,7 +945,11 @@ void transpile_js_statement(JsTranspiler* tp, JsAstNode* stmt) {
     switch (stmt->node_type) {
         case JS_AST_NODE_VARIABLE_DECLARATION:
             printf("DEBUG: Handling JS_AST_NODE_VARIABLE_DECLARATION\n");
+            printf("DEBUG: Current code buffer length: %zu\n", tp->code_buf->length);
+            fflush(stdout);
             transpile_js_variable_declaration(tp, (JsVariableDeclarationNode*)stmt);
+            printf("DEBUG: After variable declaration, code buffer length: %zu\n", tp->code_buf->length);
+            fflush(stdout);
             break;
         case JS_AST_NODE_FUNCTION_DECLARATION:
             transpile_js_function(tp, (JsFunctionNode*)stmt);
@@ -959,13 +997,15 @@ void transpile_js_statement(JsTranspiler* tp, JsAstNode* stmt) {
             JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)stmt;
             printf("DEBUG: Expression statement has expression: %s\n", expr_stmt->expression ? "YES" : "NO");
             if (expr_stmt->expression) {
-                printf("DEBUG: Expression type: %s\n", expr_stmt->expression->type ? "HAS_TYPE" : "NO_TYPE");
-                if (expr_stmt->expression->type) {
-                    printf("DEBUG: Expression type_id: %d\n", expr_stmt->expression->type->type_id);
-                }
+                printf("DEBUG: Expression node_type: %d\n", expr_stmt->expression->node_type);
+                fflush(stdout);
             }
             // For the main result, just generate the expression directly
+            printf("DEBUG: About to transpile expression\n");
+            fflush(stdout);
             transpile_js_box_item(tp, expr_stmt->expression);
+            printf("DEBUG: Expression transpiled successfully\n");
+            fflush(stdout);
             break;
         }
         default:
@@ -1020,7 +1060,11 @@ void transpile_js_ast_root(JsTranspiler* tp, JsAstNode* root) {
     
     if (last_expr_stmt) {
         printf("DEBUG: Generating final result from last expression statement\n");
+        printf("DEBUG: Current code buffer before final expression: %.*s\n", (int)tp->code_buf->length, tp->code_buf->str);
+        fflush(stdout);
         transpile_js_statement(tp, last_expr_stmt);
+        printf("DEBUG: Final expression completed\n");
+        fflush(stdout);
     } else if (!has_content) {
         strbuf_append_str(tp->code_buf, "ITEM_NULL");
     } else {
