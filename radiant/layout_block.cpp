@@ -774,9 +774,22 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // line got content
         lycon->line.is_line_start = false;
         lycon->line.has_space = false;  lycon->line.last_space = NULL;  lycon->line.last_space_pos = 0;
-    } else {
+    }
+    else { // normal block
         if (block->bound) {
-            lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
+            // check sibling margin collapsing
+            int collapse = 0;
+            View* prev_sibling = block->previous_view();
+            if (prev_sibling && prev_sibling->is_block() && ((ViewBlock*)prev_sibling)->bound) {
+                ViewBlock* prev_block = (ViewBlock*)prev_sibling;
+                if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {
+                    collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
+                    block->y -= collapse;
+                    prev_block->bound->margin.bottom = 0;
+                    log_debug("collapsed margin %d between sibling blocks\n", collapse);
+                }
+            }
+            lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom - collapse;
             lycon->block.max_width = max(lycon->block.max_width, block->width
                 + block->bound->margin.left + block->bound->margin.right);
         } else {
