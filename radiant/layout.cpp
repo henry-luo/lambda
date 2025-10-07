@@ -178,6 +178,46 @@ void line_align(LayoutContext* lycon) {
     printf("end of line align\n");
 }
 
+// Compute bounding box of a ViewSpan based on union of child views
+void compute_span_bounding_box(ViewSpan* span) {
+    View* child = span->child;
+    if (!child) {
+        // If no child views, keep current position and zero size
+        span->width = 0;
+        span->height = 0;
+        return;
+    }
+
+    // Initialize bounds with first child
+    int min_x = child->x;
+    int min_y = child->y;
+    int max_x = child->x + child->width;
+    int max_y = child->y + child->height;
+
+    // Iterate through remaining children to find union
+    child = child->next;
+    while (child) {
+        int child_min_x = child->x;
+        int child_min_y = child->y;
+        int child_max_x = child->x + child->width;
+        int child_max_y = child->y + child->height;
+
+        // Expand bounding box to include this child
+        if (child_min_x < min_x) min_x = child_min_x;
+        if (child_min_y < min_y) min_y = child_min_y;
+        if (child_max_x > max_x) max_x = child_max_x;
+        if (child_max_y > max_y) max_y = child_max_y;
+
+        child = child->next;
+    }
+
+    // Update span's bounding box
+    span->x = min_x;
+    span->y = min_y;
+    span->width = max_x - min_x;
+    span->height = max_y - min_y;
+}
+
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
     uintptr_t elmt_name = span->node->tag();
     switch (elmt_name) {
@@ -255,8 +295,9 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->parent = span->parent;
     }
 
-    span->width = lycon->line.advance_x - span->x;
-    span->height = lycon->block.advance_y + lycon->line.max_ascender + lycon->line.max_descender - span->y;
+    // span->width = lycon->line.advance_x - span->x;
+    // span->height = lycon->block.advance_y + lycon->line.max_ascender + lycon->line.max_descender - span->y;
+    compute_span_bounding_box(span);
     lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
     lycon->prev_view = (View*)span;
     printf("inline view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d\n", span->type, span->child, span->x, span->y, span->width, span->height);
