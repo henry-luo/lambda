@@ -6,6 +6,13 @@
 #include "../lib/mempool.h"
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
 
+View* View::previous_view() {
+    if (!parent || parent->child == this) return NULL;
+    View* sibling = parent->child;
+    while (sibling && sibling->next != this) { sibling = sibling->next; }
+    return sibling;
+}
+
 View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
     View* view;
     ViewTree* tree = lycon->doc->view_tree;
