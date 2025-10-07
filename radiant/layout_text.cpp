@@ -29,9 +29,9 @@ void line_init(LayoutContext* lycon) {
     FloatContext* float_ctx = get_current_float_context(lycon);
     if (float_ctx) {
         adjust_line_for_floats(lycon, float_ctx);
-        printf("DEBUG: Used shared float context %p for line adjustment\n", (void*)float_ctx);
+        log_debug("DEBUG: Used shared float context %p for line adjustment", (void*)float_ctx);
     } else {
-        printf("DEBUG: No float context available for line adjustment\n");
+        log_debug("DEBUG: No float context available for line adjustment");
     }
 }
 
@@ -121,7 +121,7 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
             }
         }
         else {
-            printf("unknown node type\n");
+            log_debug("unknown node type");
             // skip the node
         }
         node = node->next_sibling();
@@ -134,7 +134,7 @@ LineFillStatus node_has_line_filled(LayoutContext* lycon, DomNode* node) {
 LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNode* node) {
     // note: this function navigates to parenets through laid out view tree,
     // and siblings through non-processed html nodes
-    printf("check if view has line filled\n");
+    log_debug("check if view has line filled");
     node = node->next_sibling();
     if (node) {
         LineFillStatus result = node_has_line_filled(lycon, node);
@@ -147,7 +147,7 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNode* n
         else if (view->type == RDT_VIEW_INLINE) {
             return view_has_line_filled(lycon, view, view->node);
         }
-        printf("unknown view type\n");
+        log_debug("unknown view type");
     }
     return RDT_NOT_SURE;
 }
@@ -158,7 +158,10 @@ void output_text(LayoutContext* lycon, ViewText* text, int text_length, int text
     lycon->line.advance_x += text_width;
     lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.face->size->metrics.ascender >> 6);
     lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.face->size->metrics.descender) >> 6);
-    printf("text view: x %d, y %d, width %d, height %d\n", text->x, text->y, text->width, text->height);
+    log_debug("text view: x %d, y %d, width %d, height %d", text->x, text->y, text->width, text->height);
+    if (text_length < 20) {
+        log_debug("short text: %.*s", text_length, text->node->text_data() + text->start_index);
+    }
 }
 
 void layout_text(LayoutContext* lycon, DomNode *text_node) {
@@ -230,20 +233,20 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         // printf("char: %c, width: %d\n", *str, wd);
         text->width += wd;
         if (text->x + text->width > lycon->line.right) { // line filled up
-            printf("line filled up\n");
+            log_debug("line filled up");
             if (is_space(*str)) { // break at the current space
-                printf("break on space\n");
+                log_debug("break on space");
                 // skip all spaces
                 do { str++; } while (is_space(*str));
                 text->width -= wd;  // minus away space width at line break
                 output_text(lycon, text, str - text_start - text->start_index, text->width);
                 line_break(lycon);
-                printf("after space line break\n");
+                log_debug("after space line break");
                 if (*str) { goto LAYOUT_TEXT; }
                 else return;
             }
             else if (lycon->line.last_space) { // break at the last space
-                printf("break at last space\n");
+                log_debug("break at last space");
                 if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
                     str = lycon->line.last_space + 1;
                     output_text(lycon, text, str - text_start - text->start_index, lycon->line.last_space_pos);

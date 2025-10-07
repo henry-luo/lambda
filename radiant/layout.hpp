@@ -38,6 +38,9 @@ typedef struct Linebox {
     bool has_space;                 // whether last layout character is a space
     FontBox line_start_font;
     FT_UInt prev_glyph_index = 0;   // for kerning
+    inline void reset_space() {
+        is_line_start = false;  has_space = false;  last_space = NULL;  last_space_pos = 0;
+    }
 } Linebox;
 
 typedef enum LineFillStatus {

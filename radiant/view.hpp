@@ -204,7 +204,7 @@ struct View {
     DomNode *node;  // DOM node abstraction instead of direct lexbor dependency
     View* next;
     ViewGroup* parent;  // corrected the type to ViewGroup
-    int x, y, width, height;  // x, y relative to the parent block, width, height forms the BORDER box of the block
+    int x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
 
     inline bool is_inline() { return type == RDT_VIEW_TEXT || type == RDT_VIEW_INLINE || type == RDT_VIEW_INLINE_BLOCK; }
 
