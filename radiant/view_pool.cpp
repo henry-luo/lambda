@@ -437,7 +437,7 @@ void print_view_tree(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio) {
     log_debug("=================\nView tree:");
     log_debug("%s", buf->str);
     log_debug("=================\n");
-    char vfile[1024], *last_slash;
+    char vfile[1024];  const char *last_slash;
     last_slash = strrchr((const char*)url->path.str.data, '/');
     snprintf(vfile, sizeof(vfile), "./test_output/view_tree_%s.txt", last_slash + 1);
     write_string_to_file(vfile, buf->str);
@@ -1135,7 +1135,7 @@ void print_view_tree_json(ViewGroup* view_root, lxb_url_t* url, float pixel_rati
     strbuf_append_str(json_buf, "\n}\n");
 
     // Write to file in both ./ and /tmp directory for easier access
-    char buf[1024], *last_slash;
+    char buf[1024];  const char *last_slash;
     last_slash = strrchr((const char*)url->path.str.data, '/');
     snprintf(buf, sizeof(buf), "./test_output/view_tree_%s.json", last_slash + 1);
     write_string_to_file(buf, json_buf->str);

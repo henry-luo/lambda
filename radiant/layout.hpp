@@ -113,6 +113,9 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 // This matches Chrome browser's "normal" line-height behavior more accurately
 int calculate_chrome_line_height(int font_size, float pixel_ratio);
 
+// ViewSpan bounding box computation
+void compute_span_bounding_box(ViewSpan* span);
+
 // View tree printing functions
 void print_view_tree(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio);
 void print_view_tree_json(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio);

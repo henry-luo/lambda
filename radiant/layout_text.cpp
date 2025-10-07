@@ -231,10 +231,11 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         text->width += wd;
         if (text->x + text->width > lycon->line.right) { // line filled up
             printf("line filled up\n");
-            if (is_space(*str)) {
+            if (is_space(*str)) { // break at the current space
                 printf("break on space\n");
                 // skip all spaces
                 do { str++; } while (is_space(*str));
+                text->width -= wd;  // minus away space width at line break
                 output_text(lycon, text, str - text_start - text->start_index, text->width);
                 line_break(lycon);
                 printf("after space line break\n");
