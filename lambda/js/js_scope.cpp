@@ -260,17 +260,10 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
         return (Item){.item = ITEM_ERROR};
     }
     
-    // Print JavaScript AST for debugging
-    log_debug("JavaScript AST built successfully. Printing AST:");
-    printf("=== JavaScript AST ===\n");
-    print_js_ast_node(js_ast, 0);
-    printf("=== End JavaScript AST ===\n");
-    
     // Generate C code
     transpile_js_ast_root(tp, js_ast);
     
     if (tp->has_errors) {
-        log_error("JavaScript transpilation failed with errors");
         if (tp->error_buf) {
             log_error("Errors:\n%s", tp->error_buf->str);
         }
@@ -279,28 +272,34 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     
     // Get generated C code
     char* c_code = tp->code_buf->str;
-    log_debug("Generated JavaScript C code (length: %zu):", strlen(c_code));
+    // printf("DEBUG: Code buffer pointer: %p\n", c_code);
+    if (c_code) {
+        // printf("DEBUG: Code buffer length: %zu\n", strlen(c_code));
+    } else {
+        // printf("DEBUG: Code buffer is NULL!\n");
+    }
+    log_debug("Generated JavaScript C code (length: %zu):", c_code ? strlen(c_code) : 0);
     
     // Print generated C code for debugging
-    printf("=== Generated C Code ===\n");
+    // printf("=== Generated C Code ===\n");
     if (strlen(c_code) > 0) {
-        printf("%s\n", c_code);
+        // printf("%s\n", c_code);
     } else {
-        printf("(empty)\n");
+        // printf("(empty)\n");
         log_error("Generated C code is empty!");
         return (Item){.item = ITEM_NULL};
     }
-    printf("=== End Generated C Code ===\n");
+    // printf("=== End Generated C Code ===\n");
     
     // Execute the JavaScript operations directly using the runtime
-    printf("DEBUG: Executing JavaScript operations directly...\n");
+    // printf("DEBUG: Executing JavaScript operations directly...\n");
     
     // Initialize JavaScript global object
-    printf("DEBUG: Skipping js_init_global_object() for now to avoid segfault\n");
-    fflush(stdout);
+    // printf("DEBUG: Skipping js_init_global_object() for now to avoid segfault\n");
+    // fflush(stdout);
     // js_init_global_object();  // TODO: Fix the d2it usage in this function
-    printf("DEBUG: Continuing without global object initialization\n");
-    fflush(stdout);
+    // printf("DEBUG: Continuing without global object initialization\n");
+    // fflush(stdout);
     
     // For now, implement a simple interpreter for the generated operations
     // Parse the generated C code and execute the operations
@@ -327,7 +326,7 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
             double* a_ptr = (double*)malloc(sizeof(double));
             *a_ptr = value;
             js_a.item = d2it(a_ptr);
-            printf("DEBUG: Executed _js_a = d2it(%f)\n", value);
+            // printf("DEBUG: Executed _js_a = d2it(%f)\n", value);
         }
     }
     
@@ -347,7 +346,7 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
             double* b_ptr = (double*)malloc(sizeof(double));
             *b_ptr = value;
             js_b.item = d2it(b_ptr);
-            printf("DEBUG: Executed _js_b = d2it(%f)\n", value);
+            // printf("DEBUG: Executed _js_b = d2it(%f)\n", value);
         }
     }
     
@@ -363,23 +362,24 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
         double* result_ptr = (double*)malloc(sizeof(double));
         *result_ptr = result_val;
         js_result.item = d2it(result_ptr);
-        printf("DEBUG: Executed _js_result = d2it(js_add(%f, %f)) = %f\n", a_val, b_val, result_val);
+        // printf("DEBUG: Executed _js_result = d2it(js_add(%f, %f)) = %f\n", a_val, b_val, result_val);
     }
     
     // Look for: Item result = _js_result;
     char* final_assign = strstr(code_ptr, "Item result = _js_result");
     if (final_assign) {
-        printf("DEBUG: Executed result = _js_result\n");
-        printf("DEBUG: Final JavaScript result: %f\n", *(double*)js_result.pointer);
+        // printf("DEBUG: Executed result = _js_result\n");
+        // printf("DEBUG: Final JavaScript result: %f\n", *(double*)js_result.pointer);
         return js_result;
     }
     
-    printf("DEBUG: Could not parse generated operations, returning null\n");
+    // printf("DEBUG: Could not parse generated operations, returning null\n");
     return (Item){.item = ITEM_NULL};
 }
 
 // Main entry point
 Item transpile_js_to_c(Runtime* runtime, const char* js_source, const char* filename) {
+    // printf("DEBUG: transpile_js_to_c called with source length: %zu\n", js_source ? strlen(js_source) : 0);
     log_debug("Starting JavaScript transpilation for file: %s", filename ? filename : "<string>");
     
     // Create transpiler
@@ -388,19 +388,28 @@ Item transpile_js_to_c(Runtime* runtime, const char* js_source, const char* file
         log_error("Failed to create JavaScript transpiler");
         return (Item){.item = ITEM_ERROR};
     }
+    // printf("DEBUG: JavaScript transpiler created successfully\n");
     
     // Parse JavaScript source
-    size_t source_length = strlen(js_source);
-    if (!js_transpiler_parse(tp, js_source, source_length)) {
+    // printf("DEBUG: About to parse JavaScript source\n");
+    if (!js_transpiler_parse(tp, js_source, strlen(js_source))) {
+        // printf("DEBUG: Failed to parse JavaScript source\n");
+        log_error("Failed to parse JavaScript source");
         js_transpiler_destroy(tp);
         return (Item){.item = ITEM_ERROR};
     }
+    // printf("DEBUG: JavaScript source parsed successfully\n");
     
     // Compile to C code
+    // printf("DEBUG: About to compile to C code\n");
     Item result = js_transpiler_compile(tp, runtime);
+    // printf("DEBUG: Compilation completed with result type: %d\n", result.type_id);
+    // printf("DEBUG: Result item value: %llu\n", result.item);
+    // printf("DEBUG: About to cleanup transpiler\n");
     
     // Cleanup
     js_transpiler_destroy(tp);
+    // printf("DEBUG: Transpiler cleanup completed\n");
     
     log_debug("JavaScript transpilation completed");
     return result;
