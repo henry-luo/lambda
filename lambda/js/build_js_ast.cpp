@@ -172,19 +172,19 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
     identifier->name = name_pool_create_strview(tp->name_pool, source);
     
     // Look up in symbol table
-    printf("DEBUG: Looking up identifier: %.*s\n", (int)identifier->name->len, identifier->name->chars);
+    // printf("DEBUG: Looking up identifier: %.*s\n", (int)identifier->name->len, identifier->name->chars);
     fflush(stdout);
     identifier->entry = js_scope_lookup(tp, identifier->name);
     
     if (identifier->entry) {
-        printf("DEBUG: Found identifier in scope, entry->node: %p\n", identifier->entry->node);
-        printf("DEBUG: Entry node type: %p\n", identifier->entry->node->type);
+        // printf("DEBUG: Found identifier in scope, entry->node: %p\n", identifier->entry->node);
+        // printf("DEBUG: Entry node type: %p\n", identifier->entry->node->type);
         fflush(stdout);
         identifier->base.type = identifier->entry->node->type;
-        printf("DEBUG: Set identifier type to: %p\n", identifier->base.type);
+        // printf("DEBUG: Set identifier type to: %p\n", identifier->base.type);
         fflush(stdout);
     } else {
-        printf("DEBUG: Identifier not found in scope, using TYPE_ANY\n");
+        // printf("DEBUG: Identifier not found in scope, using TYPE_ANY\n");
         fflush(stdout);
         // Undefined identifier - could be global or error
         identifier->base.type = &TYPE_ANY;
@@ -196,78 +196,78 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
 
 // Build JavaScript binary expression node
 JsAstNode* build_js_binary_expression(JsTranspiler* tp, TSNode binary_node) {
-    printf("DEBUG: build_js_binary_expression called\n");
+    // printf("DEBUG: build_js_binary_expression called\n");
     fflush(stdout);
     
     // Debug: Print all children of the binary_expression
     uint32_t child_count = ts_node_child_count(binary_node);
-    printf("DEBUG: binary_expression has %u children:\n", child_count);
+    // printf("DEBUG: binary_expression has %u children:\n", child_count);
     for (uint32_t i = 0; i < child_count; i++) {
         TSNode child = ts_node_child(binary_node, i);
         const char* child_type = ts_node_type(child);
-        printf("DEBUG:   Child %u: %s\n", i, child_type);
+        // printf("DEBUG:   Child %u: %s\n", i, child_type);
     }
     
-    printf("DEBUG: Allocating binary expression node\n");
+    // printf("DEBUG: Allocating binary expression node\n");
     fflush(stdout);
     JsBinaryNode* binary = (JsBinaryNode*)alloc_js_ast_node(tp, JS_AST_NODE_BINARY_EXPRESSION, binary_node, sizeof(JsBinaryNode));
-    printf("DEBUG: Allocated binary expression node: %p\n", binary);
+    // printf("DEBUG: Allocated binary expression node: %p\n", binary);
     fflush(stdout);
     
     // Get left operand (child 0)
-    printf("DEBUG: Getting left operand from child 0\n");
+    // printf("DEBUG: Getting left operand from child 0\n");
     fflush(stdout);
     TSNode left_node = ts_node_child(binary_node, 0);
-    printf("DEBUG: Building left operand\n");
+    // printf("DEBUG: Building left operand\n");
     fflush(stdout);
     binary->left = build_js_expression(tp, left_node);
-    printf("DEBUG: Built left operand successfully\n");
+    // printf("DEBUG: Built left operand successfully\n");
     fflush(stdout);
     
     // Get right operand (child 2)
-    printf("DEBUG: Getting right operand from child 2\n");
+    // printf("DEBUG: Getting right operand from child 2\n");
     fflush(stdout);
     TSNode right_node = ts_node_child(binary_node, 2);
-    printf("DEBUG: Building right operand\n");
+    // printf("DEBUG: Building right operand\n");
     fflush(stdout);
     binary->right = build_js_expression(tp, right_node);
-    printf("DEBUG: Built right operand successfully\n");
+    // printf("DEBUG: Built right operand successfully\n");
     fflush(stdout);
     
     // Get operator (child 1)
-    printf("DEBUG: Getting operator from child 1\n");
+    // printf("DEBUG: Getting operator from child 1\n");
     fflush(stdout);
     TSNode op_node = ts_node_child(binary_node, 1);
     StrView op_source = js_node_source(tp, op_node);
-    printf("DEBUG: Operator source: %.*s\n", (int)op_source.length, op_source.str);
+    // printf("DEBUG: Operator source: %.*s\n", (int)op_source.length, op_source.str);
     fflush(stdout);
     binary->op = js_operator_from_string(op_source.str, op_source.length);
-    printf("DEBUG: Parsed operator: %d\n", binary->op);
+    // printf("DEBUG: Parsed operator: %d\n", binary->op);
     fflush(stdout);
     
     // Infer result type based on operator and operands
-    printf("DEBUG: Inferring result type for operator %d\n", binary->op);
-    printf("DEBUG: Left operand type: %p\n", binary->left->type);
-    printf("DEBUG: Right operand type: %p\n", binary->right->type);
+    // printf("DEBUG: Inferring result type for operator %d\n", binary->op);
+    // printf("DEBUG: Left operand type: %p\n", binary->left->type);
+    // printf("DEBUG: Right operand type: %p\n", binary->right->type);
     fflush(stdout);
     
     // Check if operands have valid types (simple NULL check for now)
     bool left_type_valid = (binary->left->type != NULL);
     bool right_type_valid = (binary->right->type != NULL);
     
-    printf("DEBUG: Type validity check - Left: %s, Right: %s\n", 
-           left_type_valid ? "valid" : "null", right_type_valid ? "valid" : "null");
+    // printf("DEBUG: Type validity check - Left: %s, Right: %s\n", 
+    //        left_type_valid ? "valid" : "null", right_type_valid ? "valid" : "null");
     fflush(stdout);
     
     // For now, always default to FLOAT for arithmetic operations to avoid crashes
     // TODO: Fix the type corruption issue in variable declarators
-    printf("DEBUG: Defaulting to FLOAT type for binary expression (avoiding type corruption)\n");
+    // printf("DEBUG: Defaulting to FLOAT type for binary expression (avoiding type corruption)\n");
     fflush(stdout);
     binary->base.type = &TYPE_FLOAT;
     
     if (false) { // Disable the problematic type checking for now
-        printf("DEBUG: Left type_id: %d, Right type_id: %d\n", 
-               binary->left->type->type_id, binary->right->type->type_id);
+        // printf("DEBUG: Left type_id: %d, Right type_id: %d\n", 
+        //        binary->left->type->type_id, binary->right->type->type_id);
         fflush(stdout);
         
         switch (binary->op) {
@@ -313,7 +313,7 @@ JsAstNode* build_js_binary_expression(JsTranspiler* tp, TSNode binary_node) {
         }
     }
     
-    printf("DEBUG: Binary expression built successfully\n");
+    // printf("DEBUG: Binary expression built successfully\n");
     fflush(stdout);
     return (JsAstNode*)binary;
 }
@@ -668,14 +668,14 @@ JsAstNode* build_js_block_statement(JsTranspiler* tp, TSNode block_node) {
 
 // Build JavaScript variable declaration node
 JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
-    printf("DEBUG: build_js_variable_declaration called\n");
+    // // printf("DEBUG: build_js_variable_declaration called\n");
     JsVariableDeclarationNode* var_decl = (JsVariableDeclarationNode*)alloc_js_ast_node(tp, JS_AST_NODE_VARIABLE_DECLARATION, var_node, sizeof(JsVariableDeclarationNode));
     
     // Determine variable kind (var, let, const)
     TSNode first_child = ts_node_child(var_node, 0);
     StrView kind_source = js_node_source(tp, first_child);
     
-    printf("DEBUG: Variable kind: %.*s\n", (int)kind_source.length, kind_source.str);
+    // // printf("DEBUG: Variable kind: %.*s\n", (int)kind_source.length, kind_source.str);
     
     if (strncmp(kind_source.str, "var", 3) == 0) {
         var_decl->kind = JS_VAR_VAR;
@@ -687,49 +687,49 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
     
     // Build declarators
     uint32_t child_count = ts_node_named_child_count(var_node);
-    printf("DEBUG: Variable declaration has %u named children\n", child_count);
+    // // printf("DEBUG: Variable declaration has %u named children\n", child_count);
     JsAstNode* prev_declarator = NULL;
     
     for (uint32_t i = 0; i < child_count; i++) {
-        printf("DEBUG: Processing child %u\n", i);
+        // // printf("DEBUG: Processing child %u\n", i);
         TSNode declarator_node = ts_node_named_child(var_node, i);
-        printf("DEBUG: Got declarator node\n");
+        // // printf("DEBUG: Got declarator node\n");
         const char* declarator_type = ts_node_type(declarator_node);
-        printf("DEBUG: Declarator type: %s\n", declarator_type);
+        // // printf("DEBUG: Declarator type: %s\n", declarator_type);
         
         if (strcmp(declarator_type, "variable_declarator") == 0) {
             log_debug("Found variable_declarator");
             
             // Debug: Print all children of the variable_declarator
             uint32_t declarator_child_count = ts_node_child_count(declarator_node);
-            printf("DEBUG: variable_declarator has %u children:\n", declarator_child_count);
+            // // printf("DEBUG: variable_declarator has %u children:\n", declarator_child_count);
             for (uint32_t j = 0; j < declarator_child_count; j++) {
                 TSNode child = ts_node_child(declarator_node, j);
                 const char* child_type = ts_node_type(child);
-                printf("DEBUG:   Child %u: %s\n", j, child_type);
+                // // printf("DEBUG:   Child %u: %s\n", j, child_type);
             }
             
-            printf("DEBUG: About to call alloc_js_ast_node\n");
+            // // printf("DEBUG: About to call alloc_js_ast_node\n");
             fflush(stdout);
             JsVariableDeclaratorNode* declarator = (JsVariableDeclaratorNode*)alloc_js_ast_node(tp, JS_AST_NODE_VARIABLE_DECLARATOR, declarator_node, sizeof(JsVariableDeclaratorNode));
-            printf("DEBUG: alloc_js_ast_node returned: %p\n", declarator);
+            // // printf("DEBUG: alloc_js_ast_node returned: %p\n", declarator);
             fflush(stdout);
             
             // Get identifier (child 0)
-            printf("DEBUG: Getting identifier from child 0\n");
+            // // printf("DEBUG: Getting identifier from child 0\n");
             fflush(stdout);
             TSNode id_node = ts_node_child(declarator_node, 0);
-            printf("DEBUG: Got identifier node, is_null: %s\n", ts_node_is_null(id_node) ? "true" : "false");
+            // // printf("DEBUG: Got identifier node, is_null: %s\n", ts_node_is_null(id_node) ? "true" : "false");
             fflush(stdout);
             
             if (!ts_node_is_null(id_node)) {
-                printf("DEBUG: Building identifier from node\n");
+                // // printf("DEBUG: Building identifier from node\n");
                 fflush(stdout);
                 declarator->id = build_js_identifier(tp, id_node);
-                printf("DEBUG: Built identifier successfully\n");
+                // // printf("DEBUG: Built identifier successfully\n");
                 fflush(stdout);
             } else {
-                printf("DEBUG: Identifier node is null!\n");
+                // // printf("DEBUG: Identifier node is null!\n");
                 declarator->id = NULL;
             }
             
@@ -739,20 +739,20 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
             if (declarator_child_count >= 3) {
                 init_node = ts_node_child(declarator_node, 2);
                 has_initializer = !ts_node_is_null(init_node);
-                printf("DEBUG: Got initializer node from child 2, has_initializer: %s\n", has_initializer ? "true" : "false");
+                // printf("DEBUG: Got initializer node from child 2, has_initializer: %s\n", has_initializer ? "true" : "false");
             } else {
-                printf("DEBUG: No initializer (child count: %u)\n", declarator_child_count);
+                // printf("DEBUG: No initializer (child count: %u)\n", declarator_child_count);
                 has_initializer = false;
             }
             if (has_initializer) {
-                printf("DEBUG: Building initializer expression\n");
+                // printf("DEBUG: Building initializer expression\n");
                 fflush(stdout);
                 declarator->init = build_js_expression(tp, init_node);
                 declarator->base.type = declarator->init->type;
-                printf("DEBUG: Built initializer successfully\n");
+                // printf("DEBUG: Built initializer successfully\n");
                 fflush(stdout);
             } else {
-                printf("DEBUG: No initializer, setting to NULL\n");
+                // printf("DEBUG: No initializer, setting to NULL\n");
                 declarator->init = NULL;
                 declarator->base.type = &TYPE_NULL; // undefined
             }
