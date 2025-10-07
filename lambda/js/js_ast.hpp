@@ -72,6 +72,7 @@ typedef enum JsAstNodeType {
     JS_AST_NODE_VARIABLE_DECLARATION,
     JS_AST_NODE_EXPRESSION_STATEMENT,
     JS_AST_NODE_BLOCK_STATEMENT,
+    JS_AST_NODE_IF_STATEMENT,
     JS_AST_NODE_WHILE_STATEMENT,
     JS_AST_NODE_FOR_STATEMENT,
     JS_AST_NODE_RETURN_STATEMENT,
@@ -278,11 +279,7 @@ typedef struct JsPropertyNode {
 typedef struct JsVariableDeclarationNode {
     JsAstNode base;
     JsAstNode* declarations;        // Variable declarators
-    enum {
-        JS_VAR_VAR,
-        JS_VAR_LET,
-        JS_VAR_CONST
-    } kind;
+    int kind;                       // Variable declaration kind (JsVarKind)
 } JsVariableDeclarationNode;
 
 // JavaScript variable declarator node

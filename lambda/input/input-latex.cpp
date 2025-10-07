@@ -1,5 +1,6 @@
 #include "input.h"
 #include "input-common.h"
+#include "../../lib/log.h"
 
 // Forward declaration for math parser integration
 void parse_math(Input* input, const char* math_string, const char* flavor);
@@ -953,7 +954,7 @@ static Item parse_latex_element(Input *input, const char **latex) {
                 printf("DEBUG: Text item type before adding to textblock: %d\n", text_type);
                 if (text_type > LMD_TYPE_ERROR) {
                     printf("ERROR: Invalid text type %d in textblock creation!\n", text_type);
-                    printf("ERROR: text_str=%p, text_str->len=%zu\n", text_str, text_str ? text_str->len : 0);
+                    log_error("text_str=%p, text_str->len=%zu", text_str, text_str ? text_str->len : 0);
                 }
                 
                 // Add the text using proper s2it() function
@@ -1019,7 +1020,7 @@ void parse_latex(Input* input, const char* latex_string) {
             TypeId elem_type = get_type_id(element);
             if (elem_type > LMD_TYPE_ERROR) {
                 printf("ERROR: Invalid type %d detected in parse_latex! Max valid type is %d\n", elem_type, LMD_TYPE_ERROR);
-                printf("ERROR: Element details - element.item=0x%llx, element.pointer=%p\n", (unsigned long long)element.item, element.pointer);
+                log_error("Element details - element.item=0x%llx, element.pointer=%llu", (unsigned long long)element.item, (unsigned long long)element.pointer);
                 printf("ERROR: Element count: %d\n", element_count);
                 printf("ERROR: Raw memory dump of Item:\n");
                 unsigned char* bytes = (unsigned char*)&element;

@@ -1,5 +1,6 @@
 #include "ast.hpp"
 #include "../lib/log.h"
+#include "../lib/mempool.h"
 
 Type TYPE_NULL = {.type_id = LMD_TYPE_NULL};
 Type TYPE_BOOL = {.type_id = LMD_TYPE_BOOL};

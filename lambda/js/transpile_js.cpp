@@ -31,7 +31,7 @@ void write_js_temp_var(StrBuf* buf, int counter) {
 String* js_create_temp_var_name(JsTranspiler* tp) {
     char temp_name[64];
     snprintf(temp_name, sizeof(temp_name), "_js_temp%d", tp->temp_var_counter++);
-    return name_pool_create_string(tp->name_pool, temp_name, strlen(temp_name));
+    return name_pool_create_len(tp->name_pool, temp_name, strlen(temp_name));
 }
 
 // Boxing function for JavaScript values

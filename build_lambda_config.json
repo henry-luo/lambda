@@ -1466,6 +1466,16 @@
                             "gtest",
                             "gtest_main"
                         ]
+                    },
+                    {
+                        "source": "test/test_js_gtest.cpp",
+                        "name": "🟨 JavaScript Transpiler Tests (GTest)",
+                        "dependencies": [],
+                        "binary": "test/test_js_gtest.exe",
+                        "libraries": [
+                            "gtest",
+                            "gtest_main"
+                        ]
                     }
                 ],
                 "type": "lambda",

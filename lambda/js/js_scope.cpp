@@ -2,6 +2,7 @@
 #include "../lambda-data.hpp"
 #include "../../lib/log.h"
 #include "../../lib/strbuf.h"
+#include "../../lib/mempool.h"
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
@@ -101,7 +102,7 @@ void js_scope_define(JsTranspiler* tp, String* name, JsAstNode* node, JsVarKind 
     // Create new name entry
     NameEntry* entry = (NameEntry*)pool_alloc(tp->ast_pool, sizeof(NameEntry));
     entry->name = name;
-    entry->node = node;
+    entry->node = (AstNode*)node;
     entry->next = NULL;
     entry->import = NULL;
     
@@ -168,20 +169,19 @@ JsTranspiler* js_transpiler_create(Runtime* runtime) {
     memset(tp, 0, sizeof(JsTranspiler));
     
     // Initialize memory pools
-    tp->ast_pool = pool_create(1024 * 1024); // 1MB pool
-    tp->name_pool = name_pool_create();
+    tp->ast_pool = pool_create(); // Memory pool
+    tp->name_pool = name_pool_create(tp->ast_pool, NULL);
     tp->code_buf = strbuf_new();
     tp->error_buf = NULL;
     
     // Initialize Tree-sitter parser
     tp->parser = ts_parser_new();
-    ts_parser_set_language(tp->parser, tree_sitter_javascript());
+    // TODO: Add tree_sitter_javascript() when library is ready
+    // ts_parser_set_language(tp->parser, tree_sitter_javascript());
     
     // Initialize scopes
     tp->global_scope = js_scope_create(tp, JS_SCOPE_GLOBAL, NULL);
     tp->current_scope = tp->global_scope;
-    
-    // Initialize state
     tp->strict_mode = false;
     tp->function_counter = 0;
     tp->temp_var_counter = 0;
@@ -208,7 +208,7 @@ void js_transpiler_destroy(JsTranspiler* tp) {
         pool_destroy(tp->ast_pool);
     }
     if (tp->name_pool) {
-        name_pool_destroy(tp->name_pool);
+        name_pool_release(tp->name_pool);
     }
     if (tp->code_buf) {
         strbuf_free(tp->code_buf);
@@ -246,7 +246,7 @@ bool js_transpiler_parse(JsTranspiler* tp, const char* source, size_t length) {
 Item js_transpiler_compile(JsTranspiler* tp) {
     if (!tp->tree) {
         log_error("No parsed tree available for compilation");
-        return ITEM_ERROR;
+        return (Item){.item = ITEM_ERROR};
     }
     
     TSNode root = ts_tree_root_node(tp->tree);
@@ -255,7 +255,7 @@ Item js_transpiler_compile(JsTranspiler* tp) {
     JsAstNode* js_ast = build_js_ast(tp, root);
     if (!js_ast) {
         log_error("Failed to build JavaScript AST");
-        return ITEM_ERROR;
+        return (Item){.item = ITEM_ERROR};
     }
     
     // Generate C code
@@ -264,18 +264,18 @@ Item js_transpiler_compile(JsTranspiler* tp) {
     if (tp->has_errors) {
         log_error("JavaScript transpilation failed with errors");
         if (tp->error_buf) {
-            log_error("Errors:\n%s", strbuf_to_string(tp->error_buf));
+            log_error("Errors:\n%s", tp->error_buf->str);
         }
-        return ITEM_ERROR;
+        return (Item){.item = ITEM_ERROR};
     }
     
     // Get generated C code
-    char* c_code = strbuf_to_string(tp->code_buf);
+    char* c_code = tp->code_buf->str;
     log_debug("Generated JavaScript C code:\n%s", c_code);
     
     // TODO: Compile C code with MIR and execute
     // For now, just return the code as a string
-    return s2it(c_code);
+    return (Item){.item = s2it(c_code)};
 }
 
 // Main entry point
@@ -286,14 +286,14 @@ Item transpile_js_to_c(Runtime* runtime, const char* js_source, const char* file
     JsTranspiler* tp = js_transpiler_create(runtime);
     if (!tp) {
         log_error("Failed to create JavaScript transpiler");
-        return ITEM_ERROR;
+        return (Item){.item = ITEM_ERROR};
     }
     
     // Parse JavaScript source
     size_t source_length = strlen(js_source);
     if (!js_transpiler_parse(tp, js_source, source_length)) {
         js_transpiler_destroy(tp);
-        return ITEM_ERROR;
+        return (Item){.item = ITEM_ERROR};
     }
     
     // Compile to C code

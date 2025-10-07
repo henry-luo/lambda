@@ -363,6 +363,12 @@ Item push_c(int64_t cval);
 // item unboxing
 int64_t it2l(Item item);
 double it2d(Item item);
+bool it2b(Item item);
+int it2i(Item item);
+String* it2s(Item item);
+
+// item type access
+#define item_type(item) ((TypeId)(item).type_id)
 
 // generic field access function
 Item fn_index(Item item, Item index);
