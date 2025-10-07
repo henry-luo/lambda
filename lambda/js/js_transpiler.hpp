@@ -130,6 +130,9 @@ String* js_create_label_name(JsTranspiler* tp);
 void js_error(JsTranspiler* tp, TSNode node, const char* format, ...);
 void js_warning(JsTranspiler* tp, TSNode node, const char* format, ...);
 
+// Debug functions
+void print_js_ast_node(JsAstNode* node, int indent);
+
 // Transpiler lifecycle functions
 JsTranspiler* js_transpiler_create(Runtime* runtime);
 void js_transpiler_destroy(JsTranspiler* tp);
