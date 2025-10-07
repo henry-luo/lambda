@@ -630,6 +630,92 @@ int main(int argc, char *argv[]) {
         return exit_code;
     }
 
+    // Handle JavaScript command
+    log_debug("Checking for js command");
+    if (argc >= 2 && strcmp(argv[1], "js") == 0) {
+        log_debug("Entering JavaScript command handler");
+        
+        // Check for help first
+        if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
+            printf("Lambda JavaScript Transpiler v1.0\n\n");
+            printf("Usage: %s js [file.js]\n", argv[0]);
+            printf("\nDescription:\n");
+            printf("  The 'js' command runs the JavaScript transpiler.\n");
+            printf("  If no file is provided, it runs built-in test cases.\n");
+            printf("  If a file is provided, it transpiles and executes the JavaScript.\n");
+            printf("\nOptions:\n");
+            printf("  -h, --help     Show this help message\n");
+            printf("\nExamples:\n");
+            printf("  %s js                             # Run built-in tests\n", argv[0]);
+            printf("  %s js test.js                     # Transpile and run test.js\n", argv[0]);
+            log_finish();
+            return 0;
+        }
+        
+        Runtime runtime;
+        runtime_init(&runtime);
+        
+        if (argc >= 3) {
+            // Test specific JavaScript file
+            const char* js_file = argv[2];
+            printf("Testing JavaScript file: %s\n", js_file);
+            
+            char* js_source = read_text_file(js_file);
+            if (!js_source) {
+                printf("Error: Could not read file '%s'\n", js_file);
+                runtime_cleanup(&runtime);
+                log_finish();
+                return 1;
+            }
+            
+            Item result = transpile_js_to_c(&runtime, js_source, js_file);
+            
+            StrBuf *output = strbuf_new_cap(256);
+            print_root_item(output, result);
+            printf("JavaScript result: %s\n", output->str);
+            strbuf_free(output);
+            
+            free(js_source);
+        } else {
+            // Run built-in JavaScript tests
+            printf("Running JavaScript transpiler tests...\n");
+            
+            // Test 1: Simple arithmetic
+            const char* test1 = "var a = 5; var b = 10; var result = a + b; result;";
+            printf("\nTest 1: Simple arithmetic\n");
+            printf("JavaScript: %s\n", test1);
+            Item result1 = transpile_js_to_c(&runtime, test1, "test1.js");
+            StrBuf *output1 = strbuf_new_cap(256);
+            print_root_item(output1, result1);
+            printf("Result: %s\n", output1->str);
+            strbuf_free(output1);
+            
+            // Test 2: Template literal
+            const char* test2 = "var name = 'World'; var message = `Hello, ${name}!`; message;";
+            printf("\nTest 2: Template literal\n");
+            printf("JavaScript: %s\n", test2);
+            Item result2 = transpile_js_to_c(&runtime, test2, "test2.js");
+            StrBuf *output2 = strbuf_new_cap(256);
+            print_root_item(output2, result2);
+            printf("Result: %s\n", output2->str);
+            strbuf_free(output2);
+            
+            // Test 3: Function
+            const char* test3 = "function add(x, y) { return x + y; } var result = add(3, 7); result;";
+            printf("\nTest 3: Function\n");
+            printf("JavaScript: %s\n", test3);
+            Item result3 = transpile_js_to_c(&runtime, test3, "test3.js");
+            StrBuf *output3 = strbuf_new_cap(256);
+            print_root_item(output3, result3);
+            printf("Result: %s\n", output3->str);
+            strbuf_free(output3);
+        }
+        
+        runtime_cleanup(&runtime);
+        log_finish();
+        return 0;
+    }
+
     // Handle convert command
     log_debug("Checking for convert command");
     if (argc >= 2 && strcmp(argv[1], "convert") == 0) {

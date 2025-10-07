@@ -46,6 +46,10 @@
         "lambda/validator.cpp",
         "lambda/validator/ast_validate.cpp",
         "lambda/validator/error_reporting.cpp",
+        "lambda/js/js_scope.cpp",
+        "lambda/js/build_js_ast.cpp",
+        "lambda/js/transpile_js.cpp",
+        "lambda/js/js_runtime.cpp",
         "lambda/input/css_tokenizer.c",
         "lambda/input/css_properties.c",
         "lambda/input/css_parser.c",
@@ -94,6 +98,7 @@
         ".",
         "lambda/tree-sitter/lib/include",
         "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
         "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include"
     ],
@@ -115,6 +120,12 @@
             "name": "tree-sitter-lambda",
             "include": "lambda/tree-sitter-lambda/bindings/c",
             "lib": "lambda/tree-sitter-lambda/libtree-sitter-lambda.a",
+            "link": "static"
+        },
+        {
+            "name": "tree-sitter-javascript",
+            "include": "lambda/tree-sitter-javascript/bindings/c",
+            "lib": "lambda/tree-sitter-javascript/libtree-sitter-javascript.a",
             "link": "static"
         },
         {

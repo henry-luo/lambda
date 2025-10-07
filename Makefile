@@ -164,6 +164,7 @@ else
 TREE_SITTER_LIB = lambda/tree-sitter/libtree-sitter.a
 endif
 TREE_SITTER_LAMBDA_LIB = lambda/tree-sitter-lambda/libtree-sitter-lambda.a
+TREE_SITTER_JAVASCRIPT_LIB = lambda/tree-sitter-javascript/libtree-sitter-javascript.a
 
 # Build or verify tree-sitter library
 $(TREE_SITTER_LIB):
@@ -194,6 +195,17 @@ $(TREE_SITTER_LAMBDA_LIB): $(PARSER_C)
 	@echo "🔧 Unsetting OS variable to bypass Windows check..."
 	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
 	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-lambda libtree-sitter-lambda.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
+
+# Build tree-sitter-javascript library
+$(TREE_SITTER_JAVASCRIPT_LIB):
+	@echo "Building tree-sitter-javascript library..."
+	@echo "🔧 Compiler: $(CC)"
+	@echo "🔧 CXX: $(CXX)"
+	@echo "🔧 Environment: MSYSTEM=$(MSYSTEM)"
+	@echo "🔧 Working directory: lambda/tree-sitter-javascript"
+	@echo "🔧 Unsetting OS variable to bypass Windows check..."
+	@echo "🔧 Adding /mingw64/bin to PATH for DLL dependencies..."
+	env -u OS PATH="/mingw64/bin:$$PATH" $(MAKE) -C lambda/tree-sitter-javascript libtree-sitter-javascript.a CC="$(CC)" CXX="$(CXX)" V=1 VERBOSE=1
 
 # MINGW64 Environment Validation Functions
 define mingw64_env_check
@@ -286,7 +298,7 @@ define run_make_with_error_summary
 endef
 
 # Combined tree-sitter libraries target
-tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB)
+tree-sitter-libs: $(TREE_SITTER_LIB) $(TREE_SITTER_LAMBDA_LIB) $(TREE_SITTER_JAVASCRIPT_LIB)
 
 # Build tree-sitter without Unicode/ICU dependencies (minimal build)
 # Uses the amalgamated lib.c file approach recommended by ChatGPT
