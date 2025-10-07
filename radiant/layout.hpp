@@ -26,17 +26,18 @@ typedef struct Blockbox {
 } Blockbox;
 
 typedef struct Linebox {
-    int left, right;  // left and right bounds of the line
+    int left, right;                // left and right bounds of the line
     int advance_x;
     int max_ascender;
     int max_descender;
-    unsigned char* last_space; // last space character in the line
-    int last_space_pos;  // position of the last space in the line
+    unsigned char* last_space;      // last space character in the line
+    int last_space_pos;             // position of the last space in the line
     View* start_view;
     PropValue vertical_align;
     bool is_line_start;
-    bool has_space; // whether last layout character is a space
+    bool has_space;                 // whether last layout character is a space
     FontBox line_start_font;
+    FT_UInt prev_glyph_index = 0;   // for kerning
 } Linebox;
 
 typedef enum LineFillStatus {
