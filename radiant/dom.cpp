@@ -24,9 +24,9 @@ const lxb_char_t* DomNode::get_attribute(const char* attr_name, size_t* value_le
 }
 
 DomNode* DomNode::first_child() {
-    if (child) {
-        printf("Found cached child %p for node %p\n", child, this);
-        return child;
+    if (_child) {
+        printf("Found cached child %p for node %p\n", _child, this);
+        return _child;
     }
     printf("Looking for first child of node %p (type %d)\n", this, type);
 
@@ -42,7 +42,7 @@ DomNode* DomNode::first_child() {
                 dn->type = LEXBOR_NODE;
                 dn->lxb_node = chd;
             }
-            this->child = dn;  dn->parent = this;
+            this->_child = dn;  dn->parent = this;
             printf("Created new child %p for node %p\n", dn, this);
             return dn;
         }
@@ -59,40 +59,39 @@ DomNode* DomNode::first_child() {
 }
 
 DomNode* DomNode::next_sibling() {
-    if (next) { return next; }
+    if (_next) { return _next; }
 
-    lxb_dom_node_t* current_node = nullptr;
-
-    // Handle Lexbor nodes
-    if (type == LEXBOR_ELEMENT && lxb_elmt) {
-        current_node = lxb_dom_interface_node(lxb_elmt);
-    } else if (type == LEXBOR_NODE && lxb_node) {
-        current_node = lxb_node;
-    }
-
-    if (current_node) {
-        lxb_dom_node_t* nxt = lxb_dom_node_next(current_node);
-        if (nxt) {
-            DomNode* dn = (DomNode*)calloc(1, sizeof(DomNode));
-            if (nxt->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-                dn->type = LEXBOR_ELEMENT;
-                dn->lxb_elmt = (lxb_html_element_t*)nxt;
-            } else {
-                dn->type = LEXBOR_NODE;
-                dn->lxb_node = nxt;
-            }
-            this->next = dn;  dn->parent = this->parent;
-            return dn;
-        }
-    }
-
-    // Handle mark nodes
+    // handle mark nodes
     if (type == MARK_ELEMENT || type == MARK_TEXT) {
         // TODO: Implement mark node sibling navigation
         // This would require understanding how mark elements are structured in trees
         printf("Mark node sibling navigation not yet implemented\n");
     }
-
+    else { // handle lexbor nodes
+        lxb_dom_node_t* current_node = nullptr;
+        if (type == LEXBOR_ELEMENT && lxb_elmt) {
+            current_node = lxb_dom_interface_node(lxb_elmt);
+        }
+        else if (type == LEXBOR_NODE && lxb_node) {
+            current_node = lxb_node;
+        }
+        if (current_node) {
+            lxb_dom_node_t* nxt = lxb_dom_node_next(current_node);
+            if (nxt) {
+                DomNode* dn = (DomNode*)calloc(1, sizeof(DomNode));
+                dn->parent = this->parent;
+                if (nxt->type == LXB_DOM_NODE_TYPE_ELEMENT) {
+                    dn->type = LEXBOR_ELEMENT;
+                    dn->lxb_elmt = (lxb_html_element_t*)nxt;
+                } else {
+                    dn->type = LEXBOR_NODE;
+                    dn->lxb_node = nxt;
+                }
+                this->_next = dn;
+                return dn;
+            }
+        }
+    }
     return NULL;
 }
 
@@ -133,8 +132,8 @@ DomNode* DomNode::create_mark_element(Element* element) {
     node->mark_element = element;
     node->style = nullptr;
     node->parent = nullptr;
-    node->next = nullptr;
-    node->child = nullptr;
+    node->_next = nullptr;
+    node->_child = nullptr;
 
     return node;
 }
@@ -147,8 +146,8 @@ DomNode* DomNode::create_mark_text(String* text) {
     node->mark_text = text;
     node->style = nullptr;
     node->parent = nullptr;
-    node->next = nullptr;
-    node->child = nullptr;
+    node->_next = nullptr;
+    node->_child = nullptr;
 
     return node;
 }

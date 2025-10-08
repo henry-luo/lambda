@@ -77,8 +77,11 @@ typedef struct DomNode {
     };
     struct Style* style;  // associated style
     DomNode* parent;
-    DomNode* next;
-    DomNode* child;
+    private:
+    DomNode* _child;  // cached first child
+    DomNode* _next;  // cached next sibling
+
+    public:
     // Basic node information
     char* name() {
         if (type == LEXBOR_ELEMENT && lxb_elmt) {
