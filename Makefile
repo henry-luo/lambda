@@ -425,7 +425,7 @@ help:
 	@echo "  test-layout              - Run Radiant layout integration tests (all categories)"
 	@echo "                             Usage: make test-layout SUITE=baseline (run specific suite)"
 	@echo "                             Usage: make test-layout TEST=table_simple (run specific test)"
-	@echo "                             Usage: make test-layout PATTERN=table_simple (run all matching tests)"
+	@echo "                             Usage: make test-layout PATTERN=float (run tests matching pattern)"
 	@echo "                             Available suites: auto-detected from test/layout/data/"
 	@echo "  capture-browser-layout   - Extract browser layout references using Puppeteer"
 	@echo "                             Usage: make capture-browser-layout (all categories, skip existing)"
@@ -1418,21 +1418,21 @@ capture-browser-layout:
 test-layout:
 	@echo "🎨 Running Radiant Layout Engine Tests"
 	@echo "======================================"
-	@if [ -f "test/layout/tools/test_layout.js" ]; then \
+	@if [ -f "test/layout/test_radiant_layout.js" ]; then \
 		if [ -n "$(TEST)" ]; then \
 			echo "🎯 Running single test: $(TEST)"; \
-			node test/layout/tools/test_layout.js --radiant-exe ./radiant.exe --test $(TEST) -v; \
+			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe --test $(TEST) -v; \
 		elif [ -n "$(PATTERN)" ]; then \
 			echo "🔍 Running tests matching pattern: $(PATTERN)"; \
-			node test/layout/tools/test_layout.js --radiant-exe ./radiant.exe --pattern $(PATTERN) -v; \
+			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe --pattern $(PATTERN); \
 		elif [ -n "$(SUITE)" ]; then \
 			echo "📂 Running test suite: $(SUITE)"; \
-			node test/layout/tools/test_layout.js --radiant-exe ./radiant.exe --category $(SUITE); \
+			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe --category $(SUITE); \
 		else \
 			echo "🎯 Running all layout tests"; \
-			node test/layout/tools/test_layout.js --radiant-exe ./radiant.exe -v; \
+			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe; \
 		fi; \
 	else \
-		echo "❌ Error: Layout test script not found at test/layout/tools/test_layout.js"; \
+		echo "❌ Error: Layout test script not found at test/layout/test_radiant_layout.js"; \
 		exit 1; \
 	fi
