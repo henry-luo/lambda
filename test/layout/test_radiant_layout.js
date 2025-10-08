@@ -714,7 +714,7 @@ class RadiantLayoutTester {
         console.log(`   Pattern: "${pattern}"`);
         console.log(`   Total Matches: ${totalMatches}`);
         console.log(`   ✅ Successful: ${successful}`);
-        console.log(`   ❌ Failed: ${failed}`);
+        if (failed > 0) console.log(`   ❌ Failed: ${failed}`);
         console.log(`   Success Rate: ${allResults.length > 0 ? (successful / allResults.length * 100).toFixed(1) : 0}%`);
 
         return allResults;

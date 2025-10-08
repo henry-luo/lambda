@@ -38,6 +38,9 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
         case RDT_VIEW_TEXT:
             view = (ViewText*)pool_calloc(tree->pool, sizeof(ViewText));
             break;
+        case RDT_VIEW_BR:
+            view = (View*)pool_calloc(tree->pool, sizeof(View));
+            break;
         default:
             printf("Unknown view type\n");
             return NULL;
@@ -396,6 +399,11 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                 strbuf_append_char_n(buf, ' ', indent);
                 strbuf_append_str(buf, "]\n");
             }
+            else if (view->type == RDT_VIEW_BR) {
+                strbuf_append_char_n(buf, ' ', indent);
+                strbuf_append_format(buf, "[br: x:%d, y:%d, wd:%d, hg:%d]\n",
+                    view->x, view->y, view->width, view->height);
+            }
             else if (view->type == RDT_VIEW_TEXT) {
                 strbuf_append_char_n(buf, ' ', indent);
                 ViewText* text = (ViewText*)view;
@@ -465,6 +473,7 @@ const char* get_view_type_name_json(ViewType type) {
         case RDT_VIEW_TABLE_CELL: return "table-cell";
         case RDT_VIEW_INLINE: return "inline";
         case RDT_VIEW_TEXT: return "text";
+        case RDT_VIEW_BR: return "br";
         default: return "unknown";
     }
 }
@@ -838,6 +847,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         else if (child->type == RDT_VIEW_TEXT) {
             print_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
         }
+        else if (child->type == RDT_VIEW_BR) {
+            print_br_json(child, buf, indent + 4, pixel_ratio);
+        }
         else if (child->type == RDT_VIEW_INLINE) {
             print_inline_json((ViewSpan*)child, buf, indent + 4, pixel_ratio);
         }
@@ -920,6 +932,30 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
     print_bounds_json(text, buf, indent, pixel_ratio);
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "}\n");
+
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "}");
+}
+
+void print_br_json(View* br, StrBuf* buf, int indent, float pixel_ratio) {
+    strbuf_append_char_n(buf, ' ', indent);
+    strbuf_append_str(buf, "{\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"type\": \"br\",\n");
+
+    // CRITICAL FIX: Add tag field for consistency with block elements
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"tag\": \"br\",\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"selector\": \"br\",\n");
+
+    strbuf_append_char_n(buf, ' ', indent + 2);
+    strbuf_append_str(buf, "\"layout\": {\n");
+    print_bounds_json(br, buf, indent, pixel_ratio);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}\n");
 
@@ -1085,7 +1121,11 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 
         if (child->type == RDT_VIEW_TEXT) {
             print_text_json((ViewText*)child, buf, indent + 4, pixel_ratio);
-        } else if (child->type == RDT_VIEW_INLINE) {
+        }
+        else if (child->type == RDT_VIEW_BR) {
+            print_br_json(child, buf, indent + 4, pixel_ratio);
+        }
+        else if (child->type == RDT_VIEW_INLINE) {
             // Nested inline elements
             print_inline_json((ViewSpan*)child, buf, indent + 4, pixel_ratio);
         } else {
