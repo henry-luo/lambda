@@ -10,6 +10,7 @@ void view_pool_destroy(ViewTree* tree);
 // Function declaration moved to layout.hpp
 char* read_text_file(const char *filename);
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display);
+void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
 
 bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
@@ -76,7 +77,7 @@ int calculate_vertical_align_offset(PropValue align, int item_height, int line_h
 
 void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     FontBox pa_font = lycon->font;  PropValue pa_line_align = lycon->line.vertical_align;
-    log_debug("render inline view");
+    log_debug("span_vertical_align");
     View* child = span->child;
     if (child) {
         if (span->font) {
@@ -95,6 +96,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
 
 // apply vertical alignment to a view
 void view_vertical_align(LayoutContext* lycon, View* view) {
+    log_debug("view_vertical_align: view=%d", view->type);
     int line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
     if (view->type == RDT_VIEW_TEXT) {
         ViewText* text_view = (ViewText*)view;
@@ -103,10 +105,12 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         int item_baseline = (int)(text_view->font->ft_face->size->metrics.ascender >> 6);
         int vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
-        log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%d, line=%d, txt=%d",
-            text_view->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height);
+        log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%d, line=%d, hg=%d, txt='%.*s'",
+            text_view->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
+            text_view->length, text_view->node->text_data() + text_view->start_index);
         text_view->y = lycon->block.advance_y + max(vertical_offset, 0);
-    } else if (view->type == RDT_VIEW_INLINE_BLOCK) {
+    }
+    else if (view->type == RDT_VIEW_INLINE_BLOCK) {
         ViewBlock* block = (ViewBlock*)view;
         int item_height = block->height + (block->bound ?
             block->bound->margin.top + block->bound->margin.bottom : 0);
@@ -118,10 +122,14 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->bound->margin.top : 0);
         log_debug("vertical-adjusted-inline-block: y=%d, adv=%d, offset=%d, line=%d, blk=%d",
             block->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height);
-    } else if (view->type == RDT_VIEW_INLINE) {
+    }
+    else if (view->type == RDT_VIEW_INLINE) {
         // for inline elements, apply to all children
         ViewSpan* span = (ViewSpan*)view;
         span_vertical_align(lycon, span);
+    }
+    else {
+        log_debug("view_vertical_align: unknown view type %d", view->type);
     }
 }
 
@@ -180,140 +188,6 @@ void line_align(LayoutContext* lycon) {
         }
     }
     log_debug("end of line align");
-}
-
-// Compute bounding box of a ViewSpan based on union of child views
-void compute_span_bounding_box(ViewSpan* span) {
-    View* child = span->child;
-    if (!child) {
-        // If no child views, keep current position and zero size
-        span->width = 0;
-        span->height = 0;
-        return;
-    }
-
-    // Initialize bounds with first child
-    int min_x = child->x;
-    int min_y = child->y;
-    int max_x = child->x + child->width;
-    int max_y = child->y + child->height;
-
-    // Iterate through remaining children to find union
-    child = child->next;
-    while (child) {
-        int child_min_x = child->x;
-        int child_min_y = child->y;
-        int child_max_x = child->x + child->width;
-        int child_max_y = child->y + child->height;
-
-        // Expand bounding box to include this child
-        if (child_min_x < min_x) min_x = child_min_x;
-        if (child_min_y < min_y) min_y = child_min_y;
-        if (child_max_x > max_x) max_x = child_max_x;
-        if (child_max_y > max_y) max_y = child_max_y;
-
-        child = child->next;
-    }
-
-    // Update span's bounding box
-    span->x = min_x;
-    span->y = min_y;
-    span->width = max_x - min_x;
-    span->height = max_y - min_y;
-}
-
-void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
-    uintptr_t elmt_name = span->node->tag();
-    switch (elmt_name) {
-    case LXB_TAG_B:
-        if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->font_weight = LXB_CSS_VALUE_BOLD;
-        break;
-    case LXB_TAG_I:
-        if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->font_style = LXB_CSS_VALUE_ITALIC;
-        break;
-    case LXB_TAG_U:
-        if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->text_deco = LXB_CSS_VALUE_UNDERLINE;
-        break;
-    case LXB_TAG_S:
-        if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->text_deco = LXB_CSS_VALUE_LINE_THROUGH;
-        break;
-    case LXB_TAG_FONT: {
-        // parse font style
-        // Get color attribute using DomNode interface
-        const lxb_char_t* color_attr = span->node->get_attribute("color");
-        if (color_attr) {
-            log_debug("font color: %s", color_attr);
-        }
-        break;
-    }
-    case LXB_TAG_A: {
-        // anchor style
-        if (!span->in_line) { span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp)); }
-        span->in_line->cursor = LXB_CSS_VALUE_POINTER;
-        span->in_line->color = color_name_to_rgb(LXB_CSS_VALUE_BLUE);
-        span->font = alloc_font_prop(lycon);
-        span->font->text_deco = LXB_CSS_VALUE_UNDERLINE;
-        break;
-    }
-    }
-}
-
-void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
-    log_debug("layout inline %s", elmt->name());
-    if (elmt->tag() == LXB_TAG_BR) {
-        // allocate a line break view
-        View* br_view = alloc_view(lycon, RDT_VIEW_BR, elmt);
-        br_view->x = lycon->line.advance_x;  br_view->y = lycon->block.advance_y;
-        br_view->width = 0;  br_view->height = lycon->block.line_height;
-        lycon->prev_view = br_view;
-        line_break(lycon);
-        return;
-    }
-
-    // save parent context
-    FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
-    PropValue pa_line_align = lycon->line.vertical_align;
-    lycon->elmt = elmt;
-
-    ViewSpan* span = (ViewSpan*)alloc_view(lycon, RDT_VIEW_INLINE, elmt);
-    span->x = lycon->line.advance_x;  span->y = lycon->block.advance_y;
-    span->width = 0;  span->height = 0;
-    span->display = display;
-    // resolve element default styles
-    resolve_inline_default(lycon, span);
-    // resolve CSS styles
-
-    dom_node_resolve_style(elmt, lycon);
-
-    if (span->font) {
-        setup_font(lycon->ui_context, &lycon->font, pa_font.face.ft_face->family_name, span->font);
-    }
-    if (span->in_line && span->in_line->vertical_align) {
-        lycon->line.vertical_align = span->in_line->vertical_align;
-    }
-    // line.max_ascender and max_descender to be changed only when there's output from the span
-
-    // layout inline content
-    DomNode *child = elmt->first_child();
-    if (child) {
-        lycon->parent = (ViewGroup*)span;  lycon->prev_view = NULL;
-        do {
-            layout_flow_node(lycon, child);
-            child = child->next_sibling();
-        } while (child);
-        lycon->parent = span->parent;
-    }
-
-    // span->width = lycon->line.advance_x - span->x;
-    // span->height = lycon->block.advance_y + lycon->line.max_ascender + lycon->line.max_descender - span->y;
-    compute_span_bounding_box(span);
-    lycon->font = pa_font;  lycon->line.vertical_align = pa_line_align;
-    lycon->prev_view = (View*)span;
-    log_debug("inline view: %d, child %p, x:%d, y:%d, wd:%d, hg:%d", span->type, span->child, span->x, span->y, span->width, span->height);
 }
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
