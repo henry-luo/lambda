@@ -444,7 +444,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
         }
 
         if (evcon.new_url) {
-            log_debug("opening-url:%s", evcon.new_url);
+            log_info("opening_url:%s", evcon.new_url);
             if (evcon.new_target) {
                 log_debug("setting new src to target: %s", evcon.new_target);
                 // find iframe with the target name
