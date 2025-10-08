@@ -127,6 +127,22 @@
         "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
@@ -188,6 +204,22 @@
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
@@ -246,6 +278,22 @@
             },
             "depth": 2,
             "elementIndex": 3,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
             "children": []
           },
           {
@@ -327,6 +375,22 @@
             ]
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "style",
             "tag": "style",
@@ -403,6 +467,22 @@
                 "children": []
               }
             ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
+            "children": []
           }
         ]
       },
@@ -539,7 +619,10 @@
                       "width": 383.69,
                       "height": 17,
                       "right": 383.69,
-                      "bottom": 17
+                      "bottom": 17,
+                      "text": "Test passes if there are two lines of \"Filler Text\" below.",
+                      "startIndex": 0,
+                      "endIndex": 58
                     }
                   ],
                   "hasLayout": true,
@@ -686,7 +769,10 @@
                           "width": 68.17,
                           "height": 17,
                           "right": 68.17,
-                          "bottom": 35
+                          "bottom": 35,
+                          "text": "Filler Text",
+                          "startIndex": 0,
+                          "endIndex": 11
                         }
                       ],
                       "hasLayout": true,
@@ -773,7 +859,10 @@
                           "width": 68.17,
                           "height": 17,
                           "right": 68.17,
-                          "bottom": 53
+                          "bottom": 53,
+                          "text": "Filler Text",
+                          "startIndex": 0,
+                          "endIndex": 11
                         }
                       ],
                       "hasLayout": true,

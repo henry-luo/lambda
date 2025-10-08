@@ -127,6 +127,22 @@
         "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
@@ -188,6 +204,22 @@
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
@@ -246,6 +278,22 @@
             },
             "depth": 2,
             "elementIndex": 3,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
             "children": []
           },
           {
@@ -327,6 +375,22 @@
             ]
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "style",
             "tag": "style",
@@ -403,6 +467,22 @@
                 "children": []
               }
             ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
+            "children": []
           }
         ]
       },
@@ -542,7 +622,10 @@
                       "width": 86.7,
                       "height": 14,
                       "right": 127.7,
-                      "bottom": 55
+                      "bottom": 55,
+                      "text": "This text is 12px",
+                      "startIndex": 0,
+                      "endIndex": 17
                     }
                   ],
                   "hasLayout": true,
@@ -632,7 +715,10 @@
                       "width": 115.61,
                       "height": 17,
                       "right": 156.61,
-                      "bottom": 104
+                      "bottom": 104,
+                      "text": "This text is 16px",
+                      "startIndex": 0,
+                      "endIndex": 17
                     }
                   ],
                   "hasLayout": true,
@@ -722,7 +808,10 @@
                       "width": 173.41,
                       "height": 27,
                       "right": 214.41,
-                      "bottom": 164
+                      "bottom": 164,
+                      "text": "This text is 24px",
+                      "startIndex": 0,
+                      "endIndex": 17
                     }
                   ],
                   "hasLayout": true,
@@ -812,7 +901,10 @@
                       "width": 182.75,
                       "height": 27,
                       "right": 223.75,
-                      "bottom": 224
+                      "bottom": 224,
+                      "text": "This text is 150%",
+                      "startIndex": 0,
+                      "endIndex": 17
                     }
                   ],
                   "hasLayout": true,
@@ -902,7 +994,10 @@
                       "width": 224.06,
                       "height": 36,
                       "right": 265.06,
-                      "bottom": 293
+                      "bottom": 293,
+                      "text": "This text is 2em",
+                      "startIndex": 0,
+                      "endIndex": 16
                     }
                   ],
                   "hasLayout": true,

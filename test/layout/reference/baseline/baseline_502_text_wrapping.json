@@ -127,6 +127,22 @@
         "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
@@ -188,6 +204,22 @@
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
@@ -246,6 +278,22 @@
             },
             "depth": 2,
             "elementIndex": 3,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
             "children": []
           },
           {
@@ -327,6 +375,22 @@
             ]
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "style",
             "tag": "style",
@@ -403,6 +467,22 @@
                 "children": []
               }
             ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
+            "children": []
           }
         ]
       },
@@ -541,7 +621,10 @@
                       "width": 94.27,
                       "height": 17,
                       "right": 109.27,
-                      "bottom": 32
+                      "bottom": 32,
+                      "text": "\n        This is a long ",
+                      "startIndex": 0,
+                      "endIndex": 24
                     },
                     {
                       "x": 15,
@@ -549,7 +632,10 @@
                       "width": 147.67,
                       "height": 17,
                       "right": 162.67,
-                      "bottom": 50
+                      "bottom": 50,
+                      "text": "sentence that should ",
+                      "startIndex": 24,
+                      "endIndex": 45
                     },
                     {
                       "x": 15,
@@ -557,7 +643,10 @@
                       "width": 145.83,
                       "height": 17,
                       "right": 160.83,
-                      "bottom": 68
+                      "bottom": 68,
+                      "text": "wrap across multiple ",
+                      "startIndex": 45,
+                      "endIndex": 66
                     },
                     {
                       "x": 15,
@@ -565,7 +654,10 @@
                       "width": 102.3,
                       "height": 17,
                       "right": 117.3,
-                      "bottom": 86
+                      "bottom": 86,
+                      "text": "lines when the ",
+                      "startIndex": 66,
+                      "endIndex": 81
                     },
                     {
                       "x": 15,
@@ -573,7 +665,10 @@
                       "width": 123.63,
                       "height": 17,
                       "right": 138.63,
-                      "bottom": 104
+                      "bottom": 104,
+                      "text": "container width is ",
+                      "startIndex": 81,
+                      "endIndex": 100
                     },
                     {
                       "x": 15,
@@ -581,7 +676,10 @@
                       "width": 122.75,
                       "height": 17,
                       "right": 137.75,
-                      "bottom": 122
+                      "bottom": 122,
+                      "text": "constrained to be ",
+                      "startIndex": 100,
+                      "endIndex": 118
                     },
                     {
                       "x": 15,
@@ -589,7 +687,10 @@
                       "width": 52.47,
                       "height": 17,
                       "right": 67.47,
-                      "bottom": 140
+                      "bottom": 140,
+                      "text": "narrow.\n    ",
+                      "startIndex": 118,
+                      "endIndex": 130
                     }
                   ],
                   "hasLayout": true,

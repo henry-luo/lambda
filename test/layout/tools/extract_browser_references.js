@@ -117,13 +117,13 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
             // Helper function to extract text node data
             const extractTextNodeData = (textNode, nodeIndex) => {
                 try {
-                    // Create range for this text node to get layout information
+                    const text = textNode.textContent;
                     const range = document.createRange();
                     range.selectNodeContents(textNode);
                     const rects = range.getClientRects();
 
                     // Convert ClientRects to plain objects and round coordinates
-                    const rectArray = Array.from(rects).map(rect => ({
+                    let rectArray = Array.from(rects).map(rect => ({
                         x: Math.round(rect.left * 100) / 100,
                         y: Math.round(rect.top * 100) / 100,
                         width: Math.round(rect.width * 100) / 100,
@@ -132,14 +132,96 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
                         bottom: Math.round(rect.bottom * 100) / 100
                     }));
 
-                    range.detach(); // Clean up range
-
                     // Additional debugging: check parent element visibility
                     const parentElement = textNode.parentElement;
                     const parentComputed = parentElement ? window.getComputedStyle(parentElement) : null;
                     const isParentVisible = parentComputed ?
                         (parentComputed.display !== 'none' && parentComputed.visibility !== 'hidden') :
                         false;
+
+                    // Enhanced: For multi-line text, return multiple text nodes (one per line) to match Radiant's behavior
+                    if (rectArray.length > 1 && text.trim().length > 0) {
+                        try {
+                            // Use character-by-character analysis to determine line breaks
+                            const charPositions = [];
+                            for (let i = 0; i < text.length; i++) {
+                                range.setStart(textNode, i);
+                                range.setEnd(textNode, i + 1);
+                                const charRects = range.getClientRects();
+                                if (charRects.length > 0) {
+                                    const rect = charRects[0];
+                                    charPositions.push({
+                                        char: text[i],
+                                        index: i,
+                                        y: Math.round(rect.top * 100) / 100,
+                                        x: Math.round(rect.left * 100) / 100
+                                    });
+                                }
+                            }
+
+                            // Group characters by Y position to determine lines (with tolerance for slight variations)
+                            const tolerance = 2;
+                            const lines = [];
+                            charPositions.forEach(charData => {
+                                let foundLine = lines.find(line => Math.abs(line.y - charData.y) <= tolerance);
+                                if (!foundLine) {
+                                    foundLine = { y: charData.y, chars: [] };
+                                    lines.push(foundLine);
+                                }
+                                foundLine.chars.push(charData);
+                            });
+
+                            // Sort lines by Y position
+                            lines.sort((a, b) => a.y - b.y);
+
+                            // Return array of separate text nodes (one per line) to match Radiant's behavior
+                            const lineTextNodes = [];
+                            lines.forEach((line, lineIndex) => {
+                                if (line.chars.length > 0 && lineIndex < rectArray.length) {
+                                    const startIndex = line.chars[0].index;
+                                    const endIndex = line.chars[line.chars.length - 1].index + 1;
+                                    const segmentText = text.substring(startIndex, endIndex);
+                                    const rect = rectArray[lineIndex];
+
+                                    lineTextNodes.push({
+                                        nodeType: 'text',
+                                        text: segmentText,
+                                        length: segmentText.length,
+                                        isWhitespaceOnly: !segmentText.trim(),
+                                        layout: {
+                                            rects: [{
+                                                ...rect,
+                                                text: segmentText,
+                                                startIndex: 0, // Relative to this text segment
+                                                endIndex: segmentText.length
+                                            }],
+                                            hasLayout: true,
+                                            parentVisible: isParentVisible,
+                                            parentDisplay: parentComputed?.display || 'unknown',
+                                            parentVisibility: parentComputed?.visibility || 'unknown'
+                                        },
+                                        depth: 0, // Will be set by parent
+                                        nodeIndex: nodeIndex
+                                    });
+                                }
+                            });
+
+                            range.detach();
+                            return lineTextNodes; // Return array instead of single node
+                        } catch (mappingError) {
+                            // If detailed mapping fails, fall through to single node approach
+                            console.warn('Line-based text mapping failed:', mappingError.message);
+                        }
+                    }
+
+                    // Single line text or fallback - create enhanced rectangle with text mapping
+                    if (rectArray.length === 1 && text.trim().length > 0) {
+                        rectArray[0].text = text;
+                        rectArray[0].startIndex = 0;
+                        rectArray[0].endIndex = text.length;
+                    }
+
+                    range.detach();
 
                     return {
                         nodeType: 'text',
@@ -285,21 +367,65 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
                         for (let i = 0; i < node.childNodes.length; i++) {
                             const childNode = node.childNodes[i];
 
-                            // Process both element and text nodes (including whitespace-only text nodes)
-                            if (childNode.nodeType === Node.ELEMENT_NODE ||
-                                childNode.nodeType === Node.TEXT_NODE) {
-
+                            if (childNode.nodeType === Node.ELEMENT_NODE) {
+                                // Always include element nodes
                                 const childTree = buildDOMTree(childNode, depth + 1, i);
                                 nodeData.children.push(childTree);
+                            } else if (childNode.nodeType === Node.TEXT_NODE) {
+                                // Include text nodes that have layout rectangles OR are hidden (display:none, visibility:hidden)
+                                const childResult = buildDOMTree(childNode, depth + 1, i);
+
+                                // Handle case where multi-line text returns multiple text nodes
+                                if (Array.isArray(childResult)) {
+                                    // Multiple text nodes from line wrapping
+                                    childResult.forEach(textNode => {
+                                        if (textNode && textNode.layout) {
+                                            const hasLayout = textNode.layout.hasLayout && textNode.layout.rects.length > 0;
+                                            const isHidden = !textNode.layout.parentVisible ||
+                                                           textNode.layout.parentDisplay === 'none' ||
+                                                           textNode.layout.parentVisibility === 'hidden';
+
+                                            // Include if it has layout OR if it's hidden (for testing purposes)
+                                            if (hasLayout || isHidden) {
+                                                textNode.depth = depth + 1;
+                                                nodeData.children.push(textNode);
+                                            }
+                                        }
+                                    });
+                                } else if (childResult && childResult.layout) {
+                                    // Single text node
+                                    const hasLayout = childResult.layout.hasLayout && childResult.layout.rects.length > 0;
+                                    const isHidden = !childResult.layout.parentVisible ||
+                                                   childResult.layout.parentDisplay === 'none' ||
+                                                   childResult.layout.parentVisibility === 'hidden';
+
+                                    // Include if it has layout OR if it's hidden (for testing purposes)
+                                    if (hasLayout || isHidden) {
+                                        nodeData.children.push(childResult);
+                                    }
+                                }
+                                // Only skip text nodes that have no layout AND are not hidden (e.g., whitespace-only nodes)
                             }
                         }
                     }
 
                 } else if (node.nodeType === Node.TEXT_NODE) {
-                    // Text node
-                    nodeData = extractTextNodeData(node, nodeIndex);
-                    nodeData.depth = depth;
-                    nodeData.children = []; // Text nodes have no children
+                    // Text node - may return single node or array of nodes for multi-line text
+                    const textResult = extractTextNodeData(node, nodeIndex);
+
+                    if (Array.isArray(textResult)) {
+                        // Multi-line text returns multiple text nodes
+                        textResult.forEach(textNode => {
+                            textNode.depth = depth;
+                            textNode.children = []; // Text nodes have no children
+                        });
+                        return textResult; // Return array of text nodes
+                    } else {
+                        // Single text node
+                        textResult.depth = depth;
+                        textResult.children = []; // Text nodes have no children
+                        return textResult;
+                    }
                 }
 
                 return nodeData;

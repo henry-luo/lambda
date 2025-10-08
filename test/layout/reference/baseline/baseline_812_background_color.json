@@ -127,6 +127,22 @@
         "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
@@ -188,6 +204,22 @@
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
@@ -246,6 +278,22 @@
             },
             "depth": 2,
             "elementIndex": 3,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
             "children": []
           },
           {
@@ -327,6 +375,22 @@
             ]
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "style",
             "tag": "style",
@@ -403,6 +467,22 @@
                 "children": []
               }
             ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
+            "children": []
           }
         ]
       },
@@ -542,7 +622,10 @@
                       "width": 117.42,
                       "height": 17,
                       "right": 163.42,
-                      "bottom": 63
+                      "bottom": 63,
+                      "text": "Red background",
+                      "startIndex": 0,
+                      "endIndex": 14
                     }
                   ],
                   "hasLayout": true,
@@ -632,7 +715,10 @@
                       "width": 132.53,
                       "height": 17,
                       "right": 178.53,
-                      "bottom": 205
+                      "bottom": 205,
+                      "text": "Green background",
+                      "startIndex": 0,
+                      "endIndex": 16
                     }
                   ],
                   "hasLayout": true,
@@ -722,7 +808,10 @@
                       "width": 120.09,
                       "height": 17,
                       "right": 166.09,
-                      "bottom": 347
+                      "bottom": 347,
+                      "text": "Blue background",
+                      "startIndex": 0,
+                      "endIndex": 15
                     }
                   ],
                   "hasLayout": true,
@@ -812,7 +901,10 @@
                       "width": 85.67,
                       "height": 17,
                       "right": 131.67,
-                      "bottom": 489
+                      "bottom": 489,
+                      "text": "Transparent ",
+                      "startIndex": 0,
+                      "endIndex": 12
                     },
                     {
                       "x": 46,
@@ -820,7 +912,10 @@
                       "width": 83.63,
                       "height": 17,
                       "right": 129.63,
-                      "bottom": 507
+                      "bottom": 507,
+                      "text": "background",
+                      "startIndex": 12,
+                      "endIndex": 22
                     }
                   ],
                   "hasLayout": true,

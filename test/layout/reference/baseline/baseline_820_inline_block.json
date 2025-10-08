@@ -487,22 +487,6 @@
         ]
       },
       {
-        "nodeType": "text",
-        "text": "\n",
-        "length": 1,
-        "isWhitespaceOnly": true,
-        "layout": {
-          "rects": [],
-          "hasLayout": false,
-          "parentVisible": true,
-          "parentDisplay": "block",
-          "parentVisibility": "visible"
-        },
-        "depth": 1,
-        "nodeIndex": 1,
-        "children": []
-      },
-      {
         "nodeType": "element",
         "selector": "body",
         "tag": "body",
@@ -562,22 +546,6 @@
         "depth": 1,
         "elementIndex": 2,
         "children": [
-          {
-            "nodeType": "text",
-            "text": "\n    ",
-            "length": 5,
-            "isWhitespaceOnly": true,
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 0,
-            "children": []
-          },
           {
             "nodeType": "element",
             "selector": "div.container",
@@ -640,22 +608,6 @@
             "depth": 2,
             "elementIndex": 1,
             "children": [
-              {
-                "nodeType": "text",
-                "text": "\n        ",
-                "length": 9,
-                "isWhitespaceOnly": true,
-                "layout": {
-                  "rects": [],
-                  "hasLayout": false,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
-                },
-                "depth": 3,
-                "nodeIndex": 0,
-                "children": []
-              },
               {
                 "nodeType": "element",
                 "selector": "div.inline-block:nth-of-type(1)",
@@ -731,7 +683,10 @@
                           "width": 40.92,
                           "height": 17,
                           "right": 103.77,
-                          "bottom": 55
+                          "bottom": 55,
+                          "text": "Box 1",
+                          "startIndex": 0,
+                          "endIndex": 5
                         }
                       ],
                       "hasLayout": true,
@@ -845,7 +800,10 @@
                           "width": 40.92,
                           "height": 17,
                           "right": 202.22,
-                          "bottom": 55
+                          "bottom": 55,
+                          "text": "Box 2",
+                          "startIndex": 0,
+                          "endIndex": 5
                         }
                       ],
                       "hasLayout": true,
@@ -960,7 +918,10 @@
                           "width": 70.25,
                           "height": 17,
                           "right": 315.34,
-                          "bottom": 55
+                          "bottom": 55,
+                          "text": "Taller Box",
+                          "startIndex": 0,
+                          "endIndex": 10
                         }
                       ],
                       "hasLayout": true,
@@ -1074,7 +1035,10 @@
                           "width": 40.92,
                           "height": 17,
                           "right": 399.13,
-                          "bottom": 55
+                          "bottom": 55,
+                          "text": "Box 4",
+                          "startIndex": 0,
+                          "endIndex": 5
                         }
                       ],
                       "hasLayout": true,
@@ -1087,40 +1051,8 @@
                     "children": []
                   }
                 ]
-              },
-              {
-                "nodeType": "text",
-                "text": "\n    ",
-                "length": 5,
-                "isWhitespaceOnly": true,
-                "layout": {
-                  "rects": [],
-                  "hasLayout": false,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
-                },
-                "depth": 3,
-                "nodeIndex": 8,
-                "children": []
               }
             ]
-          },
-          {
-            "nodeType": "text",
-            "text": "\n\n    ",
-            "length": 6,
-            "isWhitespaceOnly": true,
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 2,
-            "children": []
           },
           {
             "nodeType": "element",
@@ -1199,22 +1131,6 @@
                 "children": []
               }
             ]
-          },
-          {
-            "nodeType": "text",
-            "text": "\n\n\n",
-            "length": 3,
-            "isWhitespaceOnly": true,
-            "layout": {
-              "rects": [],
-              "hasLayout": false,
-              "parentVisible": true,
-              "parentDisplay": "block",
-              "parentVisibility": "visible"
-            },
-            "depth": 2,
-            "nodeIndex": 4,
-            "children": []
           }
         ]
       }

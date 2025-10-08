@@ -127,6 +127,22 @@
         "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
@@ -188,6 +204,22 @@
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
@@ -246,6 +278,22 @@
             },
             "depth": 2,
             "elementIndex": 3,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
             "children": []
           },
           {
@@ -327,6 +375,22 @@
             ]
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "style",
             "tag": "style",
@@ -403,6 +467,22 @@
                 "children": []
               }
             ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
+            "children": []
           }
         ]
       },
@@ -604,7 +684,10 @@
                           "width": 243.67,
                           "height": 17,
                           "right": 265.67,
-                          "bottom": 39
+                          "bottom": 39,
+                          "text": "Overflow: visible - content extends ",
+                          "startIndex": 0,
+                          "endIndex": 36
                         },
                         {
                           "x": 22,
@@ -612,7 +695,10 @@
                           "width": 122.77,
                           "height": 17,
                           "right": 144.77,
-                          "bottom": 57
+                          "bottom": 57,
+                          "text": "beyond container",
+                          "startIndex": 36,
+                          "endIndex": 52
                         }
                       ],
                       "hasLayout": true,
@@ -766,7 +852,10 @@
                           "width": 257.92,
                           "height": 17,
                           "right": 279.92,
-                          "bottom": 173
+                          "bottom": 173,
+                          "text": "Overflow: hidden - content is clipped",
+                          "startIndex": 0,
+                          "endIndex": 37
                         }
                       ],
                       "hasLayout": true,
@@ -920,7 +1009,10 @@
                           "width": 246.3,
                           "height": 17,
                           "right": 268.3,
-                          "bottom": 307
+                          "bottom": 307,
+                          "text": "Overflow: scroll - scrollbars appear",
+                          "startIndex": 0,
+                          "endIndex": 36
                         }
                       ],
                       "hasLayout": true,

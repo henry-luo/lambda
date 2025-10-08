@@ -127,6 +127,22 @@
         "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
@@ -188,6 +204,22 @@
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
@@ -246,6 +278,22 @@
             },
             "depth": 2,
             "elementIndex": 3,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
             "children": []
           },
           {
@@ -327,6 +375,22 @@
             ]
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "style",
             "tag": "style",
@@ -403,6 +467,22 @@
                 "children": []
               }
             ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
+            "children": []
           }
         ]
       },
@@ -604,7 +684,10 @@
                           "width": 46.84,
                           "height": 17,
                           "right": 93.84,
-                          "bottom": 64
+                          "bottom": 64,
+                          "text": "Visible",
+                          "startIndex": 0,
+                          "endIndex": 7
                         }
                       ],
                       "hasLayout": true,
@@ -617,6 +700,31 @@
                     "children": []
                   }
                 ]
+              },
+              {
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 153,
+                      "y": 47,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 157.45,
+                      "bottom": 64
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 2,
+                "children": []
               },
               {
                 "nodeType": "element",
@@ -694,7 +802,10 @@
                           "width": 50.7,
                           "height": 17,
                           "right": 214.16,
-                          "bottom": 64
+                          "bottom": 64,
+                          "text": "Hidden",
+                          "startIndex": 0,
+                          "endIndex": 6
                         }
                       ],
                       "hasLayout": true,
@@ -784,7 +895,10 @@
                           "width": 51.56,
                           "height": 17,
                           "right": 98.56,
-                          "bottom": 126
+                          "bottom": 126,
+                          "text": "Normal",
+                          "startIndex": 0,
+                          "endIndex": 6
                         }
                       ],
                       "hasLayout": true,
@@ -873,7 +987,10 @@
                       "width": 489.2,
                       "height": 17,
                       "right": 509.2,
-                      "bottom": 203
+                      "bottom": 203,
+                      "text": "The middle box should be hidden but still take up space in the layout.",
+                      "startIndex": 0,
+                      "endIndex": 70
                     }
                   ],
                   "hasLayout": true,

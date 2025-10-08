@@ -104,14 +104,14 @@ class RadiantLayoutTester {
             const browserVal = browserLayout[prop] || 0;
             const diff = Math.abs(radiantVal - browserVal);
 
-            if (diff > this.tolerance) {
-                differences.push({
-                    property: prop,
-                    radiant: radiantVal,
-                    browser: browserVal,
-                    difference: diff
-                });
-            }
+            // Always include the difference, regardless of tolerance
+            differences.push({
+                property: prop,
+                radiant: radiantVal,
+                browser: browserVal,
+                difference: diff,
+                exceedsTolerance: diff > this.tolerance
+            });
         }
 
         return differences;
@@ -232,7 +232,7 @@ class RadiantLayoutTester {
 
                 if (presentNode.type === 'text' || presentNode.nodeType === 'text') {
                     const content = presentNode.content || presentNode.text || '';
-                    console.log(`${indent()}❌ Missing text in ${missingIn}: "${content.substring(0, 10)}..."`);
+                    console.log(`${indent()}❌ Missing text in ${missingIn}: "${content.substring(0, 10)}${content.length > 10 ? '...' : ''}"`);
                 } else {
                     console.log(`${indent()}❌ Missing element in ${missingIn}: <${presentNode.tag}>`);
                 }
@@ -250,9 +250,10 @@ class RadiantLayoutTester {
             results.totalTextNodes++;
 
             if (this.verbose) {
-                const radiantContent = (radiantNode.content || '').substring(0, 10);
-                const browserContent = (browserNode.text || '').substring(0, 10);
-                console.log(`${indent()}📝 Comparing text: "${radiantContent}..." vs "${browserContent}..."`);
+                const radiantContent = (radiantNode.content || '').substring(0, 20) + (radiantNode.content.length > 20 ? '...' : '');
+                const browserContent = (browserNode.text || '').substring(0, 20) + (browserNode.text.length > 20 ? '...' : '');
+                // console.log("browser text:", browserNode.text);
+                console.log(`${indent()}📝 Comparing text: "${radiantContent}" vs. "${browserContent}"`);
             }
 
             const contentMatch = (radiantNode.content || '').trim() === (browserNode.text || '').trim();
@@ -268,16 +269,17 @@ class RadiantLayoutTester {
 
                 const layoutDiffs = this.compareLayout(radiantLayout, browserLayout);
                 const maxDiff = layoutDiffs.length > 0 ? Math.max(...layoutDiffs.map(d => d.difference)) : 0;
+                const exceedsToleranceCount = layoutDiffs.filter(d => d.exceedsTolerance).length;
 
                 if (this.verbose) {
                     console.log(`${indent()}   Radiant: (${radiantLayout.x}, ${radiantLayout.y}, ${radiantLayout.width}×${radiantLayout.height})`);
                     console.log(`${indent()}   Browser: (${browserLayout.x}, ${browserLayout.y}, ${browserLayout.width}×${browserLayout.height})`);
                 }
 
-                if (maxDiff <= this.tolerance) {
+                if (exceedsToleranceCount === 0) {
                     results.matchedTextNodes++;
                     if (this.verbose) {
-                        console.log(`${indent()}   ✅ TEXT MATCH (${maxDiff.toFixed(1)}px diff)`);
+                        console.log(`${indent()}   ✅ TEXT MATCH (${maxDiff.toFixed(1)}px diff <= ${this.tolerance}px)`);
                     }
                 } else {
                     results.differences.push({
@@ -328,16 +330,17 @@ class RadiantLayoutTester {
                 if (radiantNode.layout && browserNode.layout) {
                     const layoutDiffs = this.compareLayout(radiantNode.layout, browserNode.layout);
                     const maxDiff = layoutDiffs.length > 0 ? Math.max(...layoutDiffs.map(d => d.difference)) : 0;
+                    const exceedsToleranceCount = layoutDiffs.filter(d => d.exceedsTolerance).length;
 
                     if (this.verbose) {
                         console.log(`${indent()}   Radiant: (${radiantNode.layout.x}, ${radiantNode.layout.y}, ${radiantNode.layout.width}×${radiantNode.layout.height})`);
                         console.log(`${indent()}   Browser: (${browserNode.layout.x}, ${browserNode.layout.y}, ${browserNode.layout.width}×${browserNode.layout.height})`);
                     }
 
-                    if (maxDiff <= this.tolerance) {
+                    if (exceedsToleranceCount === 0) {
                         results.matchedElements++;
                         if (this.verbose) {
-                            console.log(`${indent()}   ✅ ELEMENT MATCH (${maxDiff.toFixed(1)}px diff)`);
+                            console.log(`${indent()}   ✅ ELEMENT MATCH (${maxDiff.toFixed(1)}px diff <= ${this.tolerance}px)`);
                         }
                     } else {
                         results.differences.push({
