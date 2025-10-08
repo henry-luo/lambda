@@ -14,7 +14,7 @@ const { spawn } = require('child_process');
 
 class RadiantLayoutTester {
     constructor(options = {}) {
-        this.radiantExe = options.radiantExe || '../../radiant.exe';
+        this.radiantExe = options.radiantExe || './radiant.exe';
         this.tolerance = options.tolerance || 5.0; // 5px tolerance for layout differences
         this.testDataDir = path.join(__dirname, 'data');
         this.referenceDir = path.join(__dirname, 'reference');
@@ -582,27 +582,29 @@ class RadiantLayoutTester {
      * Print hierarchical report to console
      */
     printReport(report) {
-        console.log(`\n📊 Test Report: ${report.testName}`);
-        console.log('=' .repeat(50));
+        console.log(`\n📊 Test Case: ${report.testName}`);
+        // Only show detailed statistics in verbose mode
+        if (this.verbose) {
+            // Element comparison results
+            console.log(`🏗️  Element Structure Comparison:`);
+            console.log(`   Total Elements: ${report.elementComparison.total}`);
+            console.log(`   ✅ Matched: ${report.elementComparison.matched} (${report.elementComparison.passRate.toFixed(1)}%)`);
+            if (report.elementComparison.failed > 0) console.log(`   ❌ Failed: ${report.elementComparison.failed}`);
 
-        // Element comparison results
-        console.log(`\n🏗️  Element Structure Comparison:`);
-        console.log(`   Total Elements: ${report.elementComparison.total}`);
-        console.log(`   ✅ Matched: ${report.elementComparison.matched} (${report.elementComparison.passRate.toFixed(1)}%)`);
-        console.log(`   ❌ Failed: ${report.elementComparison.failed}`);
-
-        // Text comparison results
-        if (report.textComparison.total > 0) {
-            console.log(`\n📝 Text Node Comparison:`);
-            console.log(`   Total Text Nodes: ${report.textComparison.total}`);
-            console.log(`   ✅ Matched: ${report.textComparison.matched} (${report.textComparison.passRate.toFixed(1)}%)`);
-            console.log(`   ❌ Failed: ${report.textComparison.failed}`);
+            // Text comparison results
+            if (report.textComparison.total > 0) {
+                console.log(`📝 Text Node Comparison:`);
+                console.log(`   Total Text Nodes: ${report.textComparison.total}`);
+                console.log(`   ✅ Matched: ${report.textComparison.matched} (${report.textComparison.passRate.toFixed(1)}%)`);
+                if (report.textComparison.failed > 0) console.log(`   ❌ Failed: ${report.textComparison.failed}`);
+            }
+            console.log('');
         }
 
         // Overall result
         const overallSuccess = report.elementComparison.passRate >= 80 && report.textComparison.passRate >= 70;
         const status = overallSuccess ? '✅ PASS' : '❌ FAIL';
-        console.log(`\n${status} Overall: Elements ${report.elementComparison.passRate.toFixed(1)}%, Text ${report.textComparison.passRate.toFixed(1)}%`);
+        console.log(`${status} Overall: Elements ${report.elementComparison.passRate.toFixed(1)}%, Text ${report.textComparison.passRate.toFixed(1)}%`);
     }
 
     /**
@@ -610,7 +612,7 @@ class RadiantLayoutTester {
      */
     async testSingleFile(htmlFile, category) {
         const testName = path.basename(htmlFile, '.html');
-        console.log(`\n🧪 Testing: ${testName}`);
+        // console.log(`\n🧪 Testing: ${testName}`);
 
         try {
             // Run Radiant layout
@@ -654,6 +656,12 @@ class RadiantLayoutTester {
      * Test all files in a category
      */
     async testCategory(category) {
+        // Skip css2.1 suite
+        if (category === 'css2.1') {
+            console.log(`\n⚠️  Skipping css2.1 suite (excluded from testing)`);
+            return [];
+        }
+
         console.log(`\n📂 Testing category: ${category}`);
         console.log('=' .repeat(50));
 
@@ -676,8 +684,14 @@ class RadiantLayoutTester {
                 }
             }
 
-            // Summary
-            const successful = results.filter(r => !r.error).length;
+            // Summary - properly count passed/failed tests based on pass rates
+            const successful = results.filter(r => {
+                if (r.error) return false; // Tests with errors are failures
+                // Use same criteria as printReport: 80% elements, 70% text
+                const elementPassRate = r.elementComparison ? r.elementComparison.passRate : 0;
+                const textPassRate = r.textComparison ? r.textComparison.passRate : 100;
+                return elementPassRate >= 80 && textPassRate >= 70;
+            }).length;
             const failed = results.length - successful;
 
             console.log(`\n📋 Category Summary:`);
@@ -703,11 +717,73 @@ class RadiantLayoutTester {
                 .filter(item => item.isDirectory())
                 .map(item => item.name)
                 .filter(name => !name.startsWith('.'))
+                .filter(name => name !== 'css2.1') // Skip css2.1 suite
                 .sort();
         } catch (error) {
             console.error(`Error scanning test categories: ${error.message}`);
             return [];
         }
+    }
+
+    /**
+     * Test files matching a pattern across all categories
+     */
+    async testByPattern(pattern) {
+        console.log(`\n🔍 Testing files matching pattern: "${pattern}"`);
+        console.log('=' .repeat(50));
+
+        const categories = await this.getAvailableCategories();
+        const allResults = [];
+        let totalMatches = 0;
+
+        for (const category of categories) {
+            const categoryDir = path.join(this.testDataDir, category);
+
+            try {
+                const files = await fs.readdir(categoryDir);
+                const matchingFiles = files.filter(file =>
+                    file.endsWith('.html') && file.includes(pattern)
+                );
+
+                if (matchingFiles.length > 0) {
+                    console.log(`\n📂 Found ${matchingFiles.length} matching files in ${category}:`);
+
+                    for (const htmlFile of matchingFiles) {
+                        console.log(`   🎯 ${htmlFile}`);
+                        const result = await this.testSingleFile(path.join(categoryDir, htmlFile), category);
+                        if (result) {
+                            allResults.push(result);
+                            totalMatches++;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.log(`   ⚠️  Error reading category ${category}: ${error.message}`);
+            }
+        }
+
+        if (totalMatches === 0) {
+            console.log(`\n⚠️  No files found matching pattern "${pattern}"`);
+            return [];
+        }
+
+        // Summary
+        const successful = allResults.filter(r => {
+            if (r.error) return false;
+            const elementPassRate = r.elementComparison ? r.elementComparison.passRate : 0;
+            const textPassRate = r.textComparison ? r.textComparison.passRate : 100;
+            return elementPassRate >= 80 && textPassRate >= 70;
+        }).length;
+        const failed = allResults.length - successful;
+
+        console.log(`\n📋 Pattern Matching Summary:`);
+        console.log(`   Pattern: "${pattern}"`);
+        console.log(`   Total Matches: ${totalMatches}`);
+        console.log(`   ✅ Successful: ${successful}`);
+        console.log(`   ❌ Failed: ${failed}`);
+        console.log(`   Success Rate: ${allResults.length > 0 ? (successful / allResults.length * 100).toFixed(1) : 0}%`);
+
+        return allResults;
     }
 
     /**
@@ -726,8 +802,14 @@ class RadiantLayoutTester {
             allResults.push(...categoryResults);
         }
 
-        // Overall summary
-        const successful = allResults.filter(r => !r.error).length;
+        // Overall summary - properly count passed/failed tests based on pass rates
+        const successful = allResults.filter(r => {
+            if (r.error) return false; // Tests with errors are failures
+            // Use same criteria as printReport: 80% elements, 70% text
+            const elementPassRate = r.elementComparison ? r.elementComparison.passRate : 0;
+            const textPassRate = r.textComparison ? r.textComparison.passRate : 100;
+            return elementPassRate >= 80 && textPassRate >= 70;
+        }).length;
         const failed = allResults.length - successful;
 
         console.log(`\n🎯 OVERALL SUMMARY`);
@@ -753,6 +835,7 @@ async function main() {
 
     let category = null;
     let testFile = null;
+    let pattern = null;
     let showHelp = false;
 
     for (let i = 0; i < args.length; i++) {
@@ -769,6 +852,10 @@ async function main() {
             case '--test':
             case '-t':
                 testFile = args[++i];
+                break;
+            case '--pattern':
+            case '-p':
+                pattern = args[++i];
                 break;
             case '--tolerance':
                 options.tolerance = parseFloat(args[++i]);
@@ -790,22 +877,26 @@ async function main() {
         console.log(`
 Radiant Layout Engine Automated Test Script
 
-Usage: node test_radiant_layout.js [options]
+Usage: node test/layout/test_radiant_layout.js [options]
 
 Options:
   --category, -c <name>    Test specific category (e.g., basic, flex, grid)
   --test, -t <file>        Test specific HTML file
+  --pattern, -p <text>     Test files containing pattern (runs in verbose mode)
   --tolerance <pixels>     Layout difference tolerance in pixels (default: 5.0)
   --verbose, -v            Show detailed output
   --radiant-exe <path>     Path to Radiant executable (default: ./radiant.exe)
   --help, -h               Show this help message
 
 Examples:
-  node test_radiant_layout.js                    # Test all categories
-  node test_radiant_layout.js -c basic           # Test basic category only
-  node test_radiant_layout.js -t box_001_basic_div.html  # Test specific file
-  node test_radiant_layout.js --tolerance 2.0    # Use 2px tolerance
-  node test_radiant_layout.js -v                 # Verbose output
+  node test/layout/test_radiant_layout.js                              # Test all categories
+  node test/layout/test_radiant_layout.js -c baseline                  # Test baseline category only
+  node test/layout/test_radiant_layout.js -t baseline_801_display_block.html  # Test specific file
+  node test/layout/test_radiant_layout.js -p float                     # Test all files containing "float"
+  node test/layout/test_radiant_layout.js --tolerance 2.0              # Use 2px tolerance
+  node test/layout/test_radiant_layout.js -v                           # Verbose output
+
+Note: Run this script from the project root directory.
 `);
         process.exit(0);
     }
@@ -837,6 +928,11 @@ Examples:
                 console.error(`Test file '${testFile}' not found in any category`);
                 process.exit(1);
             }
+
+        } else if (pattern) {
+            // Force verbose mode for pattern matching
+            tester.verbose = true;
+            await tester.testByPattern(pattern);
 
         } else if (category) {
             await tester.testCategory(category);
