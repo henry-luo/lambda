@@ -902,14 +902,15 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
             strncpy(content, (char*)(text_data + text->start_index), text->length);
             content[text->length] = '\0';
 
-            // Clean up whitespace for better readability
-            char* cleaned = content;
-            while (*cleaned && (*cleaned == ' ' || *cleaned == '\n' || *cleaned == '\t')) cleaned++;
-            if (strlen(cleaned) > 0) {
-                append_json_string(buf, cleaned);
-            } else {
-                append_json_string(buf, "[whitespace]");
-            }
+            // // Clean up whitespace for better readability
+            // char* cleaned = content;
+            // while (*cleaned && (*cleaned == ' ' || *cleaned == '\n' || *cleaned == '\t')) cleaned++;
+            // if (strlen(cleaned) > 0) {
+            //     append_json_string(buf, cleaned);
+            // } else {
+            //     append_json_string(buf, "[whitespace]");
+            // }
+            append_json_string(buf, content);
             free(content);
         } else {
             append_json_string(buf, "[empty]");
