@@ -246,7 +246,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->block.pa_block = &pa_block;  lycon->elmt = elmt;
     lycon->block.width = lycon->block.height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
-    // lycon->block.line_height // inherit
+    // lycon->block.line_height // inherit from parent context
+    log_debug("layout block line_height: %d", lycon->block.line_height);
 
     uintptr_t elmt_name = elmt->tag();
     ViewBlock* block = (ViewBlock*)alloc_view(lycon,
@@ -337,9 +338,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->block.given_height = 200 * lycon->ui_context->pixel_ratio;
         break;
     }
-    // CRITICAL FIX: Use special marker for normal line-height instead of Chrome formula
-    // This will be updated to font intrinsic height after CSS resolution
-    lycon->block.line_height = -1;  // Special marker for normal line-height
 
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
@@ -351,29 +349,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->font.face.style.font_size = lycon->font.current_font_size;
         lycon->font.face.ft_face = load_styled_font(lycon->ui_context, lycon->font.face.ft_face->family_name, &lycon->font.face.style);
         log_debug("Updated font face for new font size: %d", lycon->font.face.style.font_size);
-    }
-
-    // CRITICAL FIX: After CSS resolution, update line-height to use font intrinsic height
-    // This must happen after CSS resolution because font-size might have changed
-    if (lycon->block.line_height == -1) {
-        // Special marker value means no explicit line-height was set in CSS
-        // Use font intrinsic height for line-height: normal, with browser-compatible adjustment
-
-        // DEBUG: Check font face state
-        if (!lycon->font.face.ft_face) {
-            log_debug("ERROR: Font face is NULL when calculating line height!");
-            lycon->block.line_height = 17 * lycon->ui_context->pixel_ratio; // Fallback to reasonable default
-        } else if (!lycon->font.face.ft_face->size) {
-            printf("ERROR: Font face size is NULL when calculating line height!");
-            lycon->block.line_height = 17 * lycon->ui_context->pixel_ratio; // Fallback to reasonable default
-        } else {
-            int font_height = lycon->font.face.ft_face->size->metrics.height >> 6;
-            log_debug("Font face loaded: %s, font_height=%d",
-                   lycon->font.face.ft_face->family_name ? lycon->font.face.ft_face->family_name : "unknown", font_height);
-            lycon->block.line_height = font_height;
-        }
-        log_debug("Updated line-height after CSS resolution to browser-compatible height: %d (font_size=%d)",
-               lycon->block.line_height, lycon->font.face.style.font_size);
     }
 
     // CRITICAL FIX: After CSS resolution, handle body margin properly

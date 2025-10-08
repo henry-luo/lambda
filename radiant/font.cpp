@@ -21,6 +21,7 @@ int fontface_compare(const void *a, const void *b, void *udata) {
 uint64_t fontface_hash(const void *item, uint64_t seed0, uint64_t seed1) {
     const FontfaceEntry *fontface = (const FontfaceEntry*)item;
     // xxhash3 is a fast hash function
+    log_debug("hashing fontface: %s", fontface->name);
     return hashmap_xxhash3(fontface->name, strlen(fontface->name), seed0, seed1);
 }
 
@@ -86,10 +87,7 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
         } else {
             // Set height of the font
             FT_Set_Pixel_Sizes(face, 0, font_size);
-            log_info("Font loaded: %s, height:%ld, ascend:%ld, descend:%ld, em size: %d",
-                    face->family_name, face->size->metrics.height >> 6,
-                    face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6,
-                    face->units_per_EM >> 6);
+            log_debug("Font loaded: %s, size: %dpx", font_name, font_size);
             // put the font face into the hashmap
             if (uicon->fontface_map) {
                 // copy the font name
@@ -103,6 +101,10 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
         free(font_path);
     }
     strbuf_free(name_and_size);
+    // units_per_EM is the font design size, and does not change with font pixel size
+    log_info("Font loaded: %s, height:%ld, ascend:%ld, descend:%ld, em size: %d",
+        face->family_name, face->size->metrics.height >> 6,
+        face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6, face->units_per_EM >> 6);
     return face;
 }
 
@@ -121,8 +123,8 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     }
     FT_Face face = load_font_face(uicon, name->str, font_style->font_size);
     if (face) {
-        log_info("Loading styled font: %s, ascd: %ld, desc: %ld",
-                name->str, face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6);
+        log_info("Loading styled font: %s, ascd: %ld, desc: %ld, em size: %d",
+                name->str, face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6, face->units_per_EM >> 6);
     } else {
         log_error("Failed to load styled font: %s", name->str);
     }

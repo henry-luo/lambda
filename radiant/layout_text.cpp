@@ -159,10 +159,8 @@ void output_text(LayoutContext* lycon, ViewText* text, int text_length, int text
     lycon->line.advance_x += text_width;
     lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.face.ft_face->size->metrics.ascender >> 6);
     lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.face.ft_face->size->metrics.descender) >> 6);
-    log_debug("text view: x %d, y %d, width %d, height %d", text->x, text->y, text->width, text->height);
-    if (text_length < 20) {
-        log_debug("short text: %.*s", text_length, text->node->text_data() + text->start_index);
-    }
+    log_debug("text view: '%.*s', x %d, y %d, width %d, height %d, font size %d",
+        text_length,text->node->text_data() + text->start_index, text->x, text->y, text->width, text->height, lycon->font.face.style.font_size);
 }
 
 void layout_text(LayoutContext* lycon, DomNode *text_node) {
@@ -185,7 +183,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     text->start_index = str - text_start;
     int font_height = lycon->font.face.ft_face->size->metrics.height >> 6;
     text->x = lycon->line.advance_x;
-    text->height = lycon->block.line_height;
+    text->height = font_height;  // should text->height be lycon->block.line_height or font_height?
+
     if (lycon->line.vertical_align == LXB_CSS_VALUE_MIDDLE) {
         log_debug("middle-aligned-text: font %d, line %d", font_height, lycon->block.line_height);
         text->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;
@@ -203,6 +202,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         //     + lycon->line.max_ascender - (lycon->font.face->size->metrics.ascender >> 6);
         text->y = lycon->block.advance_y;
     }
+
     // layout the text glyphs
     do {
         int wd;
