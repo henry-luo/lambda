@@ -6,6 +6,7 @@ void view_pool_destroy(ViewTree* tree);
 void fontface_cleanup(UiContext* uicon);
 void image_cache_cleanup(UiContext* uicon);
 char* load_font_path(FcConfig *font_config, const char* font_name);
+void scroll_config_init(int pixel_ratio);
 
 char *fallback_fonts[] = {
     "PingFang SC", // Chinese, partial Japanese and Korean
@@ -88,6 +89,8 @@ int ui_context_init(UiContext* uicon, bool headless) {
     }
     // creates the surface for rendering
     ui_context_create_surface(uicon, uicon->window_width, uicon->window_height);
+    scroll_config_init(uicon->pixel_ratio);
+
     return EXIT_SUCCESS;
 }
 
