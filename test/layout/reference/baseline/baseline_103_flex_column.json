@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Flex Column Layout\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .flex-container {\n            display: flex;\n            flex-direction: column;\n            width: 150px;\n            height: 250px;\n            background-color: #e8e8e8;\n        }\n        .flex-item1 {\n            width: 100px;\n            height: 50px;\n            background-color: #ffcc66;\n        }\n        .flex-item2 {\n            width: 100px;\n            height: 50px;\n            background-color: #cc66ff;\n        }\n        .flex-item3 {\n            width: 100px;\n            height: 50px;\n            background-color: #66ffcc;\n        }\n    \n\n\n    \n        \n        \n        \n    \n    \n    \n    {\n        \"test_id\": \"baseline_103_flex_column\",\n        \"category\": \"baseline\",\n        \"features\": [\"display-flex\", \"flex-direction-column\"],\n        \"description\": \"Flexbox with three items in column direction\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-flexbox-1/#flex-direction-property\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three colored 100x50px boxes stacked vertically within gray container\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Flex Column Layout\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .flex-container {\n            display: flex;\n            flex-direction: column;\n            width: 150px;\n            height: 250px;\n            background-color: #e8e8e8;\n        }\n        .flex-item1 {\n            width: 100px;\n            height: 50px;\n            background-color: #ffcc66;\n        }\n        .flex-item2 {\n            width: 100px;\n            height: 50px;\n            background-color: #cc66ff;\n        }\n        .flex-item3 {\n            width: 100px;\n            height: 50px;\n            background-color: #66ffcc;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Flex Column Layout",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Flex Column Layout",
+                "length": 33,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .flex-container {\n            display: flex;\n            flex-direction: column;\n            width: 150px;\n            height: 250px;\n            background-color: #e8e8e8;\n        }\n        .flex-item1 {\n            width: 100px;\n            height: 50px;\n            background-color: #ffcc66;\n        }\n        .flex-item2 {\n            width: 100px;\n            height: 50px;\n            background-color: #cc66ff;\n        }\n        .flex-item3 {\n            width: 100px;\n            height: 50px;\n            background-color: #66ffcc;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .flex-container {\n            display: flex;\n            flex-direction: column;\n            width: 150px;\n            height: 250px;\n            background-color: #e8e8e8;\n        }\n        .flex-item1 {\n            width: 100px;\n            height: 50px;\n            background-color: #ffcc66;\n        }\n        .flex-item2 {\n            width: 100px;\n            height: 50px;\n            background-color: #cc66ff;\n        }\n        .flex-item3 {\n            width: 100px;\n            height: 50px;\n            background-color: #66ffcc;\n        }\n    ",
+                "length": 651,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "{\n        \"test_id\": \"baseline_103_flex_column\",\n        \"category\": \"baseline\",\n        \"features\": [\"display-flex\", \"flex-direction-column\"],\n        \"description\": \"Flexbox with three items in column direction\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-flexbox-1/#flex-direction-property\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three colored 100x50px boxes stacked vertically within gray container\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.flex-container",
             "tag": "div",
             "id": null,
@@ -504,13 +525,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 3,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.flex-item1:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,14 +587,12 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.flex-item2:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -633,14 +650,12 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.flex-item3:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -698,16 +713,14 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": []
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -763,12 +776,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_103_flex_column\",\n        \"category\": \"baseline\",\n        \"features\": [\"display-flex\", \"flex-direction-column\"],\n        \"description\": \"Flexbox with three items in column direction\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-flexbox-1/#flex-direction-property\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three colored 100x50px boxes stacked vertically within gray container\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_103_flex_column\",\n        \"category\": \"baseline\",\n        \"features\": [\"display-flex\", \"flex-direction-column\"],\n        \"description\": \"Flexbox with three items in column direction\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-flexbox-1/#flex-direction-property\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three colored 100x50px boxes stacked vertically within gray container\"\n    }\n    ",
+                "length": 455,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

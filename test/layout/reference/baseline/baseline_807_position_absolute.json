@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Position Absolute\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            position: relative;\n            width: 200px;\n            height: 200px;\n            border: 2px solid black;\n            background-color: lightblue;\n        }\n        .absolute-box {\n            position: absolute;\n            top: 50px;\n            left: 50px;\n            width: 80px;\n            height: 80px;\n            background-color: purple;\n        }\n        .normal-box {\n            width: 100px;\n            height: 50px;\n            background-color: yellow;\n        }\n    \n\n\n    \n        \n        \n    \n\n    \n    {\n        \"test_id\": \"baseline_807_position_absolute\",\n        \"category\": \"baseline\",\n        \"features\": [\"position\", \"absolute\", \"top\", \"left\"],\n        \"description\": \"Basic absolute positioning\",\n        \"original_css_test\": \"position-absolute-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#positioning-scheme\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Purple box positioned absolutely at 50px from top and left, overlapping yellow box\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Position Absolute\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            position: relative;\n            width: 200px;\n            height: 200px;\n            border: 2px solid black;\n            background-color: lightblue;\n        }\n        .absolute-box {\n            position: absolute;\n            top: 50px;\n            left: 50px;\n            width: 80px;\n            height: 80px;\n            background-color: purple;\n        }\n        .normal-box {\n            width: 100px;\n            height: 50px;\n            background-color: yellow;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Position Absolute",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Position Absolute",
+                "length": 32,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            position: relative;\n            width: 200px;\n            height: 200px;\n            border: 2px solid black;\n            background-color: lightblue;\n        }\n        .absolute-box {\n            position: absolute;\n            top: 50px;\n            left: 50px;\n            width: 80px;\n            height: 80px;\n            background-color: purple;\n        }\n        .normal-box {\n            width: 100px;\n            height: 50px;\n            background-color: yellow;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            position: relative;\n            width: 200px;\n            height: 200px;\n            border: 2px solid black;\n            background-color: lightblue;\n        }\n        .absolute-box {\n            position: absolute;\n            top: 50px;\n            left: 50px;\n            width: 80px;\n            height: 80px;\n            background-color: purple;\n        }\n        .normal-box {\n            width: 100px;\n            height: 50px;\n            background-color: yellow;\n        }\n    ",
+                "length": 609,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "{\n        \"test_id\": \"baseline_807_position_absolute\",\n        \"category\": \"baseline\",\n        \"features\": [\"position\", \"absolute\", \"top\", \"left\"],\n        \"description\": \"Basic absolute positioning\",\n        \"original_css_test\": \"position-absolute-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#positioning-scheme\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Purple box positioned absolutely at 50px from top and left, overlapping yellow box\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +525,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 2,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.normal-box:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,14 +587,12 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.absolute-box:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -633,16 +650,14 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": []
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -698,12 +713,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_807_position_absolute\",\n        \"category\": \"baseline\",\n        \"features\": [\"position\", \"absolute\", \"top\", \"left\"],\n        \"description\": \"Basic absolute positioning\",\n        \"original_css_test\": \"position-absolute-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#positioning-scheme\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Purple box positioned absolutely at 50px from top and left, overlapping yellow box\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_807_position_absolute\",\n        \"category\": \"baseline\",\n        \"features\": [\"position\", \"absolute\", \"top\", \"left\"],\n        \"description\": \"Basic absolute positioning\",\n        \"original_css_test\": \"position-absolute-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#positioning-scheme\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Purple box positioned absolutely at 50px from top and left, overlapping yellow box\"\n    }\n    ",
+                "length": 517,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

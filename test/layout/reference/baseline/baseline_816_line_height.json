@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Line Height\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .text-block {\n            width: 300px;\n            margin: 20px;\n            padding: 10px;\n            border: 1px solid black;\n            font-size: 16px;\n        }\n        .normal { line-height: normal; }\n        .number { line-height: 1.5; }\n        .pixels { line-height: 24px; }\n        .percent { line-height: 200%; }\n    \n\n\n    \n        This paragraph has normal line height. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    \n    \n        This paragraph has line-height: 1.5. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    \n    \n        This paragraph has line-height: 24px. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    \n    \n        This paragraph has line-height: 200%. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    \n\n    \n    {\n        \"test_id\": \"baseline_816_line_height\",\n        \"category\": \"baseline\",\n        \"features\": [\"line-height\", \"normal\", \"number\", \"pixels\", \"percent\"],\n        \"description\": \"Line height using different value types\",\n        \"original_css_test\": \"line-height-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visudet.html#line-height\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four text blocks with different line spacing\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Line Height\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .text-block {\n            width: 300px;\n            margin: 20px;\n            padding: 10px;\n            border: 1px solid black;\n            font-size: 16px;\n        }\n        .normal { line-height: normal; }\n        .number { line-height: 1.5; }\n        .pixels { line-height: 24px; }\n        .percent { line-height: 200%; }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Line Height",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Line Height",
+                "length": 26,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .text-block {\n            width: 300px;\n            margin: 20px;\n            padding: 10px;\n            border: 1px solid black;\n            font-size: 16px;\n        }\n        .normal { line-height: normal; }\n        .number { line-height: 1.5; }\n        .pixels { line-height: 24px; }\n        .percent { line-height: 200%; }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .text-block {\n            width: 300px;\n            margin: 20px;\n            padding: 10px;\n            border: 1px solid black;\n            font-size: 16px;\n        }\n        .normal { line-height: normal; }\n        .number { line-height: 1.5; }\n        .pixels { line-height: 24px; }\n        .percent { line-height: 200%; }\n    ",
+                "length": 441,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "This paragraph has normal line height. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    \n    \n        This paragraph has line-height: 1.5. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    \n    \n        This paragraph has line-height: 24px. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    \n    \n        This paragraph has line-height: 200%. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    \n\n    \n    {\n        \"test_id\": \"baseline_816_line_height\",\n        \"category\": \"baseline\",\n        \"features\": [\"line-height\", \"normal\", \"number\", \"pixels\", \"percent\"],\n        \"description\": \"Line height using different value types\",\n        \"original_css_test\": \"line-height-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visudet.html#line-height\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four text blocks with different line spacing\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 5,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.text-block.normal:nth-of-type(1)",
             "tag": "div",
             "id": null,
@@ -505,57 +526,62 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This paragraph has normal line height. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "\n        This paragraph has normal line height. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 51,
-                    "y": 51,
-                    "width": 273.05,
-                    "height": 17,
-                    "right": 324.05,
-                    "bottom": 68
-                  },
-                  {
-                    "x": 51,
-                    "y": 69,
-                    "width": 284.56,
-                    "height": 17,
-                    "right": 335.56,
-                    "bottom": 86
-                  },
-                  {
-                    "x": 51,
-                    "y": 87,
-                    "width": 274.83,
-                    "height": 17,
-                    "right": 325.83,
-                    "bottom": 104
-                  },
-                  {
-                    "x": 51,
-                    "y": 105,
-                    "width": 72.05,
-                    "height": 17,
-                    "right": 123.05,
-                    "bottom": 122
-                  }
-                ],
                 "length": 143,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 143
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 51,
+                      "y": 51,
+                      "width": 273.05,
+                      "height": 17,
+                      "right": 324.05,
+                      "bottom": 68
+                    },
+                    {
+                      "x": 51,
+                      "y": 69,
+                      "width": 284.56,
+                      "height": 17,
+                      "right": 335.56,
+                      "bottom": 86
+                    },
+                    {
+                      "x": 51,
+                      "y": 87,
+                      "width": 274.83,
+                      "height": 17,
+                      "right": 325.83,
+                      "bottom": 104
+                    },
+                    {
+                      "x": 51,
+                      "y": 105,
+                      "width": 72.05,
+                      "height": 17,
+                      "right": 123.05,
+                      "bottom": 122
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "div.text-block.number:nth-of-type(2)",
             "tag": "div",
             "id": null,
@@ -614,57 +640,62 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This paragraph has line-height: 1.5. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 3,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "\n        This paragraph has line-height: 1.5. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 51,
-                    "y": 168,
-                    "width": 251.72,
-                    "height": 17,
-                    "right": 302.72,
-                    "bottom": 185
-                  },
-                  {
-                    "x": 51,
-                    "y": 192,
-                    "width": 284.56,
-                    "height": 17,
-                    "right": 335.56,
-                    "bottom": 209
-                  },
-                  {
-                    "x": 51,
-                    "y": 216,
-                    "width": 274.83,
-                    "height": 17,
-                    "right": 325.83,
-                    "bottom": 233
-                  },
-                  {
-                    "x": 51,
-                    "y": 240,
-                    "width": 72.05,
-                    "height": 17,
-                    "right": 123.05,
-                    "bottom": 257
-                  }
-                ],
                 "length": 141,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 141
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 51,
+                      "y": 168,
+                      "width": 251.72,
+                      "height": 17,
+                      "right": 302.72,
+                      "bottom": 185
+                    },
+                    {
+                      "x": 51,
+                      "y": 192,
+                      "width": 284.56,
+                      "height": 17,
+                      "right": 335.56,
+                      "bottom": 209
+                    },
+                    {
+                      "x": 51,
+                      "y": 216,
+                      "width": 274.83,
+                      "height": 17,
+                      "right": 325.83,
+                      "bottom": 233
+                    },
+                    {
+                      "x": 51,
+                      "y": 240,
+                      "width": 72.05,
+                      "height": 17,
+                      "right": 123.05,
+                      "bottom": 257
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "div.text-block.pixels:nth-of-type(3)",
             "tag": "div",
             "id": null,
@@ -723,57 +754,62 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This paragraph has line-height: 24px. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 5,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "\n        This paragraph has line-height: 24px. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 51,
-                    "y": 306,
-                    "width": 264.17,
-                    "height": 17,
-                    "right": 315.17,
-                    "bottom": 323
-                  },
-                  {
-                    "x": 51,
-                    "y": 330,
-                    "width": 284.56,
-                    "height": 17,
-                    "right": 335.56,
-                    "bottom": 347
-                  },
-                  {
-                    "x": 51,
-                    "y": 354,
-                    "width": 274.83,
-                    "height": 17,
-                    "right": 325.83,
-                    "bottom": 371
-                  },
-                  {
-                    "x": 51,
-                    "y": 378,
-                    "width": 72.05,
-                    "height": 17,
-                    "right": 123.05,
-                    "bottom": 395
-                  }
-                ],
                 "length": 142,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 142
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 51,
+                      "y": 306,
+                      "width": 264.17,
+                      "height": 17,
+                      "right": 315.17,
+                      "bottom": 323
+                    },
+                    {
+                      "x": 51,
+                      "y": 330,
+                      "width": 284.56,
+                      "height": 17,
+                      "right": 335.56,
+                      "bottom": 347
+                    },
+                    {
+                      "x": 51,
+                      "y": 354,
+                      "width": 274.83,
+                      "height": 17,
+                      "right": 325.83,
+                      "bottom": 371
+                    },
+                    {
+                      "x": 51,
+                      "y": 378,
+                      "width": 72.05,
+                      "height": 17,
+                      "right": 123.05,
+                      "bottom": 395
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "div.text-block.percent:nth-of-type(4)",
             "tag": "div",
             "id": null,
@@ -832,57 +868,62 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This paragraph has line-height: 200%. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 7,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "\n        This paragraph has line-height: 200%. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 51,
-                    "y": 448,
-                    "width": 270.39,
-                    "height": 17,
-                    "right": 321.39,
-                    "bottom": 465
-                  },
-                  {
-                    "x": 51,
-                    "y": 480,
-                    "width": 284.56,
-                    "height": 17,
-                    "right": 335.56,
-                    "bottom": 497
-                  },
-                  {
-                    "x": 51,
-                    "y": 512,
-                    "width": 274.83,
-                    "height": 17,
-                    "right": 325.83,
-                    "bottom": 529
-                  },
-                  {
-                    "x": 51,
-                    "y": 544,
-                    "width": 72.05,
-                    "height": 17,
-                    "right": 123.05,
-                    "bottom": 561
-                  }
-                ],
                 "length": 142,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 142
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 51,
+                      "y": 448,
+                      "width": 270.39,
+                      "height": 17,
+                      "right": 321.39,
+                      "bottom": 465
+                    },
+                    {
+                      "x": 51,
+                      "y": 480,
+                      "width": 284.56,
+                      "height": 17,
+                      "right": 335.56,
+                      "bottom": 497
+                    },
+                    {
+                      "x": 51,
+                      "y": 512,
+                      "width": 274.83,
+                      "height": 17,
+                      "right": 325.83,
+                      "bottom": 529
+                    },
+                    {
+                      "x": 51,
+                      "y": 544,
+                      "width": 72.05,
+                      "height": 17,
+                      "right": 123.05,
+                      "bottom": 561
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -938,12 +979,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_816_line_height\",\n        \"category\": \"baseline\",\n        \"features\": [\"line-height\", \"normal\", \"number\", \"pixels\", \"percent\"],\n        \"description\": \"Line height using different value types\",\n        \"original_css_test\": \"line-height-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visudet.html#line-height\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four text blocks with different line spacing\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 9,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_816_line_height\",\n        \"category\": \"baseline\",\n        \"features\": [\"line-height\", \"normal\", \"number\", \"pixels\", \"percent\"],\n        \"description\": \"Line height using different value types\",\n        \"original_css_test\": \"line-height-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visudet.html#line-height\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four text blocks with different line spacing\"\n    }\n    ",
+                "length": 490,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

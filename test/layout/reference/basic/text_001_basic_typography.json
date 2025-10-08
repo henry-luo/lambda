@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Basic Typography\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 800px;\n        }\n        \n        /* Basic typography styles */\n        h1 {\n            font-size: 32px;\n            margin-bottom: 16px;\n            font-weight: bold;\n        }\n        \n        h2 {\n            font-size: 24px;\n            margin-bottom: 12px;\n            margin-top: 24px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n            line-height: 1.6;\n        }\n        \n        .emphasis {\n            font-style: italic;\n        }\n        \n        .strong {\n            font-weight: bold;\n        }\n    \n\n\n    Main Heading\n    This is a regular paragraph with some italic text and bold text.\n    \n    Secondary Heading\n    Another paragraph that should have proper spacing and line height for readability.\n    \n    \n    \n    {\n        \"test_id\": \"text_001_basic_typography\",\n        \"category\": \"text\",\n        \"features\": [\"typography\", \"headings\", \"paragraphs\", \"line-height\", \"margins\"],\n        \"description\": \"Basic text typography with headings, paragraphs, and inline formatting\",\n        \"markdown_equivalent\": \"# Main Heading\\n\\nThis is a regular paragraph with some *italic text* and **bold text**.\\n\\n## Secondary Heading\\n\\nAnother paragraph...\",\n        \"complexity\": \"basic\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Basic Typography\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 800px;\n        }\n        \n        /* Basic typography styles */\n        h1 {\n            font-size: 32px;\n            margin-bottom: 16px;\n            font-weight: bold;\n        }\n        \n        h2 {\n            font-size: 24px;\n            margin-bottom: 12px;\n            margin-top: 24px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n            line-height: 1.6;\n        }\n        \n        .emphasis {\n            font-style: italic;\n        }\n        \n        .strong {\n            font-weight: bold;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Basic Typography",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Basic Typography",
+                "length": 22,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +380,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 800px;\n        }\n        \n        /* Basic typography styles */\n        h1 {\n            font-size: 32px;\n            margin-bottom: 16px;\n            font-weight: bold;\n        }\n        \n        h2 {\n            font-size: 24px;\n            margin-bottom: 12px;\n            margin-top: 24px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n            line-height: 1.6;\n        }\n        \n        .emphasis {\n            font-style: italic;\n        }\n        \n        .strong {\n            font-weight: bold;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 800px;\n        }\n        \n        /* Basic typography styles */\n        h1 {\n            font-size: 32px;\n            margin-bottom: 16px;\n            font-weight: bold;\n        }\n        \n        h2 {\n            font-size: 24px;\n            margin-bottom: 12px;\n            margin-top: 24px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n            line-height: 1.6;\n        }\n        \n        .emphasis {\n            font-style: italic;\n        }\n        \n        .strong {\n            font-weight: bold;\n        }\n    ",
+                "length": 843,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +457,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Main Heading\n    This is a regular paragraph with some italic text and bold text.\n    \n    Secondary Heading\n    Another paragraph that should have proper spacing and line height for readability.\n    \n    \n    \n    {\n        \"test_id\": \"text_001_basic_typography\",\n        \"category\": \"text\",\n        \"features\": [\"typography\", \"headings\", \"paragraphs\", \"line-height\", \"margins\"],\n        \"description\": \"Basic text typography with headings, paragraphs, and inline formatting\",\n        \"markdown_equivalent\": \"# Main Heading\\n\\nThis is a regular paragraph with some *italic text* and **bold text**.\\n\\n## Secondary Heading\\n\\nAnother paragraph...\",\n        \"complexity\": \"basic\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 5,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "h1",
             "tag": "h1",
             "id": null,
@@ -502,33 +517,35 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Main Heading",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Main Heading",
-                "parentElement": "h1",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 26,
-                    "width": 208.02,
-                    "height": 36,
-                    "right": 228.02,
-                    "bottom": 62
-                  }
-                ],
                 "length": 12,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 12
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 26,
+                      "width": 208.02,
+                      "height": 36,
+                      "right": 228.02,
+                      "bottom": 62
+                    }
+                  ],
+                  "hasLayout": true
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "p:nth-of-type(1)",
             "tag": "p",
             "id": null,
@@ -584,68 +601,33 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This is a regular paragraph with some italic text and bold text.",
-            "hasTextNodes": true,
-            "textNodes": [
-              {
-                "text": "This is a regular paragraph with some ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 88,
-                    "width": 272.13,
-                    "height": 17,
-                    "right": 292.13,
-                    "bottom": 105
-                  }
-                ],
-                "length": 38,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 38
-              },
-              {
-                "text": " and ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 354.38,
-                    "y": 88,
-                    "width": 35.59,
-                    "height": 17,
-                    "right": 389.97,
-                    "bottom": 105
-                  }
-                ],
-                "length": 5,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 5
-              },
-              {
-                "text": ".",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 456.64,
-                    "y": 88,
-                    "width": 4.45,
-                    "height": 17,
-                    "right": 461.09,
-                    "bottom": 105
-                  }
-                ],
-                "length": 1,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 1
-              }
-            ],
-            "childCount": 2,
             "depth": 2,
+            "elementIndex": 3,
             "children": [
               {
+                "nodeType": "text",
+                "text": "This is a regular paragraph with some ",
+                "length": 38,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 88,
+                      "width": 272.13,
+                      "height": 17,
+                      "right": 292.13,
+                      "bottom": 105
+                    }
+                  ],
+                  "hasLayout": true
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "element",
                 "selector": "span.emphasis:nth-of-type(1)",
                 "tag": "span",
                 "id": null,
@@ -703,33 +685,57 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "italic text",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "italic text",
-                    "parentElement": "span",
-                    "rects": [
-                      {
-                        "x": 292.13,
-                        "y": 88,
-                        "width": 62.25,
-                        "height": 17,
-                        "right": 354.38,
-                        "bottom": 105
-                      }
-                    ],
                     "length": 11,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 11
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 292.13,
+                          "y": 88,
+                          "width": 62.25,
+                          "height": 17,
+                          "right": 354.38,
+                          "bottom": 105
+                        }
+                      ],
+                      "hasLayout": true
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": " and ",
+                "length": 5,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 354.38,
+                      "y": 88,
+                      "width": 35.59,
+                      "height": 17,
+                      "right": 389.97,
+                      "bottom": 105
+                    }
+                  ],
+                  "hasLayout": true
+                },
                 "depth": 3,
+                "nodeIndex": 2,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "span.strong:nth-of-type(2)",
                 "tag": "span",
                 "id": null,
@@ -787,35 +793,59 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "bold text",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "bold text",
-                    "parentElement": "span",
-                    "rects": [
-                      {
-                        "x": 389.97,
-                        "y": 88,
-                        "width": 66.67,
-                        "height": 17,
-                        "right": 456.64,
-                        "bottom": 105
-                      }
-                    ],
                     "length": 9,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 9
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 389.97,
+                          "y": 88,
+                          "width": 66.67,
+                          "height": 17,
+                          "right": 456.64,
+                          "bottom": 105
+                        }
+                      ],
+                      "hasLayout": true
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": ".",
+                "length": 1,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 456.64,
+                      "y": 88,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 461.09,
+                      "bottom": 105
+                    }
+                  ],
+                  "hasLayout": true
+                },
                 "depth": 3,
+                "nodeIndex": 4,
                 "children": []
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "h2",
             "tag": "h2",
             "id": null,
@@ -871,33 +901,35 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Secondary Heading",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 5,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Secondary Heading",
-                "parentElement": "h2",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 137.59,
-                    "width": 224.06,
-                    "height": 27,
-                    "right": 244.06,
-                    "bottom": 164.59
-                  }
-                ],
                 "length": 17,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 17
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 137.59,
+                      "width": 224.06,
+                      "height": 27,
+                      "right": 244.06,
+                      "bottom": 164.59
+                    }
+                  ],
+                  "hasLayout": true
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "p:nth-of-type(2)",
             "tag": "p",
             "id": null,
@@ -953,33 +985,35 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Another paragraph that should have proper spacing and line height for readability.",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 7,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Another paragraph that should have proper spacing and line height for readability.",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 185.59,
-                    "width": 577.88,
-                    "height": 17,
-                    "right": 597.88,
-                    "bottom": 202.59
-                  }
-                ],
                 "length": 82,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 82
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 185.59,
+                      "width": 577.88,
+                      "height": 17,
+                      "right": 597.88,
+                      "bottom": 202.59
+                    }
+                  ],
+                  "hasLayout": true
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -1035,12 +1069,23 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"text_001_basic_typography\",\n        \"category\": \"text\",\n        \"features\": [\"typography\", \"headings\", \"paragraphs\", \"line-height\", \"margins\"],\n        \"description\": \"Basic text typography with headings, paragraphs, and inline formatting\",\n        \"markdown_equivalent\": \"# Main Heading\\n\\nThis is a regular paragraph with some *italic text* and **bold text**.\\n\\n## Secondary Heading\\n\\nAnother paragraph...\",\n        \"complexity\": \"basic\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 11,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"text_001_basic_typography\",\n        \"category\": \"text\",\n        \"features\": [\"typography\", \"headings\", \"paragraphs\", \"line-height\", \"margins\"],\n        \"description\": \"Basic text typography with headings, paragraphs, and inline formatting\",\n        \"markdown_equivalent\": \"# Main Heading\\n\\nThis is a regular paragraph with some *italic text* and **bold text**.\\n\\n## Secondary Heading\\n\\nAnother paragraph...\",\n        \"complexity\": \"basic\"\n    }\n    ",
+                "length": 479,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Single Div\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .box {\n            width: 100px;\n            height: 100px;\n            background-color: #ff0000;\n        }\n    \n\n\n    \n    \n    \n    {\n        \"test_id\": \"baseline_002_single_div\",\n        \"category\": \"baseline\",\n        \"features\": [\"block-element\", \"width\", \"height\", \"background-color\"],\n        \"description\": \"Single div with fixed dimensions and background color\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html\"],\n        \"complexity\": \"trivial\",\n        \"expected_behavior\": \"Red 100x100px box at top-left of body\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Single Div\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .box {\n            width: 100px;\n            height: 100px;\n            background-color: #ff0000;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Single Div",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Single Div",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .box {\n            width: 100px;\n            height: 100px;\n            background-color: #ff0000;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .box {\n            width: 100px;\n            height: 100px;\n            background-color: #ff0000;\n        }\n    ",
+                "length": 208,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "{\n        \"test_id\": \"baseline_002_single_div\",\n        \"category\": \"baseline\",\n        \"features\": [\"block-element\", \"width\", \"height\", \"background-color\"],\n        \"description\": \"Single div with fixed dimensions and background color\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html\"],\n        \"complexity\": \"trivial\",\n        \"expected_behavior\": \"Red 100x100px box at top-left of body\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.box",
             "tag": "div",
             "id": null,
@@ -504,14 +525,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -567,12 +586,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_002_single_div\",\n        \"category\": \"baseline\",\n        \"features\": [\"block-element\", \"width\", \"height\", \"background-color\"],\n        \"description\": \"Single div with fixed dimensions and background color\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html\"],\n        \"complexity\": \"trivial\",\n        \"expected_behavior\": \"Red 100x100px box at top-left of body\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_002_single_div\",\n        \"category\": \"baseline\",\n        \"features\": [\"block-element\", \"width\", \"height\", \"background-color\"],\n        \"description\": \"Single div with fixed dimensions and background color\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html\"],\n        \"complexity\": \"trivial\",\n        \"expected_behavior\": \"Red 100x100px box at top-left of body\"\n    }\n    ",
+                "length": 424,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

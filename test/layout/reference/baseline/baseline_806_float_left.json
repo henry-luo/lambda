@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Float Left\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            border: 2px solid black;\n            padding: 10px;\n            width: 300px;\n        }\n        .float-box {\n            float: left;\n            width: 100px;\n            height: 100px;\n            background-color: red;\n            margin: 5px;\n        }\n        .content {\n            background-color: lightgray;\n            padding: 5px;\n        }\n    \n\n\n    \n        \n        This text should wrap around the floated red box on the left.\n    \n\n    \n    {\n        \"test_id\": \"baseline_806_float_left\",\n        \"category\": \"baseline\",\n        \"features\": [\"float\", \"left\"],\n        \"description\": \"Basic float left behavior\",\n        \"original_css_test\": \"floats-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#floats\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Red box floated left with text wrapping around it\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Float Left\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            border: 2px solid black;\n            padding: 10px;\n            width: 300px;\n        }\n        .float-box {\n            float: left;\n            width: 100px;\n            height: 100px;\n            background-color: red;\n            margin: 5px;\n        }\n        .content {\n            background-color: lightgray;\n            padding: 5px;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Float Left",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Float Left",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            border: 2px solid black;\n            padding: 10px;\n            width: 300px;\n        }\n        .float-box {\n            float: left;\n            width: 100px;\n            height: 100px;\n            background-color: red;\n            margin: 5px;\n        }\n        .content {\n            background-color: lightgray;\n            padding: 5px;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            border: 2px solid black;\n            padding: 10px;\n            width: 300px;\n        }\n        .float-box {\n            float: left;\n            width: 100px;\n            height: 100px;\n            background-color: red;\n            margin: 5px;\n        }\n        .content {\n            background-color: lightgray;\n            padding: 5px;\n        }\n    ",
+                "length": 477,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "This text should wrap around the floated red box on the left.\n    \n\n    \n    {\n        \"test_id\": \"baseline_806_float_left\",\n        \"category\": \"baseline\",\n        \"features\": [\"float\", \"left\"],\n        \"description\": \"Basic float left behavior\",\n        \"original_css_test\": \"floats-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#floats\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Red box floated left with text wrapping around it\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +525,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This text should wrap around the floated red box on the left.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 2,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.float-box:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,14 +587,12 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.content:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -633,51 +650,56 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "This text should wrap around the floated red box on the left.",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "This text should wrap around the floated red box on the left.",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 122,
-                        "y": 17,
-                        "width": 151.19,
-                        "height": 17,
-                        "right": 273.19,
-                        "bottom": 34
-                      },
-                      {
-                        "x": 122,
-                        "y": 35,
-                        "width": 156.56,
-                        "height": 17,
-                        "right": 278.56,
-                        "bottom": 52
-                      },
-                      {
-                        "x": 122,
-                        "y": 53,
-                        "width": 104.97,
-                        "height": 17,
-                        "right": 226.97,
-                        "bottom": 70
-                      }
-                    ],
                     "length": 61,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 61
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 122,
+                          "y": 17,
+                          "width": 151.19,
+                          "height": 17,
+                          "right": 273.19,
+                          "bottom": 34
+                        },
+                        {
+                          "x": 122,
+                          "y": 35,
+                          "width": 156.56,
+                          "height": 17,
+                          "right": 278.56,
+                          "bottom": 52
+                        },
+                        {
+                          "x": 122,
+                          "y": 53,
+                          "width": 104.97,
+                          "height": 17,
+                          "right": 226.97,
+                          "bottom": 70
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -733,12 +755,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_806_float_left\",\n        \"category\": \"baseline\",\n        \"features\": [\"float\", \"left\"],\n        \"description\": \"Basic float left behavior\",\n        \"original_css_test\": \"floats-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#floats\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Red box floated left with text wrapping around it\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_806_float_left\",\n        \"category\": \"baseline\",\n        \"features\": [\"float\", \"left\"],\n        \"description\": \"Basic float left behavior\",\n        \"original_css_test\": \"floats-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#floats\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Red box floated left with text wrapping around it\"\n    }\n    ",
+                "length": 431,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Basic Font Size\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .small-text {\n            font-size: 12px;\n        }\n        .medium-text {\n            font-size: 16px;\n        }\n        .large-text {\n            font-size: 24px;\n        }\n    \n\n\n    Small text\n    Medium text\n    Large text\n    \n    \n    {\n        \"test_id\": \"baseline_201_font_sizes\",\n        \"category\": \"baseline\",\n        \"features\": [\"font-size\", \"text-content\"],\n        \"description\": \"Text content with different font sizes\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html#propdef-font-size\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three paragraphs with 12px, 16px, and 24px text\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Basic Font Size\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .small-text {\n            font-size: 12px;\n        }\n        .medium-text {\n            font-size: 16px;\n        }\n        .large-text {\n            font-size: 24px;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Basic Font Size",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Basic Font Size",
+                "length": 30,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .small-text {\n            font-size: 12px;\n        }\n        .medium-text {\n            font-size: 16px;\n        }\n        .large-text {\n            font-size: 24px;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .small-text {\n            font-size: 12px;\n        }\n        .medium-text {\n            font-size: 16px;\n        }\n        .large-text {\n            font-size: 24px;\n        }\n    ",
+                "length": 275,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Small text\n    Medium text\n    Large text\n    \n    \n    {\n        \"test_id\": \"baseline_201_font_sizes\",\n        \"category\": \"baseline\",\n        \"features\": [\"font-size\", \"text-content\"],\n        \"description\": \"Text content with different font sizes\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html#propdef-font-size\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three paragraphs with 12px, 16px, and 24px text\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "p.small-text:nth-of-type(1)",
             "tag": "p",
             "id": null,
@@ -504,33 +525,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Small text",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Small text",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 0,
-                    "y": 0,
-                    "width": 52.69,
-                    "height": 14,
-                    "right": 52.69,
-                    "bottom": 14
-                  }
-                ],
                 "length": 10,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 10
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "width": 52.69,
+                      "height": 14,
+                      "right": 52.69,
+                      "bottom": 14
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "p.medium-text:nth-of-type(2)",
             "tag": "p",
             "id": null,
@@ -588,33 +614,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Medium text",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 3,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Medium text",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 0,
-                    "y": 14,
-                    "width": 87.14,
-                    "height": 17,
-                    "right": 87.14,
-                    "bottom": 31
-                  }
-                ],
                 "length": 11,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 11
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 0,
+                      "y": 14,
+                      "width": 87.14,
+                      "height": 17,
+                      "right": 87.14,
+                      "bottom": 31
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "p.large-text:nth-of-type(3)",
             "tag": "p",
             "id": null,
@@ -672,33 +703,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Large text",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 5,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Large text",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 0,
-                    "y": 32,
-                    "width": 106.73,
-                    "height": 27,
-                    "right": 106.73,
-                    "bottom": 59
-                  }
-                ],
                 "length": 10,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 10
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 0,
+                      "y": 32,
+                      "width": 106.73,
+                      "height": 27,
+                      "right": 106.73,
+                      "bottom": 59
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -754,12 +790,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_201_font_sizes\",\n        \"category\": \"baseline\",\n        \"features\": [\"font-size\", \"text-content\"],\n        \"description\": \"Text content with different font sizes\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html#propdef-font-size\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three paragraphs with 12px, 16px, and 24px text\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_201_font_sizes\",\n        \"category\": \"baseline\",\n        \"features\": [\"font-size\", \"text-content\"],\n        \"description\": \"Text content with different font sizes\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html#propdef-font-size\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three paragraphs with 12px, 16px, and 24px text\"\n    }\n    ",
+                "length": 410,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

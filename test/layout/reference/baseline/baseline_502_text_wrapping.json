@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Text Wrapping\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; font-size: 16px; }\n        .narrow-container {\n            width: 150px;\n            background-color: #fff0f0;\n            padding: 15px;\n        }\n    \n\n\n    \n        This is a long sentence that should wrap across multiple lines when the container width is constrained to be narrow.\n    \n    \n    \n    {\n        \"test_id\": \"baseline_502_text_wrapping\",\n        \"category\": \"baseline\", \n        \"features\": [\"text-wrapping\", \"word-break\", \"constrained-width\"],\n        \"description\": \"Long text content that wraps within narrow container\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/text.html#white-space-prop\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Multi-line text wrapping within 150px wide container with padding\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Text Wrapping\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; font-size: 16px; }\n        .narrow-container {\n            width: 150px;\n            background-color: #fff0f0;\n            padding: 15px;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Text Wrapping",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Text Wrapping",
+                "length": 28,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; font-size: 16px; }\n        .narrow-container {\n            width: 150px;\n            background-color: #fff0f0;\n            padding: 15px;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; font-size: 16px; }\n        .narrow-container {\n            width: 150px;\n            background-color: #fff0f0;\n            padding: 15px;\n        }\n    ",
+                "length": 238,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "This is a long sentence that should wrap across multiple lines when the container width is constrained to be narrow.\n    \n    \n    \n    {\n        \"test_id\": \"baseline_502_text_wrapping\",\n        \"category\": \"baseline\", \n        \"features\": [\"text-wrapping\", \"word-break\", \"constrained-width\"],\n        \"description\": \"Long text content that wraps within narrow container\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/text.html#white-space-prop\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Multi-line text wrapping within 150px wide container with padding\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.narrow-container",
             "tag": "div",
             "id": null,
@@ -504,81 +525,86 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This is a long sentence that should wrap across multiple lines when the container width is constrained to be narrow.",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "\n        This is a long sentence that should wrap across multiple lines when the container width is constrained to be narrow.\n    ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 15,
-                    "y": 15,
-                    "width": 94.27,
-                    "height": 17,
-                    "right": 109.27,
-                    "bottom": 32
-                  },
-                  {
-                    "x": 15,
-                    "y": 33,
-                    "width": 147.67,
-                    "height": 17,
-                    "right": 162.67,
-                    "bottom": 50
-                  },
-                  {
-                    "x": 15,
-                    "y": 51,
-                    "width": 145.83,
-                    "height": 17,
-                    "right": 160.83,
-                    "bottom": 68
-                  },
-                  {
-                    "x": 15,
-                    "y": 69,
-                    "width": 102.3,
-                    "height": 17,
-                    "right": 117.3,
-                    "bottom": 86
-                  },
-                  {
-                    "x": 15,
-                    "y": 87,
-                    "width": 123.63,
-                    "height": 17,
-                    "right": 138.63,
-                    "bottom": 104
-                  },
-                  {
-                    "x": 15,
-                    "y": 105,
-                    "width": 122.75,
-                    "height": 17,
-                    "right": 137.75,
-                    "bottom": 122
-                  },
-                  {
-                    "x": 15,
-                    "y": 123,
-                    "width": 52.47,
-                    "height": 17,
-                    "right": 67.47,
-                    "bottom": 140
-                  }
-                ],
                 "length": 130,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 130
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 15,
+                      "y": 15,
+                      "width": 94.27,
+                      "height": 17,
+                      "right": 109.27,
+                      "bottom": 32
+                    },
+                    {
+                      "x": 15,
+                      "y": 33,
+                      "width": 147.67,
+                      "height": 17,
+                      "right": 162.67,
+                      "bottom": 50
+                    },
+                    {
+                      "x": 15,
+                      "y": 51,
+                      "width": 145.83,
+                      "height": 17,
+                      "right": 160.83,
+                      "bottom": 68
+                    },
+                    {
+                      "x": 15,
+                      "y": 69,
+                      "width": 102.3,
+                      "height": 17,
+                      "right": 117.3,
+                      "bottom": 86
+                    },
+                    {
+                      "x": 15,
+                      "y": 87,
+                      "width": 123.63,
+                      "height": 17,
+                      "right": 138.63,
+                      "bottom": 104
+                    },
+                    {
+                      "x": 15,
+                      "y": 105,
+                      "width": 122.75,
+                      "height": 17,
+                      "right": 137.75,
+                      "bottom": 122
+                    },
+                    {
+                      "x": 15,
+                      "y": 123,
+                      "width": 52.47,
+                      "height": 17,
+                      "right": 67.47,
+                      "bottom": 140
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -634,12 +660,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_502_text_wrapping\",\n        \"category\": \"baseline\", \n        \"features\": [\"text-wrapping\", \"word-break\", \"constrained-width\"],\n        \"description\": \"Long text content that wraps within narrow container\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/text.html#white-space-prop\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Multi-line text wrapping within 150px wide container with padding\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_502_text_wrapping\",\n        \"category\": \"baseline\", \n        \"features\": [\"text-wrapping\", \"word-break\", \"constrained-width\"],\n        \"description\": \"Long text content that wraps within narrow container\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/text.html#white-space-prop\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Multi-line text wrapping within 150px wide container with padding\"\n    }\n    ",
+                "length": 467,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

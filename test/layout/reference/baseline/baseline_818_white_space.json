@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: White Space\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            width: 300px;\n            border: 2px solid black;\n            padding: 10px;\n            margin: 10px 0;\n        }\n        .normal {\n            white-space: normal;\n            background-color: lightgray;\n        }\n        .nowrap {\n            white-space: nowrap;\n            background-color: lightblue;\n        }\n        .pre {\n            white-space: pre;\n            background-color: lightgreen;\n        }\n        .pre-wrap {\n            white-space: pre-wrap;\n            background-color: lightyellow;\n        }\n    \n\n\n    \n        Normal: This    text   has    multiple    spaces and\n        line breaks that should be collapsed.\n    \n    \n        Nowrap: This text should not wrap to the next line even if it is very long and exceeds the container width.\n    \n    \n        Pre: This    text   preserves    all    spaces and\n        line breaks exactly as written.\n    \n    \n        Pre-wrap: This    text   preserves    spaces but still wraps when it reaches the container edge like this long line.\n    \n\n    \n    {\n        \"test_id\": \"baseline_818_white_space\",\n        \"category\": \"baseline\",\n        \"features\": [\"white-space\", \"normal\", \"nowrap\", \"pre\", \"pre-wrap\"],\n        \"description\": \"White-space property behavior for text handling\",\n        \"original_css_test\": \"white-space-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/text.html#white-space-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four containers showing different white-space behaviors: normal, nowrap, pre, and pre-wrap\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: White Space\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            width: 300px;\n            border: 2px solid black;\n            padding: 10px;\n            margin: 10px 0;\n        }\n        .normal {\n            white-space: normal;\n            background-color: lightgray;\n        }\n        .nowrap {\n            white-space: nowrap;\n            background-color: lightblue;\n        }\n        .pre {\n            white-space: pre;\n            background-color: lightgreen;\n        }\n        .pre-wrap {\n            white-space: pre-wrap;\n            background-color: lightyellow;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: White Space",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: White Space",
+                "length": 26,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            width: 300px;\n            border: 2px solid black;\n            padding: 10px;\n            margin: 10px 0;\n        }\n        .normal {\n            white-space: normal;\n            background-color: lightgray;\n        }\n        .nowrap {\n            white-space: nowrap;\n            background-color: lightblue;\n        }\n        .pre {\n            white-space: pre;\n            background-color: lightgreen;\n        }\n        .pre-wrap {\n            white-space: pre-wrap;\n            background-color: lightyellow;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            width: 300px;\n            border: 2px solid black;\n            padding: 10px;\n            margin: 10px 0;\n        }\n        .normal {\n            white-space: normal;\n            background-color: lightgray;\n        }\n        .nowrap {\n            white-space: nowrap;\n            background-color: lightblue;\n        }\n        .pre {\n            white-space: pre;\n            background-color: lightgreen;\n        }\n        .pre-wrap {\n            white-space: pre-wrap;\n            background-color: lightyellow;\n        }\n    ",
+                "length": 664,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Normal: This    text   has    multiple    spaces and\n        line breaks that should be collapsed.\n    \n    \n        Nowrap: This text should not wrap to the next line even if it is very long and exceeds the container width.\n    \n    \n        Pre: This    text   preserves    all    spaces and\n        line breaks exactly as written.\n    \n    \n        Pre-wrap: This    text   preserves    spaces but still wraps when it reaches the container edge like this long line.\n    \n\n    \n    {\n        \"test_id\": \"baseline_818_white_space\",\n        \"category\": \"baseline\",\n        \"features\": [\"white-space\", \"normal\", \"nowrap\", \"pre\", \"pre-wrap\"],\n        \"description\": \"White-space property behavior for text handling\",\n        \"original_css_test\": \"white-space-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/text.html#white-space-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four containers showing different white-space behaviors: normal, nowrap, pre, and pre-wrap\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 5,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container.normal:nth-of-type(1)",
             "tag": "div",
             "id": null,
@@ -505,13 +526,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Normal: This    text   has    multiple    spaces and\n        line breaks that should be collapsed.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "p",
                 "tag": "p",
                 "id": null,
@@ -567,43 +586,48 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Normal: This    text   has    multiple    spaces and\n        line breaks that should be collapsed.",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Normal: This    text   has    multiple    spaces and\n        line breaks that should be collapsed.",
-                    "parentElement": "p",
-                    "rects": [
-                      {
-                        "x": 32,
-                        "y": 42,
-                        "width": 296.73,
-                        "height": 17,
-                        "right": 328.73,
-                        "bottom": 59
-                      },
-                      {
-                        "x": 32,
-                        "y": 60,
-                        "width": 258.84,
-                        "height": 17,
-                        "right": 290.84,
-                        "bottom": 77
-                      }
-                    ],
                     "length": 98,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 98
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 32,
+                          "y": 42,
+                          "width": 296.73,
+                          "height": 17,
+                          "right": 328.73,
+                          "bottom": 59
+                        },
+                        {
+                          "x": 32,
+                          "y": 60,
+                          "width": 258.84,
+                          "height": 17,
+                          "right": 290.84,
+                          "bottom": 77
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "div.container.nowrap:nth-of-type(2)",
             "tag": "div",
             "id": null,
@@ -662,13 +686,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Nowrap: This text should not wrap to the next line even if it is very long and exceeds the container width.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 3,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "p",
                 "tag": "p",
                 "id": null,
@@ -724,35 +746,40 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Nowrap: This text should not wrap to the next line even if it is very long and exceeds the container width.",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Nowrap: This text should not wrap to the next line even if it is very long and exceeds the container width.",
-                    "parentElement": "p",
-                    "rects": [
-                      {
-                        "x": 32,
-                        "y": 112,
-                        "width": 737.89,
-                        "height": 17,
-                        "right": 769.89,
-                        "bottom": 129
-                      }
-                    ],
                     "length": 107,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 107
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 32,
+                          "y": 112,
+                          "width": 737.89,
+                          "height": 17,
+                          "right": 769.89,
+                          "bottom": 129
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "div.container.pre:nth-of-type(3)",
             "tag": "div",
             "id": null,
@@ -811,13 +838,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Pre: This    text   preserves    all    spaces and\n        line breaks exactly as written.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 5,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "p",
                 "tag": "p",
                 "id": null,
@@ -873,51 +898,56 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Pre: This    text   preserves    all    spaces and\n        line breaks exactly as written.",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Pre: This    text   preserves    all    spaces and\n        line breaks exactly as written.",
-                    "parentElement": "p",
-                    "rects": [
-                      {
-                        "x": 32,
-                        "y": 200,
-                        "width": 324.3,
-                        "height": 17,
-                        "right": 356.3,
-                        "bottom": 217
-                      },
-                      {
-                        "x": 356.3,
-                        "y": 200,
-                        "width": 0,
-                        "height": 17,
-                        "right": 356.3,
-                        "bottom": 217
-                      },
-                      {
-                        "x": 32,
-                        "y": 218,
-                        "width": 244.55,
-                        "height": 17,
-                        "right": 276.55,
-                        "bottom": 235
-                      }
-                    ],
                     "length": 90,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 90
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 32,
+                          "y": 200,
+                          "width": 324.3,
+                          "height": 17,
+                          "right": 356.3,
+                          "bottom": 217
+                        },
+                        {
+                          "x": 356.3,
+                          "y": 200,
+                          "width": 0,
+                          "height": 17,
+                          "right": 356.3,
+                          "bottom": 217
+                        },
+                        {
+                          "x": 32,
+                          "y": 218,
+                          "width": 244.55,
+                          "height": 17,
+                          "right": 276.55,
+                          "bottom": 235
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "div.container.pre-wrap:nth-of-type(4)",
             "tag": "div",
             "id": null,
@@ -976,13 +1006,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Pre-wrap: This    text   preserves    spaces but still wraps when it reaches the container edge like this long line.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 7,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "p",
                 "tag": "p",
                 "id": null,
@@ -1038,67 +1066,72 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Pre-wrap: This    text   preserves    spaces but still wraps when it reaches the container edge like this long line.",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Pre-wrap: This    text   preserves    spaces but still wraps when it reaches the container edge like this long line.",
-                    "parentElement": "p",
-                    "rects": [
-                      {
-                        "x": 32,
-                        "y": 342,
-                        "width": 299.38,
-                        "height": 17,
-                        "right": 331.38,
-                        "bottom": 359
-                      },
-                      {
-                        "x": 331.38,
-                        "y": 342,
-                        "width": 4.45,
-                        "height": 17,
-                        "right": 335.83,
-                        "bottom": 359
-                      },
-                      {
-                        "x": 32,
-                        "y": 360,
-                        "width": 240.13,
-                        "height": 17,
-                        "right": 272.13,
-                        "bottom": 377
-                      },
-                      {
-                        "x": 272.13,
-                        "y": 360,
-                        "width": 4.45,
-                        "height": 17,
-                        "right": 276.58,
-                        "bottom": 377
-                      },
-                      {
-                        "x": 32,
-                        "y": 378,
-                        "width": 232.16,
-                        "height": 17,
-                        "right": 264.16,
-                        "bottom": 395
-                      }
-                    ],
                     "length": 116,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 116
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 32,
+                          "y": 342,
+                          "width": 299.38,
+                          "height": 17,
+                          "right": 331.38,
+                          "bottom": 359
+                        },
+                        {
+                          "x": 331.38,
+                          "y": 342,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 335.83,
+                          "bottom": 359
+                        },
+                        {
+                          "x": 32,
+                          "y": 360,
+                          "width": 240.13,
+                          "height": 17,
+                          "right": 272.13,
+                          "bottom": 377
+                        },
+                        {
+                          "x": 272.13,
+                          "y": 360,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 276.58,
+                          "bottom": 377
+                        },
+                        {
+                          "x": 32,
+                          "y": 378,
+                          "width": 232.16,
+                          "height": 17,
+                          "right": 264.16,
+                          "bottom": 395
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -1154,12 +1187,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_818_white_space\",\n        \"category\": \"baseline\",\n        \"features\": [\"white-space\", \"normal\", \"nowrap\", \"pre\", \"pre-wrap\"],\n        \"description\": \"White-space property behavior for text handling\",\n        \"original_css_test\": \"white-space-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/text.html#white-space-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four containers showing different white-space behaviors: normal, nowrap, pre, and pre-wrap\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 9,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_818_white_space\",\n        \"category\": \"baseline\",\n        \"features\": [\"white-space\", \"normal\", \"nowrap\", \"pre\", \"pre-wrap\"],\n        \"description\": \"White-space property behavior for text handling\",\n        \"original_css_test\": \"white-space-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/text.html#white-space-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four containers showing different white-space behaviors: normal, nowrap, pre, and pre-wrap\"\n    }\n    ",
+                "length": 544,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

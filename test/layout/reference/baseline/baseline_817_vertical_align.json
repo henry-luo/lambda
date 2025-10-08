@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Vertical Align\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            line-height: 60px;\n            border: 1px solid black;\n            margin: 10px;\n            padding: 10px;\n            font-size: 18px;\n        }\n        .box {\n            display: inline-block;\n            width: 40px;\n            height: 40px;\n            background-color: lightblue;\n            border: 1px solid blue;\n            margin: 0 5px;\n        }\n        .baseline { vertical-align: baseline; }\n        .top { vertical-align: top; }\n        .middle { vertical-align: middle; }\n        .bottom { vertical-align: bottom; }\n        .text-top { vertical-align: text-top; }\n    \n\n\n    \n        Text baseline\n        \n        \n        \n        \n        \n        more text\n    \n\n    \n    {\n        \"test_id\": \"baseline_817_vertical_align\",\n        \"category\": \"baseline\",\n        \"features\": [\"vertical-align\", \"baseline\", \"top\", \"middle\", \"bottom\", \"text-top\"],\n        \"description\": \"Vertical alignment of inline elements\",\n        \"original_css_test\": \"vertical-align-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visudet.html#line-height\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Five blue boxes aligned differently relative to the text baseline\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Vertical Align\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            line-height: 60px;\n            border: 1px solid black;\n            margin: 10px;\n            padding: 10px;\n            font-size: 18px;\n        }\n        .box {\n            display: inline-block;\n            width: 40px;\n            height: 40px;\n            background-color: lightblue;\n            border: 1px solid blue;\n            margin: 0 5px;\n        }\n        .baseline { vertical-align: baseline; }\n        .top { vertical-align: top; }\n        .middle { vertical-align: middle; }\n        .bottom { vertical-align: bottom; }\n        .text-top { vertical-align: text-top; }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Vertical Align",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Vertical Align",
+                "length": 29,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            line-height: 60px;\n            border: 1px solid black;\n            margin: 10px;\n            padding: 10px;\n            font-size: 18px;\n        }\n        .box {\n            display: inline-block;\n            width: 40px;\n            height: 40px;\n            background-color: lightblue;\n            border: 1px solid blue;\n            margin: 0 5px;\n        }\n        .baseline { vertical-align: baseline; }\n        .top { vertical-align: top; }\n        .middle { vertical-align: middle; }\n        .bottom { vertical-align: bottom; }\n        .text-top { vertical-align: text-top; }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            line-height: 60px;\n            border: 1px solid black;\n            margin: 10px;\n            padding: 10px;\n            font-size: 18px;\n        }\n        .box {\n            display: inline-block;\n            width: 40px;\n            height: 40px;\n            background-color: lightblue;\n            border: 1px solid blue;\n            margin: 0 5px;\n        }\n        .baseline { vertical-align: baseline; }\n        .top { vertical-align: top; }\n        .middle { vertical-align: middle; }\n        .bottom { vertical-align: bottom; }\n        .text-top { vertical-align: text-top; }\n    ",
+                "length": 724,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Text baseline\n        \n        \n        \n        \n        \n        more text\n    \n\n    \n    {\n        \"test_id\": \"baseline_817_vertical_align\",\n        \"category\": \"baseline\",\n        \"features\": [\"vertical-align\", \"baseline\", \"top\", \"middle\", \"bottom\", \"text-top\"],\n        \"description\": \"Vertical alignment of inline elements\",\n        \"original_css_test\": \"vertical-align-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visudet.html#line-height\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Five blue boxes aligned differently relative to the text baseline\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,50 +525,36 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Text baseline\n        \n        \n        \n        \n        \n        more text",
-            "hasTextNodes": true,
-            "textNodes": [
-              {
-                "text": "\n        Text baseline\n        ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 41,
-                    "y": 67,
-                    "width": 110.08,
-                    "height": 20,
-                    "right": 151.08,
-                    "bottom": 87
-                  }
-                ],
-                "length": 31,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 31
-              },
-              {
-                "text": "\n        more text\n    ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 431.14,
-                    "y": 67,
-                    "width": 80.03,
-                    "height": 20,
-                    "right": 511.17,
-                    "bottom": 87
-                  }
-                ],
-                "length": 23,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 23
-              }
-            ],
-            "childCount": 5,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "text",
+                "text": "\n        Text baseline\n        ",
+                "length": 31,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 41,
+                      "y": 67,
+                      "width": 110.08,
+                      "height": 20,
+                      "right": 151.08,
+                      "bottom": 87
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "element",
                 "selector": "span.box.baseline:nth-of-type(1)",
                 "tag": "span",
                 "id": null,
@@ -606,14 +613,12 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "span.box.top:nth-of-type(2)",
                 "tag": "span",
                 "id": null,
@@ -672,14 +677,12 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "span.box.middle:nth-of-type(3)",
                 "tag": "span",
                 "id": null,
@@ -738,14 +741,12 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "span.box.bottom:nth-of-type(4)",
                 "tag": "span",
                 "id": null,
@@ -804,14 +805,12 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 7,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "span.box.text-top:nth-of-type(5)",
                 "tag": "span",
                 "id": null,
@@ -870,16 +869,39 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 9,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "\n        more text\n    ",
+                "length": 23,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 431.14,
+                      "y": 67,
+                      "width": 80.03,
+                      "height": 20,
+                      "right": 511.17,
+                      "bottom": 87
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 10,
                 "children": []
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -935,12 +957,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_817_vertical_align\",\n        \"category\": \"baseline\",\n        \"features\": [\"vertical-align\", \"baseline\", \"top\", \"middle\", \"bottom\", \"text-top\"],\n        \"description\": \"Vertical alignment of inline elements\",\n        \"original_css_test\": \"vertical-align-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visudet.html#line-height\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Five blue boxes aligned differently relative to the text baseline\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_817_vertical_align\",\n        \"category\": \"baseline\",\n        \"features\": [\"vertical-align\", \"baseline\", \"top\", \"middle\", \"bottom\", \"text-top\"],\n        \"description\": \"Vertical alignment of inline elements\",\n        \"original_css_test\": \"vertical-align-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visudet.html#line-height\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Five blue boxes aligned differently relative to the text baseline\"\n    }\n    ",
+                "length": 528,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

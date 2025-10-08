@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Inline Block\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            width: 400px;\n            border: 1px solid black;\n            padding: 10px;\n            text-align: center;\n        }\n        .inline-block {\n            display: inline-block;\n            width: 80px;\n            height: 60px;\n            margin: 5px;\n            border: 2px solid blue;\n            background-color: lightcyan;\n            vertical-align: top;\n        }\n        .different-height {\n            height: 100px;\n            background-color: lightpink;\n        }\n    \n\n\n    \n        Box 1\n        Box 2\n        Taller Box\n        Box 4\n    \n\n    \n    {\n        \"test_id\": \"baseline_820_inline_block\",\n        \"category\": \"baseline\",\n        \"features\": [\"display\", \"inline-block\", \"vertical-align\"],\n        \"description\": \"Inline-block elements with different heights\",\n        \"original_css_test\": \"inline-block-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#display-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four inline-block boxes in a row, with one taller box\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Inline Block\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            width: 400px;\n            border: 1px solid black;\n            padding: 10px;\n            text-align: center;\n        }\n        .inline-block {\n            display: inline-block;\n            width: 80px;\n            height: 60px;\n            margin: 5px;\n            border: 2px solid blue;\n            background-color: lightcyan;\n            vertical-align: top;\n        }\n        .different-height {\n            height: 100px;\n            background-color: lightpink;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Inline Block",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Inline Block",
+                "length": 27,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,63 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            width: 400px;\n            border: 1px solid black;\n            padding: 10px;\n            text-align: center;\n        }\n        .inline-block {\n            display: inline-block;\n            width: 80px;\n            height: 60px;\n            margin: 5px;\n            border: 2px solid blue;\n            background-color: lightcyan;\n            vertical-align: top;\n        }\n        .different-height {\n            height: 100px;\n            background-color: lightpink;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .container {\n            width: 400px;\n            border: 1px solid black;\n            padding: 10px;\n            text-align: center;\n        }\n        .inline-block {\n            display: inline-block;\n            width: 80px;\n            height: 60px;\n            margin: 5px;\n            border: 2px solid blue;\n            background-color: lightcyan;\n            vertical-align: top;\n        }\n        .different-height {\n            height: 100px;\n            background-color: lightpink;\n        }\n    ",
+                "length": 620,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "text",
+        "text": "\n",
+        "length": 1,
+        "isWhitespaceOnly": true,
+        "layout": {
+          "rects": [],
+          "hasLayout": false,
+          "parentVisible": true,
+          "parentDisplay": "block",
+          "parentVisibility": "visible"
+        },
+        "depth": 1,
+        "nodeIndex": 1,
+        "children": []
+      },
+      {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +559,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Box 1\n        Box 2\n        Taller Box\n        Box 4\n    \n\n    \n    {\n        \"test_id\": \"baseline_820_inline_block\",\n        \"category\": \"baseline\",\n        \"features\": [\"display\", \"inline-block\", \"vertical-align\"],\n        \"description\": \"Inline-block elements with different heights\",\n        \"original_css_test\": \"inline-block-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#display-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four inline-block boxes in a row, with one taller box\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": true,
+              "parentDisplay": "block",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +637,27 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Box 1\n        Box 2\n        Taller Box\n        Box 4",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 4,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "element",
                 "selector": "div.inline-block:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,33 +715,63 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Box 1",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Box 1",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 62.84,
-                        "y": 38,
-                        "width": 40.92,
-                        "height": 17,
-                        "right": 103.77,
-                        "bottom": 55
-                      }
-                    ],
                     "length": 5,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 5
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 62.84,
+                          "y": 38,
+                          "width": 40.92,
+                          "height": 17,
+                          "right": 103.77,
+                          "bottom": 55
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline-block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 130.31,
+                      "y": 31,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 134.77,
+                      "bottom": 48
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 2,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.inline-block:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -652,33 +829,63 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Box 2",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Box 2",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 161.3,
-                        "y": 38,
-                        "width": 40.92,
-                        "height": 17,
-                        "right": 202.22,
-                        "bottom": 55
-                      }
-                    ],
                     "length": 5,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 5
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 161.3,
+                          "y": 38,
+                          "width": 40.92,
+                          "height": 17,
+                          "right": 202.22,
+                          "bottom": 55
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline-block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 228.77,
+                      "y": 31,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 233.22,
+                      "bottom": 48
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 4,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.inline-block.different-height:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -737,33 +944,63 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Taller Box",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Taller Box",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 245.09,
-                        "y": 38,
-                        "width": 70.25,
-                        "height": 17,
-                        "right": 315.34,
-                        "bottom": 55
-                      }
-                    ],
                     "length": 10,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 10
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 245.09,
+                          "y": 38,
+                          "width": 70.25,
+                          "height": 17,
+                          "right": 315.34,
+                          "bottom": 55
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline-block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 327.22,
+                      "y": 31,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 331.67,
+                      "bottom": 48
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 6,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.inline-block:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -821,35 +1058,72 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Box 4",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 7,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Box 4",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 358.2,
-                        "y": 38,
-                        "width": 40.92,
-                        "height": 17,
-                        "right": 399.13,
-                        "bottom": 55
-                      }
-                    ],
                     "length": 5,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 5
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 358.2,
+                          "y": 38,
+                          "width": 40.92,
+                          "height": 17,
+                          "right": 399.13,
+                          "bottom": 55
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline-block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": "\n    ",
+                "length": 5,
+                "isWhitespaceOnly": true,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 8,
                 "children": []
               }
             ]
           },
           {
+            "nodeType": "text",
+            "text": "\n\n    ",
+            "length": 6,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": true,
+              "parentDisplay": "block",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -905,11 +1179,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_820_inline_block\",\n        \"category\": \"baseline\",\n        \"features\": [\"display\", \"inline-block\", \"vertical-align\"],\n        \"description\": \"Inline-block elements with different heights\",\n        \"original_css_test\": \"inline-block-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#display-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four inline-block boxes in a row, with one taller box\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_820_inline_block\",\n        \"category\": \"baseline\",\n        \"features\": [\"display\", \"inline-block\", \"vertical-align\"],\n        \"description\": \"Inline-block elements with different heights\",\n        \"original_css_test\": \"inline-block-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#display-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four inline-block boxes in a row, with one taller box\"\n    }\n    ",
+                "length": 496,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n\n\n",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": true,
+              "parentDisplay": "block",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
             "children": []
           }
         ]

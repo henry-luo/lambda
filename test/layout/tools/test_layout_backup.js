@@ -126,6 +126,7 @@ class LayoutTester {
 
     /**
      * Filter radiant tree to match browser structure
+     * UPDATED: Now maintains nodeType structure consistent with new browser format
      */
     filterRadiantTree(node) {
         if (!node) return null;
@@ -139,36 +140,44 @@ class LayoutTester {
             return null; // CSS styles - not part of layout tree
         }
 
-        // Skip text nodes in tree comparison - handle separately in text comparison
-        if (node.type === 'text' || node.tag === 'text') {
-            return null; // Text nodes handled separately
-        }
-
         // Create filtered copy of node
         const filtered = {
             ...node,
-            children: [],
-            textNodes: [] // Initialize textNodes array
+            children: []
         };
 
-        // Convert Radiant text children to textNodes array for browser compatibility
+        // Process children maintaining the new nodeType structure
         if (node.children && Array.isArray(node.children)) {
             node.children.forEach(child => {
                 if (child && (child.type === 'text' || child.tag === 'text')) {
-                    // Convert Radiant text node to browser-style textNode
-                    filtered.textNodes.push({
-                        text: child.content || '',
-                        rects: [child.layout || { x: 0, y: 0, width: 0, height: 0 }]
+                    // Convert Radiant text node to browser-compatible format with nodeType
+                    filtered.children.push({
+                        nodeType: 'text',
+                        text: child.content || child.text || '',
+                        length: (child.content || child.text || '').length,
+                        isWhitespaceOnly: !(child.content || child.text || '').trim(),
+                        layout: {
+                            rects: child.layout ? [child.layout] : [],
+                            hasLayout: !!child.layout
+                        },
+                        depth: (child.depth || 0) + 1,
+                        nodeIndex: 0,
+                        children: []
                     });
                 } else {
                     // Regular DOM element - recurse
                     const filteredChild = this.filterRadiantTree(child);
                     if (filteredChild) {
+                        // Ensure element has nodeType for consistency
+                        filteredChild.nodeType = 'element';
                         filtered.children.push(filteredChild);
                     }
                 }
             });
         }
+
+        // Ensure this node has nodeType for consistency
+        filtered.nodeType = 'element';
 
         return filtered;
     }
@@ -199,6 +208,7 @@ class LayoutTester {
 
     /**
      * Extract elements from browser tree structure recursively
+     * UPDATED: Now works with new format where text nodes are in children[] array
      */
     extractBrowserElements(treeNode, elements = [], path = '') {
         if (!treeNode) return elements;
@@ -206,23 +216,31 @@ class LayoutTester {
         const currentPath = path ? `${path} > ${treeNode.tag}` : treeNode.tag;
         const selector = treeNode.selector || currentPath;
 
-        // Add current element to flat list with tree context
-        elements.push({
-            selector: selector,
-            tag: treeNode.tag,
-            id: treeNode.id,
-            classes: treeNode.classes || [],
-            layout: treeNode.layout,
-            computed: treeNode.computed,
-            textContent: treeNode.textContent,
-            hasTextNodes: treeNode.hasTextNodes,
-            textNodes: treeNode.textNodes || [],
-            childCount: treeNode.childCount,
-            depth: treeNode.depth,
-            treePath: currentPath
-        });
+        // Only process element nodes, skip text nodes for element extraction
+        if (treeNode.nodeType === 'element') {
+            // Count text nodes in children for compatibility
+            const textNodesInChildren = treeNode.children ?
+                treeNode.children.filter(child => child.nodeType === 'text' && child.layout && child.layout.hasLayout) : [];
 
-        // Recursively process children
+            // Add current element to flat list with tree context
+            elements.push({
+                selector: selector,
+                tag: treeNode.tag,
+                id: treeNode.id,
+                classes: treeNode.classes || [],
+                layout: treeNode.layout,
+                computed: treeNode.computed,
+                textContent: this.extractTextContent(treeNode),
+                hasTextNodes: textNodesInChildren.length > 0,
+                textNodes: this.convertTextNodesToLegacyFormat(textNodesInChildren), // For legacy compatibility
+                childCount: treeNode.children ? treeNode.children.filter(child => child.nodeType === 'element').length : 0,
+                depth: treeNode.depth,
+                treePath: currentPath,
+                children: treeNode.children || [] // Keep original children for new format
+            });
+        }
+
+        // Recursively process children (both elements and text nodes)
         if (treeNode.children && Array.isArray(treeNode.children)) {
             treeNode.children.forEach(child => {
                 this.extractBrowserElements(child, elements, currentPath);
@@ -230,6 +248,69 @@ class LayoutTester {
         }
 
         return elements;
+    }
+
+    /**
+     * Extract text content from a node (including text node children)
+     */
+    extractTextContent(node) {
+        if (!node.children) return null;
+
+        return node.children
+            .filter(child => child.nodeType === 'text')
+            .map(child => child.text)
+            .join(' ')
+            .trim() || null;
+    }
+
+    /**
+     * Convert new format text nodes to legacy textNodes format for compatibility
+     */
+    convertTextNodesToLegacyFormat(textNodeChildren) {
+        return textNodeChildren.map(textNode => ({
+            text: textNode.text,
+            rects: textNode.layout && textNode.layout.rects ? textNode.layout.rects : [],
+            parentElement: textNode.parent?.tag || null,
+            length: textNode.length,
+            isWhitespaceOnly: textNode.isWhitespaceOnly
+        }));
+    }
+
+    /**
+     * Extract text nodes from browser elements with their position data (legacy method for compatibility)
+     * UPDATED: Now works with new format where text nodes are in children[] array
+     */
+    extractBrowserTextNodes(browserElements) {
+        const textNodes = [];
+
+        Object.entries(browserElements).forEach(([key, elem]) => {
+            // NEW FORMAT: Look for text nodes in children array
+            if (elem.children && elem.children.length > 0) {
+                elem.children.forEach((child, index) => {
+                    if (child.nodeType === 'text' && child.layout && child.layout.hasLayout && child.layout.rects) {
+                        // Each rect represents a line fragment
+                        child.layout.rects.forEach((rect, rectIndex) => {
+                            textNodes.push({
+                                selector: `${elem.selector || key}_text_${index}_${rectIndex}`,
+                                tag: 'text',
+                                layout: {
+                                    x: rect.x,
+                                    y: rect.y,
+                                    width: rect.width,
+                                    height: rect.height
+                                },
+                                text: child.text,
+                                parentElement: elem.tag,
+                                isTextNode: true,
+                                nodeType: 'text'
+                            });
+                        });
+                    }
+                });
+            }
+        });
+
+        return textNodes;
     }
 
     /**
@@ -441,6 +522,335 @@ class LayoutTester {
         return filtered;
     }
 
+    /**
+     * Convert browser tree structure to common format
+     * Common format: {tag: [{bounds}, ...children, {text: {bounds, string}}]}
+     */
+    convertBrowserToCommonFormat(node) {
+        if (!node) return null;
+
+        const commonNode = {
+            tag: node.tag,
+            children: []
+        };
+
+        // Add the element's own bounds first
+        if (node.layout) {
+            commonNode.children.push({
+                x: node.layout.x || 0,
+                y: node.layout.y || 0,
+                width: node.layout.width || 0,
+                height: node.layout.height || 0
+            });
+        } else {
+            // Add zero bounds if no layout
+            commonNode.children.push({ x: 0, y: 0, width: 0, height: 0 });
+        }
+
+        // Process children (elements and text nodes)
+        if (node.children && Array.isArray(node.children)) {
+            for (const child of node.children) {
+                if (child.nodeType === 'text') {
+                    // Handle text nodes - create one entry per rect for multi-line text
+                    if (child.layout && child.layout.hasLayout && child.layout.rects) {
+                        for (const rect of child.layout.rects) {
+                            commonNode.children.push({
+                                text: {
+                                    x: rect.x || 0,
+                                    y: rect.y || 0,
+                                    width: rect.width || 0,
+                                    height: rect.height || 0,
+                                    string: child.text || ""
+                                }
+                            });
+                        }
+                    }
+                } else if (child.nodeType === 'element') {
+                    // Recursively convert child elements
+                    const convertedChild = this.convertBrowserToCommonFormat(child);
+                    if (convertedChild) {
+                        commonNode.children.push(convertedChild);
+                    }
+                }
+            }
+        }
+
+        return commonNode;
+    }
+
+    /**
+     * Convert radiant tree structure to common format
+     * Common format: {tag: [{bounds}, ...children, {text: {bounds, string}}]}
+     */
+    convertRadiantToCommonFormat(node) {
+        if (!node) return null;
+
+        const commonNode = {
+            tag: node.tag,
+            children: []
+        };
+
+        // Add the element's own bounds first
+        if (node.layout) {
+            commonNode.children.push({
+                x: node.layout.x || 0,
+                y: node.layout.y || 0,
+                width: node.layout.width || 0,
+                height: node.layout.height || 0
+            });
+        } else {
+            // Add zero bounds if no layout
+            commonNode.children.push({ x: 0, y: 0, width: 0, height: 0 });
+        }
+
+        // Process children (elements and text nodes)
+        if (node.children && Array.isArray(node.children)) {
+            for (const child of node.children) {
+                if (child.nodeType === 'text' || child.type === 'text') {
+                    // Handle text nodes - radiant may have different structure
+                    // After filterRadiantTree, layout is in child.layout.rects[0]
+                    let textLayout = null;
+                    if (child.layout && child.layout.rects && child.layout.rects.length > 0) {
+                        textLayout = child.layout.rects[0];
+                    } else if (child.layout) {
+                        textLayout = child.layout;
+                    }
+
+                    if (textLayout) {
+                        commonNode.children.push({
+                            text: {
+                                x: textLayout.x || 0,
+                                y: textLayout.y || 0,
+                                width: textLayout.width || 0,
+                                height: textLayout.height || 0,
+                                string: child.text || child.content || ""
+                            }
+                        });
+                    }
+                } else {
+                    // Recursively convert child elements
+                    const convertedChild = this.convertRadiantToCommonFormat(child);
+                    if (convertedChild) {
+                        commonNode.children.push(convertedChild);
+                    }
+                }
+            }
+        }
+
+        return commonNode;
+    }
+
+    /**
+     * Compare two nodes in common format
+     * Returns comparison results with matches and differences
+     */
+    compareCommonFormatNodes(radiantNode, browserNode, path = '', depth = 0) {
+        const results = {
+            totalElements: 0,
+            matchedElements: 0,
+            differences: [],
+            maxDifference: 0,
+            totalTextNodes: 0,
+            matchedTextNodes: 0,
+            textDifferences: [],
+            maxTextDifference: 0
+        };
+
+        const getIndent = (level = depth) => {
+            const baseIndent = '   ';
+            const treeIndent = '  '.repeat(level);
+            return baseIndent + treeIndent;
+        };
+
+        if (!radiantNode && !browserNode) {
+            return results;
+        }
+
+        if (!radiantNode || !browserNode) {
+            // One tree has an element the other doesn't
+            const presentNode = radiantNode || browserNode;
+            const elementPath = path || presentNode.tag || 'unknown';
+
+            results.totalElements = 1;
+            results.differences.push({
+                type: radiantNode ? 'extra_in_radiant' : 'missing_in_radiant',
+                path: elementPath,
+                radiant: radiantNode ? { tag: radiantNode.tag, bounds: radiantNode.children[0] } : null,
+                browser: browserNode ? { tag: browserNode.tag, bounds: browserNode.children[0] } : null
+            });
+
+            if (this.verbose) {
+                const missingIn = radiantNode ? 'browser' : 'radiant';
+                console.log(`${getIndent()}❌ Missing in ${missingIn}: ${elementPath} (${presentNode.tag})`);
+            }
+
+            return results;
+        }
+
+        // Both nodes exist, compare them
+        results.totalElements = 1;
+        const currentPath = path || radiantNode.tag;
+
+        // Check if tags match
+        if (radiantNode.tag !== browserNode.tag) {
+            results.differences.push({
+                type: 'tag_mismatch',
+                path: currentPath,
+                radiant: radiantNode.tag,
+                browser: browserNode.tag
+            });
+
+            if (this.verbose) {
+                console.log(`${getIndent()}❌ Tag mismatch: ${currentPath} | ${radiantNode.tag} vs. ${browserNode.tag}`);
+            }
+
+            return results;
+        }
+
+        // Tags match - this is a successful element match
+        results.matchedElements = 1;
+
+        // Compare element bounds (first child should be bounds)
+        const radiantBounds = radiantNode.children[0];
+        const browserBounds = browserNode.children[0];
+
+        if (radiantBounds && browserBounds && !radiantBounds.text && !browserBounds.text) {
+            const layoutDiffs = this.compareElementLayout(radiantBounds, browserBounds);
+            if (layoutDiffs.length > 0) {
+                const maxDiff = Math.max(...layoutDiffs.map(d => d.difference));
+                results.maxDifference = Math.max(results.maxDifference, maxDiff);
+
+                results.differences.push({
+                    type: 'layout_difference',
+                    path: currentPath,
+                    radiant: radiantBounds,
+                    browser: browserBounds,
+                    differences: layoutDiffs,
+                    maxDifference: maxDiff
+                });
+
+                const layoutMatches = maxDiff <= this.tolerance;
+                if (this.verbose) {
+                    const layoutDetails = layoutDiffs.map(d => `${d.property}:${d.difference.toFixed(1)}px`).join(', ');
+                    const status = layoutMatches ? '✅' : '⚠️';
+                    console.log(`${getIndent()}  ^ ${status} Match: ${currentPath} - ${maxDiff.toFixed(2)}px (${layoutDetails})`);
+                }
+            } else if (this.verbose) {
+                console.log(`${getIndent()}  ^ ✅ Match: ${currentPath}`);
+            }
+        }
+
+        // Compare children (skip the first bounds entry, start from index 1)
+        const radiantChildren = radiantNode.children.slice(1);
+        const browserChildren = browserNode.children.slice(1);
+        const maxChildren = Math.max(radiantChildren.length, browserChildren.length);
+
+        for (let i = 0; i < maxChildren; i++) {
+            const radiantChild = radiantChildren[i] || null;
+            const browserChild = browserChildren[i] || null;
+
+            if (radiantChild && radiantChild.text && browserChild && browserChild.text) {
+                // Both are text nodes
+                results.totalTextNodes += 1;
+
+                // Compare text bounds
+                const textLayoutDiffs = this.compareElementLayout(radiantChild.text, browserChild.text);
+                if (textLayoutDiffs.length > 0) {
+                    const maxTextDiff = Math.max(...textLayoutDiffs.map(d => d.difference));
+                    results.maxTextDifference = Math.max(results.maxTextDifference, maxTextDiff);
+
+                    results.textDifferences.push({
+                        type: 'text_layout_difference',
+                        path: `${currentPath}_text_${i}`,
+                        radiant: radiantChild.text,
+                        browser: browserChild.text,
+                        differences: textLayoutDiffs,
+                        maxDifference: maxTextDiff
+                    });
+
+                    const textMatches = maxTextDiff <= this.textTolerance;
+                    if (textMatches) {
+                        results.matchedTextNodes += 1;
+                    }
+
+                    if (this.verbose) {
+                        const textDetails = textLayoutDiffs.map(d => `${d.property}:${d.difference.toFixed(1)}px`).join(', ');
+                        const status = textMatches ? '✅' : '⚠️';
+                        const displayText = this.cleanTextForDisplay(radiantChild.text.string);
+                        const radiantBounds = `(${radiantChild.text.x}, ${radiantChild.text.y}, ${radiantChild.text.width}, ${radiantChild.text.height})`;
+                        const browserBounds = `(${browserChild.text.x}, ${browserChild.text.y}, ${browserChild.text.width}, ${browserChild.text.height})`;
+                        console.log(`${getIndent()}    📝 ${status} Text: "${displayText}" - ${maxTextDiff.toFixed(2)}px (${textDetails})`);
+                        console.log(`${getIndent()}        Radiant: ${radiantBounds} vs. Browser: ${browserBounds}`);
+                    }
+                } else {
+                    results.matchedTextNodes += 1;
+                    if (this.verbose) {
+                        const displayText = this.cleanTextForDisplay(radiantChild.text.string);
+                        console.log(`${getIndent()}    📝 ✅ Text: "${displayText}"`);
+                    }
+                }
+
+            } else if ((radiantChild && radiantChild.text) || (browserChild && browserChild.text)) {
+                // One is text, one is not (or missing)
+                results.totalTextNodes += 1;
+                results.textDifferences.push({
+                    type: radiantChild ? 'extra_text_in_radiant' : 'missing_text_in_radiant',
+                    path: `${currentPath}_text_${i}`,
+                    radiant: radiantChild ? radiantChild.text : null,
+                    browser: browserChild ? browserChild.text : null
+                });
+
+                if (this.verbose) {
+                    const missingIn = radiantChild ? 'browser' : 'radiant';
+                    const text = radiantChild ? radiantChild.text.string : browserChild.text.string;
+                    const presentBounds = radiantChild ?
+                        `Radiant: (${radiantChild.text.x}, ${radiantChild.text.y}, ${radiantChild.text.width}, ${radiantChild.text.height})` :
+                        `Browser: (${browserChild.text.x}, ${browserChild.text.y}, ${browserChild.text.width}, ${browserChild.text.height})`;
+                    console.log(`${getIndent()}    📝 ❌ Missing text in ${missingIn}: "${this.cleanTextForDisplay(text)}"`);
+                    console.log(`${getIndent()}        ${presentBounds}`);
+                }
+
+            } else if (radiantChild && radiantChild.tag && browserChild && browserChild.tag) {
+                // Both are element nodes - recurse
+                const childPath = `${currentPath} > ${radiantChild.tag}`;
+                const childResults = this.compareCommonFormatNodes(radiantChild, browserChild, childPath, depth + 1);
+
+                // Merge results
+                results.totalElements += childResults.totalElements;
+                results.matchedElements += childResults.matchedElements;
+                results.differences.push(...childResults.differences);
+                results.maxDifference = Math.max(results.maxDifference, childResults.maxDifference);
+                results.totalTextNodes += childResults.totalTextNodes;
+                results.matchedTextNodes += childResults.matchedTextNodes;
+                results.textDifferences.push(...childResults.textDifferences);
+                results.maxTextDifference = Math.max(results.maxTextDifference, childResults.maxTextDifference);
+
+            } else if (radiantChild || browserChild) {
+                // One child exists, the other doesn't
+                const presentChild = radiantChild || browserChild;
+                const childPath = `${currentPath}_child_${i}`;
+
+                if (presentChild.tag) {
+                    // Element mismatch
+                    results.totalElements += 1;
+                    results.differences.push({
+                        type: radiantChild ? 'extra_element_in_radiant' : 'missing_element_in_radiant',
+                        path: childPath,
+                        radiant: radiantChild ? { tag: presentChild.tag } : null,
+                        browser: browserChild ? { tag: presentChild.tag } : null
+                    });
+
+                    if (this.verbose) {
+                        const missingIn = radiantChild ? 'browser' : 'radiant';
+                        console.log(`${getIndent()}  ❌ Missing element in ${missingIn}: ${presentChild.tag}`);
+                    }
+                }
+            }
+        }
+
+        return results;
+    }
+
     compareLayouts(radiantData, browserData, testId = null) {
         const results = {
             totalElements: 0,
@@ -479,21 +889,30 @@ class LayoutTester {
         browserTree = this.filterBrowserTree(browserTree);
 
         if (this.verbose) {
-            console.log(`\n🌳 INTEGRATED TREE-BASED COMPARISON:`);
-            console.log(`   📊 Comparing element tree with text nodes inline, filtered out <head>, <script>, <style>, and <br>`);
+            console.log(`\n🌳 COMMON FORMAT COMPARISON:`);
+            console.log(`   📊 Converting both trees to common format: {tag: [{bounds}, ...children, {text: {bounds, string}}]}`);
         }
 
-        // Recursive tree comparison with integrated text node checking
-        const initialPath = radiantTree?.tag || browserTree?.tag || 'root';
-        const comparison = this.compareTreesRecursively(radiantTree, browserTree, initialPath, null, results.effectiveTextTolerance, 0);
+        // Convert both trees to common format
+        const radiantCommon = this.convertRadiantToCommonFormat(radiantTree);
+        const browserCommon = this.convertBrowserToCommonFormat(browserTree);
 
-        // Copy results from integrated comparison
+        if (this.verbose) {
+            console.log(`   🔄 Radiant tree converted: ${radiantCommon ? radiantCommon.tag : 'null'}`);
+            console.log(`   🔄 Browser tree converted: ${browserCommon ? browserCommon.tag : 'null'}`);
+        }
+
+        // Compare using common format
+        const initialPath = radiantCommon?.tag || browserCommon?.tag || 'root';
+        const comparison = this.compareCommonFormatNodes(radiantCommon, browserCommon, initialPath, 0);
+
+        // Copy results from common format comparison
         results.totalElements = comparison.totalElements;
         results.matchedElements = comparison.matchedElements;
         results.differences = comparison.differences;
         results.maxDifference = comparison.maxDifference;
 
-        // Copy text node results from integrated comparison
+        // Copy text node results from common format comparison
         results.totalTextNodes = comparison.totalTextNodes;
         results.matchedTextNodes = comparison.matchedTextNodes;
         results.textDifferences = comparison.textDifferences;
@@ -501,11 +920,11 @@ class LayoutTester {
 
         // Update debug info
         results.debugInfo.radiantTextNodeCount = results.totalTextNodes;
-        results.debugInfo.browserTextNodeCount = results.totalTextNodes; // Approximation since we compare pairwise
+        results.debugInfo.browserTextNodeCount = results.totalTextNodes; // Since we compare pairwise
 
         if (this.verbose) {
             const testDisplayName = testId ? ` for ${testId}` : '';
-            console.log(`\n🌳 INTEGRATED TREE COMPARISON SUMMARY${testDisplayName}:`);
+            console.log(`\n🌳 COMMON FORMAT COMPARISON SUMMARY${testDisplayName}:`);
             console.log(`   ✅ Matched Elements: ${results.matchedElements}/${results.totalElements}`);
             console.log(`   📏 Max Layout Diff: ${results.maxDifference.toFixed(2)}px`);
 
@@ -536,225 +955,55 @@ class LayoutTester {
     }
 
     /**
-     * Recursively compare two trees element by element with parent context, including text nodes
+     * Clean text for display by removing newlines and normalizing whitespace
      */
-    compareTreesRecursively(radiantNode, browserNode, path = '', parentContext = null, effectiveTextTolerance = null, depth = 0) {
-        const results = {
-            totalElements: 0,
-            matchedElements: 0,
-            differences: [],
-            maxDifference: 0,
-            // Add text node tracking directly in tree comparison
-            totalTextNodes: 0,
-            matchedTextNodes: 0,
-            textDifferences: [],
-            maxTextDifference: 0
-        };
+    cleanTextForDisplay(text, maxLength = 30) {
+        if (!text) return '';
 
-        // Helper function to create proper indentation based on tree depth
-        const getIndent = (level = depth) => {
-            const baseIndent = '   '; // Base 3-space indentation
-            const treeIndent = '  '.repeat(level); // 2 spaces per depth level
-            return baseIndent + treeIndent;
-        };
+        // Replace newlines and multiple whitespace with single spaces
+        const cleaned = text.replace(/\s+/g, ' ').trim();
 
-        if (!radiantNode && !browserNode) {
-            return results; // Both null, nothing to compare
+        // Truncate if needed
+        if (cleaned.length > maxLength) {
+            return cleaned.substring(0, maxLength) + '...';
         }
 
-        if (!radiantNode || !browserNode) {
-            // One tree has an element the other doesn't
-            results.totalElements = 1;
-            const presentNode = radiantNode || browserNode;
-            const elementPath = path || presentNode.tag || 'unknown';
-
-            results.differences.push({
-                type: radiantNode ? 'extra_in_radiant' : 'missing_in_radiant',
-                path: elementPath,
-                radiant: radiantNode ? { tag: radiantNode.tag, layout: radiantNode.layout } : null,
-                browser: browserNode ? { tag: browserNode.tag, layout: browserNode.layout } : null
-            });
-
-            if (this.verbose) {
-                const missingIn = radiantNode ? 'browser' : 'radiant';
-                console.log(`${getIndent()}❌ Missing in ${missingIn}: ${elementPath} (${presentNode.tag})`);
-            }
-
-            return results;
-        }
-
-        // Both nodes exist, compare them
-        results.totalElements = 1;
-        const currentPath = (path && path !== 'root') ? path : radiantNode.tag;
-
-        // Compare current nodes with parent context for relative positioning
-        const nodeComparison = this.compareTreeNode(radiantNode, browserNode, currentPath, parentContext, depth);
-
-        // CRITICAL CHANGE: Elements always match by name, record layout differences separately
-        if (nodeComparison.matches) {
-            results.matchedElements = 1;
-            if (this.verbose && radiantNode.layout) {
-                const layoutStatus = nodeComparison.layoutMatches ? '✅' : '⚠️';
-                console.log(`${getIndent()}  ^ ${layoutStatus} Match: ${currentPath}`);
-            }
-        } else {
-            // Only tag mismatches prevent element matching
-            if (this.verbose) {
-                console.log(`${getIndent()}❌ Tag mismatch: ${currentPath} | ${radiantNode.tag} vs. ${browserNode.tag}`);
-            }
-        }
-
-        // Record all differences (layout and tag mismatches)
-        results.differences.push(...nodeComparison.differences);
-        nodeComparison.differences.forEach(diff => {
-            if (diff.maxDifference) {
-                results.maxDifference = Math.max(results.maxDifference, diff.maxDifference);
-            }
-        });
-
-        // CRITICAL CHANGE: Create parent context for children (relative positioning)
-        const childParentContext = (radiantNode.layout && browserNode.layout) ? {
-            radiant: radiantNode.layout,
-            browser: browserNode.layout
-        } : null;
-
-        // NEW: Get all child nodes (elements + text nodes) in document order
-        const radiantChildNodes = this.getAllChildNodesInOrder(radiantNode, currentPath);
-        const browserChildNodes = this.getAllChildNodesInOrder(browserNode, currentPath);
-        const maxChildren = Math.max(radiantChildNodes.length, browserChildNodes.length);
-
-        if (this.verbose && (radiantChildNodes.length > 0 || browserChildNodes.length > 0)) {
-            // console.log(`${getIndent()}🔍 Comparing ${maxChildren} child nodes (elements + text) in document order`);
-        }
-
-        // Compare all child nodes (elements and text) in unified loop following document order
-        for (let i = 0; i < maxChildren; i++) {
-            const radiantChild = radiantChildNodes[i] || null;
-            const browserChild = browserChildNodes[i] || null;
-
-            const childResults = this.compareChildNodesInOrder(
-                radiantChild, browserChild, currentPath, childParentContext, effectiveTextTolerance, depth + 1
-            );
-
-            // Merge results including text nodes
-            results.totalElements += childResults.totalElements;
-            results.matchedElements += childResults.matchedElements;
-            results.differences.push(...childResults.differences);
-            results.maxDifference = Math.max(results.maxDifference, childResults.maxDifference);
-
-            // Merge text node results
-            results.totalTextNodes += childResults.totalTextNodes;
-            results.matchedTextNodes += childResults.matchedTextNodes;
-            results.textDifferences.push(...childResults.textDifferences);
-            results.maxTextDifference = Math.max(results.maxTextDifference, childResults.maxTextDifference);
-        }
-
-        return results;
+        return cleaned;
     }
 
     /**
-     * Get all child nodes (elements + text nodes) from a node in their natural order
+     * Clean text for display by removing newlines and normalizing whitespace
      */
-    getAllChildNodesInOrder(node, parentPath) {
-        if (!node) return [];
+    cleanTextForDisplay(text, maxLength = 30) {
+        if (!text) return '';
 
-        const childNodes = [];
+        // Replace newlines and multiple whitespace with single spaces
+        const cleaned = text.replace(/\s+/g, ' ').trim();
 
-        // For proper document order, we need to interleave text nodes and elements
-        // based on their position in the original HTML DOM structure
-
-        const elements = node.children || [];
-        const textNodes = node.textNodes || [];
-
-        // Simple approach: alternate between text and elements
-        // Text nodes typically appear between elements in HTML like:
-        // text0 <element0/> text1 <element1/> text2 <element2/> text3
-
-        for (let i = 0; i <= Math.max(elements.length, textNodes.length); i++) {
-            // Add text node if it exists at this position
-            if (i < textNodes.length && textNodes[i].rects && textNodes[i].rects.length > 0) {
-                const textNode = textNodes[i];
-                textNode.rects.forEach((rect, rectIndex) => {
-                    childNodes.push({
-                        type: 'text',
-                        node: {
-                            tag: 'text',
-                            layout: {
-                                x: rect.x,
-                                y: rect.y,
-                                width: rect.width,
-                                height: rect.height
-                            },
-                            text: textNode.text,
-                            textIndex: i,
-                            rectIndex: rectIndex
-                        },
-                        index: i,
-                        rectIndex: rectIndex,
-                        path: `${parentPath}_text_${i}_${rectIndex}`
-                    });
-                });
-            }
-
-            // Add element if it exists at this position
-            if (i < elements.length) {
-                childNodes.push({
-                    type: 'element',
-                    node: elements[i],
-                    index: i,
-                    path: `${parentPath} > ${elements[i].tag}`
-                });
-            }
+        // Truncate if needed
+        if (cleaned.length > maxLength) {
+            return cleaned.substring(0, maxLength) + '...';
         }
 
-        return childNodes;
+        return cleaned;
     }
 
     /**
-     * Compare child nodes (element or text) in document order
+     * Clean text for display by removing newlines and normalizing whitespace
      */
-    compareChildNodesInOrder(radiantChild, browserChild, parentPath, parentContext, effectiveTextTolerance, depth) {
-        const results = {
-            totalElements: 0,
-            matchedElements: 0,
-            differences: [],
-            maxDifference: 0,
-            totalTextNodes: 0,
-            matchedTextNodes: 0,
-            textDifferences: [],
-            maxTextDifference: 0
-        };
+    cleanTextForDisplay(text, maxLength = 30) {
+        if (!text) return '';
 
-        // Helper function for indentation
-        const getIndent = (level = depth) => {
-            const baseIndent = '   ';
-            const treeIndent = '  '.repeat(level);
-            return baseIndent + treeIndent;
-        };
+        // Replace newlines and multiple whitespace with single spaces
+        const cleaned = text.replace(/\s+/g, ' ').trim();
 
-        if (!radiantChild && !browserChild) {
-            return results; // Both null, nothing to compare
+        // Truncate if needed
+        if (cleaned.length > maxLength) {
+            return cleaned.substring(0, maxLength) + '...';
         }
 
-        if (!radiantChild || !browserChild) {
-            // One tree has a node the other doesn't
-            const presentChild = radiantChild || browserChild;
-            const childPath = presentChild.path;
-
-            if (presentChild.type === 'element') {
-                results.totalElements = 1;
-                results.differences.push({
-                    type: radiantChild ? 'extra_in_radiant' : 'missing_in_radiant',
-                    path: childPath,
-                    radiant: radiantChild ? { tag: radiantChild.node.tag, layout: radiantChild.node.layout } : null,
-                    browser: browserChild ? { tag: browserChild.node.tag, layout: browserChild.node.layout } : null
-                });
-
-                if (this.verbose) {
-                    const missingIn = radiantChild ? 'browser' : 'radiant';
-                    console.log(`${getIndent()}❌ Missing ${presentChild.type} in ${missingIn}: ${childPath} (${presentChild.node.tag})`);
-                }
-            } else if (presentChild.type === 'text') {
+        return cleaned;
+    }
                 results.totalTextNodes = 1;
                 results.textDifferences.push({
                     type: radiantChild ? 'extra_text_in_radiant' : 'missing_text_in_radiant',
@@ -766,7 +1015,9 @@ class LayoutTester {
 
                 if (this.verbose) {
                     const missingIn = radiantChild ? 'browser' : 'radiant';
+                    const presentBounds = `(${presentChild.node.layout.x}, ${presentChild.node.layout.y}, ${presentChild.node.layout.width}, ${presentChild.node.layout.height})`;
                     console.log(`${getIndent()}❌ Missing text in ${missingIn}: "${this.cleanTextForDisplay(presentChild.node.text)}"`);
+                    console.log(`${getIndent()}   ${radiantChild ? 'Radiant' : 'Browser'}: ${presentBounds}`);
                 }
             }
 
@@ -907,17 +1158,19 @@ class LayoutTester {
 
     /**
      * Extract text nodes from a single element (not recursive)
+     * UPDATED: Now works with new format where text nodes are in children[] array
      */
     getTextNodesFromElement(element, elementPath) {
         const textNodes = [];
 
-        if (!element || !element.textNodes) {
+        if (!element || !element.children) {
             return textNodes;
         }
 
-        element.textNodes.forEach((textNode, index) => {
-            if (textNode.rects && textNode.rects.length > 0) {
-                textNode.rects.forEach((rect, rectIndex) => {
+        // NEW FORMAT: Look for text nodes in children array
+        element.children.forEach((child, index) => {
+            if (child.nodeType === 'text' && child.layout && child.layout.hasLayout && child.layout.rects) {
+                child.layout.rects.forEach((rect, rectIndex) => {
                     textNodes.push({
                         selector: `${elementPath}_text_${index}_${rectIndex}`,
                         tag: 'text',
@@ -927,10 +1180,11 @@ class LayoutTester {
                             width: rect.width,
                             height: rect.height
                         },
-                        text: textNode.text,
-                        parentElement: textNode.parentElement,
+                        text: child.text,
+                        parentElement: element.tag,
                         isTextNode: true,
-                        treePath: elementPath
+                        treePath: elementPath,
+                        nodeType: 'text'
                     });
                 });
             }
@@ -941,42 +1195,42 @@ class LayoutTester {
 
     /**
      * Extract browser text fragments from a single element (not recursive)
+     * UPDATED: Now works with new format where text nodes are in children[] array
      */
     getBrowserTextFragmentsFromElement(element, elementPath) {
         const textFragments = [];
 
-        if (!element || !element.textNodes) {
+        if (!element || !element.children) {
             return textFragments;
         }
 
-        element.textNodes.forEach((textNode, nodeIndex) => {
-            if (textNode.rects && textNode.rects.length > 0) {
-                // Browser has multiple rects for wrapped text - create fragment for each rect
-                textNode.rects.forEach((rect, rectIndex) => {
-                    textFragments.push({
-                        text: textNode.text,
-                        layout: {
-                            x: rect.x,
-                            y: rect.y,
-                            width: rect.width,
-                            height: rect.height
-                        },
-                        rectIndex: rectIndex,
-                        totalRects: textNode.rects.length,
-                        parentText: textNode.text,
-                        nodeIndex: nodeIndex
+        // NEW FORMAT: Look for text nodes in children array
+        element.children.forEach((child, nodeIndex) => {
+            if (child.nodeType === 'text' && child.layout) {
+                if (child.layout.hasLayout && child.layout.rects && child.layout.rects.length > 0) {
+                    // Browser has multiple rects for wrapped text - create fragment for each rect
+                    child.layout.rects.forEach((rect, rectIndex) => {
+                        textFragments.push({
+                            text: child.text,
+                            layout: {
+                                x: rect.x,
+                                y: rect.y,
+                                width: rect.width,
+                                height: rect.height
+                            },
+                            rectIndex: rectIndex,
+                            totalRects: child.layout.rects.length,
+                            parentText: child.text,
+                            nodeIndex: nodeIndex,
+                            nodeType: 'text'
+                        });
                     });
-                });
-            } else if (textNode.layout) {
-                // Browser has single rect - treat as single fragment
-                textFragments.push({
-                    text: textNode.text,
-                    layout: textNode.layout,
-                    rectIndex: 0,
-                    totalRects: 1,
-                    parentText: textNode.text,
-                    nodeIndex: nodeIndex
-                });
+                } else {
+                    // Text node without layout rects (probably hidden)
+                    if (this.verbose) {
+                        console.log(`      [DEBUG] Text node without layout: "${this.cleanTextForDisplay(child.text)}"`);
+                    }
+                }
             }
         });
 
@@ -1013,66 +1267,35 @@ class LayoutTester {
     }
 
     /**
-     * Display compact JSON data for debugging in verbose mode
+     * Print detailed text differences for debugging
+     * @deprecated This method is obsolete - text differences are now shown inline during tree comparison
      */
-    displayCompactJSON(data, label, maxDepth = 7) {
-        if (!this.verbose) return;
-
-        console.log(`\n📄 ${label} JSON Data:`);
-        console.log('=' .repeat(50));
-
-        // Create a compact version by limiting depth and removing verbose details
-        const compactData = this.createCompactView(data, 0, maxDepth);
-        console.log(JSON.stringify(compactData, null, 2));
-        console.log('=' .repeat(50));
-    }
-
-    /**
-     * Create a compact view of data by limiting depth and focusing on key structure
-     */
-    createCompactView(obj, currentDepth, maxDepth) {
-        if (currentDepth >= maxDepth || obj === null || obj === undefined) {
-            return typeof obj === 'object' ? '[Object]' : obj;
+    printTextDifferences(textDifferences, testName = '') {
+        if (textDifferences.length === 0) {
+            console.log(`   ✅ No text differences found for ${testName}`);
+            return;
         }
 
-        if (Array.isArray(obj)) {
-            if (obj.length === 0) return [];
-            // Show first few items and indicate if there are more
-            const preview = obj.slice(0, 7).map(item =>
-                this.createCompactView(item, currentDepth + 1, maxDepth)
-            );
-            if (obj.length > 7) {
-                preview.push(`... ${obj.length - 7} more items`);
-            }
-            return preview;
-        }
+        console.log(`\n📝 DETAILED TEXT DIFFERENCES for ${testName}:`);
+        console.log(`   Found ${textDifferences.length} text positioning issues:`);
 
-        if (typeof obj === 'object') {
-            const compact = {};
-            const keys = Object.keys(obj);
+        textDifferences.forEach((diff, index) => {
+            console.log(`   ${index + 1}. Text: \"${diff.text}\"`);
+            console.log(`      Max Difference: ${diff.maxDifference.toFixed(2)}px vs ${diff.effectiveTextTolerance}px tolerance`);
 
-            // Always include key structural fields
-            const priorityKeys = ['tag', 'layout', 'children', 'textNodes', 'layout_tree'];
-            const otherKeys = keys.filter(k => !priorityKeys.includes(k));
-
-            priorityKeys.forEach(key => {
-                if (obj.hasOwnProperty(key)) {
-                    compact[key] = this.createCompactView(obj[key], currentDepth + 1, maxDepth);
-                }
-            });
-
-            // Add a few other keys but limit verbosity
-            otherKeys.slice(0, 7).forEach(key => {
-                compact[key] = this.createCompactView(obj[key], currentDepth + 1, maxDepth);
-            });
-            if (otherKeys.length > 7) {
-                compact['...'] = `${otherKeys.length - 7} more properties`;
+            if (diff.detailedDifferences) {
+                diff.detailedDifferences.forEach(propDiff => {
+                    const status = propDiff.withinTolerance ? '✅' : '❌';
+                    const pct = propDiff.difference > 0 ? `(${((propDiff.difference / diff.effectiveTextTolerance) * 100).toFixed(1)}% of tolerance)` : '';
+                    console.log(`      ${status} ${propDiff.property}: ${propDiff.difference.toFixed(2)}px ${pct}`);
+                    console.log(`          Radiant: ${propDiff.radiant}, Browser: ${propDiff.browser}`);
+                });
             }
 
-            return compact;
-        }
-
-        return obj;
+            if (diff.browserFragment) {
+                console.log(`      Browser Fragment: ${diff.browserFragment.rectIndex + 1}/${diff.browserFragment.totalRects}`);
+            }
+        });
     }
 
     async testSingleFile(htmlFile, category) {
@@ -1099,6 +1322,7 @@ class LayoutTester {
                 const elementCount = this.countTreeElements(radiantData.layout_tree);
 
                 console.log(`    ✅ PASS (${elementCount}/${elementCount} elements)`);
+
                 return {
                     testName,
                     passed: true,
@@ -1112,16 +1336,6 @@ class LayoutTester {
             // Run Radiant layout
             await this.runRadiantLayout(htmlFile);
             const radiantData = await this.loadRadiantOutput();
-
-            // Display compact JSON data in verbose mode - show filtered trees used for comparison
-            if (this.verbose) {
-                // Filter trees to show what's actually being compared
-                const filteredRadiantTree = this.filterRadiantTree(radiantData.layout_tree);
-                const filteredBrowserTree = this.filterBrowserTree(browserData.layout_tree);
-
-                this.displayCompactJSON(filteredRadiantTree, 'Radiant Output (Filtered for Comparison)');
-                this.displayCompactJSON(filteredBrowserTree, 'Browser Reference (Filtered for Comparison)');
-            }
 
             // Compare layouts
             const comparison = this.compareLayouts(radiantData, browserData, testName);

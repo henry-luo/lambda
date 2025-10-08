@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Background Color\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .box {\n            width: 150px;\n            height: 100px;\n            margin: 10px;\n            padding: 15px;\n            border: 1px solid black;\n        }\n        .red { background-color: red; }\n        .green { background-color: #00ff00; }\n        .blue { background-color: rgb(0, 0, 255); }\n        .transparent { background-color: transparent; }\n    \n\n\n    Red background\n    Green background\n    Blue background\n    Transparent background\n\n    \n    {\n        \"test_id\": \"baseline_812_background_color\",\n        \"category\": \"baseline\",\n        \"features\": [\"background-color\", \"color-values\"],\n        \"description\": \"Background color using different color value formats\",\n        \"original_css_test\": \"background-color-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/colors.html#background-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four boxes with red, green, blue, and transparent backgrounds\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Background Color\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .box {\n            width: 150px;\n            height: 100px;\n            margin: 10px;\n            padding: 15px;\n            border: 1px solid black;\n        }\n        .red { background-color: red; }\n        .green { background-color: #00ff00; }\n        .blue { background-color: rgb(0, 0, 255); }\n        .transparent { background-color: transparent; }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Background Color",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Background Color",
+                "length": 31,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .box {\n            width: 150px;\n            height: 100px;\n            margin: 10px;\n            padding: 15px;\n            border: 1px solid black;\n        }\n        .red { background-color: red; }\n        .green { background-color: #00ff00; }\n        .blue { background-color: rgb(0, 0, 255); }\n        .transparent { background-color: transparent; }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .box {\n            width: 150px;\n            height: 100px;\n            margin: 10px;\n            padding: 15px;\n            border: 1px solid black;\n        }\n        .red { background-color: red; }\n        .green { background-color: #00ff00; }\n        .blue { background-color: rgb(0, 0, 255); }\n        .transparent { background-color: transparent; }\n    ",
+                "length": 468,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Red background\n    Green background\n    Blue background\n    Transparent background\n\n    \n    {\n        \"test_id\": \"baseline_812_background_color\",\n        \"category\": \"baseline\",\n        \"features\": [\"background-color\", \"color-values\"],\n        \"description\": \"Background color using different color value formats\",\n        \"original_css_test\": \"background-color-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/colors.html#background-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four boxes with red, green, blue, and transparent backgrounds\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 5,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.box.red:nth-of-type(1)",
             "tag": "div",
             "id": null,
@@ -505,33 +526,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Red background",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Red background",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 46,
-                    "y": 46,
-                    "width": 117.42,
-                    "height": 17,
-                    "right": 163.42,
-                    "bottom": 63
-                  }
-                ],
                 "length": 14,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 14
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 46,
+                      "y": 46,
+                      "width": 117.42,
+                      "height": 17,
+                      "right": 163.42,
+                      "bottom": 63
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "div.box.green:nth-of-type(2)",
             "tag": "div",
             "id": null,
@@ -590,33 +616,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Green background",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 3,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Green background",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 46,
-                    "y": 188,
-                    "width": 132.53,
-                    "height": 17,
-                    "right": 178.53,
-                    "bottom": 205
-                  }
-                ],
                 "length": 16,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 16
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 46,
+                      "y": 188,
+                      "width": 132.53,
+                      "height": 17,
+                      "right": 178.53,
+                      "bottom": 205
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "div.box.blue:nth-of-type(3)",
             "tag": "div",
             "id": null,
@@ -675,33 +706,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Blue background",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 5,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Blue background",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 46,
-                    "y": 330,
-                    "width": 120.09,
-                    "height": 17,
-                    "right": 166.09,
-                    "bottom": 347
-                  }
-                ],
                 "length": 15,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 15
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 46,
+                      "y": 330,
+                      "width": 120.09,
+                      "height": 17,
+                      "right": 166.09,
+                      "bottom": 347
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "div.box.transparent:nth-of-type(4)",
             "tag": "div",
             "id": null,
@@ -760,41 +796,46 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Transparent background",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 7,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Transparent background",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 46,
-                    "y": 472,
-                    "width": 85.67,
-                    "height": 17,
-                    "right": 131.67,
-                    "bottom": 489
-                  },
-                  {
-                    "x": 46,
-                    "y": 490,
-                    "width": 83.63,
-                    "height": 17,
-                    "right": 129.63,
-                    "bottom": 507
-                  }
-                ],
                 "length": 22,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 22
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 46,
+                      "y": 472,
+                      "width": 85.67,
+                      "height": 17,
+                      "right": 131.67,
+                      "bottom": 489
+                    },
+                    {
+                      "x": 46,
+                      "y": 490,
+                      "width": 83.63,
+                      "height": 17,
+                      "right": 129.63,
+                      "bottom": 507
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -850,12 +891,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_812_background_color\",\n        \"category\": \"baseline\",\n        \"features\": [\"background-color\", \"color-values\"],\n        \"description\": \"Background color using different color value formats\",\n        \"original_css_test\": \"background-color-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/colors.html#background-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four boxes with red, green, blue, and transparent backgrounds\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 9,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_812_background_color\",\n        \"category\": \"baseline\",\n        \"features\": [\"background-color\", \"color-values\"],\n        \"description\": \"Background color using different color value formats\",\n        \"original_css_test\": \"background-color-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/colors.html#background-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four boxes with red, green, blue, and transparent backgrounds\"\n    }\n    ",
+                "length": 519,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

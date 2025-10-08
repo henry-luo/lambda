@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Display Block\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        span {\n            display: block;\n        }\n    \n\n\n    Test passes if there are two lines of \"Filler Text\" below.\n    \n        Filler Text\n        Filler Text\n    \n\n    \n    {\n        \"test_id\": \"baseline_801_display_block\",\n        \"category\": \"baseline\",\n        \"features\": [\"display\", \"block\"],\n        \"description\": \"Display property set to block on inline elements\",\n        \"original_css_test\": \"display-002.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#display-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Span elements should display as block elements on separate lines\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Display Block\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        span {\n            display: block;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Display Block",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Display Block",
+                "length": 28,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        span {\n            display: block;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        span {\n            display: block;\n        }\n    ",
+                "length": 144,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test passes if there are two lines of \"Filler Text\" below.\n    \n        Filler Text\n        Filler Text\n    \n\n    \n    {\n        \"test_id\": \"baseline_801_display_block\",\n        \"category\": \"baseline\",\n        \"features\": [\"display\", \"block\"],\n        \"description\": \"Display property set to block on inline elements\",\n        \"original_css_test\": \"display-002.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#display-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Span elements should display as block elements on separate lines\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 3,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "p",
             "tag": "p",
             "id": null,
@@ -502,33 +523,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test passes if there are two lines of \"Filler Text\" below.",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Test passes if there are two lines of \"Filler Text\" below.",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 0,
-                    "y": 0,
-                    "width": 383.69,
-                    "height": 17,
-                    "right": 383.69,
-                    "bottom": 17
-                  }
-                ],
                 "length": 58,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 58
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "width": 383.69,
+                      "height": 17,
+                      "right": 383.69,
+                      "bottom": 17
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "div",
             "tag": "div",
             "id": null,
@@ -584,13 +610,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Filler Text\n        Filler Text",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 2,
             "depth": 2,
+            "elementIndex": 3,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "span:nth-of-type(1)",
                 "tag": "span",
                 "id": null,
@@ -646,33 +670,38 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Filler Text",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Filler Text",
-                    "parentElement": "span",
-                    "rects": [
-                      {
-                        "x": 0,
-                        "y": 18,
-                        "width": 68.17,
-                        "height": 17,
-                        "right": 68.17,
-                        "bottom": 35
-                      }
-                    ],
                     "length": 11,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 11
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 0,
+                          "y": 18,
+                          "width": 68.17,
+                          "height": 17,
+                          "right": 68.17,
+                          "bottom": 35
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "span:nth-of-type(2)",
                 "tag": "span",
                 "id": null,
@@ -728,35 +757,40 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Filler Text",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Filler Text",
-                    "parentElement": "span",
-                    "rects": [
-                      {
-                        "x": 0,
-                        "y": 36,
-                        "width": 68.17,
-                        "height": 17,
-                        "right": 68.17,
-                        "bottom": 53
-                      }
-                    ],
                     "length": 11,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 11
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 0,
+                          "y": 36,
+                          "width": 68.17,
+                          "height": 17,
+                          "right": 68.17,
+                          "bottom": 53
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -812,12 +846,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_801_display_block\",\n        \"category\": \"baseline\",\n        \"features\": [\"display\", \"block\"],\n        \"description\": \"Display property set to block on inline elements\",\n        \"original_css_test\": \"display-002.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#display-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Span elements should display as block elements on separate lines\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_801_display_block\",\n        \"category\": \"baseline\",\n        \"features\": [\"display\", \"block\"],\n        \"description\": \"Display property set to block on inline elements\",\n        \"original_css_test\": \"display-002.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#display-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Span elements should display as block elements on separate lines\"\n    }\n    ",
+                "length": 482,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

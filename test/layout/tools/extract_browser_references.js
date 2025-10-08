@@ -92,59 +92,7 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
         // Extract layout data
         console.log('📊 Extracting layout data...');
         const layoutData = await page.evaluate(() => {
-            // Helper to extract text node positions
-            const extractTextNodePositions = (element) => {
-                const textNodes = [];
-
-                // FIXED: Only walk through DIRECT child nodes to avoid duplication
-                // Previously used TreeWalker which traversed ALL descendants, causing duplication
-                for (let i = 0; i < element.childNodes.length; i++) {
-                    const node = element.childNodes[i];
-
-                    // Only process direct text node children
-                    if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
-                        try {
-                            // Create range for this text node
-                            const range = document.createRange();
-                            range.selectNodeContents(node);
-                            const rects = range.getClientRects(); // one per line fragment
-
-                            // Convert ClientRects to plain objects and round coordinates
-                            const rectArray = Array.from(rects).map(rect => ({
-                                x: Math.round(rect.left * 100) / 100,
-                                y: Math.round(rect.top * 100) / 100,
-                                width: Math.round(rect.width * 100) / 100,
-                                height: Math.round(rect.height * 100) / 100,
-                                right: Math.round(rect.right * 100) / 100,
-                                bottom: Math.round(rect.bottom * 100) / 100
-                            }));
-
-                            // Only add if we have valid rects
-                            if (rectArray.length > 0) {
-                                textNodes.push({
-                                    text: node.textContent,
-                                    parentElement: node.parentElement?.tagName.toLowerCase() || null,
-                                    rects: rectArray,
-                                    length: node.textContent.length,
-                                    // Additional metadata
-                                    isWhitespaceOnly: !node.textContent.trim(),
-                                    startOffset: 0, // Could be enhanced to track actual offset in parent
-                                    endOffset: node.textContent.length
-                                });
-                            }
-
-                            range.detach(); // Clean up range
-                        } catch (error) {
-                            // Skip text nodes that can't be measured (e.g., in hidden elements)
-                            console.warn('Could not extract position for text node:', node.textContent, error);
-                        }
-                    }
-                }
-
-                return textNodes;
-            };
-
-            // Helper to generate enhanced CSS selector (from extract_layout.js)
+            // Helper to generate enhanced CSS selector
             const generateSelector = (element) => {
                 if (element.id) return `#${element.id}`;
 
@@ -166,20 +114,85 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
                 return selector;
             };
 
-            // Helper function to extract element data (same as before but reusable)
-            const extractElementData = (element, index) => {
+            // Helper function to extract text node data
+            const extractTextNodeData = (textNode, nodeIndex) => {
+                try {
+                    // Create range for this text node to get layout information
+                    const range = document.createRange();
+                    range.selectNodeContents(textNode);
+                    const rects = range.getClientRects();
+
+                    // Convert ClientRects to plain objects and round coordinates
+                    const rectArray = Array.from(rects).map(rect => ({
+                        x: Math.round(rect.left * 100) / 100,
+                        y: Math.round(rect.top * 100) / 100,
+                        width: Math.round(rect.width * 100) / 100,
+                        height: Math.round(rect.height * 100) / 100,
+                        right: Math.round(rect.right * 100) / 100,
+                        bottom: Math.round(rect.bottom * 100) / 100
+                    }));
+
+                    range.detach(); // Clean up range
+
+                    // Additional debugging: check parent element visibility
+                    const parentElement = textNode.parentElement;
+                    const parentComputed = parentElement ? window.getComputedStyle(parentElement) : null;
+                    const isParentVisible = parentComputed ?
+                        (parentComputed.display !== 'none' && parentComputed.visibility !== 'hidden') :
+                        false;
+
+                    return {
+                        nodeType: 'text',
+                        text: textNode.textContent,
+                        length: textNode.textContent.length,
+                        isWhitespaceOnly: !textNode.textContent.trim(),
+                        layout: {
+                            rects: rectArray,
+                            hasLayout: rectArray.length > 0,
+                            parentVisible: isParentVisible,
+                            parentDisplay: parentComputed?.display || 'unknown',
+                            parentVisibility: parentComputed?.visibility || 'unknown'
+                        },
+                        depth: 0, // Will be set by parent
+                        nodeIndex: nodeIndex
+                    };
+                } catch (error) {
+                    // Return basic text node data if layout extraction fails
+                    return {
+                        nodeType: 'text',
+                        text: textNode.textContent,
+                        length: textNode.textContent.length,
+                        isWhitespaceOnly: !textNode.textContent.trim(),
+                        layout: {
+                            rects: [],
+                            hasLayout: false,
+                            error: error.message,
+                            parentVisible: false,
+                            parentDisplay: 'unknown',
+                            parentVisibility: 'unknown'
+                        },
+                        depth: 0,
+                        nodeIndex: nodeIndex
+                    };
+                }
+            };
+
+            // Helper function to extract element data
+            const extractElementData = (element, elementIndex) => {
                 const rect = element.getBoundingClientRect();
                 const computed = window.getComputedStyle(element);
 
                 // Generate enhanced selector
                 const selector = generateSelector(element);
-                const key = selector || `${element.tagName.toLowerCase()}_${index}`;
+                const key = selector || `${element.tagName.toLowerCase()}_${elementIndex}`;
 
                 return {
+                    nodeType: 'element',
                     selector: key,
                     tag: element.tagName.toLowerCase(),
                     id: element.id || null,
                     classes: element.className ? element.className.split(' ').filter(c => c.trim()) : [],
+
                     // Layout properties
                     layout: {
                         x: Math.round(rect.left * 100) / 100,
@@ -250,40 +263,51 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
                         overflowX: computed.overflowX,
                         overflowY: computed.overflowY
                     },
-                    // Text content information
-                    textContent: element.textContent?.trim() || null,
-                    hasTextNodes: Array.from(element.childNodes).some(n => n.nodeType === 3 && n.textContent.trim()),
-
-                    // Text node positions using Range.getClientRects()
-                    textNodes: extractTextNodePositions(element),
 
                     // Hierarchy information
-                    childCount: element.children.length,
-                    depth: 0  // Will be calculated during tree building
+                    depth: 0,  // Will be calculated during tree building
+                    elementIndex: elementIndex
                 };
             };
 
-            // Recursive function to build element tree
-            const buildElementTree = (element, depth = 0, index = 0) => {
-                const elementData = extractElementData(element, index);
-                elementData.depth = depth;
+            // Recursive function to build DOM tree in document order
+            const buildDOMTree = (node, depth = 0, nodeIndex = 0) => {
+                let nodeData;
 
-                // Add children recursively
-                elementData.children = [];
-                if (element.children && element.children.length > 0) {
-                    for (let i = 0; i < element.children.length; i++) {
-                        const childElement = element.children[i];
-                        const childTree = buildElementTree(childElement, depth + 1, i);
-                        elementData.children.push(childTree);
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    // Element node
+                    nodeData = extractElementData(node, nodeIndex);
+                    nodeData.depth = depth;
+
+                    // Process all child nodes in document order (both elements and text nodes)
+                    nodeData.children = [];
+                    if (node.childNodes && node.childNodes.length > 0) {
+                        for (let i = 0; i < node.childNodes.length; i++) {
+                            const childNode = node.childNodes[i];
+
+                            // Process both element and text nodes (including whitespace-only text nodes)
+                            if (childNode.nodeType === Node.ELEMENT_NODE ||
+                                childNode.nodeType === Node.TEXT_NODE) {
+
+                                const childTree = buildDOMTree(childNode, depth + 1, i);
+                                nodeData.children.push(childTree);
+                            }
+                        }
                     }
+
+                } else if (node.nodeType === Node.TEXT_NODE) {
+                    // Text node
+                    nodeData = extractTextNodeData(node, nodeIndex);
+                    nodeData.depth = depth;
+                    nodeData.children = []; // Text nodes have no children
                 }
 
-                return elementData;
+                return nodeData;
             };
 
             // Start with the root HTML element to build the tree
             const htmlElement = document.documentElement;
-            const elementTree = buildElementTree(htmlElement, 0, 0);
+            const elementTree = buildDOMTree(htmlElement, 0, 0);
 
             // Add viewport information to the tree structure
             elementTree.viewport = {
@@ -304,9 +328,20 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
             return elementTree;
         });
 
-        // Helper function to count elements in tree
+        // Helper function to count nodes in tree (elements and text nodes)
+        const countNodes = (node) => {
+            let count = 1; // Count the current node
+            if (node.children && node.children.length > 0) {
+                node.children.forEach(child => {
+                    count += countNodes(child);
+                });
+            }
+            return count;
+        };
+
+        // Helper function to count elements only in tree
         const countElements = (node) => {
-            let count = 1;
+            let count = node.nodeType === 'element' ? 1 : 0;
             if (node.children && node.children.length > 0) {
                 node.children.forEach(child => {
                     count += countElements(child);
@@ -315,9 +350,9 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
             return count;
         };
 
-        // Helper function to count text nodes in tree
+        // Helper function to count text nodes only in tree
         const countTextNodes = (node) => {
-            let count = node.textNodes ? node.textNodes.length : 0;
+            let count = node.nodeType === 'text' ? 1 : 0;
             if (node.children && node.children.length > 0) {
                 node.children.forEach(child => {
                     count += countTextNodes(child);
@@ -332,8 +367,7 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
         const viewport = await page.viewport();
 
         console.log('✅ Layout data extracted');
-        console.log(`📈 Found ${countElements(layoutData)} elements in tree structure`);
-        console.log(`📝 Extracted ${countTextNodes(layoutData)} text nodes with position data`);
+        console.log(`📈 Found ${countNodes(layoutData)} total nodes (${countElements(layoutData)} elements + ${countTextNodes(layoutData)} text nodes)`);
 
         // Create enhanced reference JSON with tree structure (minimal browser info)
         const reference = {
@@ -371,7 +405,17 @@ async function extractLayoutFromFile(htmlFilePath, forceRegenerate = false) {
             if (currentCount >= maxSamples) return currentCount;
 
             const indent = '  '.repeat(depth);
-            console.log(`  ${indent}${node.selector}: ${node.layout.width}x${node.layout.height} at (${node.layout.x}, ${node.layout.y})`);
+
+            if (node.nodeType === 'element') {
+                console.log(`  ${indent}${node.selector}: ${node.layout.width}x${node.layout.height} at (${node.layout.x}, ${node.layout.y})`);
+            } else if (node.nodeType === 'text') {
+                const textPreview = node.text.length > 20 ? node.text.substring(0, 20) + '...' : node.text;
+                const layoutInfo = node.layout.hasLayout ?
+                    `${node.layout.rects.length} rect(s)` :
+                    'no layout';
+                console.log(`  ${indent}TEXT: "${textPreview}" (${layoutInfo})`);
+            }
+
             currentCount++;
 
             if (node.children && node.children.length > 0 && currentCount < maxSamples) {
@@ -477,20 +521,20 @@ async function extractAllTestFiles(category = null, forceRegenerate = false, inc
             const wasSkipped = result._wasSkipped || false;
             delete result._wasSkipped; // Clean up the flag
 
-            // Helper to count elements in tree (for compatibility)
-            const countElementsInResult = (result) => {
+            // Helper to count nodes in tree (for compatibility with new format)
+            const countNodesInResult = (result) => {
                 if (result.layout_tree) {
-                    // New tree format
-                    const countNodes = (node) => {
-                        let count = 1;
+                    // New tree format - count all nodes (elements and text)
+                    const countAllNodes = (node) => {
+                        let count = 1; // Current node
                         if (node.children && node.children.length > 0) {
                             node.children.forEach(child => {
-                                count += countNodes(child);
+                                count += countAllNodes(child);
                             });
                         }
                         return count;
                     };
-                    return countNodes(result.layout_tree);
+                    return countAllNodes(result.layout_tree);
                 } else if (result.layout_data) {
                     // Legacy flat format
                     return Object.keys(result.layout_data).length;
@@ -499,22 +543,22 @@ async function extractAllTestFiles(category = null, forceRegenerate = false, inc
                 }
             };
 
-            const elementCount = countElementsInResult(result);
+            const nodeCount = countNodesInResult(result);
 
             results.push({
                 ...fileInfo,
                 success: true,
                 wasSkipped: wasSkipped,
-                elementCount: elementCount,
+                nodeCount: nodeCount,
                 result: result
             });
 
             if (wasSkipped) {
                 skippedCount++;
-                console.log(`⏭️  Skipped: ${elementCount} elements (file already exists)`);
+                console.log(`⏭️  Skipped: ${nodeCount} nodes (file already exists)`);
             } else {
                 successCount++;
-                console.log(`✅ Success: ${elementCount} elements extracted`);
+                console.log(`✅ Success: ${nodeCount} nodes extracted`);
             }
         } catch (error) {
             results.push({
@@ -543,7 +587,7 @@ async function extractAllTestFiles(category = null, forceRegenerate = false, inc
         if (result.success) {
             status = result.wasSkipped ? '⏭️ ' : '✅';
             const action = result.wasSkipped ? 'skipped' : 'generated';
-            details = `${result.elementCount} elements (${action})`;
+            details = `${result.nodeCount} nodes (${action})`;
         } else {
             status = '❌';
             details = `Error: ${result.error}`;
@@ -576,7 +620,7 @@ async function extractAllTestFiles(category = null, forceRegenerate = false, inc
             file: r.file,
             success: r.success,
             was_skipped: r.wasSkipped || false,
-            element_count: r.elementCount || 0,
+            node_count: r.nodeCount || 0,
             error: r.error || null
         }))
     };
@@ -665,21 +709,21 @@ Note: By default, existing reference files are skipped. Use --force to regenerat
             await fs.access(resolvedPath);
             const result = await extractLayoutFromFile(resolvedPath, forceRegenerate);
 
-            // Count elements in tree structure
-            const countTreeElements = (node) => {
-                let count = 1;
+            // Count all nodes in tree structure (elements and text nodes)
+            const countTreeNodes = (node) => {
+                let count = 1; // Current node
                 if (node.children && node.children.length > 0) {
                     node.children.forEach(child => {
-                        count += countTreeElements(child);
+                        count += countTreeNodes(child);
                     });
                 }
                 return count;
             };
 
-            const elementCount = result.layout_tree ? countTreeElements(result.layout_tree) : 0;
+            const nodeCount = result.layout_tree ? countTreeNodes(result.layout_tree) : 0;
 
             console.log(`\n🎉 Extraction completed successfully!`);
-            console.log(`✅ Reference JSON created with ${elementCount} elements in tree structure`);
+            console.log(`✅ Reference JSON created with ${nodeCount} nodes in tree structure`);
         } else {
             // Batch mode
             await extractAllTestFiles(category, forceRegenerate, includeCss21);

@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Basic Border\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .box1 {\n            width: 100px;\n            height: 100px;\n            background-color: lightblue;\n            border: 3px solid red;\n            margin: 10px;\n        }\n        .box2 {\n            width: 100px;\n            height: 100px;\n            background-color: lightgreen;\n            border: 5px dotted blue;\n            margin: 10px;\n        }\n        .box3 {\n            width: 100px;\n            height: 100px;\n            background-color: lightyellow;\n            border: 2px dashed purple;\n            margin: 10px;\n        }\n    \n\n\n    \n    \n    \n\n    \n    {\n        \"test_id\": \"baseline_811_basic_border\",\n        \"category\": \"baseline\",\n        \"features\": [\"border\", \"border-style\", \"border-width\", \"border-color\"],\n        \"description\": \"Basic border properties - solid, dotted, and dashed styles\",\n        \"original_css_test\": \"border-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/box.html#border-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Three boxes with different border styles: solid red, dotted blue, dashed purple\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Basic Border\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .box1 {\n            width: 100px;\n            height: 100px;\n            background-color: lightblue;\n            border: 3px solid red;\n            margin: 10px;\n        }\n        .box2 {\n            width: 100px;\n            height: 100px;\n            background-color: lightgreen;\n            border: 5px dotted blue;\n            margin: 10px;\n        }\n        .box3 {\n            width: 100px;\n            height: 100px;\n            background-color: lightyellow;\n            border: 2px dashed purple;\n            margin: 10px;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Basic Border",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Basic Border",
+                "length": 27,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .box1 {\n            width: 100px;\n            height: 100px;\n            background-color: lightblue;\n            border: 3px solid red;\n            margin: 10px;\n        }\n        .box2 {\n            width: 100px;\n            height: 100px;\n            background-color: lightgreen;\n            border: 5px dotted blue;\n            margin: 10px;\n        }\n        .box3 {\n            width: 100px;\n            height: 100px;\n            background-color: lightyellow;\n            border: 2px dashed purple;\n            margin: 10px;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .box1 {\n            width: 100px;\n            height: 100px;\n            background-color: lightblue;\n            border: 3px solid red;\n            margin: 10px;\n        }\n        .box2 {\n            width: 100px;\n            height: 100px;\n            background-color: lightgreen;\n            border: 5px dotted blue;\n            margin: 10px;\n        }\n        .box3 {\n            width: 100px;\n            height: 100px;\n            background-color: lightyellow;\n            border: 2px dashed purple;\n            margin: 10px;\n        }\n    ",
+                "length": 658,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "{\n        \"test_id\": \"baseline_811_basic_border\",\n        \"category\": \"baseline\",\n        \"features\": [\"border\", \"border-style\", \"border-width\", \"border-color\"],\n        \"description\": \"Basic border properties - solid, dotted, and dashed styles\",\n        \"original_css_test\": \"border-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/box.html#border-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Three boxes with different border styles: solid red, dotted blue, dashed purple\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.box1:nth-of-type(1)",
             "tag": "div",
             "id": null,
@@ -504,14 +525,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "div.box2:nth-of-type(2)",
             "tag": "div",
             "id": null,
@@ -569,14 +588,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "div.box3:nth-of-type(3)",
             "tag": "div",
             "id": null,
@@ -634,14 +651,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -697,12 +712,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_811_basic_border\",\n        \"category\": \"baseline\",\n        \"features\": [\"border\", \"border-style\", \"border-width\", \"border-color\"],\n        \"description\": \"Basic border properties - solid, dotted, and dashed styles\",\n        \"original_css_test\": \"border-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/box.html#border-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Three boxes with different border styles: solid red, dotted blue, dashed purple\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_811_basic_border\",\n        \"category\": \"baseline\",\n        \"features\": [\"border\", \"border-style\", \"border-width\", \"border-color\"],\n        \"description\": \"Basic border properties - solid, dotted, and dashed styles\",\n        \"original_css_test\": \"border-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/box.html#border-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Three boxes with different border styles: solid red, dotted blue, dashed purple\"\n    }\n    ",
+                "length": 544,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

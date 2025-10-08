@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Fixed Size Block\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .fixed-container {\n            width: 200px;\n            height: 120px;\n            background-color: #ffeecc;\n            overflow: hidden;\n        }\n        .oversized-content {\n            width: 300px;\n            height: 180px;\n            background-color: #ff6600;\n        }\n    \n\n\n    \n        \n    \n    \n    \n    {\n        \"test_id\": \"baseline_401_fixed_size_overflow\",\n        \"category\": \"baseline\",\n        \"features\": [\"overflow-hidden\", \"fixed-dimensions\", \"clipping\"],\n        \"description\": \"Fixed size container with oversized content and overflow hidden\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visufx.html#overflow\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Orange content clipped by beige 200x120px container with overflow hidden\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Fixed Size Block\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .fixed-container {\n            width: 200px;\n            height: 120px;\n            background-color: #ffeecc;\n            overflow: hidden;\n        }\n        .oversized-content {\n            width: 300px;\n            height: 180px;\n            background-color: #ff6600;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Fixed Size Block",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Fixed Size Block",
+                "length": 31,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .fixed-container {\n            width: 200px;\n            height: 120px;\n            background-color: #ffeecc;\n            overflow: hidden;\n        }\n        .oversized-content {\n            width: 300px;\n            height: 180px;\n            background-color: #ff6600;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .fixed-container {\n            width: 200px;\n            height: 120px;\n            background-color: #ffeecc;\n            overflow: hidden;\n        }\n        .oversized-content {\n            width: 300px;\n            height: 180px;\n            background-color: #ff6600;\n        }\n    ",
+                "length": 381,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "{\n        \"test_id\": \"baseline_401_fixed_size_overflow\",\n        \"category\": \"baseline\",\n        \"features\": [\"overflow-hidden\", \"fixed-dimensions\", \"clipping\"],\n        \"description\": \"Fixed size container with oversized content and overflow hidden\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visufx.html#overflow\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Orange content clipped by beige 200x120px container with overflow hidden\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.fixed-container",
             "tag": "div",
             "id": null,
@@ -504,13 +525,11 @@
               "overflowX": "hidden",
               "overflowY": "hidden"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.oversized-content",
                 "tag": "div",
                 "id": null,
@@ -568,16 +587,14 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": []
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -633,12 +650,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_401_fixed_size_overflow\",\n        \"category\": \"baseline\",\n        \"features\": [\"overflow-hidden\", \"fixed-dimensions\", \"clipping\"],\n        \"description\": \"Fixed size container with oversized content and overflow hidden\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visufx.html#overflow\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Orange content clipped by beige 200x120px container with overflow hidden\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_401_fixed_size_overflow\",\n        \"category\": \"baseline\",\n        \"features\": [\"overflow-hidden\", \"fixed-dimensions\", \"clipping\"],\n        \"description\": \"Fixed size container with oversized content and overflow hidden\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visufx.html#overflow\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Orange content clipped by beige 200x120px container with overflow hidden\"\n    }\n    ",
+                "length": 483,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

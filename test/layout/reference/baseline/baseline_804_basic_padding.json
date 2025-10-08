@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Basic Padding\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .box {\n            width: 100px;\n            height: 100px;\n            background-color: green;\n            padding: 15px;\n            border: 2px solid black;\n        }\n    \n\n\n    Content\n\n    \n    {\n        \"test_id\": \"baseline_804_basic_padding\",\n        \"category\": \"baseline\",\n        \"features\": [\"padding\", \"box-model\"],\n        \"description\": \"Basic padding property application\",\n        \"original_css_test\": \"padding-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/box.html#padding-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Green box with 15px padding around content\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Basic Padding\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .box {\n            width: 100px;\n            height: 100px;\n            background-color: green;\n            padding: 15px;\n            border: 2px solid black;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Basic Padding",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Basic Padding",
+                "length": 28,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .box {\n            width: 100px;\n            height: 100px;\n            background-color: green;\n            padding: 15px;\n            border: 2px solid black;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .box {\n            width: 100px;\n            height: 100px;\n            background-color: green;\n            padding: 15px;\n            border: 2px solid black;\n        }\n    ",
+                "length": 270,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Content\n\n    \n    {\n        \"test_id\": \"baseline_804_basic_padding\",\n        \"category\": \"baseline\",\n        \"features\": [\"padding\", \"box-model\"],\n        \"description\": \"Basic padding property application\",\n        \"original_css_test\": \"padding-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/box.html#padding-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Green box with 15px padding around content\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.box",
             "tag": "div",
             "id": null,
@@ -504,33 +525,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Content",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Content",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 17,
-                    "y": 17,
-                    "width": 56.05,
-                    "height": 17,
-                    "right": 73.05,
-                    "bottom": 34
-                  }
-                ],
                 "length": 7,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 7
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 17,
+                      "y": 17,
+                      "width": 56.05,
+                      "height": 17,
+                      "right": 73.05,
+                      "bottom": 34
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -586,12 +612,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_804_basic_padding\",\n        \"category\": \"baseline\",\n        \"features\": [\"padding\", \"box-model\"],\n        \"description\": \"Basic padding property application\",\n        \"original_css_test\": \"padding-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/box.html#padding-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Green box with 15px padding around content\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_804_basic_padding\",\n        \"category\": \"baseline\",\n        \"features\": [\"padding\", \"box-model\"],\n        \"description\": \"Basic padding property application\",\n        \"original_css_test\": \"padding-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/box.html#padding-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Green box with 15px padding around content\"\n    }\n    ",
+                "length": 452,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

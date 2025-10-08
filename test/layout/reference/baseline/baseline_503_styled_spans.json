@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Styled Text Spans\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; font-size: 16px; }\n        .text-container {\n            width: 400px;\n            background-color: #f5f5f5;\n            padding: 20px;\n        }\n        .bold-text {\n            font-weight: bold;\n        }\n        .colored-text {\n            color: #ff0000;\n        }\n        .larger-text {\n            font-size: 20px;\n        }\n    \n\n\n    \n        This is bold text and this is red text and so does larger text in a paragraph.\n    \n\n    \n    {\n        \"test_id\": \"baseline_503_styled_spans\",\n        \"category\": \"baseline\",\n        \"features\": [\"inline-spans\", \"font-weight\", \"color\", \"mixed-styling\"],\n        \"description\": \"Text with inline spans having different font styles and colors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html\", \"https://www.w3.org/TR/CSS22/colors.html\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Paragraph with bold, red, and larger text spans inline\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Styled Text Spans\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; font-size: 16px; }\n        .text-container {\n            width: 400px;\n            background-color: #f5f5f5;\n            padding: 20px;\n        }\n        .bold-text {\n            font-weight: bold;\n        }\n        .colored-text {\n            color: #ff0000;\n        }\n        .larger-text {\n            font-size: 20px;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Styled Text Spans",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Styled Text Spans",
+                "length": 32,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; font-size: 16px; }\n        .text-container {\n            width: 400px;\n            background-color: #f5f5f5;\n            padding: 20px;\n        }\n        .bold-text {\n            font-weight: bold;\n        }\n        .colored-text {\n            color: #ff0000;\n        }\n        .larger-text {\n            font-size: 20px;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; font-size: 16px; }\n        .text-container {\n            width: 400px;\n            background-color: #f5f5f5;\n            padding: 20px;\n        }\n        .bold-text {\n            font-weight: bold;\n        }\n        .colored-text {\n            color: #ff0000;\n        }\n        .larger-text {\n            font-size: 20px;\n        }\n    ",
+                "length": 422,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "This is bold text and this is red text and so does larger text in a paragraph.\n    \n\n    \n    {\n        \"test_id\": \"baseline_503_styled_spans\",\n        \"category\": \"baseline\",\n        \"features\": [\"inline-spans\", \"font-weight\", \"color\", \"mixed-styling\"],\n        \"description\": \"Text with inline spans having different font styles and colors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html\", \"https://www.w3.org/TR/CSS22/colors.html\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Paragraph with bold, red, and larger text spans inline\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.text-container",
             "tag": "div",
             "id": null,
@@ -504,86 +525,36 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This is bold text and this is red text and so does larger text in a paragraph.",
-            "hasTextNodes": true,
-            "textNodes": [
-              {
-                "text": "\n        This is ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 24,
-                    "width": 50.67,
-                    "height": 17,
-                    "right": 70.67,
-                    "bottom": 41
-                  }
-                ],
-                "length": 17,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 17
-              },
-              {
-                "text": " and this is ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 137.34,
-                    "y": 24,
-                    "width": 80.94,
-                    "height": 17,
-                    "right": 218.28,
-                    "bottom": 41
-                  }
-                ],
-                "length": 13,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 13
-              },
-              {
-                "text": " and so does ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 271.64,
-                    "y": 24,
-                    "width": 96.08,
-                    "height": 17,
-                    "right": 367.72,
-                    "bottom": 41
-                  }
-                ],
-                "length": 13,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 13
-              },
-              {
-                "text": " in a paragraph.\n    ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 52.25,
-                    "y": 47,
-                    "width": 112.08,
-                    "height": 17,
-                    "right": 164.33,
-                    "bottom": 64
-                  }
-                ],
-                "length": 21,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 21
-              }
-            ],
-            "childCount": 3,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "text",
+                "text": "\n        This is ",
+                "length": 17,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 24,
+                      "width": 50.67,
+                      "height": 17,
+                      "right": 70.67,
+                      "bottom": 41
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "element",
                 "selector": "span.bold-text:nth-of-type(1)",
                 "tag": "span",
                 "id": null,
@@ -641,33 +612,63 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "bold text",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "bold text",
-                    "parentElement": "span",
-                    "rects": [
-                      {
-                        "x": 70.67,
-                        "y": 24,
-                        "width": 66.67,
-                        "height": 17,
-                        "right": 137.34,
-                        "bottom": 41
-                      }
-                    ],
                     "length": 9,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 9
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 70.67,
+                          "y": 24,
+                          "width": 66.67,
+                          "height": 17,
+                          "right": 137.34,
+                          "bottom": 41
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": " and this is ",
+                "length": 13,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 137.34,
+                      "y": 24,
+                      "width": 80.94,
+                      "height": 17,
+                      "right": 218.28,
+                      "bottom": 41
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 2,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "span.colored-text:nth-of-type(2)",
                 "tag": "span",
                 "id": null,
@@ -725,33 +726,63 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "red text",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "red text",
-                    "parentElement": "span",
-                    "rects": [
-                      {
-                        "x": 218.28,
-                        "y": 24,
-                        "width": 53.36,
-                        "height": 17,
-                        "right": 271.64,
-                        "bottom": 41
-                      }
-                    ],
                     "length": 8,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 8
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 218.28,
+                          "y": 24,
+                          "width": 53.36,
+                          "height": 17,
+                          "right": 271.64,
+                          "bottom": 41
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": " and so does ",
+                "length": 13,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 271.64,
+                      "y": 24,
+                      "width": 96.08,
+                      "height": 17,
+                      "right": 367.72,
+                      "bottom": 41
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 4,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "span.larger-text:nth-of-type(3)",
                 "tag": "span",
                 "id": null,
@@ -809,43 +840,73 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "larger text",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "larger text",
-                    "parentElement": "span",
-                    "rects": [
-                      {
-                        "x": 367.72,
-                        "y": 20,
-                        "width": 51.14,
-                        "height": 22,
-                        "right": 418.86,
-                        "bottom": 42
-                      },
-                      {
-                        "x": 20,
-                        "y": 43,
-                        "width": 32.25,
-                        "height": 22,
-                        "right": 52.25,
-                        "bottom": 65
-                      }
-                    ],
                     "length": 11,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 11
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 367.72,
+                          "y": 20,
+                          "width": 51.14,
+                          "height": 22,
+                          "right": 418.86,
+                          "bottom": 42
+                        },
+                        {
+                          "x": 20,
+                          "y": 43,
+                          "width": 32.25,
+                          "height": 22,
+                          "right": 52.25,
+                          "bottom": 65
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": " in a paragraph.\n    ",
+                "length": 21,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 52.25,
+                      "y": 47,
+                      "width": 112.08,
+                      "height": 17,
+                      "right": 164.33,
+                      "bottom": 64
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 6,
                 "children": []
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -901,12 +962,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_503_styled_spans\",\n        \"category\": \"baseline\",\n        \"features\": [\"inline-spans\", \"font-weight\", \"color\", \"mixed-styling\"],\n        \"description\": \"Text with inline spans having different font styles and colors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html\", \"https://www.w3.org/TR/CSS22/colors.html\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Paragraph with bold, red, and larger text spans inline\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_503_styled_spans\",\n        \"category\": \"baseline\",\n        \"features\": [\"inline-spans\", \"font-weight\", \"color\", \"mixed-styling\"],\n        \"description\": \"Text with inline spans having different font styles and colors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html\", \"https://www.w3.org/TR/CSS22/colors.html\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Paragraph with bold, red, and larger text spans inline\"\n    }\n    ",
+                "length": 496,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

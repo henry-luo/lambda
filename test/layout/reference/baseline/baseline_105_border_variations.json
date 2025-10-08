@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Border Variations\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .box1 {\n            width: 100px;\n            height: 60px;\n            background-color: #ffdddd;\n            border: 2px solid #ff0000;\n        }\n        .box2 {\n            width: 120px;\n            height: 50px;\n            background-color: #ddffdd;\n            border: 4px solid #00aa00;\n        }\n        .box3 {\n            width: 80px;\n            height: 70px;\n            background-color: #ddddff;\n            border: 1px solid #0000ff;\n        }\n    \n\n\n    \n    \n    \n    \n    \n    {\n        \"test_id\": \"baseline_105_border_variations\",\n        \"category\": \"baseline\",\n        \"features\": [\"border\", \"border-width\", \"border-color\", \"block-flow\"],\n        \"description\": \"Three containers with different border widths and colors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html#border-properties\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three boxes stacked vertically with different colored borders\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Border Variations\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .box1 {\n            width: 100px;\n            height: 60px;\n            background-color: #ffdddd;\n            border: 2px solid #ff0000;\n        }\n        .box2 {\n            width: 120px;\n            height: 50px;\n            background-color: #ddffdd;\n            border: 4px solid #00aa00;\n        }\n        .box3 {\n            width: 80px;\n            height: 70px;\n            background-color: #ddddff;\n            border: 1px solid #0000ff;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Border Variations",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Border Variations",
+                "length": 32,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .box1 {\n            width: 100px;\n            height: 60px;\n            background-color: #ffdddd;\n            border: 2px solid #ff0000;\n        }\n        .box2 {\n            width: 120px;\n            height: 50px;\n            background-color: #ddffdd;\n            border: 4px solid #00aa00;\n        }\n        .box3 {\n            width: 80px;\n            height: 70px;\n            background-color: #ddddff;\n            border: 1px solid #0000ff;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .box1 {\n            width: 100px;\n            height: 60px;\n            background-color: #ffdddd;\n            border: 2px solid #ff0000;\n        }\n        .box2 {\n            width: 120px;\n            height: 50px;\n            background-color: #ddffdd;\n            border: 4px solid #00aa00;\n        }\n        .box3 {\n            width: 80px;\n            height: 70px;\n            background-color: #ddddff;\n            border: 1px solid #0000ff;\n        }\n    ",
+                "length": 558,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "{\n        \"test_id\": \"baseline_105_border_variations\",\n        \"category\": \"baseline\",\n        \"features\": [\"border\", \"border-width\", \"border-color\", \"block-flow\"],\n        \"description\": \"Three containers with different border widths and colors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html#border-properties\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three boxes stacked vertically with different colored borders\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.box1:nth-of-type(1)",
             "tag": "div",
             "id": null,
@@ -504,14 +525,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "div.box2:nth-of-type(2)",
             "tag": "div",
             "id": null,
@@ -569,14 +588,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "div.box3:nth-of-type(3)",
             "tag": "div",
             "id": null,
@@ -634,14 +651,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -697,12 +712,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_105_border_variations\",\n        \"category\": \"baseline\",\n        \"features\": [\"border\", \"border-width\", \"border-color\", \"block-flow\"],\n        \"description\": \"Three containers with different border widths and colors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html#border-properties\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three boxes stacked vertically with different colored borders\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_105_border_variations\",\n        \"category\": \"baseline\",\n        \"features\": [\"border\", \"border-width\", \"border-color\", \"block-flow\"],\n        \"description\": \"Three containers with different border widths and colors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html#border-properties\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three boxes stacked vertically with different colored borders\"\n    }\n    ",
+                "length": 474,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

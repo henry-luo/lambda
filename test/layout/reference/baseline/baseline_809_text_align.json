@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Text Align\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            width: 300px;\n            border: 2px solid black;\n            padding: 20px;\n            margin: 10px;\n        }\n        .left {\n            text-align: left;\n            background-color: lightgray;\n        }\n        .center {\n            text-align: center;\n            background-color: lightblue;\n        }\n        .right {\n            text-align: right;\n            background-color: lightgreen;\n        }\n    \n\n\n    \n        This text is left-aligned.\n    \n    \n        This text is center-aligned.\n    \n    \n        This text is right-aligned.\n    \n\n    \n    {\n        \"test_id\": \"baseline_809_text_align\",\n        \"category\": \"baseline\",\n        \"features\": [\"text-align\", \"left\", \"center\", \"right\"],\n        \"description\": \"Basic text alignment properties\",\n        \"original_css_test\": \"text-align-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/text.html#alignment-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Three containers with text aligned left, center, and right respectively\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Text Align\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            width: 300px;\n            border: 2px solid black;\n            padding: 20px;\n            margin: 10px;\n        }\n        .left {\n            text-align: left;\n            background-color: lightgray;\n        }\n        .center {\n            text-align: center;\n            background-color: lightblue;\n        }\n        .right {\n            text-align: right;\n            background-color: lightgreen;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Text Align",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Text Align",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            width: 300px;\n            border: 2px solid black;\n            padding: 20px;\n            margin: 10px;\n        }\n        .left {\n            text-align: left;\n            background-color: lightgray;\n        }\n        .center {\n            text-align: center;\n            background-color: lightblue;\n        }\n        .right {\n            text-align: right;\n            background-color: lightgreen;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            width: 300px;\n            border: 2px solid black;\n            padding: 20px;\n            margin: 10px;\n        }\n        .left {\n            text-align: left;\n            background-color: lightgray;\n        }\n        .center {\n            text-align: center;\n            background-color: lightblue;\n        }\n        .right {\n            text-align: right;\n            background-color: lightgreen;\n        }\n    ",
+                "length": 536,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "This text is left-aligned.\n    \n    \n        This text is center-aligned.\n    \n    \n        This text is right-aligned.\n    \n\n    \n    {\n        \"test_id\": \"baseline_809_text_align\",\n        \"category\": \"baseline\",\n        \"features\": [\"text-align\", \"left\", \"center\", \"right\"],\n        \"description\": \"Basic text alignment properties\",\n        \"original_css_test\": \"text-align-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/text.html#alignment-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Three containers with text aligned left, center, and right respectively\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container.left:nth-of-type(1)",
             "tag": "div",
             "id": null,
@@ -505,13 +526,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This text is left-aligned.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "p",
                 "tag": "p",
                 "id": null,
@@ -567,35 +586,40 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "This text is left-aligned.",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "This text is left-aligned.",
-                    "parentElement": "p",
-                    "rects": [
-                      {
-                        "x": 32,
-                        "y": 32,
-                        "width": 163.63,
-                        "height": 17,
-                        "right": 195.63,
-                        "bottom": 49
-                      }
-                    ],
                     "length": 26,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 26
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 32,
+                          "y": 32,
+                          "width": 163.63,
+                          "height": 17,
+                          "right": 195.63,
+                          "bottom": 49
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "div.container.center:nth-of-type(2)",
             "tag": "div",
             "id": null,
@@ -654,13 +678,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This text is center-aligned.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 3,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "p",
                 "tag": "p",
                 "id": null,
@@ -716,35 +738,40 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "This text is center-aligned.",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "This text is center-aligned.",
-                    "parentElement": "p",
-                    "rects": [
-                      {
-                        "x": 88.63,
-                        "y": 104,
-                        "width": 186.75,
-                        "height": 17,
-                        "right": 275.38,
-                        "bottom": 121
-                      }
-                    ],
                     "length": 28,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 28
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 88.63,
+                          "y": 104,
+                          "width": 186.75,
+                          "height": 17,
+                          "right": 275.38,
+                          "bottom": 121
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "div.container.right:nth-of-type(3)",
             "tag": "div",
             "id": null,
@@ -803,13 +830,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This text is right-aligned.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 5,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "p",
                 "tag": "p",
                 "id": null,
@@ -865,35 +890,40 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "This text is right-aligned.",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "This text is right-aligned.",
-                    "parentElement": "p",
-                    "rects": [
-                      {
-                        "x": 158.59,
-                        "y": 176,
-                        "width": 173.41,
-                        "height": 17,
-                        "right": 332,
-                        "bottom": 193
-                      }
-                    ],
                     "length": 27,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 27
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 158.59,
+                          "y": 176,
+                          "width": 173.41,
+                          "height": 17,
+                          "right": 332,
+                          "bottom": 193
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -949,12 +979,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_809_text_align\",\n        \"category\": \"baseline\",\n        \"features\": [\"text-align\", \"left\", \"center\", \"right\"],\n        \"description\": \"Basic text alignment properties\",\n        \"original_css_test\": \"text-align-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/text.html#alignment-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Three containers with text aligned left, center, and right respectively\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_809_text_align\",\n        \"category\": \"baseline\",\n        \"features\": [\"text-align\", \"left\", \"center\", \"right\"],\n        \"description\": \"Basic text alignment properties\",\n        \"original_css_test\": \"text-align-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/text.html#alignment-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Three containers with text aligned left, center, and right respectively\"\n    }\n    ",
+                "length": 492,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

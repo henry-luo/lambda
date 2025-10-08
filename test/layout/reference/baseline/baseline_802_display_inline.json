@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Display Inline\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        div {\n            display: inline;\n        }\n    \n\n\n    Test passes if the \"Filler Text\" below is all on the same line.\n    Filler Text\n    Filler Text\n\n    \n    {\n        \"test_id\": \"baseline_802_display_inline\",\n        \"category\": \"baseline\",\n        \"features\": [\"display\", \"inline\"],\n        \"description\": \"Display property set to inline on block elements\",\n        \"original_css_test\": \"display-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#display-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Div elements should display inline on the same line\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Display Inline\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        div {\n            display: inline;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Display Inline",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Display Inline",
+                "length": 29,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        div {\n            display: inline;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        div {\n            display: inline;\n        }\n    ",
+                "length": 144,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test passes if the \"Filler Text\" below is all on the same line.\n    Filler Text\n    Filler Text\n\n    \n    {\n        \"test_id\": \"baseline_802_display_inline\",\n        \"category\": \"baseline\",\n        \"features\": [\"display\", \"inline\"],\n        \"description\": \"Display property set to inline on block elements\",\n        \"original_css_test\": \"display-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#display-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Div elements should display inline on the same line\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "p",
             "tag": "p",
             "id": null,
@@ -502,33 +523,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test passes if the \"Filler Text\" below is all on the same line.",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Test passes if the \"Filler Text\" below is all on the same line.",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 0,
-                    "y": 0,
-                    "width": 416.59,
-                    "height": 17,
-                    "right": 416.59,
-                    "bottom": 17
-                  }
-                ],
                 "length": 63,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 63
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "width": 416.59,
+                      "height": 17,
+                      "right": 416.59,
+                      "bottom": 17
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "div:nth-of-type(1)",
             "tag": "div",
             "id": null,
@@ -584,33 +610,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Filler Text",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 3,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Filler Text",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 0,
-                    "y": 18,
-                    "width": 68.17,
-                    "height": 17,
-                    "right": 68.17,
-                    "bottom": 35
-                  }
-                ],
                 "length": 11,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 11
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 0,
+                      "y": 18,
+                      "width": 68.17,
+                      "height": 17,
+                      "right": 68.17,
+                      "bottom": 35
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "inline",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "div:nth-of-type(2)",
             "tag": "div",
             "id": null,
@@ -666,33 +697,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Filler Text",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 5,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Filler Text",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 72.63,
-                    "y": 18,
-                    "width": 68.17,
-                    "height": 17,
-                    "right": 140.8,
-                    "bottom": 35
-                  }
-                ],
                 "length": 11,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 11
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 72.63,
+                      "y": 18,
+                      "width": 68.17,
+                      "height": 17,
+                      "right": 140.8,
+                      "bottom": 35
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "inline",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -748,12 +784,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_802_display_inline\",\n        \"category\": \"baseline\",\n        \"features\": [\"display\", \"inline\"],\n        \"description\": \"Display property set to inline on block elements\",\n        \"original_css_test\": \"display-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#display-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Div elements should display inline on the same line\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_802_display_inline\",\n        \"category\": \"baseline\",\n        \"features\": [\"display\", \"inline\"],\n        \"description\": \"Display property set to inline on block elements\",\n        \"original_css_test\": \"display-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visuren.html#display-prop\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Div elements should display inline on the same line\"\n    }\n    ",
+                "length": 471,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

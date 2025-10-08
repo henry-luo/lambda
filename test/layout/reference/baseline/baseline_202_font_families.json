@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Font Families\n    \n        * { margin: 0; padding: 0; }\n        body { font-size: 16px; }\n        .arial-text {\n            font-family: Arial, sans-serif;\n        }\n        .helvetica-text {\n            font-family: Helvetica, Arial, sans-serif;\n        }\n        .serif-text {\n            font-family: Times, serif;\n        }\n    \n\n\n    Arial font text\n    Helvetica font text\n    Times font text\n    \n    \n    {\n        \"test_id\": \"baseline_202_font_families\",\n        \"category\": \"baseline\",\n        \"features\": [\"font-family\", \"text-content\"],\n        \"description\": \"Text content with different font families\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html#propdef-font-family\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three paragraphs with Arial, Helvetica, and Times fonts\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Font Families\n    \n        * { margin: 0; padding: 0; }\n        body { font-size: 16px; }\n        .arial-text {\n            font-family: Arial, sans-serif;\n        }\n        .helvetica-text {\n            font-family: Helvetica, Arial, sans-serif;\n        }\n        .serif-text {\n            font-family: Times, serif;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Font Families",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Font Families",
+                "length": 28,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-size: 16px; }\n        .arial-text {\n            font-family: Arial, sans-serif;\n        }\n        .helvetica-text {\n            font-family: Helvetica, Arial, sans-serif;\n        }\n        .serif-text {\n            font-family: Times, serif;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-size: 16px; }\n        .arial-text {\n            font-family: Arial, sans-serif;\n        }\n        .helvetica-text {\n            font-family: Helvetica, Arial, sans-serif;\n        }\n        .serif-text {\n            font-family: Times, serif;\n        }\n    ",
+                "length": 314,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Arial font text\n    Helvetica font text\n    Times font text\n    \n    \n    {\n        \"test_id\": \"baseline_202_font_families\",\n        \"category\": \"baseline\",\n        \"features\": [\"font-family\", \"text-content\"],\n        \"description\": \"Text content with different font families\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html#propdef-font-family\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three paragraphs with Arial, Helvetica, and Times fonts\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "p.arial-text:nth-of-type(1)",
             "tag": "p",
             "id": null,
@@ -504,33 +525,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Arial font text",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Arial font text",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 0,
-                    "y": 0,
-                    "width": 93.38,
-                    "height": 17,
-                    "right": 93.38,
-                    "bottom": 17
-                  }
-                ],
                 "length": 15,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 15
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "width": 93.38,
+                      "height": 17,
+                      "right": 93.38,
+                      "bottom": 17
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "p.helvetica-text:nth-of-type(2)",
             "tag": "p",
             "id": null,
@@ -588,33 +614,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Helvetica font text",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 3,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Helvetica font text",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 0,
-                    "y": 18,
-                    "width": 127.17,
-                    "height": 18,
-                    "right": 127.17,
-                    "bottom": 36
-                  }
-                ],
                 "length": 19,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 19
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 0,
+                      "y": 18,
+                      "width": 127.17,
+                      "height": 18,
+                      "right": 127.17,
+                      "bottom": 36
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "p.serif-text:nth-of-type(3)",
             "tag": "p",
             "id": null,
@@ -672,33 +703,38 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Times font text",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 5,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Times font text",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 0,
-                    "y": 36,
-                    "width": 97.2,
-                    "height": 18,
-                    "right": 97.2,
-                    "bottom": 54
-                  }
-                ],
                 "length": 15,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 15
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 0,
+                      "y": 36,
+                      "width": 97.2,
+                      "height": 18,
+                      "right": 97.2,
+                      "bottom": 54
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -754,12 +790,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_202_font_families\",\n        \"category\": \"baseline\",\n        \"features\": [\"font-family\", \"text-content\"],\n        \"description\": \"Text content with different font families\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html#propdef-font-family\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three paragraphs with Arial, Helvetica, and Times fonts\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_202_font_families\",\n        \"category\": \"baseline\",\n        \"features\": [\"font-family\", \"text-content\"],\n        \"description\": \"Text content with different font families\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/fonts.html#propdef-font-family\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Three paragraphs with Arial, Helvetica, and Times fonts\"\n    }\n    ",
+                "length": 428,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

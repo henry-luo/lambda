@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Nested Containers\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .outer-container {\n            width: 300px;\n            height: 200px;\n            background-color: #dddddd;\n        }\n        .inner-container {\n            width: 200px;\n            height: 120px;\n            background-color: #888888;\n        }\n        .inner-box {\n            width: 100px;\n            height: 60px;\n            background-color: #333333;\n        }\n    \n\n\n    \n        \n            \n        \n    \n    \n    \n    {\n        \"test_id\": \"baseline_104_nested_containers\",\n        \"category\": \"baseline\",\n        \"features\": [\"nested-elements\", \"containment\", \"block-flow\"],\n        \"description\": \"Three-level nested containers without padding/margins\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#block-formatting\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Dark gray box inside medium gray container inside light gray outer container\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Nested Containers\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .outer-container {\n            width: 300px;\n            height: 200px;\n            background-color: #dddddd;\n        }\n        .inner-container {\n            width: 200px;\n            height: 120px;\n            background-color: #888888;\n        }\n        .inner-box {\n            width: 100px;\n            height: 60px;\n            background-color: #333333;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Nested Containers",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Nested Containers",
+                "length": 32,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .outer-container {\n            width: 300px;\n            height: 200px;\n            background-color: #dddddd;\n        }\n        .inner-container {\n            width: 200px;\n            height: 120px;\n            background-color: #888888;\n        }\n        .inner-box {\n            width: 100px;\n            height: 60px;\n            background-color: #333333;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .outer-container {\n            width: 300px;\n            height: 200px;\n            background-color: #dddddd;\n        }\n        .inner-container {\n            width: 200px;\n            height: 120px;\n            background-color: #888888;\n        }\n        .inner-box {\n            width: 100px;\n            height: 60px;\n            background-color: #333333;\n        }\n    ",
+                "length": 471,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "{\n        \"test_id\": \"baseline_104_nested_containers\",\n        \"category\": \"baseline\",\n        \"features\": [\"nested-elements\", \"containment\", \"block-flow\"],\n        \"description\": \"Three-level nested containers without padding/margins\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#block-formatting\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Dark gray box inside medium gray container inside light gray outer container\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.outer-container",
             "tag": "div",
             "id": null,
@@ -504,13 +525,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.inner-container",
                 "tag": "div",
                 "id": null,
@@ -568,13 +587,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 1,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.inner-box",
                     "tag": "div",
                     "id": null,
@@ -632,11 +649,8 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": null,
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 0,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": []
                   }
                 ]
@@ -644,6 +658,7 @@
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -699,12 +714,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_104_nested_containers\",\n        \"category\": \"baseline\",\n        \"features\": [\"nested-elements\", \"containment\", \"block-flow\"],\n        \"description\": \"Three-level nested containers without padding/margins\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#block-formatting\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Dark gray box inside medium gray container inside light gray outer container\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_104_nested_containers\",\n        \"category\": \"baseline\",\n        \"features\": [\"nested-elements\", \"containment\", \"block-flow\"],\n        \"description\": \"Three-level nested containers without padding/margins\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visuren.html#block-formatting\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Dark gray box inside medium gray container inside light gray outer container\"\n    }\n    ",
+                "length": 481,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

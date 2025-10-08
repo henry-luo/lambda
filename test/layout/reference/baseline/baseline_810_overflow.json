@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Baseline Test: Overflow\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            width: 200px;\n            height: 100px;\n            border: 2px solid black;\n            margin: 10px;\n            padding: 10px;\n        }\n        .visible {\n            overflow: visible;\n            background-color: lightcoral;\n        }\n        .hidden {\n            overflow: hidden;\n            background-color: lightblue;\n        }\n        .scroll {\n            overflow: scroll;\n            background-color: lightgreen;\n        }\n        .content {\n            width: 300px;\n            height: 150px;\n            background-color: yellow;\n            opacity: 0.7;\n        }\n    \n\n\n    \n        Overflow: visible - content extends beyond container\n    \n    \n        Overflow: hidden - content is clipped\n    \n    \n        Overflow: scroll - scrollbars appear\n    \n\n    \n    {\n        \"test_id\": \"baseline_810_overflow\",\n        \"category\": \"baseline\",\n        \"features\": [\"overflow\", \"visible\", \"hidden\", \"scroll\"],\n        \"description\": \"Basic overflow property behaviors\",\n        \"original_css_test\": \"overflow-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visufx.html#overflow\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Three containers demonstrating visible, hidden, and scroll overflow behaviors\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Baseline Test: Overflow\n    \n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            width: 200px;\n            height: 100px;\n            border: 2px solid black;\n            margin: 10px;\n            padding: 10px;\n        }\n        .visible {\n            overflow: visible;\n            background-color: lightcoral;\n        }\n        .hidden {\n            overflow: hidden;\n            background-color: lightblue;\n        }\n        .scroll {\n            overflow: scroll;\n            background-color: lightgreen;\n        }\n        .content {\n            width: 300px;\n            height: 150px;\n            background-color: yellow;\n            opacity: 0.7;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +183,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +244,12 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +305,29 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Baseline Test: Overflow",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Baseline Test: Overflow",
+                "length": 23,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +383,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "* { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            width: 200px;\n            height: 100px;\n            border: 2px solid black;\n            margin: 10px;\n            padding: 10px;\n        }\n        .visible {\n            overflow: visible;\n            background-color: lightcoral;\n        }\n        .hidden {\n            overflow: hidden;\n            background-color: lightblue;\n        }\n        .scroll {\n            overflow: scroll;\n            background-color: lightgreen;\n        }\n        .content {\n            width: 300px;\n            height: 150px;\n            background-color: yellow;\n            opacity: 0.7;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; }\n        .container {\n            width: 200px;\n            height: 100px;\n            border: 2px solid black;\n            margin: 10px;\n            padding: 10px;\n        }\n        .visible {\n            overflow: visible;\n            background-color: lightcoral;\n        }\n        .hidden {\n            overflow: hidden;\n            background-color: lightblue;\n        }\n        .scroll {\n            overflow: scroll;\n            background-color: lightgreen;\n        }\n        .content {\n            width: 300px;\n            height: 150px;\n            background-color: yellow;\n            opacity: 0.7;\n        }\n    ",
+                "length": 712,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +463,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Overflow: visible - content extends beyond container\n    \n    \n        Overflow: hidden - content is clipped\n    \n    \n        Overflow: scroll - scrollbars appear\n    \n\n    \n    {\n        \"test_id\": \"baseline_810_overflow\",\n        \"category\": \"baseline\",\n        \"features\": [\"overflow\", \"visible\", \"hidden\", \"scroll\"],\n        \"description\": \"Basic overflow property behaviors\",\n        \"original_css_test\": \"overflow-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visufx.html#overflow\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Three containers demonstrating visible, hidden, and scroll overflow behaviors\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container.visible:nth-of-type(1)",
             "tag": "div",
             "id": null,
@@ -505,13 +526,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Overflow: visible - content extends beyond container",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.content",
                 "tag": "div",
                 "id": null,
@@ -569,43 +588,48 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Overflow: visible - content extends beyond container",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Overflow: visible - content extends beyond container",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 22,
-                        "y": 22,
-                        "width": 243.67,
-                        "height": 17,
-                        "right": 265.67,
-                        "bottom": 39
-                      },
-                      {
-                        "x": 22,
-                        "y": 40,
-                        "width": 122.77,
-                        "height": 17,
-                        "right": 144.77,
-                        "bottom": 57
-                      }
-                    ],
                     "length": 52,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 52
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 22,
+                          "y": 22,
+                          "width": 243.67,
+                          "height": 17,
+                          "right": 265.67,
+                          "bottom": 39
+                        },
+                        {
+                          "x": 22,
+                          "y": 40,
+                          "width": 122.77,
+                          "height": 17,
+                          "right": 144.77,
+                          "bottom": 57
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "div.container.hidden:nth-of-type(2)",
             "tag": "div",
             "id": null,
@@ -664,13 +688,11 @@
               "overflowX": "hidden",
               "overflowY": "hidden"
             },
-            "textContent": "Overflow: hidden - content is clipped",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 3,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.content",
                 "tag": "div",
                 "id": null,
@@ -728,35 +750,40 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Overflow: hidden - content is clipped",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Overflow: hidden - content is clipped",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 22,
-                        "y": 156,
-                        "width": 257.92,
-                        "height": 17,
-                        "right": 279.92,
-                        "bottom": 173
-                      }
-                    ],
                     "length": 37,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 37
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 22,
+                          "y": 156,
+                          "width": 257.92,
+                          "height": 17,
+                          "right": 279.92,
+                          "bottom": 173
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "div.container.scroll:nth-of-type(3)",
             "tag": "div",
             "id": null,
@@ -815,13 +842,11 @@
               "overflowX": "scroll",
               "overflowY": "scroll"
             },
-            "textContent": "Overflow: scroll - scrollbars appear",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 5,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.content",
                 "tag": "div",
                 "id": null,
@@ -879,35 +904,40 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Overflow: scroll - scrollbars appear",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Overflow: scroll - scrollbars appear",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 22,
-                        "y": 290,
-                        "width": 246.3,
-                        "height": 17,
-                        "right": 268.3,
-                        "bottom": 307
-                      }
-                    ],
                     "length": 36,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 36
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 22,
+                          "y": 290,
+                          "width": 246.3,
+                          "height": 17,
+                          "right": 268.3,
+                          "bottom": 307
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -963,12 +993,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"baseline_810_overflow\",\n        \"category\": \"baseline\",\n        \"features\": [\"overflow\", \"visible\", \"hidden\", \"scroll\"],\n        \"description\": \"Basic overflow property behaviors\",\n        \"original_css_test\": \"overflow-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visufx.html#overflow\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Three containers demonstrating visible, hidden, and scroll overflow behaviors\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"baseline_810_overflow\",\n        \"category\": \"baseline\",\n        \"features\": [\"overflow\", \"visible\", \"hidden\", \"scroll\"],\n        \"description\": \"Basic overflow property behaviors\",\n        \"original_css_test\": \"overflow-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/visufx.html#overflow\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Three containers demonstrating visible, hidden, and scroll overflow behaviors\"\n    }\n    ",
+                "length": 494,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

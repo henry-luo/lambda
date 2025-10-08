@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": ".container {\n            display: flex;\n            flex-direction: row;\n            justify-content: space-between;\n            width: 600px;\n            height: 100px;\n            background: #f0f0f0;\n        }\n        .item {\n            width: 100px;\n            height: 60px;\n            background: #4CAF50;\n            flex-shrink: 0;\n        }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": ".container {\n            display: flex;\n            flex-direction: row;\n            justify-content: space-between;\n            width: 600px;\n            height: 100px;\n            background: #f0f0f0;\n        }\n        .item {\n            width: 100px;\n            height: 60px;\n            background: #4CAF50;\n            flex-shrink: 0;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 1,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -186,16 +183,31 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": ".container {\n            display: flex;\n            flex-direction: row;\n            justify-content: space-between;\n            width: 600px;\n            height: 100px;\n            background: #f0f0f0;\n        }\n        .item {\n            width: 100px;\n            height: 60px;\n            background: #4CAF50;\n            flex-shrink: 0;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 1,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        .container {\n            display: flex;\n            flex-direction: row;\n            justify-content: space-between;\n            width: 600px;\n            height: 100px;\n            background: #f0f0f0;\n        }\n        .item {\n            width: 100px;\n            height: 60px;\n            background: #4CAF50;\n            flex-shrink: 0;\n        }\n    ",
+                "length": 365,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -251,13 +263,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": null,
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 1,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -315,13 +325,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 3,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -379,14 +387,12 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -444,14 +450,12 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.item:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -509,11 +513,8 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": null,
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 0,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": []
               }
             ]
