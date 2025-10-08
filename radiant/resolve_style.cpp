@@ -554,35 +554,26 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
     Color c;  int length;
 
-    // Debug: Print the property type we're processing
-    if (declr->type == 86) {
-        printf("DEBUG: Found property 86! LXB_CSS_PROPERTY_POSITION=%d\n", LXB_CSS_PROPERTY_POSITION);
-    }
-    if (declr->type == 31) {
-        printf("DEBUG: Found property 31! LXB_CSS_PROPERTY_CLEAR=%d\n", LXB_CSS_PROPERTY_CLEAR);
-    }
-
     switch (declr->type) {
     case LXB_CSS_PROPERTY_LINE_HEIGHT: {
         lxb_css_property_line_height_t* line_height = declr->u.line_height;
         switch (line_height->type) {
         case LXB_CSS_VALUE__NUMBER:
             lycon->block.line_height = line_height->u.number.num * lycon->font.face.style.font_size;
-            printf("property number: %lf\n", line_height->u.number.num);
+            log_debug("property number: %lf", line_height->u.number.num);
             break;
         case LXB_CSS_VALUE__LENGTH:
             lycon->block.line_height = line_height->u.length.num;
-            printf("property unit: %d\n", line_height->u.length.unit);
+            log_debug("property unit: %d", line_height->u.length.unit);
             break;
         case LXB_CSS_VALUE__PERCENTAGE:
             lycon->block.line_height = line_height->u.percentage.num * lycon->font.face.style.font_size;
-            printf("property percentage: %lf\n", line_height->u.percentage.num);
+            log_debug("property percentage: %lf", line_height->u.percentage.num);
             break;
         case LXB_CSS_VALUE_NORMAL:
-            // CRITICAL FIX: For line-height: normal, use special marker
-            // This will be updated to actual font height after CSS resolution
-            lycon->block.line_height = -1;  // Special marker for normal line-height
-            printf("property normal line-height: using font intrinsic height\n");
+            lycon->block.line_height = // lycon->font.face.style.font_size * 1.15;
+                calculate_chrome_line_height(lycon->font.face.style.font_size, lycon->ui_context->pixel_ratio);
+            log_debug("normal line-height: using font intrinsic height * 1.15 = %d", lycon->block.line_height);
             break;
         }
         break;
