@@ -229,7 +229,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_enter();
     // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
-    log_debug("<<layout block %s (display.inner=%d)", elmt->name(), display.inner);
+    log_debug("layout block %s (display.inner=%d)", elmt->name(), display.inner);
 
     // Check if this block is a flex item
     ViewBlock* parent_block = (ViewBlock*)lycon->parent;
@@ -283,7 +283,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         em_size = 0.67;  // 0.67em
         HEADING_PROP:
         if (!block->font) { block->font = alloc_font_prop(lycon); }
-        block->font->font_size = lycon->font.style.font_size * em_size;
+        block->font->font_size = lycon->font.face.style.font_size * em_size;
         block->font->font_weight = LXB_CSS_VALUE_BOLD;
         break;
     case LXB_TAG_P:
@@ -299,7 +299,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
         // margin: 1em 0; padding: 0 0 0 40px;
-        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style.font_size;
+        block->bound->margin.top = block->bound->margin.bottom = lycon->font.face.style.font_size;
         block->bound->padding.left = 40 * lycon->ui_context->pixel_ratio;
         break;
     case LXB_TAG_CENTER:
@@ -346,11 +346,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // CRITICAL FIX: After CSS resolution, update font face if font size changed
     // This ensures the font face matches the resolved font size
-    if (lycon->font.current_font_size > 0 && lycon->font.current_font_size != lycon->font.style.font_size) {
+    if (lycon->font.current_font_size > 0 && lycon->font.current_font_size != lycon->font.face.style.font_size) {
         // Font size was changed by CSS, need to reload font face
-        lycon->font.style.font_size = lycon->font.current_font_size;
-        lycon->font.face = load_styled_font(lycon->ui_context, lycon->font.face->family_name, &lycon->font.style);
-        printf("DEBUG: Updated font face for new font size: %d\n", lycon->font.style.font_size);
+        lycon->font.face.style.font_size = lycon->font.current_font_size;
+        lycon->font.face.ft_face = load_styled_font(lycon->ui_context, lycon->font.face.ft_face->family_name, &lycon->font.face.style);
+        log_debug("Updated font face for new font size: %d", lycon->font.face.style.font_size);
     }
 
     // CRITICAL FIX: After CSS resolution, update line-height to use font intrinsic height
@@ -360,28 +360,20 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // Use font intrinsic height for line-height: normal, with browser-compatible adjustment
 
         // DEBUG: Check font face state
-        if (!lycon->font.face) {
-            printf("ERROR: Font face is NULL when calculating line height!\n");
-            lycon->block.line_height = 17; // Fallback to reasonable default
-        } else if (!lycon->font.face->size) {
-            printf("ERROR: Font face size is NULL when calculating line height!\n");
-            lycon->block.line_height = 17; // Fallback to reasonable default
+        if (!lycon->font.face.ft_face) {
+            log_debug("ERROR: Font face is NULL when calculating line height!");
+            lycon->block.line_height = 17 * lycon->ui_context->pixel_ratio; // Fallback to reasonable default
+        } else if (!lycon->font.face.ft_face->size) {
+            printf("ERROR: Font face size is NULL when calculating line height!");
+            lycon->block.line_height = 17 * lycon->ui_context->pixel_ratio; // Fallback to reasonable default
         } else {
-            int font_height = lycon->font.face->size->metrics.height >> 6;
-            printf("DEBUG: Font face loaded: %s, font_height=%d\n",
-                   lycon->font.face->family_name ? lycon->font.face->family_name : "unknown", font_height);
-
-            // CRITICAL FIX: Adjust font height to match browser behavior more closely
-            // Browsers seem to use slightly smaller line heights than FreeType reports
-            if (font_height >= 18) {
-                font_height -= 1;  // Reduce by 1px for fonts 18px and larger
-            }
-
+            int font_height = lycon->font.face.ft_face->size->metrics.height >> 6;
+            log_debug("Font face loaded: %s, font_height=%d",
+                   lycon->font.face.ft_face->family_name ? lycon->font.face.ft_face->family_name : "unknown", font_height);
             lycon->block.line_height = font_height;
         }
-
-        printf("DEBUG: Updated line-height after CSS resolution to browser-compatible height: %d (font_size=%d)\n",
-               lycon->block.line_height, lycon->font.style.font_size);
+        log_debug("Updated line-height after CSS resolution to browser-compatible height: %d (font_size=%d)",
+               lycon->block.line_height, lycon->font.face.style.font_size);
     }
 
     // CRITICAL FIX: After CSS resolution, handle body margin properly
@@ -394,13 +386,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             block->bound->margin.top = block->bound->margin.bottom =
                 block->bound->margin.left = block->bound->margin.right = body_margin_physical;
-            printf("DEBUG: Applied default body margin (no CSS): %d\n", body_margin_physical);
+            log_debug("DEBUG: Applied default body margin (no CSS): %d", body_margin_physical);
         } else {
             // CSS margin properties exist - check if it's a reset (all margins are 0)
             if (block->bound->margin.top == 0 && block->bound->margin.bottom == 0 &&
                 block->bound->margin.left == 0 && block->bound->margin.right == 0) {
                 // CSS reset detected - keep margins at 0
-                printf("DEBUG: CSS margin reset detected - keeping margins at 0\n");
+                log_debug("DEBUG: CSS margin reset detected - keeping margins at 0");
             } else {
                 // CSS has some non-zero margins - check for unset margins and apply defaults
                 if (block->bound->margin.top_specificity == 0) {
@@ -415,7 +407,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (block->bound->margin.right_specificity == 0) {
                     block->bound->margin.right = body_margin_physical;
                 }
-                printf("DEBUG: Applied partial default body margins\n");
+                log_debug("DEBUG: Applied partial default body margins");
             }
         }
     }
@@ -426,23 +418,23 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (!block->bound) {
             // No CSS margin properties - apply default paragraph margins
             block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-            block->bound->margin.top = block->bound->margin.bottom = lycon->font.style.font_size;
-            printf("DEBUG: Applied default paragraph margins (no CSS): %d\n", lycon->font.style.font_size);
+            block->bound->margin.top = block->bound->margin.bottom = lycon->font.face.style.font_size;
+            log_debug("Applied default paragraph margins (no CSS): %d", lycon->font.face.style.font_size);
         } else {
             // CSS margin properties exist - check if it's a reset (all margins are 0)
             if (block->bound->margin.top == 0 && block->bound->margin.bottom == 0 &&
                 block->bound->margin.left == 0 && block->bound->margin.right == 0) {
                 // CSS reset detected - keep margins at 0
-                printf("DEBUG: CSS paragraph margin reset detected - keeping margins at 0\n");
+                log_debug("CSS paragraph margin reset detected - keeping margins at 0");
             } else {
                 // CSS has some non-zero margins - check for unset margins and apply defaults
                 if (block->bound->margin.top_specificity == 0) {
-                    block->bound->margin.top = lycon->font.style.font_size;
+                    block->bound->margin.top = lycon->font.face.style.font_size;
                 }
                 if (block->bound->margin.bottom_specificity == 0) {
-                    block->bound->margin.bottom = lycon->font.style.font_size;
+                    block->bound->margin.bottom = lycon->font.face.style.font_size;
                 }
-                printf("DEBUG: Applied partial default paragraph margins\n");
+                log_debug("Applied partial default paragraph margins");
             }
         }
     }
@@ -459,14 +451,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (value && value_len) {
             StrBuf* src = strbuf_new_cap(value_len);
             strbuf_append_str_n(src, (const char*)value, value_len);
-            printf("image src: %s\n", src->str);
+            log_debug("image src: %s", src->str);
             if (!block->embed) {
                 block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
             }
             block->embed->img = load_image(lycon->ui_context, src->str);
             strbuf_free(src);
             if (!block->embed->img) {
-                printf("Failed to load image\n");
+                log_debug("Failed to load image");
                 // todo: use a placeholder
             }
         }
@@ -476,7 +468,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // scale image by pixel ratio
                 int w = img->width * lycon->ui_context->pixel_ratio;
                 int h = img->height * lycon->ui_context->pixel_ratio;
-                printf("image dims: intrinsic - %d x %d, spec - %d x %d\n", w, h,
+                log_debug("image dims: intrinsic - %d x %d, spec - %d x %d", w, h,
                     lycon->block.given_width, lycon->block.given_height);
                 if (lycon->block.given_width >= 0) { // scale unspecified height
                     lycon->block.given_height = lycon->block.given_width * h / w;
@@ -499,7 +491,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (img->format == IMAGE_FORMAT_SVG) {
                 img->max_render_width = max(lycon->block.given_width, img->max_render_width);
             }
-            printf("image dimensions: %d x %d\n", lycon->block.given_width, lycon->block.given_height);
+            log_debug("image dimensions: %d x %d", lycon->block.given_width, lycon->block.given_height);
         }
         else { // failed to load image
             lycon->block.given_width = 40;  lycon->block.given_height = 30;
@@ -509,10 +501,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     log_debug("setting up block blk");
     if (block->font) {
-        setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, block->font);
+        setup_font(lycon->ui_context, &lycon->font, pa_font.face.ft_face->family_name, block->font);
     }
-    lycon->block.init_ascender = lycon->font.face->size->metrics.ascender >> 6;
-    lycon->block.init_descender = (-lycon->font.face->size->metrics.descender) >> 6;
+    lycon->block.init_ascender = lycon->font.face.ft_face->size->metrics.ascender >> 6;
+    lycon->block.init_descender = (-lycon->font.face.ft_face->size->metrics.descender) >> 6;
 
     // determine block width and height
     int content_width = 0;
@@ -766,6 +758,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             else {
                 lycon->line.max_ascender = max(lycon->line.max_ascender, block->height);
             }
+            log_debug("inline-block set max_ascender to: %d", lycon->line.max_ascender);
         }
         // line got content
         lycon->line.reset_space();
@@ -794,6 +787,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         assert(lycon->line.is_line_start);
     }
     lycon->prev_view = (View*)block;
-    log_debug("block view: %d, end block>>", block->type);
+    log_debug("block view: %d, end block", block->type);
     log_leave();
 }

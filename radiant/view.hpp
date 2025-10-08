@@ -215,8 +215,19 @@ struct View {
     View* previous_view();
 };
 
+typedef struct FontFace {
+    FontProp style;  // current font style
+    FT_Face ft_face;  // FreeType font face
+    float space_width;  // width of a space character of the current font
+    bool has_kerning;  // whether the font has kerning
+} FontFace;
+typedef struct FontBox {
+    FontFace face;  // current font face
+    int current_font_size;  // font size of current element
+} FontBox;
 typedef struct ViewText : View {
     int start_index, length;  // start and length of the text in the style node
+    FontFace *font;  // font for this text
 } ViewText;
 
 struct ViewGroup : View {
@@ -424,15 +435,6 @@ typedef struct StateStore {
     bool is_dragging;
     View* drag_target;
 } StateStore;
-
-// layout, rendering context structs
-typedef struct {
-    FontProp style;  // current font style
-    FT_Face face;  // current font face
-    float space_width;  // width of a space character of the current font
-    int current_font_size;  // font size of current element
-    bool has_kerning;  // whether the font has kerning
-} FontBox;
 
 // rendering context structs
 typedef struct {

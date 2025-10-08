@@ -162,33 +162,34 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
 }
 
 void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop) {
-    fbox->style = *fprop;
+    fbox->face.style = *fprop;
     fbox->current_font_size = fprop->font_size;
 
     // Try @font-face descriptors first, then fall back to system fonts
     const char* family_to_load = fprop->family ? fprop->family : font_name;
     bool is_fallback = false;
-    fbox->face = load_font_with_descriptors(uicon, family_to_load, fprop, &is_fallback);
+    fbox->face.ft_face = load_font_with_descriptors(uicon, family_to_load, fprop, &is_fallback);
 
     // If @font-face loading failed, fall back to original method
-    if (!fbox->face) {
-        fbox->face = load_styled_font(uicon, family_to_load, fprop);
+    if (!fbox->face.ft_face) {
+        fbox->face.ft_face = load_styled_font(uicon, family_to_load, fprop);
     }
 
-    if (!fbox->face) {
+    if (!fbox->face.ft_face) {
         log_error("Failed to setup font: %s", font_name);
         return;
     }
 
-    if (FT_Load_Char(fbox->face, ' ', FT_LOAD_RENDER)) {
+    if (FT_Load_Char(fbox->face.ft_face, ' ', FT_LOAD_RENDER)) {
         log_warn("Could not load space character for font: %s", font_name);
-        fbox->space_width = fbox->face->size->metrics.y_ppem >> 6;
+        fbox->face.space_width = fbox->face.ft_face->size->metrics.y_ppem >> 6;
     } else {
-        fbox->space_width = fbox->face->glyph->advance.x >> 6;
+        fbox->face.space_width = fbox->face.ft_face->glyph->advance.x >> 6;
     }
-    FT_Bool use_kerning = FT_HAS_KERNING(fbox->face);
-    fbox->has_kerning = use_kerning;
-    log_debug("Font setup complete: %s (space_width: %.1f, has_kerning: %s)", font_name, fbox->space_width, fbox->has_kerning ? "yes" : "no");
+    FT_Bool use_kerning = FT_HAS_KERNING(fbox->face.ft_face);
+    fbox->face.has_kerning = use_kerning;
+    log_debug("Font setup complete: %s (space_width: %.1f, has_kerning: %s)",
+        font_name, fbox->face.space_width, fbox->face.has_kerning ? "yes" : "no");
 }
 
 bool fontface_entry_free(const void *item, void *udata) {

@@ -21,12 +21,12 @@ void target_children(EventContext* evcon, View* view) {
             ViewBlock* block = (ViewBlock*)view;
             printf("target view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
                 block->node->name(),
-                block->x, block->y, block->width, block->height);                
+                block->x, block->y, block->width, block->height);
             target_block_view(evcon, block);
         }
         else if (view->type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
-            printf("target view inline:%s\n", span->node->name());                
+            printf("target view inline:%s\n", span->node->name());
             target_inline_view(evcon, span);
         }
         else if (view->type == RDT_VIEW_TEXT) {
@@ -42,30 +42,30 @@ void target_children(EventContext* evcon, View* view) {
 
 void target_text_view(EventContext* evcon, ViewText* text) {
     float x = evcon->block.x + text->x, y = evcon->block.y + text->y;
-    unsigned char* str = text->node->text_data();  
+    unsigned char* str = text->node->text_data();
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    printf("target text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d\n", 
+    printf("target text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d\n",
         str, text->start_index, text->length, text->x, text->y, text->width, text->height, evcon->block.x);
-    bool has_space = false;   
+    bool has_space = false;
     for (; p < end; p++) {
         int wd = 0;
-        if (is_space(*p)) { 
+        if (is_space(*p)) {
             if (has_space) continue;  // skip consecutive spaces
             else has_space = true;
             // printf("target_space: %c, x:%f, end:%f\n", *p, x, x + evcon->font.space_width);
-            wd = evcon->font.space_width;
+            wd = evcon->font.face.space_width;
         }
         else {
             has_space = false;
-            if (FT_Load_Char(evcon->font.face, *p, FT_LOAD_RENDER)) {
+            if (FT_Load_Char(evcon->font.face.ft_face, *p, FT_LOAD_RENDER)) {
                 fprintf(stderr, "Could not load character '%c'\n", *p);
                 continue;
             }
             // draw the glyph to the image buffer
             // printf("target_glyph: %c, x:%f, end:%f, y:%f\n", *p, x, x + (evcon->font.face->glyph->advance.x >> 6), y);
-            wd = evcon->font.face->glyph->advance.x >> 6;  // changed from rdcon to evcon
+            wd = evcon->font.face.ft_face->glyph->advance.x >> 6;  // changed from rdcon to evcon
         }
-        float char_right = x + wd;  float char_bottom = y + (evcon->font.face->height >> 6);
+        float char_right = x + wd;  float char_bottom = y + (evcon->font.face.ft_face->height >> 6);
         MousePositionEvent* event = &evcon->event.mouse_position;
         if (x <= event->x && event->x < char_right && y <= event->y && event->y < char_bottom) {
             printf("hit on text: %c\n", *p);
@@ -81,7 +81,7 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     View* view = view_span->child;
     if (view) {
         if (view_span->font) {
-            setup_font(evcon->ui_context, &evcon->font, pa_font.face->family_name, view_span->font);
+            setup_font(evcon->ui_context, &evcon->font, pa_font.face.ft_face->family_name, view_span->font);
         }
         target_children(evcon, view);
     }
@@ -118,7 +118,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     view = block->child;
     if (view) {
         if (block->font) {
-            setup_font(evcon->ui_context, &evcon->font, pa_font.face->family_name, block->font); 
+            setup_font(evcon->ui_context, &evcon->font, pa_font.face.ft_face->family_name, block->font);
         }
         target_children(evcon, view);
         if (!evcon->target) { // check the block itself
@@ -128,7 +128,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
                 printf("hit on block: %s\n", block->node->name());
                 evcon->target = (View*)block;
                 evcon->offset_x = event->x - evcon->block.x;
-                evcon->offset_y = event->y - evcon->block.y;                
+                evcon->offset_y = event->y - evcon->block.y;
             }
         }
     }
@@ -151,7 +151,7 @@ void target_html_doc(EventContext* evcon, View* root_view) {
 }
 
 ArrayList* build_view_stack(EventContext* evcon, View* view) {
-    ArrayList* list = arraylist_new(100);  	
+    ArrayList* list = arraylist_new(100);
     while (view) {
         arraylist_prepend(list, view);
         view = (View*)view->parent;
@@ -206,14 +206,14 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
         if (evcon->event.type == RDT_EVENT_SCROLL) {
             scrollpane_scroll(evcon, block->scroller->pane);
         }
-        else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN && 
+        else if (evcon->event.type == RDT_EVENT_MOUSE_DOWN &&
             (block->scroller->pane->is_h_hovered || block->scroller->pane->is_v_hovered)) {
             scrollpane_mouse_down(evcon, block);
         }
         else if (evcon->event.type == RDT_EVENT_MOUSE_UP) {
             scrollpane_mouse_up(evcon, block);
         }
-        else if (evcon->event.type == RDT_EVENT_MOUSE_DRAG && 
+        else if (evcon->event.type == RDT_EVENT_MOUSE_DRAG &&
             (block->scroller->pane->h_is_dragging || block->scroller->pane->v_is_dragging)) {
             scrollpane_drag(evcon, block);
         }
@@ -228,10 +228,10 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
         if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
             view->type == RDT_VIEW_LIST_ITEM) {
             fire_block_event(evcon, (ViewBlock*)view);
-        } 
+        }
         else if (view->type == RDT_VIEW_INLINE) {
             fire_inline_event(evcon, (ViewSpan*)view);
-        } 
+        }
         else if (view->type == RDT_VIEW_TEXT) {
             fire_text_event(evcon, (ViewText*)view);
         }
@@ -263,7 +263,7 @@ lxb_status_t set_iframe_src_callback(lxb_dom_node_t *node, lxb_css_selector_spec
 }
 
 // find iframe by name and set new src using selector
-lxb_dom_element_t *set_iframe_src_by_name(lxb_html_document_t *document, 
+lxb_dom_element_t *set_iframe_src_by_name(lxb_html_document_t *document,
     const char *target_name, const char *new_src) {
     lxb_status_t status;
     lxb_css_parser_t *parser = lxb_css_parser_create();
@@ -277,7 +277,7 @@ lxb_dom_element_t *set_iframe_src_by_name(lxb_html_document_t *document,
         lxb_selectors_destroy(selectors, true);
         return NULL;
     }
-    
+
     // construct selector string: iframe[name="target_name"]
     char selector_str[128];
     snprintf(selector_str, sizeof(selector_str), "iframe[name=\"%s\"]", target_name);
@@ -287,11 +287,11 @@ lxb_dom_element_t *set_iframe_src_by_name(lxb_html_document_t *document,
     }
 
     lxb_dom_element_t *element = NULL;
-    status = lxb_selectors_find(selectors, lxb_dom_interface_node(document), list, 
+    status = lxb_selectors_find(selectors, lxb_dom_interface_node(document), list,
         set_iframe_src_callback, (void*)&element);
     if (element) {
         log_debug("set iframe src: %s", new_src);
-        lxb_dom_element_set_attribute(element, (const lxb_char_t *)"src", 3, 
+        lxb_dom_element_set_attribute(element, (const lxb_char_t *)"src", 3,
             (const lxb_char_t *)new_src, (size_t)strlen((char*)new_src));
     }
     // cleanup
@@ -323,16 +323,16 @@ void update_scroller(ViewBlock* block, int content_width, int content_height) {
     if (content_width > block->width) { // hz overflow
         block->scroller->has_hz_overflow = true;
         if (block->scroller->overflow_x == LXB_CSS_VALUE_VISIBLE) {}
-        else if (block->scroller->overflow_x == LXB_CSS_VALUE_SCROLL || 
+        else if (block->scroller->overflow_x == LXB_CSS_VALUE_SCROLL ||
             block->scroller->overflow_x == LXB_CSS_VALUE_AUTO) {
             block->scroller->has_hz_scroll = true;
         }
-        if (block->scroller->has_hz_scroll || 
-            block->scroller->overflow_x == LXB_CSS_VALUE_CLIP || 
+        if (block->scroller->has_hz_scroll ||
+            block->scroller->overflow_x == LXB_CSS_VALUE_CLIP ||
             block->scroller->overflow_x == LXB_CSS_VALUE_HIDDEN) {
             block->scroller->has_clip = true;
             block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
-            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;                
+            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
         }
     }
     else {
@@ -346,13 +346,13 @@ void update_scroller(ViewBlock* block, int content_width, int content_height) {
         else if (block->scroller->overflow_y == LXB_CSS_VALUE_SCROLL || block->scroller->overflow_y == LXB_CSS_VALUE_AUTO) {
             block->scroller->has_vt_scroll = true;
         }
-        if (block->scroller->has_hz_scroll || 
-            block->scroller->overflow_y == LXB_CSS_VALUE_CLIP || 
+        if (block->scroller->has_hz_scroll ||
+            block->scroller->overflow_y == LXB_CSS_VALUE_CLIP ||
             block->scroller->overflow_y == LXB_CSS_VALUE_HIDDEN) {
             block->scroller->has_clip = true;
             block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
-            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;          
-        }                
+            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
+        }
     }
     else {
         block->scroller->has_vt_overflow = false;
@@ -397,7 +397,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
         }
-        
+
         if (uicon->mouse_state.cursor != evcon.new_cursor) {
             printf("Change cursor to %d\n", evcon.new_cursor);
             uicon->mouse_state.cursor = evcon.new_cursor; // update the mouse state
@@ -415,7 +415,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                 uicon->mouse_state.sys_cursor = cursor;
                 glfwSetCursor(uicon->window, cursor);
             }
-        }        
+        }
         break;
     }
     case RDT_EVENT_MOUSE_DOWN:   case RDT_EVENT_MOUSE_UP: {
@@ -451,7 +451,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                 lxb_dom_element_t *elmt = set_iframe_src_by_name(doc->dom_tree, evcon.new_target, evcon.new_url);
                 View* iframe = find_view(doc->view_tree->root, (lxb_dom_node_t*)elmt);
                 if (iframe) {
-                    if ((iframe->type == RDT_VIEW_BLOCK || iframe->type == RDT_VIEW_INLINE_BLOCK) && 
+                    if ((iframe->type == RDT_VIEW_BLOCK || iframe->type == RDT_VIEW_INLINE_BLOCK) &&
                         ((ViewBlock*)iframe)->embed) {
                         log_debug("updating doc of iframe view");
                         ViewBlock* block = (ViewBlock*)iframe;
@@ -461,7 +461,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                         }
                         // load the new document
                         Document* old_doc = block->embed->doc;
-                        Document* new_doc = block->embed->doc = 
+                        Document* new_doc = block->embed->doc =
                             load_html_doc(evcon.ui_context->document->url, evcon.new_url);
                         if (new_doc && new_doc->dom_tree) {
                             layout_html_doc(evcon.ui_context, new_doc, false);
@@ -470,8 +470,8 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                                 block->content_width = root->content_width;
                                 block->content_height = root->content_height;
                                 update_scroller(block, block->content_width, block->content_height);
-                            }                            
-                        }           
+                            }
+                        }
                         free_document(old_doc);
                         uicon->document->state->is_dirty = true;
                     }
@@ -483,7 +483,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                 Document* old_doc = evcon.ui_context->document;
                 // load the new document
                 evcon.ui_context->document = show_html_doc(evcon.ui_context->document->url, evcon.new_url);
-                free_document(old_doc);    
+                free_document(old_doc);
             }
             to_repaint();
         }
@@ -514,7 +514,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     if (evcon.need_repaint) {
         uicon->document->state->is_dirty = true;
         to_repaint();
-    }    
+    }
     printf("end of event %d\n", event->type);
 
     event_context_cleanup(&evcon);

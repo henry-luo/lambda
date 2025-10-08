@@ -245,7 +245,7 @@ void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* d
         return;
     }
     // use font size from context
-    lycon->font.current_font_size = lycon->font.style.font_size;
+    lycon->font.current_font_size = lycon->font.face.style.font_size;
     printf("resolved font size\n");
 }
 
@@ -300,7 +300,7 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
             break;
         case LXB_CSS_UNIT_EM:
             if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
-                result = value->u.length.num * lycon->font.style.font_size;
+                result = value->u.length.num * lycon->font.face.style.font_size;
             } else {
                 if (lycon->font.current_font_size < 0) {
                     printf("resolving font size for em value");
@@ -316,7 +316,7 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         break;
     case LXB_CSS_VALUE__PERCENTAGE:
         if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
-            result = value->u.percentage.num * lycon->font.style.font_size / 100;
+            result = value->u.percentage.num * lycon->font.face.style.font_size / 100;
         } else {
             // todo: handle % based on property
             printf("DEBUG: Percentage calculation: %.2f%% of parent width %d = %.2f\n",
@@ -567,7 +567,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         lxb_css_property_line_height_t* line_height = declr->u.line_height;
         switch (line_height->type) {
         case LXB_CSS_VALUE__NUMBER:
-            lycon->block.line_height = line_height->u.number.num * lycon->font.style.font_size;
+            lycon->block.line_height = line_height->u.number.num * lycon->font.face.style.font_size;
             printf("property number: %lf\n", line_height->u.number.num);
             break;
         case LXB_CSS_VALUE__LENGTH:
@@ -575,7 +575,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             printf("property unit: %d\n", line_height->u.length.unit);
             break;
         case LXB_CSS_VALUE__PERCENTAGE:
-            lycon->block.line_height = line_height->u.percentage.num * lycon->font.style.font_size;
+            lycon->block.line_height = line_height->u.percentage.num * lycon->font.face.style.font_size;
             printf("property percentage: %lf\n", line_height->u.percentage.num);
             break;
         case LXB_CSS_VALUE_NORMAL:

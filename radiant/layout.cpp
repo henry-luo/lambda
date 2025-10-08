@@ -80,7 +80,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     View* child = span->child;
     if (child) {
         if (span->font) {
-            setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, span->font);
+            setup_font(lycon->ui_context, &lycon->font, pa_font.face.ft_face->family_name, span->font);
         }
         if (span->in_line && span->in_line->vertical_align) {
             lycon->line.vertical_align = span->in_line->vertical_align;
@@ -100,9 +100,11 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         ViewText* text_view = (ViewText*)view;
         int item_height = text_view->height;
         // for text, baseline is at font.ascender
-        int item_baseline = (int)(lycon->font.face->size->metrics.ascender / 64);
+        int item_baseline = (int)(text_view->font->ft_face->size->metrics.ascender >> 6);
         int vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
+        log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%d, line=%d, txt=%d",
+            text_view->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height);
         text_view->y = lycon->block.advance_y + max(vertical_offset, 0);
     } else if (view->type == RDT_VIEW_INLINE_BLOCK) {
         ViewBlock* block = (ViewBlock*)view;
@@ -284,10 +286,11 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // resolve element default styles
     resolve_inline_default(lycon, span);
     // resolve CSS styles
+
     dom_node_resolve_style(elmt, lycon);
 
     if (span->font) {
-        setup_font(lycon->ui_context, &lycon->font, pa_font.face->family_name, span->font);
+        setup_font(lycon->ui_context, &lycon->font, pa_font.face.ft_face->family_name, span->font);
     }
     if (span->in_line && span->in_line->vertical_align) {
         lycon->line.vertical_align = span->in_line->vertical_align;
@@ -361,7 +364,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     }
     else if (node->is_text()) {
         const unsigned char* str = node->text_data();
-        log_debug("Text: '%s'");
+        log_debug("layout_text: '%s'", str);
         // skip whitespace at end of block
         if (!node->next_sibling() && lycon->parent->is_block() && is_only_whitespace((const char*)str)) {
             log_debug("skipping whitespace text at end of block");
@@ -463,7 +466,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
 
     // init context
     lycon->elmt = elmt;
-    lycon->font.style = lycon->ui_context->default_font;
+    lycon->font.face.style = lycon->ui_context->default_font;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
     lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;
     // CRITICAL FIX: Let HTML element auto-size to content instead of forcing viewport height
@@ -492,14 +495,14 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     dom_node_resolve_style(elmt, lycon);
 
     if (html->font) {
-        setup_font(lycon->ui_context, &lycon->font, lycon->font.face->family_name, html->font);
+        setup_font(lycon->ui_context, &lycon->font, lycon->font.face.ft_face->family_name, html->font);
     }
     if (lycon->root_font_size < 0) {
         lycon->root_font_size = lycon->font.current_font_size < 0 ?
             lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
     }
-    lycon->block.init_ascender = lycon->font.face->size->metrics.ascender >> 6;
-    lycon->block.init_descender = (-lycon->font.face->size->metrics.descender) >> 6;
+    lycon->block.init_ascender = lycon->font.face.ft_face->size->metrics.ascender >> 6;
+    lycon->block.init_descender = (-lycon->font.face.ft_face->size->metrics.descender) >> 6;
 
     // layout body content
     lxb_dom_element_t *lexbor_body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);
