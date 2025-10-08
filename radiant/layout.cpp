@@ -262,7 +262,15 @@ void resolve_inline_default(LayoutContext* lycon, ViewSpan* span) {
 
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("layout inline %s", elmt->name());
-    if (elmt->tag() == LXB_TAG_BR) { line_break(lycon); return; }
+    if (elmt->tag() == LXB_TAG_BR) {
+        // allocate a line break view
+        View* br_view = alloc_view(lycon, RDT_VIEW_BR, elmt);
+        br_view->x = lycon->line.advance_x;  br_view->y = lycon->block.advance_y;
+        br_view->width = 0;  br_view->height = lycon->block.line_height;
+        lycon->prev_view = br_view;
+        line_break(lycon);
+        return;
+    }
 
     // save parent context
     FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // unresolved yet
@@ -313,15 +321,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         DisplayValue display = resolve_display(elmt);
 
         // Debug: print display values for all elements to diagnose grid issue
-        printf("DEBUG: Element %s - outer=%d, inner=%d (GRID=%d, FLEX=%d, FLOW=%d)\n",
-               node->name(), display.outer, display.inner,
-               LXB_CSS_VALUE_GRID, LXB_CSS_VALUE_FLEX, LXB_CSS_VALUE_FLOW);
-
-        // Debug: print display values for table elements
-        if (node->tag() == LXB_TAG_TABLE) {
-            printf("DEBUG: TABLE element - outer=%d, inner=%d (LXB_CSS_VALUE_TABLE=%d)\n",
-                   display.outer, display.inner, LXB_CSS_VALUE_TABLE);
-        }
+        log_debug("DEBUG: Element %s - outer=%d, inner=%d", node->name(), display.outer, display.inner);
 
         // Check for flex container first
         if (display.inner == LXB_CSS_VALUE_FLEX) {

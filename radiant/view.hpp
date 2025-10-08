@@ -112,6 +112,7 @@ extern bool is_space(char c);
 typedef enum {
     RDT_VIEW_NONE = 0,
     RDT_VIEW_TEXT,
+    RDT_VIEW_BR,
     RDT_VIEW_INLINE,
     RDT_VIEW_INLINE_BLOCK,
     RDT_VIEW_BLOCK,
