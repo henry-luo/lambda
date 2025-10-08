@@ -30,8 +30,8 @@ bool is_only_whitespace(const char* str) {
 // This matches Chrome browser's "normal" line-height behavior more accurately
 int calculate_chrome_line_height(int font_size, float pixel_ratio) {
     int base_font_size = (int)(font_size / pixel_ratio);
-    int min_line_height = base_font_size + 3;
-    int proportional_height = (int)ceil(base_font_size * 1.2);
+    int min_line_height = base_font_size + 2;
+    int proportional_height = (int)ceil(base_font_size * 1.15);
     int chrome_height = (min_line_height > proportional_height) ? min_line_height : proportional_height;
     return (int)round(chrome_height * pixel_ratio);
 }
