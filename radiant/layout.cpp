@@ -361,8 +361,14 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     }
     else if (node->is_text()) {
         const unsigned char* str = node->text_data();
-        log_debug("Text: '%s'", str);
-        layout_text(lycon, node);
+        log_debug("Text: '%s'");
+        // skip whitespace at end of block
+        if (!node->next_sibling() && lycon->parent->is_block() && is_only_whitespace((const char*)str)) {
+            log_debug("skipping whitespace text at end of block");
+        }
+        else {
+            layout_text(lycon, node);
+        }
     }
     else {
         log_debug("layout unknown node type: %d", node->type);

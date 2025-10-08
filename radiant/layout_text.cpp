@@ -169,9 +169,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     unsigned char* text_start = text_node->text_data();
     if (!text_start) return;  // null check for text data
     unsigned char* str = text_start;
-    if ((lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) { // skip space at start of line
+    // skip space at start of line
+    if ((lycon->line.is_line_start || lycon->line.has_space) && is_space(*str)) {
         do { str++; } while (is_space(*str));
-        if (!*str) { return; }
+        if (!*str) {
+            log_debug("skipping whitespace text node");
+            return;
+        }
     }
     LAYOUT_TEXT:
     // assume style_text has at least one character
