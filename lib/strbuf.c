@@ -71,7 +71,7 @@ bool strbuf_ensure_cap(StrBuf *sb, size_t min_capacity) {
             new_capacity = min_capacity; // Use minimum required instead of doubling
             break;
         }
-        log_debug("doubling strbuf new_capacity: %zu -> %zu", new_capacity, new_capacity * 2);
+        // log_debug("doubling strbuf new_capacity: %zu -> %zu", new_capacity, new_capacity * 2);
         new_capacity *= 2; 
     }
     char *new_s = (char*)realloc(sb->str, new_capacity);

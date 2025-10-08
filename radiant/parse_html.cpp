@@ -134,10 +134,10 @@ lxb_url_t* parse_lexbor_url(lxb_url_t *base, const char* doc_url) {
 }
 
 Document* load_html_doc(lxb_url_t *base, char* doc_url) {
-    log_debug("loading HTML document %s", doc_url);
+    log_debug("loading HTML document: %s, base: %s", doc_url, base ? (char*)base->path.str.data : "NULL");
     lxb_url_t* url = parse_lexbor_url(base, doc_url);
     if (!url) {
-        log_debug("failed to parse URL: %s", doc_url);
+        log_error("failed to parse URL: %s", doc_url);
         return NULL;
     }
     // parse the html document
