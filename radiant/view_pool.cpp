@@ -149,7 +149,7 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
 
 FontProp* alloc_font_prop(LayoutContext* lycon) {
     FontProp* prop = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
-    *prop = lycon->font.style;  assert(prop->font_size > 0);
+    *prop = lycon->font.face.style;  assert(prop->font_size > 0);
     return prop;
 }
 
