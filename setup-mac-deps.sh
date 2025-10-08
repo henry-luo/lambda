@@ -1,6 +1,8 @@
 #!/bin/bash
 
 # Mac native compilation dependency setup script
+# Enhanced with intelligent dependency detection to skip rebuilding ThorVG and jemalloc
+# when they're already properly downloaded, built, and verified
 set -e
 
 SCRIPT_DIR="$(pwd)"
@@ -21,6 +23,13 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
     # Clean tree-sitter-lambda build files
     if [ -d "lambda/tree-sitter-lambda" ]; then
         cd lambda/tree-sitter-lambda
+        make clean 2>/dev/null || true
+        cd - > /dev/null
+    fi
+
+    # Clean tree-sitter-javascript build files
+    if [ -d "lambda/tree-sitter-javascript" ]; then
+        cd lambda/tree-sitter-javascript
         make clean 2>/dev/null || true
         cd - > /dev/null
     fi
@@ -350,10 +359,17 @@ build_mir_for_mac() {
 build_jemalloc_with_je_prefix_for_mac() {
     echo "Building jemalloc with je_ prefix for Mac..."
 
-    # Check if already built in mac-deps
+    # Enhanced check if already built in mac-deps with proper verification
     if [ -f "mac-deps/jemalloc-install/lib/libjemalloc.a" ] && [ -f "mac-deps/jemalloc-install/include/jemalloc/jemalloc.h" ]; then
-        echo "jemalloc with je_ prefix already built"
-        return 0
+        # Verify the je_ prefix functions are available
+        if nm "mac-deps/jemalloc-install/lib/libjemalloc.a" 2>/dev/null | grep -q "je_malloc"; then
+            echo "✅ jemalloc with je_ prefix already built and verified"
+            return 0
+        else
+            echo "jemalloc found but je_ prefix functions missing, rebuilding..."
+            # Clean the incomplete installation
+            rm -rf mac-deps/jemalloc-install 2>/dev/null || true
+        fi
     fi
 
     # Create mac-deps directory if it doesn't exist
@@ -369,6 +385,8 @@ build_jemalloc_with_je_prefix_for_mac() {
             return 1
         }
         cd - > /dev/null
+    else
+        echo "jemalloc source already downloaded"
     fi
 
     cd mac-deps/jemalloc
@@ -435,11 +453,18 @@ build_jemalloc_with_je_prefix_for_mac() {
 build_thorvg_v1_0_pre11_for_mac() {
     echo "Building ThorVG v1.0-pre11 for Mac..."
 
-    # Check if already installed in system location
+    # Check if already installed in system location and verify headers
     if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ]; then
-        echo "ThorVG v1.0-pre11 already installed in system location"
-        return 0
+        if [ -f "$SYSTEM_PREFIX/include/thorvg.h" ] || [ -d "$SYSTEM_PREFIX/include/thorvg" ]; then
+            echo "✅ ThorVG v1.0-pre11 already installed in system location"
+            return 0
+        else
+            echo "ThorVG library found but headers missing, rebuilding..."
+        fi
     fi
+
+    # Create build_temp directory if it doesn't exist
+    mkdir -p build_temp
 
     if [ ! -d "build_temp/thorvg" ]; then
         cd build_temp
@@ -449,6 +474,12 @@ build_thorvg_v1_0_pre11_for_mac() {
             cd - > /dev/null
             return 1
         }
+        cd - > /dev/null
+    else
+        echo "ThorVG source already downloaded"
+        cd "build_temp/thorvg"
+        # Make sure we're up to date
+        git fetch --tags 2>/dev/null || true
         cd - > /dev/null
     fi
 
@@ -882,6 +913,33 @@ else
     echo "Tree-sitter-lambda already built for Mac"
 fi
 
+# Build tree-sitter-javascript for Mac
+if [ ! -f "lambda/tree-sitter-javascript/libtree-sitter-javascript.a" ]; then
+    echo "Building tree-sitter-javascript for Mac..."
+    cd lambda/tree-sitter-javascript
+
+    # Clean previous builds
+    make clean || true
+
+    # Generate parser if needed
+    if [ ! -f "src/parser.c" ] || [ ! -f "src/grammar.json" ]; then
+        echo "Generating tree-sitter-javascript parser..."
+        if command -v npx >/dev/null 2>&1; then
+            npx tree-sitter-cli@0.24.7 generate
+        else
+            echo "Warning: npx not available, assuming parser files are already generated"
+        fi
+    fi
+
+    # Build static library for Mac (creates libtree-sitter-javascript.a)
+    make libtree-sitter-javascript.a
+
+    cd - > /dev/null
+    echo "Tree-sitter-javascript built successfully"
+else
+    echo "Tree-sitter-javascript already built for Mac"
+fi
+
 # Build lexbor submodule for Mac
 echo "Setting up lexbor submodule..."
 if [ -f "lexbor/liblexbor_static.a" ]; then
@@ -895,21 +953,46 @@ else
     fi
 fi
 
-# Build ThorVG v1.0-pre1 for Mac
+# Build ThorVG v1.0-pre11 for Mac
 echo "Setting up ThorVG ..."
-# Force rebuild to ensure we have the correct version (v1.0-pre1)
-echo "Removing existing ThorVG installation to ensure correct version..."
-sudo rm -f "$SYSTEM_PREFIX/lib/libthorvg"* 2>/dev/null || true
-sudo rm -f "$SYSTEM_PREFIX/include/thorvg"* 2>/dev/null || true
-sudo rm -rf "$SYSTEM_PREFIX/include/thorvg" 2>/dev/null || true
-sudo rm -f "$SYSTEM_PREFIX/lib/pkgconfig/thorvg.pc" 2>/dev/null || true
-rm -rf "build_temp/thorvg" 2>/dev/null || true
 
-if ! build_thorvg_v1_0_pre11_for_mac; then
-    echo "❌ ThorVG v1.0-pre11 build failed - required for Radiant project"
-    exit 1
+# Check if ThorVG v1.0-pre11 is already properly installed
+if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ]; then
+    # Verify it's the correct version by checking if we can find the repository with the right tag
+    if [ -d "build_temp/thorvg" ]; then
+        cd "build_temp/thorvg"
+        if git describe --tags 2>/dev/null | grep -q "v1.0-pre11"; then
+            echo "✅ ThorVG v1.0-pre11 already installed and verified"
+            cd - > /dev/null
+        else
+            echo "ThorVG found but version mismatch, rebuilding..."
+            cd - > /dev/null
+            # Force rebuild to ensure we have the correct version
+            echo "Removing existing ThorVG installation to ensure correct version..."
+            sudo rm -f "$SYSTEM_PREFIX/lib/libthorvg"* 2>/dev/null || true
+            sudo rm -f "$SYSTEM_PREFIX/include/thorvg"* 2>/dev/null || true
+            sudo rm -rf "$SYSTEM_PREFIX/include/thorvg" 2>/dev/null || true
+            sudo rm -f "$SYSTEM_PREFIX/lib/pkgconfig/thorvg.pc" 2>/dev/null || true
+            rm -rf "build_temp/thorvg" 2>/dev/null || true
+            
+            if ! build_thorvg_v1_0_pre11_for_mac; then
+                echo "❌ ThorVG v1.0-pre11 build failed - required for Radiant project"
+                exit 1
+            else
+                echo "✅ ThorVG v1.0-pre11 built successfully"
+            fi
+        fi
+    else
+        echo "✅ ThorVG v1.0-pre11 already installed in system location"
+    fi
 else
-    echo "✅ ThorVG v1.0-pre11 built successfully"
+    # ThorVG not found, need to build it
+    if ! build_thorvg_v1_0_pre11_for_mac; then
+        echo "❌ ThorVG v1.0-pre11 build failed - required for Radiant project"
+        exit 1
+    else
+        echo "✅ ThorVG v1.0-pre11 built successfully"
+    fi
 fi
 
 # Build Google Test for Mac
@@ -940,9 +1023,23 @@ fi
 
 # Build jemalloc with je_ prefix for Mac (Lambda dependency)
 echo "Setting up jemalloc with je_ prefix..."
-if [ -f "mac-deps/jemalloc-install/lib/libjemalloc.a" ]; then
-    echo "jemalloc with je_ prefix already available"
+
+# Enhanced check for jemalloc - verify both library and headers exist and are functional
+if [ -f "mac-deps/jemalloc-install/lib/libjemalloc.a" ] && [ -f "mac-deps/jemalloc-install/include/jemalloc/jemalloc.h" ]; then
+    # Verify the je_ prefix functions are available in the built library
+    if nm "mac-deps/jemalloc-install/lib/libjemalloc.a" 2>/dev/null | grep -q "je_malloc"; then
+        echo "✅ jemalloc with je_ prefix already available and verified"
+    else
+        echo "jemalloc library found but je_ prefix functions missing, rebuilding..."
+        if ! build_jemalloc_with_je_prefix_for_mac; then
+            echo "❌ jemalloc with je_ prefix build failed - required for Lambda memory pool"
+            exit 1
+        else
+            echo "✅ jemalloc with je_ prefix built successfully"
+        fi
+    fi
 else
+    echo "jemalloc not found or incomplete, building..."
     if ! build_jemalloc_with_je_prefix_for_mac; then
         echo "❌ jemalloc with je_ prefix build failed - required for Lambda memory pool"
         exit 1
