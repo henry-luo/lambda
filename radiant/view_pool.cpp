@@ -22,6 +22,8 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
             break;
         case RDT_VIEW_TABLE:
             view = (ViewTable*)pool_calloc(tree->pool, sizeof(ViewTable));
+            // Initialize defaults
+            ((ViewTable*)view)->table_layout = ViewTable::TABLE_LAYOUT_AUTO;
             break;
         case RDT_VIEW_TABLE_ROW_GROUP:
             view = (ViewTableRowGroup*)pool_calloc(tree->pool, sizeof(ViewTableRowGroup));

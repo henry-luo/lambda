@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "grid.hpp"
+#include "layout_table.hpp"
 
 #include "../lib/log.h"
 #include <string.h>
@@ -1417,7 +1418,10 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
     case LXB_CSS_PROPERTY__CUSTOM: { // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
-        log_debug("custom property: %.*s\n", (int)custom->name.length, custom->name.data);
+        // Handle CSS Grid properties as custom properties until lexbor supports them
+        log_debug("Processing custom property: %.*s = %.*s\n",
+               (int)custom->name.length, (const char*)custom->name.data,
+               (int)custom->value.length, (const char*)custom->value.data);
 
         // Handle aspect-ratio as custom property until lexbor supports it
         if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "aspect-ratio", 12) == 0) {
@@ -1447,7 +1451,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         // Handle justify-content space-evenly as custom property since lexbor doesn't support it
-        if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "justify-content", 15) == 0) {
+        else if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "justify-content", 15) == 0) {
             const char* value_str = (const char*)custom->value.data;
 
             // Check if the value is "space-evenly"
@@ -1462,7 +1466,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         // Handle gap property as custom property until lexbor supports it
-        if (custom->name.length == 3 && strncmp((const char*)custom->name.data, "gap", 3) == 0) {
+        else if (custom->name.length == 3 && strncmp((const char*)custom->name.data, "gap", 3) == 0) {
             const char* value_str = (const char*)custom->value.data;
 
             // Parse gap value (e.g., "10px", "1em", "20")
@@ -1502,13 +1506,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             }
         }
 
-        // Handle CSS Grid properties as custom properties until lexbor supports them
-        printf("DEBUG: Processing custom property: %.*s (length=%zu) = %.*s\n",
-               (int)custom->name.length, (const char*)custom->name.data, custom->name.length,
-               (int)custom->value.length, (const char*)custom->value.data);
-
         // grid-template-rows
-        if (custom->name.length == 18 && strncmp((const char*)custom->name.data, "grid-template-rows", 18) == 0) {
+        else if (custom->name.length == 18 && strncmp((const char*)custom->name.data, "grid-template-rows", 18) == 0) {
             printf("DEBUG: grid-template-rows matched! block=%p\n", block);
             if (block) {
                 printf("DEBUG: Inside grid-template-rows block processing\n");
@@ -1535,7 +1534,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         // grid-template-columns
-        if (custom->name.length == 21 && strncmp((const char*)custom->name.data, "grid-template-columns", 21) == 0) {
+        else if (custom->name.length == 21 && strncmp((const char*)custom->name.data, "grid-template-columns", 21) == 0) {
             printf("DEBUG: grid-template-columns matched! block=%p\n", block);
             if (block) {
                 printf("DEBUG: Inside grid-template-columns block processing\n");
@@ -1562,7 +1561,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         // grid-template-areas
-        if (custom->name.length == 19 && strncmp((const char*)custom->name.data, "grid-template-areas", 19) == 0) {
+        else if (custom->name.length == 19 && strncmp((const char*)custom->name.data, "grid-template-areas", 19) == 0) {
             printf("DEBUG: grid-template-areas matched! block=%p\n", block);
             if (block) {
                 printf("DEBUG: Inside grid-template-areas block processing\n");
@@ -1582,7 +1581,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         // grid-row-start, grid-row-end, grid-column-start, grid-column-end
-        if (custom->name.length == 14 && strncmp((const char*)custom->name.data, "grid-row-start", 14) == 0) {
+        else if (custom->name.length == 14 && strncmp((const char*)custom->name.data, "grid-row-start", 14) == 0) {
             char* endptr;
             int line_value = strtol((const char*)custom->value.data, &endptr, 10);
             if (endptr != (const char*)custom->value.data) {
@@ -1592,7 +1591,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             }
         }
 
-        if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "grid-row-end", 12) == 0) {
+        else if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "grid-row-end", 12) == 0) {
             char* endptr;
             int line_value = strtol((const char*)custom->value.data, &endptr, 10);
             if (endptr != (const char*)custom->value.data) {
@@ -1602,7 +1601,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             }
         }
 
-        if (custom->name.length == 17 && strncmp((const char*)custom->name.data, "grid-column-start", 17) == 0) {
+        else if (custom->name.length == 17 && strncmp((const char*)custom->name.data, "grid-column-start", 17) == 0) {
             char* endptr;
             int line_value = strtol((const char*)custom->value.data, &endptr, 10);
             if (endptr != (const char*)custom->value.data) {
@@ -1612,7 +1611,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             }
         }
 
-        if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "grid-column-end", 15) == 0) {
+        else if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "grid-column-end", 15) == 0) {
             char* endptr;
             int line_value = strtol((const char*)custom->value.data, &endptr, 10);
             if (endptr != (const char*)custom->value.data) {
@@ -1623,7 +1622,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         // grid-area
-        if (custom->name.length == 9 && strncmp((const char*)custom->name.data, "grid-area", 9) == 0) {
+        else if (custom->name.length == 9 && strncmp((const char*)custom->name.data, "grid-area", 9) == 0) {
             // Copy the grid area name
             int len = min((int)custom->value.length, 63); // Reasonable limit
             if (span->grid_area) {
@@ -1636,7 +1635,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         // row-gap and column-gap for grid
-        if (custom->name.length == 7 && strncmp((const char*)custom->name.data, "row-gap", 7) == 0) {
+        else if (custom->name.length == 7 && strncmp((const char*)custom->name.data, "row-gap", 7) == 0) {
             const char* value_str = (const char*)custom->value.data;
             char* endptr;
             float gap_value = strtof(value_str, &endptr);
@@ -1651,7 +1650,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             }
         }
 
-        if (custom->name.length == 10 && strncmp((const char*)custom->name.data, "column-gap", 10) == 0) {
+        else if (custom->name.length == 10 && strncmp((const char*)custom->name.data, "column-gap", 10) == 0) {
             const char* value_str = (const char*)custom->value.data;
             char* endptr;
             float gap_value = strtof(value_str, &endptr);
@@ -1667,7 +1666,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         // grid-auto-flow
-        if (custom->name.length == 14 && strncmp((const char*)custom->name.data, "grid-auto-flow", 14) == 0) {
+        else if (custom->name.length == 14 && strncmp((const char*)custom->name.data, "grid-auto-flow", 14) == 0) {
             if (block) {
                 alloc_grid_prop(lycon, block);
 
@@ -1689,6 +1688,51 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 log_debug("Set grid-auto-flow: %.*s\n", (int)custom->value.length, custom->value.data);
             }
         }
+
+        else if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "table-layout", 12) == 0) {
+            const char* value_str = (const char*)custom->value.data;
+            if (strstr(value_str, "fixed")) {
+                ViewTable* table = lycon->view->type != RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
+                if (table) {
+                    table->table_layout = ViewTable::TABLE_LAYOUT_FIXED;
+                    log_debug("Detected table-layout: fixed (inline)");
+                }
+            }
+        }
+        else if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "border-collapse", 15) == 0) {
+            const char* value_str = (const char*)custom->value.data;
+            if (strstr(value_str, "collapse")) {
+                ViewTable* table = lycon->view->type != RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
+                if (table) {
+                    table->border_collapse = true;
+                    log_debug("Detected border-collapse: collapse (inline)");
+                }
+            }
+        }
+        else if (custom->name.length == 14 && strncmp((const char*)custom->name.data, "border-spacing", 14) == 0) {
+            const char* value_str = (const char*)custom->value.data;
+            ViewTable* table = lycon->view->type != RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
+            if (table) {
+                const char* q = value_str;
+                while (*q && *q != ':') q++;
+                if (*q == ':') q++;
+                while (*q == ' ') q++;
+                int h = atoi(q);
+                while (*q && *q != ' ' && *q != ';' && *q != 'p') q++;
+                if (*q == 'p' && *(q+1) == 'x') q += 2;
+                int v = -1;
+                while (*q == ' ') q++;
+                if (*q && *q != ';') {
+                    v = atoi(q);
+                }
+                if (h < 0) h = 0;
+                if (v < 0) v = h;
+                table->border_spacing_h = h;
+                table->border_spacing_v = v;
+                log_debug("Detected border-spacing: %dpx %dpx (inline)", h, v);
+            }
+        }
+
     }
     }
 

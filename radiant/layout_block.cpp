@@ -245,7 +245,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     uintptr_t elmt_name = elmt->tag();
     ViewBlock* block = (ViewBlock*)alloc_view(lycon,
         display.outer == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
-        (display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM : RDT_VIEW_BLOCK),
+        display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
+        display.inner == LXB_CSS_VALUE_TABLE ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK,
         elmt);
     block->display = display;
 
