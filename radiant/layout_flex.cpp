@@ -816,9 +816,6 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
 void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line) {
     if (!flex_layout || !line || line->item_count == 0) return;
 
-    printf("DEBUG: ALIGN_CROSS_AXIS - line_cross_size: %d, align_items: %d (ALIGN_CENTER=%d)\n",
-           line->cross_size, flex_layout->align_items, ALIGN_CENTER);
-
     // Find maximum baseline for baseline alignment
     int max_baseline = find_max_baseline(line);
 
@@ -827,6 +824,9 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
         // CRITICAL FIX: Use align values directly - they're now stored as Lexbor constants
         int align_type = item->align_self != ALIGN_AUTO ?
                         item->align_self : flex_layout->align_items;
+
+        printf("DEBUG: ALIGN_SELF_RAW - item %d: align_self=%d, ALIGN_AUTO=%d, flex_align_items=%d\n",
+               i, item->align_self, ALIGN_AUTO, flex_layout->align_items);
 
         int item_cross_size = get_cross_axis_size(item, flex_layout);
         int line_cross_size = line->cross_size;
@@ -861,9 +861,6 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
             // This matches browser behavior where items are aligned within the container
             int container_cross_size = flex_layout->cross_axis_size;
 
-            printf("DEBUG: ALIGN_CENTER - item %d: align_type=%d, container_cross_size=%d, item_cross_size=%d\n",
-                   i, align_type, container_cross_size, item_cross_size);
-
             // Regular alignment
             switch (align_type) {
                 case ALIGN_START:
@@ -874,7 +871,6 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                     break;
                 case ALIGN_CENTER:
                     cross_pos = (container_cross_size - item_cross_size) / 2;
-                    printf("DEBUG: ALIGN_CENTER - calculated cross_pos=%d\n", cross_pos);
                     break;
                 case ALIGN_STRETCH:
                     cross_pos = 0;
