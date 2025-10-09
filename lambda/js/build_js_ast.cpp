@@ -166,10 +166,24 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
 
 // Build JavaScript identifier node
 JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
+    if (ts_node_is_null(id_node)) {
+        log_error("Cannot build identifier from null node");
+        return NULL;
+    }
+    
     JsIdentifierNode* identifier = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, id_node, sizeof(JsIdentifierNode));
     
     StrView source = js_node_source(tp, id_node);
+    if (source.length == 0) {
+        log_error("Empty identifier source");
+        return NULL;
+    }
+    
     identifier->name = name_pool_create_strview(tp->name_pool, source);
+    if (!identifier->name) {
+        log_error("Failed to create identifier name");
+        return NULL;
+    }
     
     // Look up in symbol table
     // printf("DEBUG: Looking up identifier: %.*s\n", (int)identifier->name->len, identifier->name->chars);
@@ -366,11 +380,22 @@ JsAstNode* build_js_unary_expression(JsTranspiler* tp, TSNode unary_node) {
 
 // Build JavaScript call expression node
 JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
+    printf("DEBUG: build_js_call_expression called\n");
+    fflush(stdout);
+    
     JsCallNode* call = (JsCallNode*)alloc_js_ast_node(tp, JS_AST_NODE_CALL_EXPRESSION, call_node, sizeof(JsCallNode));
+    printf("DEBUG: Allocated call node: %p\n", call);
+    fflush(stdout);
     
     // Get callee (function being called)
+    printf("DEBUG: Getting callee node\n");
+    fflush(stdout);
     TSNode callee_node = ts_node_child_by_field_id(call_node, JS_FIELD_FUNCTION);
+    printf("DEBUG: About to build callee expression\n");
+    fflush(stdout);
     call->callee = build_js_expression(tp, callee_node);
+    printf("DEBUG: Built callee expression: %p\n", call->callee);
+    fflush(stdout);
     
     // Get arguments
     TSNode args_node = ts_node_child_by_field_id(call_node, JS_FIELD_ARGUMENTS);
@@ -504,12 +529,14 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
             TSNode param_node = ts_node_named_child(params_node, i);
             JsAstNode* param = build_js_identifier(tp, param_node);
             
-            if (!prev_param) {
-                func->params = param;
-            } else {
-                prev_param->next = param;
+            if (param) {
+                if (!prev_param) {
+                    func->params = param;
+                } else {
+                    prev_param->next = param;
+                }
+                prev_param = param;
             }
-            prev_param = param;
         }
     }
     
@@ -522,6 +549,11 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
         } else {
             // Arrow function with expression body
             func->body = build_js_expression(tp, body_node);
+        }
+        
+        if (!func->body) {
+            log_error("Failed to build function body");
+            return NULL;
         }
     }
     
@@ -832,7 +864,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         }
         
         return (JsAstNode*)cond;
-    } else if (strcmp(node_type, "template_string") == 0) {
+    } else if (strcmp(node_type, "template_string") == 0 || strcmp(node_type, "template_literal") == 0) {
         return build_js_template_literal(tp, expr_node);
     } else {
         log_error("Unsupported JavaScript expression type: %s", node_type);
@@ -873,10 +905,25 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
     } else if (strcmp(node_type, "class_declaration") == 0) {
         return build_js_class_declaration(tp, stmt_node);
     } else if (strcmp(node_type, "expression_statement") == 0) {
+        printf("DEBUG: Processing expression_statement\n");
+        fflush(stdout);
+        
         JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)alloc_js_ast_node(tp, JS_AST_NODE_EXPRESSION_STATEMENT, stmt_node, sizeof(JsExpressionStatementNode));
         TSNode expr_node = ts_node_named_child(stmt_node, 0);
+        
+        const char* expr_type = ts_node_type(expr_node);
+        printf("DEBUG: Expression type: %s\n", expr_type);
+        fflush(stdout);
+        
         expr_stmt->expression = build_js_expression(tp, expr_node);
-        expr_stmt->base.type = expr_stmt->expression->type;
+        printf("DEBUG: build_js_expression returned: %p\n", expr_stmt->expression);
+        fflush(stdout);
+        
+        if (expr_stmt->expression && expr_stmt->expression->type) {
+            expr_stmt->base.type = expr_stmt->expression->type;
+        } else {
+            expr_stmt->base.type = &TYPE_NULL;
+        }
         return (JsAstNode*)expr_stmt;
     } else if (strcmp(node_type, "comment") == 0) {
         // Skip comments - they don't generate any code
@@ -889,14 +936,31 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
 
 // Build JavaScript program (root node)
 JsAstNode* build_js_program(JsTranspiler* tp, TSNode program_node) {
+    printf("DEBUG: build_js_program called\n");
+    fflush(stdout);
+    
     JsProgramNode* program = (JsProgramNode*)alloc_js_ast_node(tp, JS_AST_NODE_PROGRAM, program_node, sizeof(JsProgramNode));
+    printf("DEBUG: Allocated program node: %p\n", program);
+    fflush(stdout);
     
     uint32_t child_count = ts_node_named_child_count(program_node);
+    printf("DEBUG: Program has %u child statements\n", child_count);
+    fflush(stdout);
+    
     JsAstNode* prev_stmt = NULL;
     
     for (uint32_t i = 0; i < child_count; i++) {
+        printf("DEBUG: Processing child %u/%u\n", i + 1, child_count);
+        fflush(stdout);
+        
         TSNode child_node = ts_node_named_child(program_node, i);
+        const char* child_type = ts_node_type(child_node);
+        printf("DEBUG: Child %u type: %s\n", i, child_type);
+        fflush(stdout);
+        
         JsAstNode* stmt = build_js_statement(tp, child_node);
+        printf("DEBUG: build_js_statement returned: %p\n", stmt);
+        fflush(stdout);
         
         if (stmt) {
             if (!prev_stmt) {
@@ -925,7 +989,9 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
         TSNode child = ts_node_named_child(template_node, i);
         TSSymbol symbol = ts_node_symbol(child);
         
-        if (symbol == sym_template_chars) {
+        const char* child_type = ts_node_type(child);
+        
+        if (strcmp(child_type, "string_fragment") == 0 || symbol == sym_template_chars) {
             // Template string part
             JsTemplateElementNode* element = (JsTemplateElementNode*)alloc_js_ast_node(tp, JS_AST_NODE_TEMPLATE_ELEMENT, child, sizeof(JsTemplateElementNode));
             
@@ -941,8 +1007,20 @@ JsAstNode* build_js_template_literal(JsTranspiler* tp, TSNode template_node) {
                 prev_quasi->next = (JsAstNode*)element;
             }
             prev_quasi = (JsAstNode*)element;
+        } else if (strcmp(child_type, "template_substitution") == 0) {
+            // Template substitution - extract the expression inside
+            TSNode expr_node = ts_node_named_child(child, 0);
+            JsAstNode* expr = build_js_expression(tp, expr_node);
+            if (expr) {
+                if (!prev_expr) {
+                    template_lit->expressions = expr;
+                } else {
+                    prev_expr->next = expr;
+                }
+                prev_expr = expr;
+            }
         } else {
-            // Template expression
+            // Other template expression
             JsAstNode* expr = build_js_expression(tp, child);
             if (expr) {
                 if (!prev_expr) {
@@ -1101,10 +1179,20 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
 
 // Main AST building entry point
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root) {
+    printf("DEBUG: build_js_ast called\n");
+    fflush(stdout);
+    
     const char* node_type = ts_node_type(root);
+    printf("DEBUG: Root node type: %s\n", node_type);
+    fflush(stdout);
     
     if (strcmp(node_type, "program") == 0) {
-        return build_js_program(tp, root);
+        printf("DEBUG: About to call build_js_program\n");
+        fflush(stdout);
+        JsAstNode* result = build_js_program(tp, root);
+        printf("DEBUG: build_js_program returned: %p\n", result);
+        fflush(stdout);
+        return result;
     } else {
         log_error("Expected program node, got: %s", node_type);
         return NULL;

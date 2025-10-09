@@ -8,6 +8,11 @@
 
 // Utility functions for code generation
 void write_js_fn_name(StrBuf* buf, JsFunctionNode* func_node, int counter) {
+    if (!buf || !func_node) {
+        log_error("Invalid parameters to write_js_fn_name");
+        return;
+    }
+    
     strbuf_append_str(buf, "_js_");
     if (func_node->name && func_node->name->chars) {
         strbuf_append_str_n(buf, func_node->name->chars, func_node->name->len);
@@ -382,7 +387,9 @@ void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node) {
     // Generate argument array
     if (arg_count > 0) {
         strbuf_append_str(tp->code_buf, "({\n");
-        strbuf_append_format(tp->code_buf, "  Item args[%d] = {", arg_count);
+        strbuf_append_str(tp->code_buf, "  Item args[");
+        strbuf_append_int(tp->code_buf, arg_count);
+        strbuf_append_str(tp->code_buf, "] = {");
         
         arg = call_node->arguments;
         for (int i = 0; i < arg_count; i++) {
@@ -394,7 +401,9 @@ void transpile_js_call_expression(JsTranspiler* tp, JsCallNode* call_node) {
         strbuf_append_str(tp->code_buf, "};\n");
         strbuf_append_str(tp->code_buf, "  js_call_function(");
         transpile_js_box_item(tp, call_node->callee);
-        strbuf_append_format(tp->code_buf, ", ITEM_NULL, args, %d);\n", arg_count);
+        strbuf_append_str(tp->code_buf, ", ITEM_NULL, args, ");
+        strbuf_append_int(tp->code_buf, arg_count);
+        strbuf_append_str(tp->code_buf, ");\n");
         strbuf_append_str(tp->code_buf, "})");
     } else {
         strbuf_append_str(tp->code_buf, "js_call_function(");
@@ -478,8 +487,19 @@ void transpile_js_object_expression(JsTranspiler* tp, JsObjectNode* object_node)
 
 // Transpile JavaScript function
 void transpile_js_function(JsTranspiler* tp, JsFunctionNode* func_node) {
+    if (!tp || !func_node) {
+        log_error("Invalid parameters to transpile_js_function");
+        return;
+    }
+    
+    log_debug("Transpiling JavaScript function: %s", func_node->name ? func_node->name->chars : "<anonymous>");
+    
     // Create function scope
     JsScope* func_scope = js_scope_create(tp, JS_SCOPE_FUNCTION, tp->current_scope);
+    if (!func_scope) {
+        log_error("Failed to create function scope");
+        return;
+    }
     func_scope->function = func_node;
     js_scope_push(tp, func_scope);
     
@@ -679,7 +699,7 @@ void transpile_js_conditional_expression(JsTranspiler* tp, JsConditionalNode* co
 // Transpile JavaScript template literal
 void transpile_js_template_literal(JsTranspiler* tp, JsTemplateLiteralNode* template_node) {
     strbuf_append_str(tp->code_buf, "({\n");
-    strbuf_append_str(tp->code_buf, "  StrBuf* template_buf = strbuf_new();\n");
+    strbuf_append_str(tp->code_buf, "  StringBuf* template_buf = stringbuf_new(pool);\n");
     
     JsAstNode* quasi = template_node->quasis;
     JsAstNode* expr = template_node->expressions;
@@ -687,7 +707,7 @@ void transpile_js_template_literal(JsTranspiler* tp, JsTemplateLiteralNode* temp
     while (quasi) {
         if (quasi->node_type == JS_AST_NODE_TEMPLATE_ELEMENT) {
             JsTemplateElementNode* element = (JsTemplateElementNode*)quasi;
-            strbuf_append_str(tp->code_buf, "  strbuf_append_str(template_buf, \"");
+            strbuf_append_str(tp->code_buf, "  stringbuf_append_str(template_buf, \"");
             // TODO: Proper string escaping
             strbuf_append_str_n(tp->code_buf, element->cooked->chars, element->cooked->len);
             strbuf_append_str(tp->code_buf, "\");\n");
@@ -700,7 +720,7 @@ void transpile_js_template_literal(JsTranspiler* tp, JsTemplateLiteralNode* temp
             strbuf_append_str(tp->code_buf, ";\n");
             strbuf_append_str(tp->code_buf, "    Item expr_str = js_to_string(expr_value);\n");
             strbuf_append_str(tp->code_buf, "    String* str = it2s(expr_str);\n");
-            strbuf_append_str(tp->code_buf, "    strbuf_append_str_n(template_buf, str->chars, str->len);\n");
+            strbuf_append_str(tp->code_buf, "    stringbuf_append_str_n(template_buf, str->chars, str->len);\n");
             strbuf_append_str(tp->code_buf, "  }\n");
             expr = expr->next;
         }
@@ -708,7 +728,7 @@ void transpile_js_template_literal(JsTranspiler* tp, JsTemplateLiteralNode* temp
         quasi = quasi->next;
     }
     
-    strbuf_append_str(tp->code_buf, "  s2it(strbuf_to_string(template_buf));\n");
+    strbuf_append_str(tp->code_buf, "  s2it(stringbuf_to_string(template_buf));\n");
     strbuf_append_str(tp->code_buf, "})");
 }
 

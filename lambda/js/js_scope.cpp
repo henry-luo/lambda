@@ -254,14 +254,22 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     
     // Build JavaScript AST
     log_debug("Building JavaScript AST...");
+    printf("DEBUG: About to call build_js_ast\n");
+    fflush(stdout);
     JsAstNode* js_ast = build_js_ast(tp, root);
+    printf("DEBUG: build_js_ast returned: %p\n", js_ast);
+    fflush(stdout);
     if (!js_ast) {
         log_error("Failed to build JavaScript AST");
         return (Item){.item = ITEM_ERROR};
     }
     
     // Generate C code
+    printf("DEBUG: About to call transpile_js_ast_root\n");
+    fflush(stdout);
     transpile_js_ast_root(tp, js_ast);
+    printf("DEBUG: transpile_js_ast_root completed\n");
+    fflush(stdout);
     
     if (tp->has_errors) {
         if (tp->error_buf) {
@@ -281,15 +289,15 @@ Item js_transpiler_compile(JsTranspiler* tp, Runtime* runtime) {
     log_debug("Generated JavaScript C code (length: %zu):", c_code ? strlen(c_code) : 0);
     
     // Print generated C code for debugging
-    // printf("=== Generated C Code ===\n");
+    printf("=== Generated C Code ===\n");
     if (strlen(c_code) > 0) {
-        // printf("%s\n", c_code);
+        printf("%s\n", c_code);
     } else {
-        // printf("(empty)\n");
+        printf("(empty)\n");
         log_error("Generated C code is empty!");
         return (Item){.item = ITEM_NULL};
     }
-    // printf("=== End Generated C Code ===\n");
+    printf("=== End Generated C Code ===\n");
     
     // Execute the JavaScript operations directly using the runtime
     // printf("DEBUG: Executing JavaScript operations directly...\n");
