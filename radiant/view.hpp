@@ -118,7 +118,6 @@ typedef enum {
     RDT_VIEW_BLOCK,
     RDT_VIEW_LIST_ITEM,
     RDT_VIEW_SCROLL_PANE,
-    // Table-related view types (Phase 1 scaffolding)
     RDT_VIEW_TABLE,
     RDT_VIEW_TABLE_ROW_GROUP,
     RDT_VIEW_TABLE_ROW,
@@ -390,7 +389,7 @@ typedef struct ViewTable : ViewBlock {
         TABLE_LAYOUT_FIXED = 1    // Fixed width calculation based on first row/col elements
     } table_layout;
 
-    // Border model and spacing (Phase 4)
+    // Border model and spacing
     // border_collapse=false => separate borders, apply border-spacing gaps
     // border_collapse=true  => collapsed borders, no gaps between cells
     bool border_collapse;

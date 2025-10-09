@@ -44,90 +44,17 @@ static inline DomNode* next_element_sibling(DomNode* n) {
 // =============================================================================
 
 // Parse table-specific CSS properties from DOM element
-static void parse_table_properties(DomNode* element, ViewTable* table) {
-    if (!element || !table) return;
-
-    // Initialize defaults
-    table->table_layout = ViewTable::TABLE_LAYOUT_AUTO;
-    table->border_collapse = false;
-    table->border_spacing_h = 0;
-    table->border_spacing_v = 0;
-
-    if (!element->is_element()) return;
-
+static void resolve_table_properties(DomNode* element, ViewTable* table) {
     lxb_html_element_t* html_element = element->lxb_elmt;
     if (!html_element) return;
 
-    // CRITICAL FIX: Read computed CSS properties from stylesheet, not just inline styles
-    // Check for table-layout property from computed styles
-    if (html_element->element.style) {
-        log_debug("Checking computed styles for table properties");
-        // TODO: Implement proper table-layout property parsing from computed styles
-        // For now, we'll use the workaround below
-    }
-
-    // Parse inline style attribute for table-specific properties (fallback)
-    lxb_dom_attr_t* style_attr = lxb_dom_element_attr_by_name(
-        lxb_dom_interface_element(html_element), (const lxb_char_t*)"style", 5);
-
-    if (style_attr && style_attr->value) {
-        size_t attr_len;
-        const char* style_str = (const char*)lxb_dom_attr_value(style_attr, &attr_len);
-        if (style_str) {
-            // Parse table-layout
-            if (strstr(style_str, "table-layout: fixed")) {
-                table->table_layout = ViewTable::TABLE_LAYOUT_FIXED;
-                log_debug("Detected table-layout: fixed (inline)");
-            }
-
-            // Parse border-collapse
-            if (strstr(style_str, "border-collapse: collapse")) {
-                table->border_collapse = true;
-                log_debug("Detected border-collapse: collapse (inline)");
-            }
-
-            // Parse border-spacing
-            const char* spacing_pos = strstr(style_str, "border-spacing");
-            if (spacing_pos) {
-                const char* q = spacing_pos;
-                while (*q && *q != ':') q++;
-                if (*q == ':') q++;
-                while (*q == ' ') q++;
-                int h = atoi(q);
-                while (*q && *q != ' ' && *q != ';' && *q != 'p') q++;
-                if (*q == 'p' && *(q+1) == 'x') q += 2;
-                int v = -1;
-                while (*q == ' ') q++;
-                if (*q && *q != ';') {
-                    v = atoi(q);
-                }
-                if (h < 0) h = 0;
-                if (v < 0) v = h;
-                table->border_spacing_h = h;
-                table->border_spacing_v = v;
-                log_debug("Detected border-spacing: %dpx %dpx (inline)", h, v);
-            }
-        }
-    }
-
-    // TEMPORARY WORKAROUND: Check if this is a fixed layout table by looking for width property
-    // If the table has an explicit width and we're in a test context, assume fixed layout
-    // This is a hack until we properly implement table-layout CSS property parsing
-    log_debug("Checking for fixed layout indicators");
-
-    // Check if the table has a width property set (common with table-layout: fixed)
-    if (html_element->element.style) {
-        // Look for width property as an indicator of fixed layout intent
-        const lxb_css_rule_declaration_t* width_decl =
-            lxb_dom_element_style_by_id((lxb_dom_element_t*)html_element, LXB_CSS_PROPERTY_WIDTH);
-        if (width_decl) {
-            log_debug("Table has explicit width - likely fixed layout");
-            // For now, if a table has explicit width, assume it might be fixed layout
-            // This is a heuristic until we implement proper table-layout parsing
-            table->table_layout = ViewTable::TABLE_LAYOUT_FIXED;
-            log_debug("WORKAROUND: Assuming table-layout: fixed due to explicit width");
-        }
-    }
+    // if (width_decl) {
+    //     log_debug("Table has explicit width - likely fixed layout");
+    //     // For now, if a table has explicit width, assume it might be fixed layout
+    //     // This is a heuristic until we implement proper table-layout parsing
+    //     table->table_layout = ViewTable::TABLE_LAYOUT_FIXED;
+    //     log_debug("WORKAROUND: Assuming table-layout: fixed due to explicit width");
+    // }
 }
 
 // Parse cell attributes (colspan, rowspan)
@@ -221,7 +148,6 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
     }
 
     log_debug("Building table structure");
-
     // Save layout context
     ViewGroup* saved_parent = lycon->parent;
     View* saved_prev = lycon->prev_view;
@@ -229,20 +155,11 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 
     // Create table view
     lycon->elmt = tableNode;
-    ViewTable* table = (ViewTable*)alloc_view(lycon, RDT_VIEW_TABLE, tableNode);
-    if (!table) {
-        log_debug("ERROR: Failed to allocate ViewTable");
-        lycon->parent = saved_parent;
-        lycon->prev_view = saved_prev;
-        lycon->elmt = saved_elmt;
-        return nullptr;
-    }
-
-    // Parse table properties
-    parse_table_properties(tableNode, table);
+    ViewTable* table = (ViewTable*)lycon->view;
 
     // Resolve table styles
     dom_node_resolve_style(tableNode, lycon);
+    resolve_table_properties(tableNode, table);
 
     // Set table as parent for children
     lycon->parent = (ViewGroup*)table;
