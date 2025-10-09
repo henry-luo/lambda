@@ -98,9 +98,6 @@ void alloc_grid_container_prop(LayoutContext* lycon, ViewBlock* block);
 View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node);
 void free_view(ViewTree* tree, View* view);
 
-// Memory pool functions for test compatibility
-ViewBlock* alloc_view_block(LayoutContext* lycon);
-
 void line_break(LayoutContext* lycon);
 void line_align(LayoutContext* lycon);
 void layout_flow_node(LayoutContext* lycon, DomNode *node);

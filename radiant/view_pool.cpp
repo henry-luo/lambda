@@ -50,6 +50,21 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
         return NULL;
     }
     view->type = type;  view->node = node;  view->parent = lycon->parent;
+
+    // CRITICAL FIX: Initialize flex properties for ViewBlocks
+    if (type == RDT_VIEW_BLOCK || type == RDT_VIEW_INLINE_BLOCK || type == RDT_VIEW_LIST_ITEM) {
+        ViewBlock* block = (ViewBlock*)view;
+        // Initialize flex item properties with proper defaults
+        block->flex_grow = 0.0f;
+        block->flex_shrink = 1.0f;
+        block->flex_basis = -1; // auto
+        block->align_self = ALIGN_AUTO; // FIXED: Use ALIGN_AUTO as per CSS spec
+        block->order = 0;
+        block->flex_basis_is_percent = false;
+        printf("DEBUG: ALLOC_VIEW - align_self set to %d (ALIGN_AUTO=%d) for block %p\n",
+               block->align_self, ALIGN_AUTO, block);
+    }
+
     // link the view
     if (lycon->prev_view) { lycon->prev_view->next = view; }
     else { if (lycon->parent) lycon->parent->child = view; }
@@ -157,7 +172,7 @@ FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon) {
     FlexItemProp* prop = (FlexItemProp*)alloc_prop(lycon, sizeof(FlexItemProp));
     // set defaults
     prop->flex_shrink = 1;  prop->flex_basis = -1;  // -1 for auto
-    prop->align_self = ALIGN_START;
+    prop->align_self = ALIGN_AUTO; // FIXED: Use ALIGN_AUTO as per CSS spec
     // prop->flex_grow = 0;  prop->order = 0;
     return prop;
 }
@@ -806,7 +821,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         strbuf_append_char_n(buf, ' ', indent + 6);
         strbuf_append_format(buf, "\"row_gap\": %d,\n", block->embed->flex->row_gap);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"column_gap\": %d,\n", block->embed->flex->column_gap);
+        strbuf_append_format(buf, "\"column_gap\": %d\n", block->embed->flex->column_gap);
         // strbuf_append_char_n(buf, ' ', indent + 6);
         // strbuf_append_format(buf, "\"main_axis_size\": %d,\n", block->embed->flex->main_axis_size);
         // strbuf_append_char_n(buf, ' ', indent + 6);
