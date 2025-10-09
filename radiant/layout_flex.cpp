@@ -178,21 +178,18 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                 int current_cross_pos = get_cross_axis_position(item, flex_layout);
                 int item_cross_size = get_cross_axis_size(item, flex_layout);
                 int new_cross_pos = container_cross_size - current_cross_pos - item_cross_size;
-
-                printf("DEBUG: wrap-reverse - item %d: %d -> %d (size: %d)\n",
+                log_debug("wrap-reverse - item %d: %d -> %d (size: %d)",
                        j, current_cross_pos, new_cross_pos, item_cross_size);
-
                 set_cross_axis_position(item, new_cross_pos, flex_layout);
             }
         }
     }
 
     // DEBUG: Final item positions after all flex layout
-    printf("DEBUG: FINAL FLEX POSITIONS:\n");
+    log_debug("FINAL FLEX POSITIONS:");
     for (int i = 0; i < item_count; i++) {
         ViewBlock* item = items[i];
-        printf("DEBUG: FINAL_ITEM %d - pos: (%d,%d), size: %dx%d\n",
-               i, item->x, item->y, item->width, item->height);
+        log_debug("FINAL_ITEM %d - pos: (%d,%d), size: %dx%d", i, item->x, item->y, item->width, item->height);
     }
 
     flex_layout->needs_reflow = false;
