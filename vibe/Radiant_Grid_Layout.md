@@ -9,7 +9,7 @@ This document outlines the incremental implementation plan for CSS Grid Layout s
 Based on the existing flex layout implementation in `layout_flex.cpp` and `layout_flex_content.cpp`, the Radiant layout system follows these patterns:
 
 ### Existing Flex Layout Architecture
-- **Main Entry Point**: `layout_flex_container_new()` in `layout_flex.cpp`
+- **Main Entry Point**: `layout_flex_container()` in `layout_flex.cpp`
 - **Content Layout**: `layout_flex_item_content()` in `layout_flex_content.cpp`
 - **Data Structures**: `FlexContainerLayout` and `FlexLineInfo` in `flex.hpp`
 - **Integration**: Dispatched from main `layout.cpp` based on CSS display property
@@ -36,38 +36,38 @@ typedef struct GridContainerLayout {
     GridTrackList* grid_template_rows;
     GridTrackList* grid_template_columns;
     GridTrackList* grid_template_areas;
-    
+
     // Grid gap properties
     int row_gap;
     int column_gap;
-    
+
     // Grid alignment properties
     PropValue justify_content;    // LXB_CSS_VALUE_START, etc.
     PropValue align_content;      // LXB_CSS_VALUE_START, etc.
     PropValue justify_items;      // LXB_CSS_VALUE_STRETCH, etc.
     PropValue align_items;        // LXB_CSS_VALUE_STRETCH, etc.
-    
+
     // Grid auto properties
     PropValue grid_auto_flow;     // LXB_CSS_VALUE_ROW, LXB_CSS_VALUE_COLUMN
     GridTrackList* grid_auto_rows;
     GridTrackList* grid_auto_columns;
-    
+
     // Computed grid properties
     GridTrack* computed_rows;
     GridTrack* computed_columns;
     int computed_row_count;
     int computed_column_count;
-    
+
     // Grid items
     ViewBlock** grid_items;
     int item_count;
     int allocated_items;
-    
+
     // Grid areas
     GridArea* grid_areas;
     int area_count;
     int allocated_areas;
-    
+
     // Layout state
     bool needs_reflow;
     int explicit_row_count;
@@ -124,7 +124,7 @@ Extend `ViewBlock` structure to include grid item properties:
 // Add to ViewBlock in view.hpp (following flex pattern)
 typedef struct ViewBlock {
     // ... existing properties ...
-    
+
     // Grid item properties (similar to flex properties)
     int grid_row_start;
     int grid_row_end;
@@ -133,7 +133,7 @@ typedef struct ViewBlock {
     char* grid_area;             // Named grid area
     PropValue justify_self;      // Item-specific justify alignment
     PropValue align_self;        // Item-specific align alignment
-    
+
     // Grid item computed properties
     int computed_grid_row_start;
     int computed_grid_row_end;
@@ -150,39 +150,39 @@ Create `layout_grid.cpp` following the flex layout pattern:
 
 ```cpp
 // Main grid layout algorithm entry point
-void layout_grid_container_new(LayoutContext* lycon, ViewBlock* container) {
+void layout_grid_container(LayoutContext* lycon, ViewBlock* container) {
     if (!container || !container->embed || !container->embed->grid_container) {
         log_debug("Early return - missing container or grid properties\n");
         return;
     }
-    
+
     GridContainerLayout* grid_layout = container->embed->grid_container;
-    
-    log_debug("GRID START - container: %dx%d at (%d,%d)\n", 
+
+    log_debug("GRID START - container: %dx%d at (%d,%d)\n",
               container->width, container->height, container->x, container->y);
-    
+
     // Phase 1: Collect grid items
     ViewBlock** items;
     int item_count = collect_grid_items(container, &items);
-    
+
     // Phase 2: Resolve grid template areas
     resolve_grid_template_areas(grid_layout);
-    
+
     // Phase 3: Place grid items
     place_grid_items(grid_layout, items, item_count);
-    
+
     // Phase 4: Determine grid size
     determine_grid_size(grid_layout);
-    
+
     // Phase 5: Resolve track sizes
     resolve_track_sizes(grid_layout, container);
-    
+
     // Phase 6: Position grid items
     position_grid_items(grid_layout, container);
-    
+
     // Phase 7: Align grid items
     align_grid_items(grid_layout);
-    
+
     grid_layout->needs_reflow = false;
 }
 ```
@@ -212,13 +212,13 @@ void place_grid_items(GridContainerLayout* grid_layout, ViewBlock** items, int i
 void resolve_track_sizes(GridContainerLayout* grid_layout, ViewBlock* container) {
     // Phase 1: Initialize track sizes
     initialize_track_sizes(grid_layout);
-    
+
     // Phase 2: Resolve intrinsic track sizes
     resolve_intrinsic_track_sizes(grid_layout);
-    
+
     // Phase 3: Maximize tracks
     maximize_tracks(grid_layout);
-    
+
     // Phase 4: Expand flexible tracks
     expand_flexible_tracks(grid_layout, container);
 }
@@ -234,15 +234,15 @@ Create `layout_grid_content.cpp` following the flex content pattern:
 // Layout content within a grid item
 void layout_grid_item_content(LayoutContext* lycon, ViewBlock* grid_item) {
     if (!grid_item) return;
-    
+
     log_debug("Layout grid item content for %p\n", grid_item);
-    
+
     // Save current context
     Blockbox pa_block = lycon->block;
     Linebox pa_line = lycon->line;
     FontBox pa_font = lycon->font;
     ViewGroup* pa_parent = lycon->parent;
-    
+
     // Set up grid item context
     lycon->parent = (ViewGroup*)grid_item;
     lycon->prev_view = NULL;
@@ -254,7 +254,7 @@ void layout_grid_item_content(LayoutContext* lycon, ViewBlock* grid_item) {
     lycon->line.right = grid_item->width;
     lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
     line_init(lycon);
-    
+
     // Layout child content
     DomNode* child = grid_item->node ? grid_item->node->first_child() : NULL;
     if (child) {
@@ -262,24 +262,24 @@ void layout_grid_item_content(LayoutContext* lycon, ViewBlock* grid_item) {
             layout_flow_node(lycon, child);
             child = child->next_sibling();
         } while (child);
-        
+
         // Handle last line if needed
         if (!lycon->line.is_line_start) {
             line_break(lycon);
         }
     }
-    
+
     // Calculate final content dimensions
     grid_item->content_width = lycon->block.max_width;
     grid_item->content_height = lycon->block.advance_y;
-    
+
     // Restore context
     lycon->block = pa_block;
     lycon->line = pa_line;
     lycon->font = pa_font;
     lycon->parent = pa_parent;
-    
-    log_debug("Grid item content layout complete: %dx%d\n", 
+
+    log_debug("Grid item content layout complete: %dx%d\n",
               grid_item->content_width, grid_item->content_height);
 }
 ```
@@ -290,16 +290,16 @@ void layout_grid_item_content(LayoutContext* lycon, ViewBlock* grid_item) {
 // Calculate intrinsic sizes for grid items
 void calculate_grid_item_intrinsic_sizes(ViewBlock* grid_item) {
     if (!grid_item) return;
-    
+
     log_debug("Calculate intrinsic sizes for grid item %p\n", grid_item);
-    
+
     IntrinsicSizes sizes = {0};
-    
+
     // Calculate based on content type (similar to flex implementation)
     View* child = grid_item->child;
     while (child) {
         IntrinsicSizes child_sizes = calculate_child_intrinsic_sizes(child);
-        
+
         // Combine sizes based on layout direction
         if (is_block_level_child(child)) {
             sizes.min_content = fmax(sizes.min_content, child_sizes.min_content);
@@ -308,14 +308,14 @@ void calculate_grid_item_intrinsic_sizes(ViewBlock* grid_item) {
             sizes.min_content += child_sizes.min_content;
             sizes.max_content += child_sizes.max_content;
         }
-        
+
         child = child->next;
     }
-    
+
     // Apply constraints and aspect ratio
     apply_intrinsic_size_constraints(grid_item, &sizes);
-    
-    log_debug("Intrinsic sizes calculated: min=%d, max=%d\n", 
+
+    log_debug("Intrinsic sizes calculated: min=%d, max=%d\n",
               sizes.min_content, sizes.max_content);
 }
 ```
@@ -342,32 +342,32 @@ void resolve_grid_item_position(ViewBlock* block, lxb_css_property_t* prop);
 // Initialize grid container layout state
 void init_grid_container(ViewBlock* container) {
     if (!container) return;
-    
+
     // Create embed structure if it doesn't exist
     if (!container->embed) {
         container->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
     }
-    
+
     GridContainerLayout* grid = (GridContainerLayout*)calloc(1, sizeof(GridContainerLayout));
     container->embed->grid_container = grid;
-    
+
     // Set default values using enum names that align with Lexbor constants
     grid->justify_content = LXB_CSS_VALUE_START;
     grid->align_content = LXB_CSS_VALUE_START;
     grid->justify_items = LXB_CSS_VALUE_STRETCH;
     grid->align_items = LXB_CSS_VALUE_STRETCH;
     grid->grid_auto_flow = LXB_CSS_VALUE_ROW;
-    
+
     // Initialize gaps
     grid->row_gap = 0;
     grid->column_gap = 0;
-    
+
     // Initialize dynamic arrays
     grid->allocated_items = 8;
     grid->grid_items = (ViewBlock**)calloc(grid->allocated_items, sizeof(ViewBlock*));
     grid->allocated_areas = 4;
     grid->grid_areas = (GridArea*)calloc(grid->allocated_areas, sizeof(GridArea));
-    
+
     grid->needs_reflow = false;
 }
 ```
@@ -382,21 +382,21 @@ Update `layout.cpp` to handle grid containers:
 // Add to layout dispatcher in layout.cpp
 void layout_block(LayoutContext* lycon, DomNode* node, DisplayValue display) {
     // ... existing code ...
-    
+
     // Check for grid container
     if (display.inner == LXB_CSS_VALUE_GRID) {
         log_debug("Dispatching to grid layout\n");
-        layout_grid_container_new(lycon, block);
+        layout_grid_container(lycon, block);
         return;
     }
-    
+
     // Check for flex container (existing)
     if (display.inner == LXB_CSS_VALUE_FLEX) {
         log_debug("Dispatching to flex layout\n");
-        layout_flex_container_new(lycon, block);
+        layout_flex_container(lycon, block);
         return;
     }
-    
+
     // ... rest of existing code ...
 }
 ```
@@ -407,10 +407,10 @@ void layout_block(LayoutContext* lycon, DomNode* node, DisplayValue display) {
 // Add grid item detection to layout flow
 bool is_grid_item(ViewBlock* block) {
     if (!block || !block->parent) return false;
-    
+
     ViewBlock* parent = (ViewBlock*)block->parent;
-    return parent->embed && 
-           parent->embed->grid_container && 
+    return parent->embed &&
+           parent->embed->grid_container &&
            block->position != POS_ABSOLUTE &&
            block->visibility != VIS_HIDDEN;
 }
@@ -528,7 +528,7 @@ void optimize_grid_layout(GridContainerLayout* grid) {
   - Named area resolution
   - Gap handling
 
-### ✅ Phase 3: Content Layout Integration  
+### ✅ Phase 3: Content Layout Integration
 - **File**: `/radiant/layout_grid_content.cpp`
 - **Features**: Grid item content layout
   - Content layout within grid items
@@ -622,7 +622,7 @@ void optimize_grid_layout(GridContainerLayout* grid) {
 ## Next Steps (Remaining Phases)
 
 ### 🔄 Phase 7: Testing and Optimization
-**Priority**: Medium  
+**Priority**: Medium
 **Estimated Effort**: 1-2 weeks
 
 **Tasks Remaining:**

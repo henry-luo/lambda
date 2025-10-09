@@ -126,7 +126,7 @@ struct LayoutCache {
         float computed_height;
         bool is_valid;
     };
-    
+
     CachedMeasurement measurements[16];  // LRU cache
     size_t next_cache_index;
     uint32_t generation_count;
@@ -188,30 +188,30 @@ void calculate_layout_impl(
     if (can_use_cached_result(node, available_width, available_height, width_mode, height_mode)) {
         return;
     }
-    
+
     // Phase 2: Flex basis calculation
     compute_flex_basis_for_children(node, available_width, available_height);
-    
+
     // Phase 3: Flex line calculation
     std::vector<FlexLine> flex_lines = calculate_flex_lines(node, available_width);
-    
+
     // Phase 4: Cross-axis sizing
     determine_cross_axis_sizes(flex_lines, available_height);
-    
+
     // Phase 5: Main-axis alignment
     justify_content_along_main_axis(flex_lines, available_width);
-    
+
     // Phase 6: Cross-axis alignment
     align_items_along_cross_axis(flex_lines, available_height);
-    
+
     // Phase 7: Baseline alignment
     if (is_baseline_layout(node)) {
         align_baselines(flex_lines);
     }
-    
+
     // Phase 8: Position children
     position_children_in_container(node, flex_lines, perform_layout);
-    
+
     // Phase 9: Cache results
     cache_layout_result(node, available_width, available_height, width_mode, height_mode);
 }
@@ -242,43 +242,43 @@ FlexLine calculate_flex_line(
     float total_flex_grow_factors = 0.0f;
     float total_flex_shrink_scaled_factors = 0.0f;
     size_t number_of_auto_margins = 0;
-    
+
     const bool is_node_flex_wrap = container->style.flex_wrap != Wrap::NoWrap;
     const float gap = container->style.compute_gap_for_axis(main_axis, available_inner_main_dim);
-    
+
     // Add items to current line until full or out of items
     for (; iterator != container->children.end(); ++iterator) {
         FlexNode* child = *iterator;
-        
+
         // Skip non-participating children
-        if (child->style.display == Display::None || 
+        if (child->style.display == Display::None ||
             child->style.position_type == PositionType::Absolute) {
             continue;
         }
-        
+
         // Calculate item size with constraints
         float flex_basis_with_constraints = bound_axis_within_min_and_max(
             child, main_axis, child->layout.computed_flex_basis, container_size
         );
-        
+
         // Check if item fits in current line
         if (size_consumed + flex_basis_with_constraints > available_inner_main_dim &&
             is_node_flex_wrap && !items_in_flow.empty()) {
             break;  // Start new line
         }
-        
+
         // Add item to current line
         size_consumed += flex_basis_with_constraints + gap;
         items_in_flow.push_back(child);
-        
+
         // Accumulate flex factors
         if (child->is_node_flexible()) {
             total_flex_grow_factors += child->resolve_flex_grow();
-            total_flex_shrink_scaled_factors += 
+            total_flex_shrink_scaled_factors +=
                 -child->resolve_flex_shrink() * child->layout.computed_flex_basis;
         }
     }
-    
+
     return FlexLine{
         .items_in_flow = std::move(items_in_flow),
         .size_consumed = size_consumed,
@@ -300,28 +300,28 @@ float calculate_baseline(const FlexNode* node) {
             node->layout.dimensions[Dimension::Height]
         );
     }
-    
+
     // Find baseline child in first line
     FlexNode* baseline_child = nullptr;
     for (auto child : node->children) {
         if (child->get_line_index() > 0) break;  // Only first line
         if (child->style.position_type == PositionType::Absolute) continue;
-        
+
         if (resolve_child_alignment(node, child) == Align::Baseline ||
             child->is_reference_baseline()) {
             baseline_child = child;
             break;
         }
-        
+
         if (baseline_child == nullptr) {
             baseline_child = child;  // Fallback to first child
         }
     }
-    
+
     if (baseline_child == nullptr) {
         return node->layout.dimensions[Dimension::Height];
     }
-    
+
     // Recursive baseline calculation
     float baseline = calculate_baseline(baseline_child);
     return baseline + baseline_child->layout.position[PhysicalEdge::Top];
@@ -339,7 +339,7 @@ private:
     std::vector<std::unique_ptr<FlexNode[]>> chunks;
     std::stack<FlexNode*> free_nodes;
     size_t chunk_size = 1024;
-    
+
 public:
     FlexNode* allocate() {
         if (free_nodes.empty()) {
@@ -349,12 +349,12 @@ public:
         free_nodes.pop();
         return new(node) FlexNode();  // Placement new
     }
-    
+
     void deallocate(FlexNode* node) {
         node->~FlexNode();
         free_nodes.push(node);
     }
-    
+
 private:
     void allocate_new_chunk() {
         auto chunk = std::make_unique<FlexNode[]>(chunk_size);
@@ -377,7 +377,7 @@ float round_value_to_pixel_grid(
     bool force_floor
 ) {
     float scaled_value = value * point_scale_factor;
-    
+
     if (force_ceil) {
         return std::ceil(scaled_value) / point_scale_factor;
     } else if (force_floor) {
@@ -450,7 +450,7 @@ for (const fileName of fixtures) {
   // Render in browser and extract layout data
   await driver.get('file://' + process.cwd() + '/test.html');
   const logs = await driver.manage().logs().get(logging.Type.BROWSER);
-  
+
   // Generate C++ test from browser layout data
   await fs.writeFile(
     `tests/generated/${fileNameNoExtension}.cpp`,
@@ -464,11 +464,11 @@ for (const fileName of fixtures) {
 // radiant-gentest/layout-extractor.js
 function calculateTree(root, parentOffsetLeft, parentOffsetTop) {
   const rootLayout = [];
-  
+
   for (let i = 0; i < root.children.length; i++) {
     const child = root.children[i];
     const boundingRect = child.getBoundingClientRect();
-    
+
     const layout = {
       name: child.id !== '' ? child.id : 'INSERT_NAME_HERE',
       left: Math.round(boundingRect.left - parentOffsetLeft),
@@ -483,15 +483,15 @@ function calculateTree(root, parentOffsetLeft, parentOffsetTop) {
       disabled: child.dataset.disabled === 'true',
       innerText: child.innerText,
     };
-    
+
     // Pixel-perfect measurement with rounding
     const size = getRoundedSize(child);
     layout.width = size.width;
     layout.height = size.height;
-    
+
     rootLayout.push(layout);
   }
-  
+
   return rootLayout;
 }
 
@@ -561,20 +561,20 @@ function getRoundedSize(node) {
   <script src="gentest.js"></script>
   <script src="gentest-cpp.js"></script>
   <script src="gentest-log.js"></script>
-  
+
   <style>
     @font-face {
       font-family: 'Ahem';
       src: url('./fonts/Ahem.ttf') format('truetype');
     }
-    
+
     body {
       padding: 0;
       margin: 0;
       font: 10px/1 Ahem;  /* Consistent font for predictable text metrics */
       font-weight: 100;
     }
-    
+
     div, span {
       box-sizing: border-box;
       position: relative;
@@ -588,16 +588,16 @@ function getRoundedSize(node) {
       justify-content: flex-start;
       flex-shrink: 0;
     }
-    
+
     body > * {
       position: absolute;
     }
-    
+
     #ltr-container > * {
       position: absolute;
       direction: ltr;
     }
-    
+
     #rtl-container > * {
       position: absolute;
       direction: rtl;
@@ -624,12 +624,12 @@ const CPPEmitter = function () {
 CPPEmitter.prototype.emitTestPrologue = function(name, experiments, disabled) {
   this.push('TEST(RadiantFlexTest, ' + name + ') {');
   this.pushIndent();
-  
+
   if (disabled) {
     this.push('GTEST_SKIP();');
     this.push('');
   }
-  
+
   this.push('FlexConfig* config = create_flex_config();');
   for (const i in experiments) {
     this.push(
@@ -684,103 +684,103 @@ CPPEmitter.prototype.emitStyleSetter = function(nodeName, style, value) {
 
 TEST(RadiantFlexTest, flex_direction_column_no_height) {
   FlexConfig* config = create_flex_config();
-  
+
   FlexNode* root = create_flex_node_with_config(config);
   set_position_type(root, PositionType::Absolute);
   set_width(root, 100);
-  
+
   FlexNode* root_child0 = create_flex_node_with_config(config);
   set_height(root_child0, 10);
   insert_child(root, root_child0, 0);
-  
+
   FlexNode* root_child1 = create_flex_node_with_config(config);
   set_height(root_child1, 10);
   insert_child(root, root_child1, 1);
-  
+
   FlexNode* root_child2 = create_flex_node_with_config(config);
   set_height(root_child2, 10);
   insert_child(root, root_child2, 2);
-  
+
   calculate_layout(root, YGUndefined, YGUndefined, Direction::LTR);
-  
+
   // Verify layout matches browser rendering exactly
   ASSERT_FLOAT_EQ(0, get_layout_left(root));
   ASSERT_FLOAT_EQ(0, get_layout_top(root));
   ASSERT_FLOAT_EQ(100, get_layout_width(root));
   ASSERT_FLOAT_EQ(30, get_layout_height(root));
-  
+
   ASSERT_FLOAT_EQ(0, get_layout_left(root_child0));
   ASSERT_FLOAT_EQ(0, get_layout_top(root_child0));
   ASSERT_FLOAT_EQ(100, get_layout_width(root_child0));
   ASSERT_FLOAT_EQ(10, get_layout_height(root_child0));
-  
+
   ASSERT_FLOAT_EQ(0, get_layout_left(root_child1));
   ASSERT_FLOAT_EQ(10, get_layout_top(root_child1));
   ASSERT_FLOAT_EQ(100, get_layout_width(root_child1));
   ASSERT_FLOAT_EQ(10, get_layout_height(root_child1));
-  
+
   ASSERT_FLOAT_EQ(0, get_layout_left(root_child2));
   ASSERT_FLOAT_EQ(20, get_layout_top(root_child2));
   ASSERT_FLOAT_EQ(100, get_layout_width(root_child2));
   ASSERT_FLOAT_EQ(10, get_layout_height(root_child2));
-  
+
   // Test RTL direction as well
   calculate_layout(root, YGUndefined, YGUndefined, Direction::RTL);
-  
+
   // RTL should produce same results for column direction
   ASSERT_FLOAT_EQ(0, get_layout_left(root));
   ASSERT_FLOAT_EQ(0, get_layout_top(root));
   ASSERT_FLOAT_EQ(100, get_layout_width(root));
   ASSERT_FLOAT_EQ(30, get_layout_height(root));
-  
+
   free_flex_node_recursive(root);
   free_flex_config(config);
 }
 
 TEST(RadiantFlexTest, flex_wrap_row_align_items_center) {
   FlexConfig* config = create_flex_config();
-  
+
   FlexNode* root = create_flex_node_with_config(config);
   set_flex_direction(root, FlexDirection::Row);
   set_flex_wrap(root, FlexWrap::Wrap);
   set_align_items(root, AlignType::Center);
   set_width(root, 200);
   set_height(root, 100);
-  
+
   FlexNode* root_child0 = create_flex_node_with_config(config);
   set_width(root_child0, 80);
   set_height(root_child0, 40);
   insert_child(root, root_child0, 0);
-  
+
   FlexNode* root_child1 = create_flex_node_with_config(config);
   set_width(root_child1, 80);
   set_height(root_child1, 60);
   insert_child(root, root_child1, 1);
-  
+
   FlexNode* root_child2 = create_flex_node_with_config(config);
   set_width(root_child2, 80);
   set_height(root_child2, 30);
   insert_child(root, root_child2, 2);
-  
+
   calculate_layout(root, YGUndefined, YGUndefined, Direction::LTR);
-  
+
   // Verify wrapping behavior and center alignment
   ASSERT_FLOAT_EQ(0, get_layout_left(root_child0));
   ASSERT_FLOAT_EQ(30, get_layout_top(root_child0));  // Centered in 100px height
   ASSERT_FLOAT_EQ(80, get_layout_width(root_child0));
   ASSERT_FLOAT_EQ(40, get_layout_height(root_child0));
-  
+
   ASSERT_FLOAT_EQ(80, get_layout_left(root_child1));
   ASSERT_FLOAT_EQ(20, get_layout_top(root_child1));  // Centered in 100px height
   ASSERT_FLOAT_EQ(80, get_layout_width(root_child1));
   ASSERT_FLOAT_EQ(60, get_layout_height(root_child1));
-  
+
   // Third child wraps to new line
   ASSERT_FLOAT_EQ(0, get_layout_left(root_child2));
   ASSERT_FLOAT_EQ(85, get_layout_top(root_child2));  // Second line, centered
   ASSERT_FLOAT_EQ(80, get_layout_width(root_child2));
   ASSERT_FLOAT_EQ(30, get_layout_height(root_child2));
-  
+
   free_flex_node_recursive(root);
   free_flex_config(config);
 }
@@ -798,7 +798,7 @@ function compensateBrowserQuirks(layoutTree, testName) {
     if (layoutTree[0].width === 30) {
       layoutTree[0].width = 60;  // Correct to spec-compliant value
     }
-    
+
     // Adjust RTL child positions
     const children = layoutTree[0].children;
     children.forEach(child => {
@@ -807,12 +807,12 @@ function compensateBrowserQuirks(layoutTree, testName) {
       }
     });
   }
-  
+
   if (testName.includes('baseline')) {
     // Handle baseline calculation differences between browsers
     compensateBaselineQuirks(layoutTree);
   }
-  
+
   return layoutTree;
 }
 ```
@@ -867,28 +867,28 @@ public:
         size_t cache_misses;
         double nodes_per_ms;
     };
-    
+
     BenchmarkResult run_benchmark(const std::string& name, std::function<FlexNode*()> create_tree) {
         auto start = std::chrono::high_resolution_clock::now();
-        
+
         FlexNode* root = create_tree();
         size_t node_count = count_nodes(root);
-        
+
         // Reset cache statistics
         reset_cache_stats();
-        
+
         // Run layout calculation multiple times for stability
         for (int i = 0; i < 100; ++i) {
             calculate_layout(root, 1000, 1000, Direction::LTR);
         }
-        
+
         auto end = std::chrono::high_resolution_clock::now();
         double duration_ms = std::chrono::duration<double, std::milli>(end - start).count() / 100.0;
-        
+
         auto cache_stats = get_cache_stats();
-        
+
         free_flex_node(root);
-        
+
         return BenchmarkResult{
             .test_name = name,
             .layout_time_ms = duration_ms,
@@ -914,18 +914,18 @@ namespace radiant {
             // Current implementation
             void layout_flex_container_old(LayoutContext* lycon, ViewBlock* container);
         }
-        
+
         namespace v2 {
             // New Yoga-inspired implementation
-            void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container);
+            void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
         }
-        
+
         // Feature flag for gradual rollout
         extern bool use_new_flex_implementation;
-        
+
         inline void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
             if (use_new_flex_implementation) {
-                v2::layout_flex_container_new(lycon, container);
+                v2::layout_flex_container(lycon, container);
             } else {
                 v1::layout_flex_container_old(lycon, container);
             }
@@ -939,10 +939,10 @@ namespace radiant {
 // Extend ViewBlock to support new flex node
 struct ViewBlock {
     // ... existing fields ...
-    
+
     // New flex node integration
     FlexNode* flex_node;  // nullptr for non-flex elements
-    
+
     // Conversion helpers
     FlexNode* get_or_create_flex_node();
     void sync_to_flex_node();
@@ -961,18 +961,18 @@ void run_migration_benchmarks() {
         {"deep_nesting", create_deep_nesting_layout},
         {"large_grid", create_large_grid_layout}
     };
-    
+
     for (const auto& test_case : test_cases) {
         // Benchmark old implementation
         auto old_result = benchmark_old_implementation(test_case);
-        
+
         // Benchmark new implementation
         auto new_result = benchmark_new_implementation(test_case);
-        
+
         // Compare results
         double speedup = old_result.layout_time_ms / new_result.layout_time_ms;
         printf("Test: %s, Speedup: %.2fx, Cache Hit Rate: %.1f%%\n",
-               test_case.name.c_str(), speedup, 
+               test_case.name.c_str(), speedup,
                new_result.cache_hits * 100.0 / (new_result.cache_hits + new_result.cache_misses));
     }
 }

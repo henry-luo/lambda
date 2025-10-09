@@ -67,6 +67,7 @@ typedef struct FlexContainerLayout : FlexProp {
     bool needs_reflow;
 } FlexContainerLayout;
 
+typedef struct GridContainerLayout GridContainerLayout;
 typedef struct LayoutContext {
     ViewGroup* parent;
     View* prev_view;
@@ -79,6 +80,7 @@ typedef struct LayoutContext {
     int root_font_size;
     struct FloatContext* current_float_context;  // Current float context for this layout
     FlexContainerLayout* flex_container; // integrated flex container layout
+    GridContainerLayout* grid_container; // integrated grid container layout
 
     Document* doc;
     UiContext* ui_context;
@@ -94,7 +96,7 @@ BlockProp* alloc_block_prop(LayoutContext* lycon);
 FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon);
 PositionProp* alloc_position_prop(LayoutContext* lycon);
 void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
-void alloc_grid_container_prop(LayoutContext* lycon, ViewBlock* block);
+void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block);
 View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node);
 void free_view(ViewTree* tree, View* view);
 
@@ -110,7 +112,7 @@ DisplayValue resolve_display(lxb_html_element_t* elmt);
 int resolve_justify_content(PropValue value); // Returns Lexbor constant directly
 Color color_name_to_rgb(PropValue color_name);
 
-void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container);
+void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
 void layout_html_root(LayoutContext* lycon, DomNode *elmt);
 
 // CSS Positioning functions

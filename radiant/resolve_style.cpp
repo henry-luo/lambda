@@ -1482,11 +1482,14 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
                 // Set gap on appropriate container type
                 if (block) {
+                    if (!block->embed) {
+                        block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+                    }
                     // Check if this is a grid container
-                    if (block->embed && block->embed->grid_container) {
+                    if (!block->embed && block->embed->grid) {
                         printf("DEBUG: Setting gap on grid container: %dpx\n", gap_px);
-                        block->embed->grid_container->row_gap = gap_px;
-                        block->embed->grid_container->column_gap = gap_px;
+                        block->embed->grid->row_gap = gap_px;
+                        block->embed->grid->column_gap = gap_px;
                         log_debug("Set grid gap: %dpx (from %s)\n", gap_px, value_str);
                     } else {
                         // Fallback to flex container for backward compatibility
@@ -1509,7 +1512,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             printf("DEBUG: grid-template-rows matched! block=%p\n", block);
             if (block) {
                 printf("DEBUG: Inside grid-template-rows block processing\n");
-                alloc_grid_container_prop(lycon, block);
+                alloc_grid_prop(lycon, block);
 
                 // Enhanced parsing for advanced features
                 char template_str[256];
@@ -1519,9 +1522,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
                 // Parse the template string (handles minmax, repeat, etc.)
                 printf("DEBUG: About to parse grid-template-rows: '%s'\n", template_str);
-                if (block->embed->grid_container->grid_template_rows) {
+                if (block->embed->grid->grid_template_rows) {
                     printf("DEBUG: Calling parse_grid_template_tracks for rows\n");
-                    parse_grid_template_tracks(block->embed->grid_container->grid_template_rows, template_str);
+                    parse_grid_template_tracks(block->embed->grid->grid_template_rows, template_str);
                 } else {
                     printf("DEBUG: grid_template_rows is NULL!\n");
                 }
@@ -1536,7 +1539,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             printf("DEBUG: grid-template-columns matched! block=%p\n", block);
             if (block) {
                 printf("DEBUG: Inside grid-template-columns block processing\n");
-                alloc_grid_container_prop(lycon, block);
+                alloc_grid_prop(lycon, block);
 
                 // Enhanced parsing for advanced features
                 char template_str[256];
@@ -1546,9 +1549,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
                 // Parse the template string (handles minmax, repeat, etc.)
                 printf("DEBUG: About to parse grid-template-columns: '%s'\n", template_str);
-                if (block->embed->grid_container->grid_template_columns) {
+                if (block->embed->grid->grid_template_columns) {
                     printf("DEBUG: Calling parse_grid_template_tracks for columns\n");
-                    parse_grid_template_tracks(block->embed->grid_container->grid_template_columns, template_str);
+                    parse_grid_template_tracks(block->embed->grid->grid_template_columns, template_str);
                 } else {
                     printf("DEBUG: grid_template_columns is NULL!\n");
                 }
@@ -1563,8 +1566,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             printf("DEBUG: grid-template-areas matched! block=%p\n", block);
             if (block) {
                 printf("DEBUG: Inside grid-template-areas block processing\n");
-                alloc_grid_container_prop(lycon, block);
-                printf("DEBUG: Grid container allocated, grid_container=%p\n", block->embed->grid_container);
+                alloc_grid_prop(lycon, block);
+                printf("DEBUG: Grid container allocated, grid_container=%p\n", block->embed->grid);
 
                 // Parse grid template areas
                 char areas_str[256];
@@ -1572,7 +1575,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 strncpy(areas_str, (const char*)custom->value.data, len);
                 areas_str[len] = '\0';
                 printf("DEBUG: About to parse grid-template-areas: '%s'\n", areas_str);
-                parse_grid_template_areas(block->embed->grid_container, areas_str);
+                parse_grid_template_areas(block->embed->grid, areas_str);
                 printf("DEBUG: Finished parsing grid-template-areas\n");
                 log_debug("Set grid-template-areas: %s\n", areas_str);
             }
@@ -1641,8 +1644,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             if (endptr != value_str && gap_value >= 0) {
                 int gap_px = (int)(gap_value * lycon->ui_context->pixel_ratio);
                 if (block) {
-                    alloc_grid_container_prop(lycon, block);
-                    block->embed->grid_container->row_gap = gap_px;
+                    alloc_grid_prop(lycon, block);
+                    block->embed->grid->row_gap = gap_px;
                     log_debug("Set row-gap: %dpx\n", gap_px);
                 }
             }
@@ -1656,8 +1659,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             if (endptr != value_str && gap_value >= 0) {
                 int gap_px = (int)(gap_value * lycon->ui_context->pixel_ratio);
                 if (block) {
-                    alloc_grid_container_prop(lycon, block);
-                    block->embed->grid_container->column_gap = gap_px;
+                    alloc_grid_prop(lycon, block);
+                    block->embed->grid->column_gap = gap_px;
                     log_debug("Set column-gap: %dpx\n", gap_px);
                 }
             }
@@ -1666,20 +1669,20 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         // grid-auto-flow
         if (custom->name.length == 14 && strncmp((const char*)custom->name.data, "grid-auto-flow", 14) == 0) {
             if (block) {
-                alloc_grid_container_prop(lycon, block);
+                alloc_grid_prop(lycon, block);
 
                 const char* value_str = (const char*)custom->value.data;
 
                 // Parse grid-auto-flow values (can be "row", "column", "row dense", "column dense")
                 if (strstr(value_str, "row")) {
-                    block->embed->grid_container->grid_auto_flow = LXB_CSS_VALUE_ROW;
+                    block->embed->grid->grid_auto_flow = LXB_CSS_VALUE_ROW;
                 } else if (strstr(value_str, "column")) {
-                    block->embed->grid_container->grid_auto_flow = LXB_CSS_VALUE_COLUMN;
+                    block->embed->grid->grid_auto_flow = LXB_CSS_VALUE_COLUMN;
                 }
 
                 // Check for dense packing
                 if (strstr(value_str, "dense")) {
-                    block->embed->grid_container->is_dense_packing = true;
+                    block->embed->grid->is_dense_packing = true;
                     log_debug("Enabled dense packing for grid auto-flow\n");
                 }
 

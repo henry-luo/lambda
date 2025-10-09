@@ -57,7 +57,7 @@ void cleanup_flex_container(LayoutContext* lycon) {
 }
 
 // Main flex layout algorithm entry point
-void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container) {
+void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
     FlexContainerLayout* flex_layout = lycon->flex_container;
     printf("DEBUG: FLEX START - container: %dx%d at (%d,%d)\n",
            container->width, container->height, container->x, container->y);

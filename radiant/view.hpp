@@ -330,11 +330,39 @@ typedef struct FlexProp {
     WritingMode writing_mode;
     TextDirection text_direction;
 } FlexProp;
+
+typedef struct GridTrackList GridTrackList;
+typedef struct GridArea GridArea;
+typedef struct GridProp {
+    // Grid alignment properties (using Lexbor CSS constants)
+    int justify_content;         // LXB_CSS_VALUE_START, etc.
+    int align_content;           // LXB_CSS_VALUE_START, etc.
+    int justify_items;           // LXB_CSS_VALUE_STRETCH, etc.
+    int align_items;             // LXB_CSS_VALUE_STRETCH, etc.
+    int grid_auto_flow;          // LXB_CSS_VALUE_ROW, LXB_CSS_VALUE_COLUMN
+    // Grid gap properties
+    int row_gap;
+    int column_gap;
+
+    // Grid template properties
+    GridTrackList* grid_template_rows;
+    GridTrackList* grid_template_columns;
+    GridTrackList* grid_template_areas;
+    int computed_row_count;
+    int computed_column_count;
+    // Grid areas
+    GridArea* grid_areas;
+    int area_count;
+    int allocated_areas;
+
+    // Advanced features
+    bool is_dense_packing;       // grid-auto-flow: dense
+} GridProp;
 typedef struct {
     ImageSurface* img;  // image surface
     Document* doc;  // iframe document
     FlexProp* flex;
-    struct GridContainerLayout* grid_container; // integrated grid container layout
+    GridProp* grid;
 } EmbedProp;
 
 typedef struct ViewBlock : ViewSpan {

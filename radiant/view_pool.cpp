@@ -196,7 +196,6 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
     }
     if (!block->embed->flex) {
         FlexProp* prop = (FlexProp*)alloc_prop(lycon, sizeof(FlexProp));
-        // CRITICAL FIX: Use enum names that now align with Lexbor constants
         prop->direction = DIR_ROW;
         prop->wrap = WRAP_NOWRAP;
         prop->justify = JUSTIFY_START;
@@ -208,12 +207,22 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
 }
 
 // alloc grid container prop
-void alloc_grid_container_prop(LayoutContext* lycon, ViewBlock* block) {
+void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
     if (!block->embed) {
         block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
     }
-    if (!block->embed->grid_container) {
-        init_grid_container(block);
+    if (!block->embed->grid) {
+        GridProp* grid = (GridProp*)alloc_prop(lycon, sizeof(GridProp));
+        // Set default values using enum names that align with Lexbor constants
+        grid->justify_content = LXB_CSS_VALUE_START;
+        grid->align_content = LXB_CSS_VALUE_START;
+        grid->justify_items = LXB_CSS_VALUE_STRETCH;
+        grid->align_items = LXB_CSS_VALUE_STRETCH;
+        grid->grid_auto_flow = LXB_CSS_VALUE_ROW;
+        // Initialize gaps
+        grid->row_gap = 0;
+        grid->column_gap = 0;
+        block->embed->grid = grid;
     }
 }
 
