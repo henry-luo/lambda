@@ -136,14 +136,36 @@ JsAstNode* build_js_literal(JsTranspiler* tp, TSNode literal_node) {
     
     if (strcmp(node_type, "number") == 0) {
         literal->literal_type = JS_LITERAL_NUMBER;
-        char* endptr;
-        literal->value.number_value = strtod(source.str, &endptr);
+        // Create null-terminated string for strtod
+        char* temp_str = (char*)malloc(source.length + 1);
+        if (temp_str) {
+            memcpy(temp_str, source.str, source.length);
+            temp_str[source.length] = '\0';
+            char* endptr;
+            literal->value.number_value = strtod(temp_str, &endptr);
+            free(temp_str);
+        } else {
+            literal->value.number_value = 0.0;
+        }
         literal->base.type = &TYPE_FLOAT; // All JS numbers are float64
     } else if (strcmp(node_type, "string") == 0) {
         literal->literal_type = JS_LITERAL_STRING;
         // Remove quotes and handle escape sequences
-        String* str_val = name_pool_create_len(tp->name_pool, source.str + 1, source.length - 2);
-        literal->value.string_value = str_val;
+        if (source.length >= 2) {
+            // Create null-terminated string without quotes
+            size_t content_len = source.length - 2;
+            char* temp_str = (char*)malloc(content_len + 1);
+            if (temp_str) {
+                memcpy(temp_str, source.str + 1, content_len);
+                temp_str[content_len] = '\0';
+                literal->value.string_value = name_pool_create_len(tp->name_pool, temp_str, content_len);
+                free(temp_str);
+            } else {
+                literal->value.string_value = name_pool_create_len(tp->name_pool, "", 0);
+            }
+        } else {
+            literal->value.string_value = name_pool_create_len(tp->name_pool, "", 0);
+        }
         literal->base.type = &TYPE_STRING;
     } else if (strcmp(node_type, "true") == 0) {
         literal->literal_type = JS_LITERAL_BOOLEAN;
@@ -179,7 +201,18 @@ JsAstNode* build_js_identifier(JsTranspiler* tp, TSNode id_node) {
         return NULL;
     }
     
-    identifier->name = name_pool_create_strview(tp->name_pool, source);
+    // Create a null-terminated string for the identifier
+    char* temp_str = (char*)malloc(source.length + 1);
+    if (!temp_str) {
+        log_error("Failed to allocate memory for identifier");
+        return NULL;
+    }
+    memcpy(temp_str, source.str, source.length);
+    temp_str[source.length] = '\0';
+    
+    identifier->name = name_pool_create_len(tp->name_pool, temp_str, source.length);
+    free(temp_str);
+    
     if (!identifier->name) {
         log_error("Failed to create identifier name");
         return NULL;
@@ -337,11 +370,11 @@ JsAstNode* build_js_unary_expression(JsTranspiler* tp, TSNode unary_node) {
     JsUnaryNode* unary = (JsUnaryNode*)alloc_js_ast_node(tp, JS_AST_NODE_UNARY_EXPRESSION, unary_node, sizeof(JsUnaryNode));
     
     // Get operand
-    TSNode operand_node = ts_node_child_by_field_id(unary_node, JS_FIELD_OPERAND);
+    TSNode operand_node = ts_node_child_by_field_name(unary_node, "argument", strlen("argument"));
     unary->operand = build_js_expression(tp, operand_node);
     
     // Get operator
-    TSNode op_node = ts_node_child_by_field_id(unary_node, JS_FIELD_OPERATOR);
+    TSNode op_node = ts_node_child_by_field_name(unary_node, "operator", strlen("operator"));
     StrView op_source = js_node_source(tp, op_node);
     unary->op = js_operator_from_string(op_source.str, op_source.length);
     
@@ -380,25 +413,39 @@ JsAstNode* build_js_unary_expression(JsTranspiler* tp, TSNode unary_node) {
 
 // Build JavaScript call expression node
 JsAstNode* build_js_call_expression(JsTranspiler* tp, TSNode call_node) {
-    printf("DEBUG: build_js_call_expression called\n");
-    fflush(stdout);
-    
     JsCallNode* call = (JsCallNode*)alloc_js_ast_node(tp, JS_AST_NODE_CALL_EXPRESSION, call_node, sizeof(JsCallNode));
-    printf("DEBUG: Allocated call node: %p\n", call);
-    fflush(stdout);
     
-    // Get callee (function being called)
-    printf("DEBUG: Getting callee node\n");
-    fflush(stdout);
-    TSNode callee_node = ts_node_child_by_field_id(call_node, JS_FIELD_FUNCTION);
-    printf("DEBUG: About to build callee expression\n");
-    fflush(stdout);
+    // Get callee (function being called) - use field name instead of ID
+    TSNode callee_node = ts_node_child_by_field_name(call_node, "function", strlen("function"));
+    if (ts_node_is_null(callee_node)) {
+        // Fallback: try getting first child
+        callee_node = ts_node_named_child(call_node, 0);
+        if (ts_node_is_null(callee_node)) {
+            log_error("Call expression has no function node");
+            return NULL;
+        }
+    }
+    
     call->callee = build_js_expression(tp, callee_node);
-    printf("DEBUG: Built callee expression: %p\n", call->callee);
-    fflush(stdout);
+    if (!call->callee) {
+        log_error("Failed to build callee expression");
+        return NULL;
+    }
     
     // Get arguments
-    TSNode args_node = ts_node_child_by_field_id(call_node, JS_FIELD_ARGUMENTS);
+    TSNode args_node = ts_node_child_by_field_name(call_node, "arguments", strlen("arguments"));
+    if (ts_node_is_null(args_node)) {
+        // Fallback: look for arguments node by type
+        uint32_t child_count = ts_node_child_count(call_node);
+        for (uint32_t i = 0; i < child_count; i++) {
+            TSNode child = ts_node_child(call_node, i);
+            const char* child_type = ts_node_type(child);
+            if (strcmp(child_type, "arguments") == 0) {
+                args_node = child;
+                break;
+            }
+        }
+    }
     if (!ts_node_is_null(args_node)) {
         uint32_t arg_count = ts_node_named_child_count(args_node);
         JsAstNode* prev_arg = NULL;
@@ -427,11 +474,11 @@ JsAstNode* build_js_member_expression(JsTranspiler* tp, TSNode member_node) {
     JsMemberNode* member = (JsMemberNode*)alloc_js_ast_node(tp, JS_AST_NODE_MEMBER_EXPRESSION, member_node, sizeof(JsMemberNode));
     
     // Get object
-    TSNode object_node = ts_node_child_by_field_id(member_node, JS_FIELD_OBJECT);
+    TSNode object_node = ts_node_child_by_field_name(member_node, "object", strlen("object"));
     member->object = build_js_expression(tp, object_node);
     
     // Get property
-    TSNode property_node = ts_node_child_by_field_id(member_node, JS_FIELD_PROPERTY);
+    TSNode property_node = ts_node_child_by_field_name(member_node, "property", strlen("property"));
     member->property = build_js_expression(tp, property_node);
     
     // Determine if computed (obj[prop]) or not (obj.prop)
@@ -483,8 +530,8 @@ JsAstNode* build_js_object_expression(JsTranspiler* tp, TSNode object_node) {
         JsPropertyNode* property = (JsPropertyNode*)alloc_js_ast_node(tp, JS_AST_NODE_PROPERTY, property_node, sizeof(JsPropertyNode));
         
         // Get key and value
-        TSNode key_node = ts_node_child_by_field_id(property_node, JS_FIELD_NAME);
-        TSNode value_node = ts_node_child_by_field_id(property_node, JS_FIELD_VALUE);
+        TSNode key_node = ts_node_child_by_field_name(property_node, "key", strlen("key"));
+        TSNode value_node = ts_node_child_by_field_name(property_node, "value", strlen("value"));
         
         property->key = build_js_expression(tp, key_node);
         property->value = build_js_expression(tp, value_node);
@@ -513,14 +560,14 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     func->is_generator = false; // TODO: Check for generator
     
     // Get function name (optional for expressions)
-    TSNode name_node = ts_node_child_by_field_id(func_node, JS_FIELD_NAME);
+    TSNode name_node = ts_node_child_by_field_name(func_node, "name", strlen("name"));
     if (!ts_node_is_null(name_node)) {
         StrView name_source = js_node_source(tp, name_node);
         func->name = name_pool_create_strview(tp->name_pool, name_source);
     }
     
     // Get parameters
-    TSNode params_node = ts_node_child_by_field_id(func_node, JS_FIELD_PARAMETERS);
+    TSNode params_node = ts_node_child_by_field_name(func_node, "parameters", strlen("parameters"));
     if (!ts_node_is_null(params_node)) {
         uint32_t param_count = ts_node_named_child_count(params_node);
         JsAstNode* prev_param = NULL;
@@ -541,10 +588,10 @@ JsAstNode* build_js_function(JsTranspiler* tp, TSNode func_node) {
     }
     
     // Get function body
-    TSNode body_node = ts_node_child_by_field_id(func_node, JS_FIELD_BODY);
+    TSNode body_node = ts_node_child_by_field_name(func_node, "body", strlen("body"));
     if (!ts_node_is_null(body_node)) {
-        TSSymbol body_symbol = ts_node_symbol(body_node);
-        if (body_symbol == JS_SYM_BLOCK_STATEMENT) {
+        const char* body_type = ts_node_type(body_node);
+        if (strcmp(body_type, "statement_block") == 0) {
             func->body = build_js_block_statement(tp, body_node);
         } else {
             // Arrow function with expression body
@@ -572,19 +619,19 @@ JsAstNode* build_js_if_statement(JsTranspiler* tp, TSNode if_node) {
     JsIfNode* if_stmt = (JsIfNode*)alloc_js_ast_node(tp, JS_AST_NODE_IF_STATEMENT, if_node, sizeof(JsIfNode));
     
     // Get condition
-    TSNode test_node = ts_node_child_by_field_id(if_node, JS_FIELD_CONDITION);
+    TSNode test_node = ts_node_child_by_field_name(if_node, "condition", strlen("condition"));
     if (!ts_node_is_null(test_node)) {
         if_stmt->test = build_js_expression(tp, test_node);
     }
     
     // Get consequent (then branch)
-    TSNode consequent_node = ts_node_child_by_field_id(if_node, JS_FIELD_CONSEQUENCE);
+    TSNode consequent_node = ts_node_child_by_field_name(if_node, "consequence", strlen("consequence"));
     if (!ts_node_is_null(consequent_node)) {
         if_stmt->consequent = build_js_statement(tp, consequent_node);
     }
     
     // Get alternate (else branch) - optional
-    TSNode alternate_node = ts_node_child_by_field_id(if_node, JS_FIELD_ALTERNATIVE);
+    TSNode alternate_node = ts_node_child_by_field_name(if_node, "alternative", strlen("alternative"));
     if (!ts_node_is_null(alternate_node)) {
         if_stmt->alternate = build_js_statement(tp, alternate_node);
     }
@@ -599,13 +646,13 @@ JsAstNode* build_js_while_statement(JsTranspiler* tp, TSNode while_node) {
     JsWhileNode* while_stmt = (JsWhileNode*)alloc_js_ast_node(tp, JS_AST_NODE_WHILE_STATEMENT, while_node, sizeof(JsWhileNode));
     
     // Get condition
-    TSNode test_node = ts_node_child_by_field_id(while_node, JS_FIELD_CONDITION);
+    TSNode test_node = ts_node_child_by_field_name(while_node, "condition", strlen("condition"));
     if (!ts_node_is_null(test_node)) {
         while_stmt->test = build_js_expression(tp, test_node);
     }
     
     // Get body
-    TSNode body_node = ts_node_child_by_field_id(while_node, JS_FIELD_BODY);
+    TSNode body_node = ts_node_child_by_field_name(while_node, "body", strlen("body"));
     if (!ts_node_is_null(body_node)) {
         while_stmt->body = build_js_statement(tp, body_node);
     }
@@ -620,25 +667,25 @@ JsAstNode* build_js_for_statement(JsTranspiler* tp, TSNode for_node) {
     JsForNode* for_stmt = (JsForNode*)alloc_js_ast_node(tp, JS_AST_NODE_FOR_STATEMENT, for_node, sizeof(JsForNode));
     
     // Get init (optional)
-    TSNode init_node = ts_node_child_by_field_name(for_node, "init", 4);
+    TSNode init_node = ts_node_child_by_field_name(for_node, "init", strlen("init"));
     if (!ts_node_is_null(init_node)) {
         for_stmt->init = build_js_statement(tp, init_node);
     }
     
     // Get test condition (optional)
-    TSNode test_node = ts_node_child_by_field_name(for_node, "condition", 9);
+    TSNode test_node = ts_node_child_by_field_name(for_node, "condition", strlen("condition"));
     if (!ts_node_is_null(test_node)) {
         for_stmt->test = build_js_expression(tp, test_node);
     }
     
     // Get update (optional)
-    TSNode update_node = ts_node_child_by_field_name(for_node, "update", 6);
+    TSNode update_node = ts_node_child_by_field_name(for_node, "update", strlen("update"));
     if (!ts_node_is_null(update_node)) {
         for_stmt->update = build_js_expression(tp, update_node);
     }
     
     // Get body
-    TSNode body_node = ts_node_child_by_field_id(for_node, JS_FIELD_BODY);
+    TSNode body_node = ts_node_child_by_field_name(for_node, "body", strlen("body"));
     if (!ts_node_is_null(body_node)) {
         for_stmt->body = build_js_statement(tp, body_node);
     }
@@ -811,8 +858,14 @@ JsAstNode* build_js_variable_declaration(JsTranspiler* tp, TSNode var_node) {
 JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
     const char* node_type = ts_node_type(expr_node);
     
-    if (strcmp(node_type, "identifier") == 0) {
+    if (strcmp(node_type, "identifier") == 0 || strcmp(node_type, "property_identifier") == 0) {
         return build_js_identifier(tp, expr_node);
+    } else if (strcmp(node_type, "this") == 0) {
+        // Handle 'this' keyword
+        JsIdentifierNode* this_node = (JsIdentifierNode*)alloc_js_ast_node(tp, JS_AST_NODE_IDENTIFIER, expr_node, sizeof(JsIdentifierNode));
+        this_node->name = name_pool_create_len(tp->name_pool, "this", 4);
+        this_node->base.type = &TYPE_ANY;
+        return (JsAstNode*)this_node;
     } else if (strcmp(node_type, "number") == 0 || strcmp(node_type, "string") == 0 || 
                strcmp(node_type, "true") == 0 || strcmp(node_type, "false") == 0 ||
                strcmp(node_type, "null") == 0 || strcmp(node_type, "undefined") == 0) {
@@ -821,7 +874,7 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         return build_js_binary_expression(tp, expr_node);
     } else if (strcmp(node_type, "unary_expression") == 0) {
         return build_js_unary_expression(tp, expr_node);
-    } else if (strcmp(node_type, "call_expression") == 0) {
+    } else if (strcmp(node_type, "call_expression") == 0 || strcmp(node_type, "new_expression") == 0) {
         return build_js_call_expression(tp, expr_node);
     } else if (strcmp(node_type, "member_expression") == 0 || strcmp(node_type, "subscript_expression") == 0) {
         return build_js_member_expression(tp, expr_node);
@@ -831,23 +884,41 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
         return build_js_object_expression(tp, expr_node);
     } else if (strcmp(node_type, "function_expression") == 0 || strcmp(node_type, "arrow_function") == 0) {
         return build_js_function(tp, expr_node);
+    } else if (strcmp(node_type, "assignment_expression") == 0) {
+        // Handle assignment expressions
+        JsAssignmentNode* assign = (JsAssignmentNode*)alloc_js_ast_node(tp, JS_AST_NODE_ASSIGNMENT_EXPRESSION, expr_node, sizeof(JsAssignmentNode));
+        
+        // Get left and right operands
+        TSNode left_node = ts_node_child_by_field_name(expr_node, "left", strlen("left"));
+        TSNode right_node = ts_node_child_by_field_name(expr_node, "right", strlen("right"));
+        
+        assign->left = build_js_expression(tp, left_node);
+        assign->right = build_js_expression(tp, right_node);
+        assign->op = JS_OP_ASSIGN; // TODO: Parse actual operator
+        assign->base.type = assign->right ? assign->right->type : &TYPE_ANY;
+        
+        return (JsAstNode*)assign;
+    } else if (strcmp(node_type, "parenthesized_expression") == 0) {
+        // Handle parenthesized expressions - just return the inner expression
+        TSNode inner_node = ts_node_named_child(expr_node, 0);
+        return build_js_expression(tp, inner_node);
     } else if (strcmp(node_type, "ternary_expression") == 0) {
         JsConditionalNode* cond = (JsConditionalNode*)alloc_js_ast_node(tp, JS_AST_NODE_CONDITIONAL_EXPRESSION, expr_node, sizeof(JsConditionalNode));
         
         // Get test condition
-        TSNode test_node = ts_node_child_by_field_name(expr_node, "condition", 9);
+        TSNode test_node = ts_node_child_by_field_name(expr_node, "condition", strlen("condition"));
         if (!ts_node_is_null(test_node)) {
             cond->test = build_js_expression(tp, test_node);
         }
         
         // Get consequent (true branch)
-        TSNode consequent_node = ts_node_child_by_field_name(expr_node, "consequence", 11);
+        TSNode consequent_node = ts_node_child_by_field_name(expr_node, "consequence", strlen("consequence"));
         if (!ts_node_is_null(consequent_node)) {
             cond->consequent = build_js_expression(tp, consequent_node);
         }
         
         // Get alternate (false branch)
-        TSNode alternate_node = ts_node_child_by_field_name(expr_node, "alternative", 11);
+        TSNode alternate_node = ts_node_child_by_field_name(expr_node, "alternative", strlen("alternative"));
         if (!ts_node_is_null(alternate_node)) {
             cond->alternate = build_js_expression(tp, alternate_node);
         }
@@ -867,7 +938,46 @@ JsAstNode* build_js_expression(JsTranspiler* tp, TSNode expr_node) {
     } else if (strcmp(node_type, "template_string") == 0 || strcmp(node_type, "template_literal") == 0) {
         return build_js_template_literal(tp, expr_node);
     } else {
-        log_error("Unsupported JavaScript expression type: %s", node_type);
+        // Handle nodes that return numeric symbol IDs instead of type names
+        TSSymbol symbol = ts_node_symbol(expr_node);
+        
+        // Check if this is a literal by examining the node content
+        StrView source = js_node_source(tp, expr_node);
+        if (source.length > 0) {
+            char first_char = source.str[0];
+            
+            // Check if it's a number literal
+            if ((first_char >= '0' && first_char <= '9') || first_char == '.' || first_char == '-') {
+                return build_js_literal(tp, expr_node);
+            }
+            // Check if it's a string literal
+            else if (first_char == '"' || first_char == '\'' || first_char == '`') {
+                return build_js_literal(tp, expr_node);
+            }
+            // Check if it's a boolean literal
+            else if (source.length >= 4 && strncmp(source.str, "true", 4) == 0) {
+                return build_js_literal(tp, expr_node);
+            }
+            else if (source.length >= 5 && strncmp(source.str, "false", 5) == 0) {
+                return build_js_literal(tp, expr_node);
+            }
+            // Check if it's null or undefined
+            else if (source.length >= 4 && strncmp(source.str, "null", 4) == 0) {
+                return build_js_literal(tp, expr_node);
+            }
+            else if (source.length >= 9 && strncmp(source.str, "undefined", 9) == 0) {
+                return build_js_literal(tp, expr_node);
+            }
+            // Check if it's an identifier (starts with letter, $, or _)
+            else if ((first_char >= 'a' && first_char <= 'z') || 
+                     (first_char >= 'A' && first_char <= 'Z') || 
+                     first_char == '$' || first_char == '_') {
+                return build_js_identifier(tp, expr_node);
+            }
+        }
+        
+        log_error("Unsupported JavaScript expression type: %s (symbol: %d, content: %.*s)", 
+                  node_type, symbol, (int)source.length, source.str);
         return NULL;
     }
 }
@@ -904,20 +1014,15 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
         return build_js_throw_statement(tp, stmt_node);
     } else if (strcmp(node_type, "class_declaration") == 0) {
         return build_js_class_declaration(tp, stmt_node);
+    } else if (strcmp(node_type, "else_clause") == 0) {
+        // Handle else clause - return the statement inside
+        TSNode inner_node = ts_node_named_child(stmt_node, 0);
+        return build_js_statement(tp, inner_node);
     } else if (strcmp(node_type, "expression_statement") == 0) {
-        printf("DEBUG: Processing expression_statement\n");
-        fflush(stdout);
-        
         JsExpressionStatementNode* expr_stmt = (JsExpressionStatementNode*)alloc_js_ast_node(tp, JS_AST_NODE_EXPRESSION_STATEMENT, stmt_node, sizeof(JsExpressionStatementNode));
         TSNode expr_node = ts_node_named_child(stmt_node, 0);
         
-        const char* expr_type = ts_node_type(expr_node);
-        printf("DEBUG: Expression type: %s\n", expr_type);
-        fflush(stdout);
-        
         expr_stmt->expression = build_js_expression(tp, expr_node);
-        printf("DEBUG: build_js_expression returned: %p\n", expr_stmt->expression);
-        fflush(stdout);
         
         if (expr_stmt->expression && expr_stmt->expression->type) {
             expr_stmt->base.type = expr_stmt->expression->type;
@@ -936,31 +1041,14 @@ JsAstNode* build_js_statement(JsTranspiler* tp, TSNode stmt_node) {
 
 // Build JavaScript program (root node)
 JsAstNode* build_js_program(JsTranspiler* tp, TSNode program_node) {
-    printf("DEBUG: build_js_program called\n");
-    fflush(stdout);
-    
     JsProgramNode* program = (JsProgramNode*)alloc_js_ast_node(tp, JS_AST_NODE_PROGRAM, program_node, sizeof(JsProgramNode));
-    printf("DEBUG: Allocated program node: %p\n", program);
-    fflush(stdout);
     
     uint32_t child_count = ts_node_named_child_count(program_node);
-    printf("DEBUG: Program has %u child statements\n", child_count);
-    fflush(stdout);
-    
     JsAstNode* prev_stmt = NULL;
     
     for (uint32_t i = 0; i < child_count; i++) {
-        printf("DEBUG: Processing child %u/%u\n", i + 1, child_count);
-        fflush(stdout);
-        
         TSNode child_node = ts_node_named_child(program_node, i);
-        const char* child_type = ts_node_type(child_node);
-        printf("DEBUG: Child %u type: %s\n", i, child_type);
-        fflush(stdout);
-        
         JsAstNode* stmt = build_js_statement(tp, child_node);
-        printf("DEBUG: build_js_statement returned: %p\n", stmt);
-        fflush(stdout);
         
         if (stmt) {
             if (!prev_stmt) {
@@ -1098,20 +1186,20 @@ JsAstNode* build_js_class_declaration(JsTranspiler* tp, TSNode class_node) {
     JsClassNode* class_decl = (JsClassNode*)alloc_js_ast_node(tp, JS_AST_NODE_CLASS_DECLARATION, class_node, sizeof(JsClassNode));
     
     // Get class name
-    TSNode name_node = ts_node_child_by_field_id(class_node, JS_FIELD_NAME);
+    TSNode name_node = ts_node_child_by_field_name(class_node, "name", strlen("name"));
     if (!ts_node_is_null(name_node)) {
         StrView name_source = js_node_source(tp, name_node);
         class_decl->name = name_pool_create_strview(tp->name_pool, name_source);
     }
     
     // Get superclass (optional)
-    TSNode superclass_node = ts_node_child_by_field_name(class_node, "superclass", 10);
+    TSNode superclass_node = ts_node_child_by_field_name(class_node, "superclass", strlen("superclass"));
     if (!ts_node_is_null(superclass_node)) {
         class_decl->superclass = build_js_expression(tp, superclass_node);
     }
     
     // Get class body
-    TSNode body_node = ts_node_child_by_field_id(class_node, JS_FIELD_BODY);
+    TSNode body_node = ts_node_child_by_field_name(class_node, "body", strlen("body"));
     if (!ts_node_is_null(body_node)) {
         class_decl->body = build_js_class_body(tp, body_node);
     }
@@ -1160,13 +1248,13 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
     method->static_method = false;
     
     // Get method key
-    TSNode key_node = ts_node_child_by_field_id(method_node, field_key);
+    TSNode key_node = ts_node_child_by_field_name(method_node, "name", strlen("name"));
     if (!ts_node_is_null(key_node)) {
         method->key = build_js_expression(tp, key_node);
     }
     
     // Get method value (function)
-    TSNode value_node = ts_node_child_by_field_id(method_node, JS_FIELD_VALUE);
+    TSNode value_node = ts_node_child_by_field_name(method_node, "value", strlen("value"));
     if (!ts_node_is_null(value_node)) {
         method->value = build_js_function(tp, value_node);
     }
@@ -1179,20 +1267,10 @@ JsAstNode* build_js_method_definition(JsTranspiler* tp, TSNode method_node) {
 
 // Main AST building entry point
 JsAstNode* build_js_ast(JsTranspiler* tp, TSNode root) {
-    printf("DEBUG: build_js_ast called\n");
-    fflush(stdout);
-    
     const char* node_type = ts_node_type(root);
-    printf("DEBUG: Root node type: %s\n", node_type);
-    fflush(stdout);
     
     if (strcmp(node_type, "program") == 0) {
-        printf("DEBUG: About to call build_js_program\n");
-        fflush(stdout);
-        JsAstNode* result = build_js_program(tp, root);
-        printf("DEBUG: build_js_program returned: %p\n", result);
-        fflush(stdout);
-        return result;
+        return build_js_program(tp, root);
     } else {
         log_error("Expected program node, got: %s", node_type);
         return NULL;
