@@ -318,8 +318,7 @@ typedef struct {
     bool has_clip;
 } ScrollProp;
 
-// Integrated flex container layout state
-typedef struct {
+typedef struct FlexProp {
     // CSS properties (using int to allow both enum and Lexbor constants)
     int direction;      // FlexDirection or LXB_CSS_VALUE_*
     int wrap;           // FlexWrap or LXB_CSS_VALUE_*
@@ -330,27 +329,11 @@ typedef struct {
     int column_gap;
     WritingMode writing_mode;
     TextDirection text_direction;
-
-    // Layout state (computed during layout)
-    struct ViewBlock** flex_items;  // Array of child flex items
-    int item_count;
-    int allocated_items;  // For dynamic array growth
-
-    // Line information
-    struct FlexLineInfo* lines;
-    int line_count;
-    int allocated_lines;
-
-    // Cached calculations
-    int main_axis_size;
-    int cross_axis_size;
-    bool needs_reflow;
-} FlexContainerLayout;
-
+} FlexProp;
 typedef struct {
     ImageSurface* img;  // image surface
     Document* doc;  // iframe document
-    FlexContainerLayout* flex_container; // integrated flex container layout
+    FlexProp* flex;
     struct GridContainerLayout* grid_container; // integrated grid container layout
 } EmbedProp;
 

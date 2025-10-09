@@ -30,36 +30,14 @@ ViewBlock* alloc_view_block(LayoutContext* lycon) {
     return block;
 }
 
-// Create a flex container from a ViewBlock
-ViewBlock* create_flex_container(LayoutContext* lycon, int width, int height) {
-    ViewBlock* container = alloc_view_block(lycon);
-    if (!container) return nullptr;
-
-    container->width = width;
-    container->height = height;
-
-    // Initialize embed properties
-    container->embed = (EmbedProp*)calloc(1, sizeof(EmbedProp));
-    if (!container->embed) {
-        free(container);
-        return nullptr;
-    }
-
-    // Initialize flex container
-    init_flex_container(container);
-
-    return container;
-}
-
 // Free a ViewBlock and its flex container resources
 void free_view_block(ViewBlock* block) {
     if (!block) return;
 
     // Cleanup flex container if it exists
-    if (block->embed && block->embed->flex_container) {
-        cleanup_flex_container(block);
+    if (block->embed && block->embed->flex) {
+        free(block->embed->flex);
     }
-
     // Free embed properties
     if (block->embed) {
         free(block->embed);
@@ -95,28 +73,6 @@ void free_view_block(ViewBlock* block) {
     }
 
     free(block);
-}
-
-// Helper to set flex container properties from CSS
-void set_flex_container_properties(ViewBlock* container,
-                                 FlexDirection direction,
-                                 FlexWrap wrap,
-                                 JustifyContent justify,
-                                 AlignType align_items,
-                                 AlignType align_content,
-                                 int row_gap,
-                                 int column_gap) {
-    if (!container || !container->embed || !container->embed->flex_container) return;
-
-    FlexContainerLayout* flex = container->embed->flex_container;
-    flex->direction = direction;
-    flex->wrap = wrap;
-    flex->justify = justify;
-    flex->align_items = align_items;
-    flex->align_content = align_content;
-    flex->row_gap = row_gap;
-    flex->column_gap = column_gap;
-    flex->needs_reflow = true;
 }
 
 // Helper to set flex item properties
@@ -155,7 +111,7 @@ void add_flex_child(ViewBlock* container, ViewBlock* child) {
     }
 
     // Mark container for reflow
-    if (container->embed && container->embed->flex_container) {
-        container->embed->flex_container->needs_reflow = true;
-    }
+    // if (container->embed && container->embed->flex_container) {
+    //     container->embed->flex_container->needs_reflow = true;
+    // }
 }

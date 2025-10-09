@@ -18,12 +18,12 @@ typedef struct FlexLineInfo {
 } FlexLineInfo;
 
 // Main flex layout functions
-void init_flex_container(ViewBlock* container);
-void cleanup_flex_container(ViewBlock* container);
+void init_flex_container(LayoutContext* lycon, ViewBlock* container);
+void cleanup_flex_container(LayoutContext* lycon);
 void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container);
 
 // Flex item collection and management
-int collect_flex_items(ViewBlock* container, ViewBlock*** items);
+int collect_flex_items(FlexContainerLayout* flex_layout, ViewBlock* container, ViewBlock*** items);
 void sort_flex_items_by_order(ViewBlock** items, int count);
 
 // Flex line creation
@@ -41,7 +41,7 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
 void align_content(FlexContainerLayout* flex_layout);
 
 // Utility functions
-bool is_main_axis_horizontal(FlexContainerLayout* flex_layout);
+bool is_main_axis_horizontal(FlexProp* flex);
 int get_main_axis_size(ViewBlock* item, FlexContainerLayout* flex_layout);
 int get_cross_axis_size(ViewBlock* item, FlexContainerLayout* flex_layout);
 int get_cross_axis_position(ViewBlock* item, FlexContainerLayout* flex_layout);
