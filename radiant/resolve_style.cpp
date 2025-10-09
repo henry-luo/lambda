@@ -1285,6 +1285,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_flex_wrap_t *flex_wrap = declr->u.flex_wrap;
         alloc_flex_prop(lycon, block);
         // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
+        printf("DEBUG: Setting flex-wrap to %d\n", flex_wrap->type);
         block->embed->flex->wrap = (FlexWrap)flex_wrap->type;
         break;
     }

@@ -30,7 +30,7 @@ void init_flex_container(LayoutContext* lycon, ViewBlock* container) {
         flex->wrap = WRAP_NOWRAP;
         flex->justify = JUSTIFY_START;
         flex->align_items = ALIGN_START;  // Changed from FLEX_START for consistency
-        flex->align_content = ALIGN_START;
+        flex->align_content = ALIGN_STRETCH;  // Default per CSS Flexbox spec
         flex->row_gap = 0;
         flex->column_gap = 0;
         flex->writing_mode = WM_HORIZONTAL_TB;
@@ -996,8 +996,11 @@ void align_content(FlexContainerLayout* flex_layout) {
 
         // Add gap between lines
         if (i < flex_layout->line_count - 1) {
-            current_pos += is_main_axis_horizontal(flex_layout) ?
+            int gap_between_lines = is_main_axis_horizontal(flex_layout) ?
                           flex_layout->row_gap : flex_layout->column_gap;
+
+            printf("DEBUG: Adding gap between lines %d and %d: %d\n", i, i+1, gap_between_lines);
+            current_pos += gap_between_lines;
         }
     }
 }

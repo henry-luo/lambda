@@ -201,7 +201,7 @@ void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
         prop->wrap = WRAP_NOWRAP;
         prop->justify = JUSTIFY_START;
         prop->align_items = ALIGN_STRETCH;
-        prop->align_content = ALIGN_START;
+        prop->align_content = ALIGN_STRETCH;  // CSS spec default for multi-line flex
         prop->row_gap = 0;  prop->column_gap = 0;
         block->embed->flex = prop;
     }
@@ -726,7 +726,24 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"flexDirection\": \"row\",\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"flexWrap\": \"nowrap\",\n");
+
+    // Get actual flex-wrap value from the block
+    const char* flex_wrap_str = "nowrap";  // default
+    if (block->embed && block->embed->flex) {
+        switch (block->embed->flex->wrap) {
+            case WRAP_WRAP:
+                flex_wrap_str = "wrap";
+                break;
+            case WRAP_WRAP_REVERSE:
+                flex_wrap_str = "wrap-reverse";
+                break;
+            case WRAP_NOWRAP:
+            default:
+                flex_wrap_str = "nowrap";
+                break;
+        }
+    }
+    strbuf_append_format(buf, "\"flexWrap\": \"%s\",\n", flex_wrap_str);
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"justifyContent\": \"normal\",\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
