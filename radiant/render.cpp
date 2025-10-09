@@ -544,7 +544,7 @@ void render_children(RenderContext* rdcon, View* view) {
                 else if (block->embed->doc) {
                     render_embed_doc(rdcon, block);
                 }
-                else if (block->embed->flex_container) {
+                else if (block->embed->flex) {
                     render_block_view(rdcon, block);
                 }
             }

@@ -175,12 +175,12 @@ PositionProp* alloc_position_prop(LayoutContext* lycon) {
 }
 
 // alloc flex container blk
-void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block) {
+void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block) {
     if (!block->embed) {
-        block->embed = block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
+        block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
     }
-    if (!block->embed->flex_container) {
-        FlexContainerLayout* prop = (FlexContainerLayout*)alloc_prop(lycon, sizeof(FlexContainerLayout));
+    if (!block->embed->flex) {
+        FlexProp* prop = (FlexProp*)alloc_prop(lycon, sizeof(FlexProp));
         // CRITICAL FIX: Use enum names that now align with Lexbor constants
         prop->direction = DIR_ROW;
         prop->wrap = WRAP_NOWRAP;
@@ -188,12 +188,7 @@ void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block) {
         prop->align_items = ALIGN_STRETCH;
         prop->align_content = ALIGN_START;
         prop->row_gap = 0;  prop->column_gap = 0;
-        prop->needs_reflow = true;
-        prop->main_axis_size = 0;
-        prop->cross_axis_size = 0;
-        prop->item_count = 0;
-        prop->line_count = 0;
-        block->embed->flex_container = prop;
+        block->embed->flex = prop;
     }
 }
 
@@ -316,15 +311,13 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
     }
 
     // Add flex container debugging info
-    if (block->embed && block->embed->flex_container) {
+    if (block->embed && block->embed->flex) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{flex-container: ");
         strbuf_append_format(buf, "row-gap:%d column-gap:%d ",
-                           block->embed->flex_container->row_gap,
-                           block->embed->flex_container->column_gap);
-        strbuf_append_format(buf, "main-axis:%d cross-axis:%d",
-                           block->embed->flex_container->main_axis_size,
-                           block->embed->flex_container->cross_axis_size);
+            block->embed->flex->row_gap, block->embed->flex->column_gap);
+        // strbuf_append_format(buf, "main-axis:%d cross-axis:%d",
+        //                   block->embed->flex->main_axis_size, block->embed->flex->cross_axis_size);
         strbuf_append_str(buf, "}\n");
     }
 
@@ -678,7 +671,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     else if (block->type == RDT_VIEW_LIST_ITEM) display = "list-item";
     else if (block->type == RDT_VIEW_TABLE) display = "table";
     // CRITICAL FIX: Check for flex container
-    else if (block->embed && block->embed->flex_container) display = "flex";
+    else if (block->embed && block->embed->flex) display = "flex";
     append_json_string(buf, display);
 
     // Add required CSS properties that test framework expects
@@ -806,18 +799,18 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     }
 
     // Add flex container properties if available
-    if (block->embed && block->embed->flex_container) {
+    if (block->embed && block->embed->flex) {
         strbuf_append_str(buf, ",\n");
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "\"flex_container\": {\n");
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"row_gap\": %d,\n", block->embed->flex_container->row_gap);
+        strbuf_append_format(buf, "\"row_gap\": %d,\n", block->embed->flex->row_gap);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"column_gap\": %d,\n", block->embed->flex_container->column_gap);
-        strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"main_axis_size\": %d,\n", block->embed->flex_container->main_axis_size);
-        strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"cross_axis_size\": %d\n", block->embed->flex_container->cross_axis_size);
+        strbuf_append_format(buf, "\"column_gap\": %d,\n", block->embed->flex->column_gap);
+        // strbuf_append_char_n(buf, ' ', indent + 6);
+        // strbuf_append_format(buf, "\"main_axis_size\": %d,\n", block->embed->flex->main_axis_size);
+        // strbuf_append_char_n(buf, ' ', indent + 6);
+        // strbuf_append_format(buf, "\"cross_axis_size\": %d\n", block->embed->flex->cross_axis_size);
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "}");
     }

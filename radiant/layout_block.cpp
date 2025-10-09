@@ -150,15 +150,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
             }
             else if (display.inner == LXB_CSS_VALUE_FLEX) {
                 // Initialize flex container if not already done
-                if (!block->embed) {
-                    block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
-                }
-                if (!block->embed->flex_container) {
-                    init_flex_container(block);
-                }
+                FlexContainerLayout* pa_flex = lycon->flex_container;
+                init_flex_container(lycon, block);
 
-                // CRITICAL FIX: Process DOM children into View objects first
-                // This is what was missing - flex containers need their DOM children
+                // process DOM children into View objects first
+                // flex containers need their DOM children
                 // converted to View objects before the flex algorithm can work
                 int child_count = 0;
                 const int MAX_CHILDREN = 100; // Safety limit
@@ -175,8 +171,12 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                     child_count++;
                 } while (child);
 
-                // Now run the flex layout algorithm with the processed children
+                // run the flex layout algorithm with the processed children
                 layout_flex_container_new(lycon, block);
+
+                // restore parent flex context
+                cleanup_flex_container(lycon);
+                lycon->flex_container = pa_flex;
             }
             else if (display.inner == LXB_CSS_VALUE_GRID) {
                 log_debug("Setting up grid container for %s\n", block->node->name());
@@ -233,9 +233,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // Check if this block is a flex item
     ViewBlock* parent_block = (ViewBlock*)lycon->parent;
-    bool is_flex_item = (parent_block && parent_block->embed &&
-                        parent_block->embed->flex_container &&
-                        parent_block->display.inner == LXB_CSS_VALUE_FLEX);
+    bool is_flex_item = (parent_block && parent_block->display.inner == LXB_CSS_VALUE_FLEX);
 
     if (display.outer != LXB_CSS_VALUE_INLINE_BLOCK) {
         if (!lycon->line.is_line_start) { line_break(lycon); }

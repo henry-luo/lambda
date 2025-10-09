@@ -1275,54 +1275,55 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_FLEX_DIRECTION: {
         if (!block) { break; }
         const lxb_css_property_flex_direction_t *flex_direction = declr->u.flex_direction;
-        alloc_flex_container_prop(lycon, block);
+        alloc_flex_prop(lycon, block);
         // CRITICAL FIX: Now that enums align with Lexbor constants, we can use them directly
-        block->embed->flex_container->direction = (FlexDirection)flex_direction->type;
+        block->embed->flex->direction = (FlexDirection)flex_direction->type;
         break;
     }
     case LXB_CSS_PROPERTY_FLEX_WRAP: {
         if (!block) { break; }
         const lxb_css_property_flex_wrap_t *flex_wrap = declr->u.flex_wrap;
-        alloc_flex_container_prop(lycon, block);
+        alloc_flex_prop(lycon, block);
         // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
-        block->embed->flex_container->wrap = (FlexWrap)flex_wrap->type;
+        block->embed->flex->wrap = (FlexWrap)flex_wrap->type;
         break;
     }
     case LXB_CSS_PROPERTY_FLEX_FLOW: {
         if (!block) { break; }
         const lxb_css_property_flex_flow_t *flex_flow = declr->u.flex_flow;
-        alloc_flex_container_prop(lycon, block);
+        alloc_flex_prop(lycon, block);
         // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
         if (flex_flow->type_direction != LXB_CSS_VALUE__UNDEF) {
-            block->embed->flex_container->direction = (FlexDirection)flex_flow->type_direction;
+            block->embed->flex->direction = (FlexDirection)flex_flow->type_direction;
         }
         if (flex_flow->wrap != LXB_CSS_VALUE__UNDEF) {
-            block->embed->flex_container->wrap = (FlexWrap)flex_flow->wrap;
+            block->embed->flex->wrap = (FlexWrap)flex_flow->wrap;
         }
         break;
     }
     case LXB_CSS_PROPERTY_JUSTIFY_CONTENT: {
         if (!block) { break; }
         const lxb_css_property_justify_content_t *justify_content = declr->u.justify_content;
-        alloc_flex_container_prop(lycon, block);
+        alloc_flex_prop(lycon, block);
         // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
-        block->embed->flex_container->justify = (JustifyContent)justify_content->type;
+        block->embed->flex->justify = (JustifyContent)justify_content->type;
         break;
     }
     case LXB_CSS_PROPERTY_ALIGN_ITEMS: {
         if (!block) { break; }
         const lxb_css_property_align_items_t *align_items = declr->u.align_items;
-        alloc_flex_container_prop(lycon, block);
+        alloc_flex_prop(lycon, block);
         // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
-        block->embed->flex_container->align_items = (AlignType)align_items->type;
+        block->embed->flex->align_items = (AlignType)align_items->type;
+        printf("DEBUG: CSS align-items parsed: type=%d\n", align_items->type);
         break;
     }
     case LXB_CSS_PROPERTY_ALIGN_CONTENT: {
         if (!block) { break; }
         const lxb_css_property_align_content_t *align_content = declr->u.align_content;
-        alloc_flex_container_prop(lycon, block);
+        alloc_flex_prop(lycon, block);
         // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
-        block->embed->flex_container->align_content = (AlignType)align_content->type;
+        block->embed->flex->align_content = (AlignType)align_content->type;
         break;
     }
     case LXB_CSS_PROPERTY_ALIGN_SELF: {
@@ -1452,8 +1453,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             if (custom->value.length == 12 && strncmp(value_str, "space-evenly", 12) == 0) {
                 // Set justify-content to space-evenly using our custom constant
                 if (block) {
-                    alloc_flex_container_prop(lycon, block);
-                    block->embed->flex_container->justify = LXB_CSS_VALUE_SPACE_EVENLY;
+                    alloc_flex_prop(lycon, block);
+                    block->embed->flex->justify = LXB_CSS_VALUE_SPACE_EVENLY;
                     log_debug("Set justify-content: space-evenly\n");
                 }
             }
@@ -1488,9 +1489,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                         log_debug("Set grid gap: %dpx (from %s)\n", gap_px, value_str);
                     } else {
                         // Fallback to flex container for backward compatibility
-                        alloc_flex_container_prop(lycon, block);
-                        block->embed->flex_container->row_gap = gap_px;
-                        block->embed->flex_container->column_gap = gap_px;
+                        alloc_flex_prop(lycon, block);
+                        block->embed->flex->row_gap = gap_px;
+                        block->embed->flex->column_gap = gap_px;
                         log_debug("Set flex gap: %dpx (from %s)\n", gap_px, value_str);
                     }
                 }

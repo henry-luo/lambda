@@ -33,8 +33,7 @@ void layout_nested_context(LayoutContext* lycon, ViewBlock* container) {
         default: {
             // Check if parent is flex
             ViewBlock* parent = (ViewBlock*)container->parent;
-            if (parent && parent->embed && parent->embed->flex_container &&
-                parent->display.inner == LXB_CSS_VALUE_FLEX) {
+            if (parent && parent->display.inner == LXB_CSS_VALUE_FLEX) {
                 layout_block_in_flex_item(lycon, container, parent);
             } else {
                 // Standard block layout - use existing layout functions
@@ -155,7 +154,7 @@ void layout_nested_flex_containers(LayoutContext* lycon, ViewBlock* outer_flex, 
     layout_block_in_flex_context(lycon, inner_flex, outer_flex);
 
     // Then, layout the inner flex container's own flex items
-    if (inner_flex->embed && inner_flex->embed->flex_container) {
+    if (inner_flex->embed && inner_flex->embed->flex) {
         layout_flex_container_with_nested_content(lycon, inner_flex);
     }
 }
@@ -201,7 +200,7 @@ void calculate_containing_block(ViewBlock* element, ViewBlock* parent, Containin
     cb->y = parent->y;
 
     // Adjust for flex containers
-    if (parent->embed && parent->embed->flex_container) {
+    if (parent->embed && parent->embed->flex) {
         // In flex containers, containing block is the flex container's content area
         if (parent->bound) {
             cb->width -= (parent->bound->padding.left + parent->bound->padding.right);
@@ -217,9 +216,7 @@ void calculate_containing_block(ViewBlock* element, ViewBlock* parent, Containin
             }
         }
     }
-
-    log_debug("Containing block calculated: %dx%d at (%d,%d)\n",
-              cb->width, cb->height, cb->x, cb->y);
+    log_debug("Containing block calculated: %dx%d at (%d,%d)\n", cb->width, cb->height, cb->x, cb->y);
 }
 
 // Handle percentage resolution in nested contexts

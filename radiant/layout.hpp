@@ -49,25 +49,43 @@ typedef enum LineFillStatus {
     RDT_LINE_FILLED = 2,
 } LineFillStatus;
 
+// Integrated flex container layout state
+typedef struct FlexContainerLayout : FlexProp {
+    // Layout state (computed during layout)
+    struct ViewBlock** flex_items;  // Array of child flex items
+    int item_count;
+    int allocated_items;  // For dynamic array growth
+
+    // Line information
+    struct FlexLineInfo* lines;
+    int line_count;
+    int allocated_lines;
+
+    // Cached calculations
+    int main_axis_size;
+    int cross_axis_size;
+    bool needs_reflow;
+} FlexContainerLayout;
+
 typedef struct LayoutContext {
     ViewGroup* parent;
     View* prev_view;
     View* view;  // current view
+    DomNode *elmt;  // current dom element, used before the view is created
+
     Blockbox block;  // current blockbox
     Linebox line;  // current linebox
     FontBox font;  // current font style
     int root_font_size;
-    DomNode *elmt;  // current dom element, used before the view is created
+    struct FloatContext* current_float_context;  // Current float context for this layout
+    FlexContainerLayout* flex_container; // integrated flex container layout
+
     Document* doc;
     UiContext* ui_context;
-
     // Additional fields for test compatibility
     int width, height;  // context dimensions
     int dpi;           // dots per inch
     Pool* pool;  // memory pool for view allocation
-
-    // Float context management
-    struct FloatContext* current_float_context;  // Current float context for this layout
 } LayoutContext;
 
 void* alloc_prop(LayoutContext* lycon, size_t size);
@@ -75,7 +93,7 @@ FontProp* alloc_font_prop(LayoutContext* lycon);
 BlockProp* alloc_block_prop(LayoutContext* lycon);
 FlexItemProp* alloc_flex_item_prop(LayoutContext* lycon);
 PositionProp* alloc_position_prop(LayoutContext* lycon);
-void alloc_flex_container_prop(LayoutContext* lycon, ViewBlock* block);
+void alloc_flex_prop(LayoutContext* lycon, ViewBlock* block);
 void alloc_grid_container_prop(LayoutContext* lycon, ViewBlock* block);
 View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node);
 void free_view(ViewTree* tree, View* view);
