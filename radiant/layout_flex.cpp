@@ -875,9 +875,22 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
                 case ALIGN_STRETCH:
                     cross_pos = 0;
                     if (item_cross_size < container_cross_size) {
-                        // Stretch item to full container cross size
-                        set_cross_axis_size(item, container_cross_size, flex_layout);
-                        item_cross_size = container_cross_size;
+                        // Check if item has explicit cross-axis size
+                        bool has_explicit_cross_size = false;
+                        if (is_main_axis_horizontal(flex_layout)) {
+                            // Row direction: cross-axis is height
+                            has_explicit_cross_size = (item->blk && item->blk->given_height >= 0);
+                        } else {
+                            // Column direction: cross-axis is width
+                            has_explicit_cross_size = (item->blk && item->blk->given_width >= 0);
+                        }
+
+                        // Only stretch if item doesn't have explicit cross-axis size
+                        if (!has_explicit_cross_size) {
+                            // Stretch item to full container cross size
+                            set_cross_axis_size(item, container_cross_size, flex_layout);
+                            item_cross_size = container_cross_size;
+                        }
                     }
                     break;
                 case ALIGN_BASELINE:
