@@ -4,7 +4,7 @@
 #include "layout.hpp"
 
 // Phase 1 entry: layout a table formatting context root (table/inline-table)
-void layout_table_box(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
+void layout_table(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 
 // Internal helpers (Phase 1 scaffolding)
 // Build the logical table structure under a ViewTable and identify caption/row groups

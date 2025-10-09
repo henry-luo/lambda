@@ -161,7 +161,7 @@ Per CSS 2.1 table model, define display mapping and insertion of anonymous boxes
 - **layout.cpp (`layout_flow_node`)**
   - Extend display resolution to classify table display types.
   - Route to new functions creating specific view subclasses:
-    - `layout_table_box()` constructs a `ViewTable` and owns the full table algorithm.
+    - `layout_table()` constructs a `ViewTable` and owns the full table algorithm.
     - Internally, create `ViewTableRowGroup`, `ViewTableRow`, `ViewTableCell` instances as children and attach minimal metadata.
     - External callers should not layout table descendants directly; the table algorithm orchestrates child layout.
 

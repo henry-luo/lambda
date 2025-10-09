@@ -19,6 +19,7 @@ View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
+void layout_table(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display) {
     // finalize the block size
@@ -138,11 +139,11 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
         if (child) {
             lycon->parent = (ViewGroup*)block;  lycon->prev_view = NULL;
             if (display.inner == LXB_CSS_VALUE_FLOW) {
+                // inline content flow
                 do {
-                    printf("Processing child %p\n", child);
+                    // printf("Processing child %p\n", child);
                     layout_flow_node(lycon, child);
                     DomNode* next_child = child->next_sibling();
-                    printf("Got next sibling %p\n", next_child);
                     child = next_child;
                 } while (child);
                 // handle last line
@@ -159,14 +160,14 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 int child_count = 0;
                 const int MAX_CHILDREN = 100; // Safety limit
                 do {
-                    printf("Processing flex child %p (count: %d)\n", child, child_count);
+                    log_debug("Processing flex child %p (count: %d)", child, child_count);
                     if (child_count >= MAX_CHILDREN) {
-                        printf("ERROR: Too many flex children, breaking to prevent infinite loop\n");
+                        log_error("ERROR: Too many flex children, breaking to prevent infinite loop");
                         break;
                     }
                     layout_flow_node(lycon, child);
                     DomNode* next_child = child->next_sibling();
-                    printf("Got next flex sibling %p\n", next_child);
+                    log_debug("Got next flex sibling %p", next_child);
                     child = next_child;
                     child_count++;
                 } while (child);
@@ -179,7 +180,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 lycon->flex_container = pa_flex;
             }
             else if (display.inner == LXB_CSS_VALUE_GRID) {
-                log_debug("Setting up grid container for %s\n", block->node->name());
+                log_debug("Setting up grid container for %s", block->node->name());
                 GridContainerLayout* pa_grid = lycon->grid_container;
                 init_grid_container(lycon, block);
                 // Process DOM children into View objects first
@@ -188,9 +189,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 int child_count = 0;
                 const int MAX_CHILDREN = 100; // Safety limit
                 do {
-                    printf("Processing grid child %p (count: %d)\n", child, child_count);
+                    log_debug("Processing grid child %p (count: %d)", child, child_count);
                     if (child_count >= MAX_CHILDREN) {
-                        printf("ERROR: Too many children, breaking to prevent infinite loop\n");
+                        log_error("ERROR: Too many children, breaking to prevent infinite loop");
                         break;
                     }
                     layout_flow_node(lycon, child);
@@ -199,15 +200,20 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 } while (child);
 
                 // Now run the grid layout algorithm with the processed children
-                printf("DEBUG: About to call layout_grid_container\n");
+                log_debug("About to call layout_grid_container");
                 layout_grid_container(lycon, block);
 
                 cleanup_grid_container(lycon);
                 lycon->grid_container = pa_grid;
-                printf("DEBUG: Finished layout_grid_container\n");
+                log_debug("Finished layout_grid_container");
+            }
+            else if (display.inner == LXB_CSS_VALUE_TABLE) {
+                log_debug("Table detected inner=%d", display.outer, display.inner);
+                layout_table(lycon, block->node, display);
+                return;
             }
             else {
-                log_debug("unknown display type\n");
+                log_debug("unknown display type");
             }
             lycon->parent = block->parent;
         }
@@ -588,11 +594,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // layout block content
     if (elmt_name != LXB_TAG_IMG) {
-        // Special handling for flex containers
-        if (display.inner == LXB_CSS_VALUE_FLEX) {
-            log_debug("Setting up flex container for %s", elmt->name());
-            // Flex container setup is handled in layout_block_content
-        }
         layout_block_content(lycon, block, display);
     }
 

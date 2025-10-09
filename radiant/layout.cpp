@@ -1,6 +1,5 @@
 #include "layout.hpp"
 #include "layout_flex.hpp"
-#include "layout_table.hpp"
 #include "layout_positioned.hpp"
 #include "font_face.h"
 
@@ -199,27 +198,6 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         // Debug: print display values for all elements to diagnose grid issue
         log_debug("DEBUG: Element %s - outer=%d, inner=%d", node->name(), display.outer, display.inner);
-
-        // Check for flex container first
-        if (display.inner == LXB_CSS_VALUE_FLEX) {
-            // This element is a flex container - route to flex layout
-            layout_block(lycon, node, display); // Block layout will handle flex containers
-            return;
-        }
-        // Check for grid container
-        if (display.inner == LXB_CSS_VALUE_GRID) {
-            printf("DEBUG: GRID container detected! Routing to layout_block\n");
-            // This element is a grid container - route to grid layout
-            layout_block(lycon, node, display); // Block layout will handle grid containers
-            return;
-        }
-        // Check for table formatting context root (Phase 1)
-        if (display.outer == LXB_CSS_VALUE_TABLE || display.inner == LXB_CSS_VALUE_TABLE) {
-            printf("DEBUG: Table detected! outer=%d, inner=%d\n", display.outer, display.inner);
-            layout_table_box(lycon, node, display);
-            return;
-        }
-
         switch (display.outer) {
         case LXB_CSS_VALUE_BLOCK:  case LXB_CSS_VALUE_INLINE_BLOCK:
         case LXB_CSS_VALUE_LIST_ITEM:
