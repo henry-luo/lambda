@@ -112,10 +112,23 @@ static ViewTableCell* create_table_cell(LayoutContext* lycon, DomNode* cellNode)
     ViewTableCell* cell = (ViewTableCell*)alloc_view(lycon, RDT_VIEW_TABLE_CELL, cellNode);
     if (!cell) return nullptr;
 
+    // Save current layout context
+    DomNode* saved_elmt = lycon->elmt;
+    View* saved_view = lycon->view;
+
+    // Set context for style resolution
+    lycon->elmt = cellNode;
+    lycon->view = (View*)cell;
+
+    // Resolve CSS styles for the cell
+    dom_node_resolve_style(cellNode, lycon);
+
     // Parse cell attributes
     parse_cell_attributes(cellNode, cell);
 
-    // Note: CSS styles should already be resolved by the layout system
+    // Restore layout context
+    lycon->elmt = saved_elmt;
+    lycon->view = saved_view;
 
     return cell;
 }
@@ -241,14 +254,36 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                                         // Layout cell content
                                         ViewGroup* cell_saved_parent = lycon->parent;
                                         View* cell_saved_prev = lycon->prev_view;
+
+                                        // CRITICAL FIX: Reset layout context for cell content
+                                        // Save current context state
+                                        Blockbox saved_block = lycon->block;
+                                        Linebox saved_line = lycon->line;
+
+                                        // Set cell as parent and reset layout state for cell content
                                         lycon->parent = (ViewGroup*)cell;
                                         lycon->prev_view = nullptr;
                                         lycon->elmt = cellNode;
+
+                                        // Reset block layout state for cell content area
+                                        lycon->block.advance_y = 0;
+                                        lycon->block.width = cell->width - 2; // subtract border
+                                        lycon->block.height = cell->height - 2; // subtract border
+                                        lycon->line.left = 0;
+                                        lycon->line.right = lycon->block.width;
+                                        lycon->line.advance_x = 0;
+                                        lycon->line.is_line_start = true;
+
+                                        log_debug("Cell content layout - width=%d, height=%d, advance_y=%d",
+                                               lycon->block.width, lycon->block.height, lycon->block.advance_y);
 
                                         for (DomNode* cc = cellNode->first_child(); cc; cc = cc->next_sibling()) {
                                             layout_flow_node(lycon, cc);
                                         }
 
+                                        // Restore layout context
+                                        lycon->block = saved_block;
+                                        lycon->line = saved_line;
                                         lycon->parent = cell_saved_parent;
                                         lycon->prev_view = (View*)cell;
                                         lycon->elmt = rowNode;
@@ -294,14 +329,36 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                             // Layout cell content
                             ViewGroup* cell_saved_parent = lycon->parent;
                             View* cell_saved_prev = lycon->prev_view;
+
+                            // CRITICAL FIX: Reset layout context for cell content
+                            // Save current context state
+                            Blockbox saved_block = lycon->block;
+                            Linebox saved_line = lycon->line;
+
+                            // Set cell as parent and reset layout state for cell content
                             lycon->parent = (ViewGroup*)cell;
                             lycon->prev_view = nullptr;
                             lycon->elmt = cellNode;
+
+                            // Reset block layout state for cell content area
+                            lycon->block.advance_y = 0;
+                            lycon->block.width = cell->width - 2; // subtract border
+                            lycon->block.height = cell->height - 2; // subtract border
+                            lycon->line.left = 0;
+                            lycon->line.right = lycon->block.width;
+                            lycon->line.advance_x = 0;
+                            lycon->line.is_line_start = true;
+
+                            log_debug("Direct cell content layout - width=%d, height=%d, advance_y=%d",
+                                   lycon->block.width, lycon->block.height, lycon->block.advance_y);
 
                             for (DomNode* cc = cellNode->first_child(); cc; cc = cc->next_sibling()) {
                                 layout_flow_node(lycon, cc);
                             }
 
+                            // Restore layout context
+                            lycon->block = saved_block;
+                            lycon->line = saved_line;
                             lycon->parent = cell_saved_parent;
                             lycon->prev_view = (View*)cell;
                             lycon->elmt = child;
@@ -362,10 +419,23 @@ static int measure_cell_min_width(ViewTableCell* cell) {
     // Browser-compatible box model calculation
     int total_width = content_width;
 
-    // Add cell padding - read from CSS properties
-    // CRITICAL FIX: The baseline test CSS has "td { padding: 8px; }"
-    // This means 8px left + 8px right = 16px total horizontal padding
-    total_width += 16; // 8px left + 8px right padding
+    // Add cell padding - read from actual CSS properties
+    int padding_horizontal = 0;
+    if (cell->bound && cell->bound->padding.left >= 0 && cell->bound->padding.right >= 0) {
+        padding_horizontal = cell->bound->padding.left + cell->bound->padding.right;
+        log_debug("Using CSS padding: left=%d, right=%d, total=%d",
+               cell->bound->padding.left, cell->bound->padding.right, padding_horizontal);
+    } else {
+        log_debug("No CSS padding found or invalid values, using default 0");
+        if (cell->bound) {
+            log_debug("bound exists: padding.left=%d, padding.right=%d",
+                   cell->bound->padding.left, cell->bound->padding.right);
+        } else {
+            log_debug("cell->bound is NULL");
+        }
+        padding_horizontal = 0;
+    }
+    total_width += padding_horizontal;
 
     // Add cell border (CSS: border: 1px solid)
     total_width += 2; // 1px left + 1px right
@@ -375,8 +445,8 @@ static int measure_cell_min_width(ViewTableCell* cell) {
         total_width = 20; // Minimum cell width for usability
     }
 
-    log_debug("Cell width calculation - content=%d, padding=16, border=2, total=%d",
-           content_width, total_width);
+    log_debug("Cell width calculation - content=%d, padding=%d, border=2, total=%d",
+           content_width, padding_horizontal, total_width);
 
     return total_width;
 }
@@ -797,8 +867,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                     // Text x,y should be relative to its parent cell, not absolute
 
                                     // Cell content area offset (border + padding)
-                                    int content_x = 1 + 8; // 1px border + 8px padding
-                                    int content_y = 1 + 8; // 1px border + 8px padding
+                                    int content_x = 1; // 1px border
+                                    int content_y = 1; // 1px border
+
+                                    // Add CSS padding
+                                    if (tcell->bound) {
+                                        content_x += tcell->bound->padding.left;
+                                        content_y += tcell->bound->padding.top;
+                                    }
 
                                     // Position text relative to cell (parent)
                                     text->x = content_x;
@@ -838,13 +914,27 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
                             // Browser-compatible box model for height
                             int cell_height = content_height;
-                            // CRITICAL FIX: The baseline test CSS has "td { padding: 8px; }"
-                            // This means 8px top + 8px bottom = 16px total vertical padding
-                            cell_height += 16;  // 8px top + 8px bottom padding
+                            // Add cell padding - read from actual CSS properties
+                            int padding_vertical = 0;
+                            if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
+                                padding_vertical = tcell->bound->padding.top + tcell->bound->padding.bottom;
+                                log_debug("Using CSS padding: top=%d, bottom=%d, total=%d",
+                                       tcell->bound->padding.top, tcell->bound->padding.bottom, padding_vertical);
+                            } else {
+                                log_debug("No CSS padding found or invalid values, using default 0");
+                                if (tcell->bound) {
+                                    log_debug("bound exists: padding.top=%d, padding.bottom=%d",
+                                           tcell->bound->padding.top, tcell->bound->padding.bottom);
+                                } else {
+                                    log_debug("tcell->bound is NULL");
+                                }
+                                padding_vertical = 0;
+                            }
+                            cell_height += padding_vertical;  // Add CSS padding
                             cell_height += 2;  // CSS border: 1px top + 1px bottom
 
-                            log_debug("Cell height calculation - content=%d, padding=16, border=2, total=%d",
-                                   content_height, cell_height);
+                            log_debug("Cell height calculation - content=%d, padding=%d, border=2, total=%d",
+                                   content_height, padding_vertical, cell_height);
 
                             cell->height = cell_height;
 
@@ -905,8 +995,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             // Text x,y should be relative to its parent cell, not absolute
 
                             // Cell content area offset (border + padding)
-                            int content_x = 1 + 8; // 1px border + 8px padding
-                            int content_y = 1 + 8; // 1px border + 8px padding
+                            int content_x = 1; // 1px border
+                            int content_y = 1; // 1px border
+
+                            // Add CSS padding
+                            if (tcell->bound) {
+                                content_x += tcell->bound->padding.left;
+                                content_y += tcell->bound->padding.top;
+                            }
 
                             // Position text relative to cell (parent)
                             text->x = content_x;
@@ -945,7 +1041,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     }
 
                     // Browser-compatible box model for height
-                    int cell_height = content_height + 16 + 2; // content + padding(16) + border(2)
+                    int cell_height = content_height;
+                    // Add cell padding - read from actual CSS properties
+                    int padding_vertical = 0;
+                    if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
+                        padding_vertical = tcell->bound->padding.top + tcell->bound->padding.bottom;
+                        log_debug("Using CSS padding: top=%d, bottom=%d, total=%d",
+                               tcell->bound->padding.top, tcell->bound->padding.bottom, padding_vertical);
+                    } else {
+                        log_debug("No CSS padding found, using default 0");
+                        padding_vertical = 0;
+                    }
+                    cell_height += padding_vertical;  // Add CSS padding
+                    cell_height += 2;  // CSS border: 1px top + 1px bottom
                     // Store calculated height
                     cell->height = cell_height;
 
@@ -1042,18 +1150,16 @@ void layout_table(LayoutContext* lycon, DomNode* tableNode, DisplayValue display
     log_debug("Table position before override: x=%d, y=%d", table->x, table->y);
     log_debug("Layout context: line.left=%d, block.advance_y=%d", lycon->line.left, lycon->block.advance_y);
 
-    // CRITICAL FIX: Account for parent positioning (body margins)
-    // The block layout system positions elements relative to parent content area,
-    // but doesn't account for the parent's own position (body margins)
+    // CRITICAL FIX: The block layout system should already position the table correctly
+    // relative to its parent. Adding parent position would double-apply body margins.
+    // Let's trust the existing block layout positioning.
     ViewBlock* parent = (ViewBlock*)table->parent;
     if (parent && parent->node && parent->node->tag() == LXB_TAG_BODY) {
-        // Add parent's position to account for body margins
-        table->x += parent->x;
-        table->y += parent->y;
-        log_debug("Added parent body position: parent=(%d,%d), table now at (%d,%d)",
-               parent->x, parent->y, table->x, table->y);
+        log_debug("Parent body found at position: (%d,%d), but not adding to table position",
+               parent->x, parent->y);
+        log_debug("Block layout should already position table correctly relative to body");
     }
-    log_debug("Table final position: x=%d, y=%d (keeping block layout positioning)", table->x, table->y);
+    log_debug("Table final position: x=%d, y=%d (trusting block layout positioning)", table->x, table->y);
 
     // Step 4: Update layout context for proper block integration
     // CRITICAL: Set advance_y to table height so finalize_block_flow works correctly
