@@ -40,7 +40,7 @@ typedef struct GridTrackSize {
     struct GridTrackSize* min_size;     // For minmax()
     struct GridTrackSize* max_size;     // For minmax()
     int fit_content_limit;       // For fit-content()
-    
+
     // For repeat() function
     int repeat_count;            // Number of repetitions (0 = auto-fill/auto-fit)
     struct GridTrackSize** repeat_tracks; // Array of track sizes to repeat
@@ -87,58 +87,32 @@ typedef struct GridLineName {
 } GridLineName;
 
 // Grid container layout state
-typedef struct GridContainerLayout {
-    // Grid template properties
-    GridTrackList* grid_template_rows;
-    GridTrackList* grid_template_columns;
-    GridTrackList* grid_template_areas;
-    
-    // Grid gap properties
-    int row_gap;
-    int column_gap;
-    
-    // Grid alignment properties (using Lexbor CSS constants)
-    int justify_content;         // LXB_CSS_VALUE_START, etc.
-    int align_content;           // LXB_CSS_VALUE_START, etc.
-    int justify_items;           // LXB_CSS_VALUE_STRETCH, etc.
-    int align_items;             // LXB_CSS_VALUE_STRETCH, etc.
-    
+typedef struct GridContainerLayout : GridProp {
     // Grid auto properties
-    int grid_auto_flow;          // LXB_CSS_VALUE_ROW, LXB_CSS_VALUE_COLUMN
     GridTrackList* grid_auto_rows;
     GridTrackList* grid_auto_columns;
-    
+
     // Computed grid properties
     GridTrack* computed_rows;
     GridTrack* computed_columns;
-    int computed_row_count;
-    int computed_column_count;
-    
+
     // Grid items
     struct ViewBlock** grid_items;
     int item_count;
     int allocated_items;
-    
-    // Grid areas
-    GridArea* grid_areas;
-    int area_count;
-    int allocated_areas;
-    
+
     // Grid line names
     GridLineName* line_names;
     int line_name_count;
     int allocated_line_names;
-    
+
     // Layout state
     bool needs_reflow;
     int explicit_row_count;
     int explicit_column_count;
     int implicit_row_count;
     int implicit_column_count;
-    
-    // Advanced features (Phase 6)
-    bool is_dense_packing;       // grid-auto-flow: dense
-    
+
     // Container dimensions
     int container_width;
     int container_height;
@@ -177,8 +151,8 @@ extern "C" {
 #endif
 
 // Grid container management functions
-void init_grid_container(struct ViewBlock* container);
-void cleanup_grid_container(struct ViewBlock* container);
+void init_grid_container(LayoutContext* lycon, struct ViewBlock* container);
+void cleanup_grid_container(LayoutContext* lycon);
 
 // Grid track functions
 GridTrackList* create_grid_track_list(int initial_capacity);
@@ -195,7 +169,7 @@ void add_grid_line_name(GridContainerLayout* grid, const char* name, int line_nu
 int find_grid_line_by_name(GridContainerLayout* grid, const char* name, bool is_row);
 
 // Grid item collection and placement
-int collect_grid_items(struct ViewBlock* container, struct ViewBlock*** items);
+int collect_grid_items(GridContainerLayout* grid_layout, struct ViewBlock* container, struct ViewBlock*** items);
 void place_grid_items(GridContainerLayout* grid_layout, struct ViewBlock** items, int item_count);
 void auto_place_grid_item(GridContainerLayout* grid_layout, struct ViewBlock* item, GridItemPlacement* placement);
 
@@ -221,7 +195,7 @@ IntrinsicSizes calculate_grid_item_intrinsic_sizes(struct ViewBlock* item, bool 
 int resolve_grid_line_position(GridContainerLayout* grid_layout, int line_value, const char* line_name, bool is_row, bool is_end_line);
 
 // Grid template area parsing
-void parse_grid_template_areas(GridContainerLayout* grid_layout, const char* areas_string);
+void parse_grid_template_areas(GridProp* grid_layout, const char* areas_string);
 void resolve_grid_template_areas(GridContainerLayout* grid_layout);
 
 // Grid content layout functions
@@ -252,5 +226,5 @@ void parse_repeat_function(const char* repeat_str, struct GridTrackSize** result
 }
 
 // C++ function declarations (outside extern "C")
-void layout_grid_container_new(LayoutContext* lycon, ViewBlock* container);
+void layout_grid_container(LayoutContext* lycon, ViewBlock* container);
 #endif

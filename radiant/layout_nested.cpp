@@ -26,7 +26,7 @@ void layout_nested_context(LayoutContext* lycon, ViewBlock* container) {
     switch (container_display.inner) {
         case LXB_CSS_VALUE_FLEX: {
             // Container is flex - use the new flex layout system
-            layout_flex_container_new(lycon, container);
+            layout_flex_container(lycon, container);
             break;
         }
         case LXB_CSS_VALUE_FLOW:
@@ -63,7 +63,7 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     }
 
     // Second pass: Run flex algorithm with calculated intrinsic sizes
-    layout_flex_container_new(lycon, flex_container);
+    layout_flex_container(lycon, flex_container);
 
     // Third pass: Final layout of flex item contents with determined sizes
     child = flex_container->child;

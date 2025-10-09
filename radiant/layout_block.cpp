@@ -172,7 +172,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 } while (child);
 
                 // run the flex layout algorithm with the processed children
-                layout_flex_container_new(lycon, block);
+                layout_flex_container(lycon, block);
 
                 // restore parent flex context
                 cleanup_flex_container(lycon);
@@ -180,20 +180,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
             }
             else if (display.inner == LXB_CSS_VALUE_GRID) {
                 log_debug("Setting up grid container for %s\n", block->node->name());
-
-                // Initialize grid container if not already done
-                printf("DEBUG: Checking grid container initialization\n");
-                if (!block->embed) {
-                    printf("DEBUG: Creating embed prop\n");
-                    block->embed = (EmbedProp*)alloc_prop(lycon, sizeof(EmbedProp));
-                }
-                if (!block->embed->grid_container) {
-                    printf("DEBUG: Initializing grid container\n");
-                    init_grid_container(block);
-                } else {
-                    printf("DEBUG: Grid container already exists\n");
-                }
-
+                GridContainerLayout* pa_grid = lycon->grid_container;
+                init_grid_container(lycon, block);
                 // Process DOM children into View objects first
                 // Grid containers need their DOM children converted to View objects
                 // before the grid algorithm can work
@@ -206,16 +194,17 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                         break;
                     }
                     layout_flow_node(lycon, child);
-                    DomNode* next_child = child->next_sibling();
-                    printf("Got next grid sibling %p\n", next_child);
-                    child = next_child;
+                    child = child->next_sibling();
                     child_count++;
                 } while (child);
 
                 // Now run the grid layout algorithm with the processed children
-                printf("DEBUG: About to call layout_grid_container_new\n");
-                layout_grid_container_new(lycon, block);
-                printf("DEBUG: Finished layout_grid_container_new\n");
+                printf("DEBUG: About to call layout_grid_container\n");
+                layout_grid_container(lycon, block);
+
+                cleanup_grid_container(lycon);
+                lycon->grid_container = pa_grid;
+                printf("DEBUG: Finished layout_grid_container\n");
             }
             else {
                 log_debug("unknown display type\n");

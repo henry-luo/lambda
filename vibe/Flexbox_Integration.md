@@ -46,13 +46,13 @@ This document outlines the comprehensive integration plan for the enhanced flexb
 // Enhanced layout dispatcher to route flex containers to new implementation
 void layout_element(LayoutContext* lycon, ViewBlock* block) {
     if (!block) return;
-    
+
     // Check if this is a flex container
     if (block->display == DISPLAY_FLEX) {
-        layout_flex_container_new(lycon, block);
+        layout_flex_container(lycon, block);
         return;
     }
-    
+
     // Existing layout routing...
     switch (block->display) {
         case DISPLAY_BLOCK:
@@ -85,19 +85,19 @@ void layout_element(LayoutContext* lycon, ViewBlock* block) {
 void layout_block(LayoutContext* lycon, ViewBlock* block) {
     // Initialize block layout
     init_block_layout(lycon, block);
-    
+
     // Check if this block is a flex container
     if (block->display == DISPLAY_FLEX) {
         // Initialize flex container if not already done
         if (!block->embed || !block->embed->flex_container) {
             init_flex_container(block);
         }
-        
+
         // Layout as flex container
-        layout_flex_container_new(lycon, block);
+        layout_flex_container(lycon, block);
         return;
     }
-    
+
     // Check if this block is a flex item
     ViewBlock* parent = (ViewBlock*)block->parent;
     if (parent && parent->display == DISPLAY_FLEX) {
@@ -106,7 +106,7 @@ void layout_block(LayoutContext* lycon, ViewBlock* block) {
         layout_flex_item_content(lycon, block);
         return;
     }
-    
+
     // Standard block layout...
     layout_block_content(lycon, block);
 }
@@ -115,10 +115,10 @@ void layout_block(LayoutContext* lycon, ViewBlock* block) {
 void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // Apply flex item constraints first
     apply_flex_item_constraints(lycon, flex_item);
-    
+
     // Layout content within the flex item
     layout_block_children(lycon, flex_item);
-    
+
     // Calculate intrinsic sizes for flex algorithm
     calculate_flex_item_intrinsic_sizes(flex_item);
 }
@@ -136,7 +136,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
 ```cpp
 // Enhanced CSS property resolution for new flexbox features
-void resolve_flex_properties(LayoutContext* lycon, ViewSpan* span, 
+void resolve_flex_properties(LayoutContext* lycon, ViewSpan* span,
                             const lxb_css_declaration_t* declr, uint32_t specificity) {
     switch (declr->type) {
         case LXB_CSS_PROPERTY_ASPECT_RATIO: {
@@ -146,7 +146,7 @@ void resolve_flex_properties(LayoutContext* lycon, ViewSpan* span,
             }
             break;
         }
-        
+
         case LXB_CSS_PROPERTY_MARGIN_LEFT: {
             const lxb_css_property_margin_left_t* margin = declr->u.margin_left;
             if (margin->type == LXB_CSS_VALUE_AUTO) {
@@ -157,9 +157,9 @@ void resolve_flex_properties(LayoutContext* lycon, ViewSpan* span,
             }
             break;
         }
-        
+
         // Similar handling for margin-top, margin-right, margin-bottom
-        
+
         case LXB_CSS_PROPERTY_MIN_WIDTH: {
             const lxb_css_property_min_width_t* min_width = declr->u.min_width;
             if (min_width->type == LXB_CSS_VALUE_PERCENTAGE) {
@@ -171,7 +171,7 @@ void resolve_flex_properties(LayoutContext* lycon, ViewSpan* span,
             }
             break;
         }
-        
+
         // Similar handling for max-width, min-height, max-height
     }
 }
@@ -192,7 +192,7 @@ This new file will handle the layout of content within flex items, ensuring that
 // Layout content within a flex item
 void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     if (!flex_item) return;
-    
+
     // Determine content type and layout accordingly
     View* child = flex_item->child;
     while (child) {
@@ -210,7 +210,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
         }
         child = child->next;
     }
-    
+
     // Calculate final content dimensions
     calculate_flex_item_content_size(flex_item);
 }
@@ -221,10 +221,10 @@ void layout_block_in_flex_item(LayoutContext* lycon, ViewBlock* block, ViewBlock
     LayoutContext item_context = *lycon;
     item_context.containing_block_width = flex_item->width;
     item_context.containing_block_height = flex_item->height;
-    
+
     // Layout the block normally within the flex item constraints
     layout_block(&item_context, block);
-    
+
     // Handle overflow and clipping if necessary
     handle_flex_item_overflow(flex_item, block);
 }
@@ -234,10 +234,10 @@ void layout_inline_in_flex_item(LayoutContext* lycon, View* inline_view, ViewBlo
     // Create inline formatting context within flex item
     InlineContext inline_ctx;
     init_inline_context(&inline_ctx, flex_item);
-    
+
     // Layout inline content with proper line breaking
     layout_inline_content(&inline_ctx, inline_view);
-    
+
     // Update flex item dimensions based on content
     update_flex_item_from_inline_content(flex_item, &inline_ctx);
 }
@@ -253,14 +253,14 @@ Handle intrinsic size calculation for flex items containing various content type
 // Calculate intrinsic sizes for flex items
 void calculate_flex_item_intrinsic_sizes(ViewBlock* flex_item) {
     if (!flex_item) return;
-    
+
     IntrinsicSizes sizes = {0};
-    
+
     // Calculate based on content type
     View* child = flex_item->child;
     while (child) {
         IntrinsicSizes child_sizes = calculate_child_intrinsic_sizes(child);
-        
+
         // Combine sizes based on layout direction
         if (is_block_level_child(child)) {
             sizes.min_content = fmax(sizes.min_content, child_sizes.min_content);
@@ -269,13 +269,13 @@ void calculate_flex_item_intrinsic_sizes(ViewBlock* flex_item) {
             sizes.min_content += child_sizes.min_content;
             sizes.max_content += child_sizes.max_content;
         }
-        
+
         child = child->next;
     }
-    
+
     // Apply constraints and aspect ratio
     apply_intrinsic_size_constraints(flex_item, &sizes);
-    
+
     // Store calculated sizes
     flex_item->intrinsic_min_width = sizes.min_content;
     flex_item->intrinsic_max_width = sizes.max_content;
@@ -284,7 +284,7 @@ void calculate_flex_item_intrinsic_sizes(ViewBlock* flex_item) {
 // Calculate intrinsic sizes for different child types
 IntrinsicSizes calculate_child_intrinsic_sizes(View* child) {
     IntrinsicSizes sizes = {0};
-    
+
     switch (child->type) {
         case RDT_VIEW_BLOCK: {
             ViewBlock* block = (ViewBlock*)child;
@@ -301,7 +301,7 @@ IntrinsicSizes calculate_child_intrinsic_sizes(View* child) {
             break;
         }
     }
-    
+
     return sizes;
 }
 ```
@@ -317,7 +317,7 @@ Handle complex nested scenarios like flex-in-flex, grid-in-flex, etc.
 void layout_nested_context(LayoutContext* lycon, ViewBlock* container) {
     // Determine container and content types
     DisplayType container_display = container->display;
-    
+
     // Set up appropriate layout context
     switch (container_display) {
         case DISPLAY_FLEX: {
@@ -345,16 +345,16 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
     while (child) {
         if (child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK) {
             ViewBlock* flex_item = (ViewBlock*)child;
-            
+
             // Layout the flex item's content to determine intrinsic sizes
             layout_flex_item_content_for_sizing(lycon, flex_item);
         }
         child = child->next;
     }
-    
+
     // Second pass: Run flex algorithm with calculated intrinsic sizes
-    layout_flex_container_new(lycon, flex_container);
-    
+    layout_flex_container(lycon, flex_container);
+
     // Third pass: Final layout of flex item contents with determined sizes
     child = flex_container->child;
     while (child) {
@@ -418,7 +418,7 @@ void init_view_span_flex_properties(ViewSpan* span) {
     span->align_self = LXB_CSS_VALUE_AUTO;
     span->order = 0;
     span->flex_basis_is_percent = false;
-    
+
     // New enhanced properties
     span->aspect_ratio = 0.0f;
     span->baseline_offset = 0;

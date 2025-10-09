@@ -20,7 +20,7 @@ typedef struct FlexLineInfo {
 // Main flex layout functions
 void init_flex_container(LayoutContext* lycon, ViewBlock* container);
 void cleanup_flex_container(LayoutContext* lycon);
-void layout_flex_container_new(LayoutContext* lycon, ViewBlock* container);
+void layout_flex_container(LayoutContext* lycon, ViewBlock* container);
 
 // Flex item collection and management
 int collect_flex_items(FlexContainerLayout* flex_layout, ViewBlock* container, ViewBlock*** items);
