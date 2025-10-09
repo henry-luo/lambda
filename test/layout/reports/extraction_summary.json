@@ -1,6 +1,6 @@
 {
-  "total_files": 7,
-  "generated": 7,
+  "total_files": 9,
+  "generated": 9,
   "skipped": 0,
   "failed": 0,
   "success_rate": 100,
@@ -14,59 +14,75 @@
   },
   "results": [
     {
-      "category": "flex",
-      "file": "flex_002_wrap.html",
+      "category": "table_simple",
+      "file": "table_simple_001_basic.html",
       "success": true,
       "was_skipped": false,
-      "node_count": 23,
+      "node_count": 24,
       "error": null
     },
     {
-      "category": "flex",
-      "file": "flex_003_align_items.html",
+      "category": "table_simple",
+      "file": "table_simple_002_border_collapse.html",
       "success": true,
       "was_skipped": false,
-      "node_count": 21,
+      "node_count": 28,
       "error": null
     },
     {
-      "category": "flex",
-      "file": "flex_005_flex_grow.html",
+      "category": "table_simple",
+      "file": "table_simple_003_border_spacing.html",
       "success": true,
       "was_skipped": false,
-      "node_count": 21,
+      "node_count": 28,
       "error": null
     },
     {
-      "category": "flex",
-      "file": "flex_006_justify_content.html",
+      "category": "table_simple",
+      "file": "table_simple_004_fixed_layout.html",
       "success": true,
       "was_skipped": false,
-      "node_count": 21,
+      "node_count": 28,
       "error": null
     },
     {
-      "category": "flex",
-      "file": "flex_007_row_reverse.html",
+      "category": "table_simple",
+      "file": "table_simple_005_colspan.html",
       "success": true,
       "was_skipped": false,
-      "node_count": 21,
+      "node_count": 31,
       "error": null
     },
     {
-      "category": "flex",
-      "file": "flex_008_flex_basis.html",
+      "category": "table_simple",
+      "file": "table_simple_006_rowspan.html",
       "success": true,
       "was_skipped": false,
-      "node_count": 21,
+      "node_count": 38,
       "error": null
     },
     {
-      "category": "flex",
-      "file": "flex_009_auto_margins.html",
+      "category": "table_simple",
+      "file": "table_simple_007_percentage_width.html",
       "success": true,
       "was_skipped": false,
-      "node_count": 19,
+      "node_count": 28,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_008_vertical_align.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 28,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_009_empty_cells.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 38,
       "error": null
     }
   ]
