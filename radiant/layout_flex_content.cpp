@@ -4,187 +4,84 @@
 
 #include "../lib/log.h"
 
-// Layout content within a flex item
+// Enhanced flex item content layout with full HTML nested content support (Phase 3.1)
+// This is the main function used by the new flex layout system
 void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     if (!flex_item) return;
 
-    log_debug("Layout flex item content for %p\n", flex_item);
+    log_debug("Enhanced flex item content layout for %p\n", flex_item);
 
-    // Save current context
-    Blockbox pa_block = lycon->block;
-    Linebox pa_line = lycon->line;
-    FontBox pa_font = lycon->font;
-    ViewGroup* pa_parent = lycon->parent;
-
-    // Set up flex item context
+    // Save parent context
+    LayoutContext saved_context = *lycon;
+    
+    // Set up flex item as a proper containing block
     lycon->parent = (ViewGroup*)flex_item;
     lycon->prev_view = NULL;
-    lycon->block.width = flex_item->width;
-    lycon->block.height = flex_item->height;
-    lycon->block.advance_y = 0;
-    lycon->block.max_width = 0;
     
-    // CRITICAL FIX: Set up content area accounting for padding
-    // Text positioning should be relative to the flex item's content area
-    int padding_left = 0;
-    int padding_right = 0;
-    int padding_top = 0;
+    // Calculate content area dimensions accounting for box model
+    int content_width = flex_item->width;
+    int content_height = flex_item->height;
+    int content_x_offset = 0;
+    int content_y_offset = 0;
     
     if (flex_item->bound) {
-        padding_left = flex_item->bound->padding.left;
-        padding_right = flex_item->bound->padding.right;
-        padding_top = flex_item->bound->padding.top;
-        lycon->block.width -= (padding_left + padding_right);
-        lycon->block.height -= (flex_item->bound->padding.top + flex_item->bound->padding.bottom);
+        // Account for padding and border in content area
+        content_width -= (flex_item->bound->padding.left + flex_item->bound->padding.right);
+        content_height -= (flex_item->bound->padding.top + flex_item->bound->padding.bottom);
+        content_x_offset = flex_item->bound->padding.left;
+        content_y_offset = flex_item->bound->padding.top;
+        
+        if (flex_item->bound->border) {
+            content_width -= (flex_item->bound->border->width.left + flex_item->bound->border->width.right);
+            content_height -= (flex_item->bound->border->width.top + flex_item->bound->border->width.bottom);
+            content_x_offset += flex_item->bound->border->width.left;
+            content_y_offset += flex_item->bound->border->width.top;
+        }
     }
     
-    // Set line boundaries relative to content area (not absolute coordinates)
-    lycon->line.left = padding_left;
-    lycon->line.right = lycon->block.width + padding_left;
-    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
+    // Set up block formatting context for nested content
+    lycon->block.width = content_width;
+    lycon->block.height = content_height;
+    lycon->block.advance_y = content_y_offset;
+    lycon->block.max_width = 0;
     
-    printf("DEBUG: Text positioning - flex_item at (%d,%d), content area relative (%d to %d), padding_top=%d\n",
-           flex_item->x, flex_item->y, lycon->line.left, lycon->line.right, padding_top);
+    // Inherit text alignment and other block properties from flex item
+    if (flex_item->blk) {
+        lycon->block.text_align = flex_item->blk->text_align;
+        lycon->block.line_height = flex_item->blk->line_height;
+    }
+    
+    // Set up line formatting context for inline content
+    lycon->line.left = content_x_offset;
+    lycon->line.right = content_x_offset + content_width;
+    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
     
     line_init(lycon);
     
-    // CRITICAL FIX: Apply vertical offset for padding_top
-    // The text should start at flex_item->y + padding_top, not flex_item->y
-    lycon->block.advance_y = padding_top;
-    
-    // CRITICAL FIX: Copy text_align property from flex item to layout context
-    // This is needed for line_align() to work correctly
-    if (flex_item->blk && flex_item->blk->text_align) {
-        lycon->block.text_align = flex_item->blk->text_align;
-        printf("DEBUG: Applied text_align=%d to layout context\n", flex_item->blk->text_align);
-    }
-
-    // Layout child content
-    DomNode* child = flex_item->node ? flex_item->node->first_child() : NULL;
-    if (child) {
+    // Layout all nested content using standard flow algorithm
+    // This handles: text nodes, nested blocks, inline elements, images, etc.
+    if (flex_item->node && flex_item->node->first_child()) {
+        DomNode* child = flex_item->node->first_child();
         do {
+            // Use standard layout flow - this handles all HTML content types
             layout_flow_node(lycon, child);
             child = child->next_sibling();
         } while (child);
-
-        // Handle last line if needed
+        
+        // Finalize any pending line content
         if (!lycon->line.is_line_start) {
             line_break(lycon);
         }
     }
-
-    // Calculate final content dimensions
+    
+    // Update flex item content dimensions for intrinsic sizing
     flex_item->content_width = lycon->block.max_width;
-    flex_item->content_height = lycon->block.advance_y;
-
-    // Restore context
-    lycon->block = pa_block;
-    lycon->line = pa_line;
-    lycon->font = pa_font;
-    lycon->parent = pa_parent;
-
-    log_debug("Flex item content layout complete: %dx%d\n",
-              flex_item->content_width, flex_item->content_height);
-}
-
-// Layout block content within a flex item
-void layout_block_in_flex_item(LayoutContext* lycon, ViewBlock* block, ViewBlock* flex_item) {
-    if (!block || !flex_item) return;
-
-    log_debug("Layout block in flex item");
-
-    // Set up containing block context for the nested block
-    LayoutContext item_context = *lycon;
-    item_context.block.width = flex_item->width;
-    item_context.block.height = flex_item->height;
-
-    // Layout the block normally within the flex item constraints
-    DisplayValue display = {.outer = LXB_CSS_VALUE_BLOCK, .inner = LXB_CSS_VALUE_FLOW};
-    layout_block(&item_context, block->node, display);
-
-    // Handle overflow and clipping if necessary
-    handle_flex_item_overflow(flex_item, block);
-}
-
-// Layout inline content within a flex item
-void layout_inline_in_flex_item(LayoutContext* lycon, View* inline_view, ViewBlock* flex_item) {
-    if (!inline_view || !flex_item) return;
-
-    log_debug("Layout inline in flex item\n");
-
-    // Create inline formatting context within flex item
-    LayoutContext inline_ctx = *lycon;
-    inline_ctx.block.width = flex_item->width;
-    inline_ctx.block.height = flex_item->height;
-    inline_ctx.line.left = 0;
-    inline_ctx.line.right = flex_item->width;
-
-    // Layout inline content with proper line breaking
-    if (inline_view->type == RDT_VIEW_INLINE) {
-        ViewSpan* span = (ViewSpan*)inline_view;
-        layout_inline(&inline_ctx, span->node, span->display);
-    } else if (inline_view->type == RDT_VIEW_TEXT) {
-        layout_text(&inline_ctx, ((ViewText*)inline_view)->node);
-    }
-
-    // Update flex item dimensions based on content
-    update_flex_item_from_inline_content(flex_item, &inline_ctx);
-}
-
-// Handle overflow in flex items
-void handle_flex_item_overflow(ViewBlock* flex_item, ViewBlock* content_block) {
-    if (!flex_item || !content_block) return;
-
-    // Check for horizontal overflow
-    if (content_block->width > flex_item->width) {
-        if (!flex_item->scroller) {
-            flex_item->scroller = (ScrollProp*)calloc(1, sizeof(ScrollProp));
-            flex_item->scroller->overflow_x = LXB_CSS_VALUE_VISIBLE;
-            flex_item->scroller->overflow_y = LXB_CSS_VALUE_VISIBLE;
-        }
-        flex_item->scroller->has_hz_overflow = true;
-
-        // Apply clipping if overflow is not visible
-        if (flex_item->scroller->overflow_x == LXB_CSS_VALUE_HIDDEN ||
-            flex_item->scroller->overflow_x == LXB_CSS_VALUE_CLIP) {
-            flex_item->scroller->has_clip = true;
-            flex_item->scroller->clip.left = 0;
-            flex_item->scroller->clip.right = flex_item->width;
-            flex_item->scroller->clip.top = 0;
-            flex_item->scroller->clip.bottom = flex_item->height;
-        }
-    }
-
-    // Check for vertical overflow
-    if (content_block->height > flex_item->height) {
-        if (!flex_item->scroller) {
-            flex_item->scroller = (ScrollProp*)calloc(1, sizeof(ScrollProp));
-            flex_item->scroller->overflow_x = LXB_CSS_VALUE_VISIBLE;
-            flex_item->scroller->overflow_y = LXB_CSS_VALUE_VISIBLE;
-        }
-        flex_item->scroller->has_vt_overflow = true;
-
-        // Apply clipping if overflow is not visible
-        if (flex_item->scroller->overflow_y == LXB_CSS_VALUE_HIDDEN ||
-            flex_item->scroller->overflow_y == LXB_CSS_VALUE_CLIP) {
-            flex_item->scroller->has_clip = true;
-            flex_item->scroller->clip.left = 0;
-            flex_item->scroller->clip.right = flex_item->width;
-            flex_item->scroller->clip.top = 0;
-            flex_item->scroller->clip.bottom = flex_item->height;
-        }
-    }
-}
-
-// Update flex item dimensions from inline content
-void update_flex_item_from_inline_content(ViewBlock* flex_item, LayoutContext* inline_ctx) {
-    if (!flex_item || !inline_ctx) return;
-
-    // Update content dimensions based on inline layout
-    flex_item->content_width = max(flex_item->content_width, inline_ctx->block.max_width);
-    flex_item->content_height = max(flex_item->content_height, inline_ctx->block.advance_y);
-
-    log_debug("Updated flex item from inline content: %dx%d\n",
+    flex_item->content_height = lycon->block.advance_y - content_y_offset;
+    
+    // Restore parent context
+    *lycon = saved_context;
+    
+    log_debug("Enhanced flex item content layout complete: %dx%d\n",
               flex_item->content_width, flex_item->content_height);
 }
 
@@ -412,20 +309,9 @@ void layout_flex_item_content_for_sizing(LayoutContext* lycon, ViewBlock* flex_i
 
     log_debug("Layout flex item content for sizing\n");
 
-    // This is a simplified layout pass to determine intrinsic sizes
-    // We don't need to do full layout, just calculate content requirements
-
+    // Calculate intrinsic sizes for measurement phase
     calculate_flex_item_intrinsic_sizes(flex_item);
-
-    // Set preliminary dimensions based on intrinsic sizes
-    // TODO: When intrinsic properties are added to ViewBlock, use:
-    // if (flex_item->width <= 0) {
-    //     flex_item->width = flex_item->intrinsic_max_width;
-    // }
-
-    // Current fallback using calculated sizes from the function above
 }
-
 
 // Final layout of flex item contents with determined sizes
 void layout_flex_item_final_content(LayoutContext* lycon, ViewBlock* flex_item) {
@@ -433,101 +319,6 @@ void layout_flex_item_final_content(LayoutContext* lycon, ViewBlock* flex_item) 
 
     log_debug("Final layout of flex item content\n");
 
-    // Now that flex algorithm has determined final sizes, do full content layout
-    layout_flex_item_content_v2(lycon, flex_item);
-}
-
-// Enhanced flex item content layout with full HTML nested content support (Phase 3.1)
-void layout_flex_item_content_v2(LayoutContext* lycon, ViewBlock* flex_item) {
-    if (!flex_item) return;
-
-    log_debug("Enhanced flex item content layout v2 for %p\n", flex_item);
-
-    // Save parent context
-    LayoutContext saved_context = *lycon;
-    
-    // Set up flex item as a proper containing block
-    lycon->parent = (ViewGroup*)flex_item;
-    lycon->prev_view = NULL;
-    
-    // Calculate content area dimensions accounting for box model
-    int content_width = flex_item->width;
-    int content_height = flex_item->height;
-    int content_x_offset = 0;
-    int content_y_offset = 0;
-    
-    if (flex_item->bound) {
-        // Account for padding and border in content area
-        content_width -= (flex_item->bound->padding.left + flex_item->bound->padding.right);
-        content_height -= (flex_item->bound->padding.top + flex_item->bound->padding.bottom);
-        content_x_offset = flex_item->bound->padding.left;
-        content_y_offset = flex_item->bound->padding.top;
-        
-        if (flex_item->bound->border) {
-            content_width -= (flex_item->bound->border->width.left + flex_item->bound->border->width.right);
-            content_height -= (flex_item->bound->border->width.top + flex_item->bound->border->width.bottom);
-            content_x_offset += flex_item->bound->border->width.left;
-            content_y_offset += flex_item->bound->border->width.top;
-        }
-    }
-    
-    // Set up block formatting context for nested content
-    lycon->block.width = content_width;
-    lycon->block.height = content_height;
-    lycon->block.advance_y = content_y_offset;
-    lycon->block.max_width = 0;
-    
-    // Inherit text alignment and other block properties from flex item
-    if (flex_item->blk) {
-        lycon->block.text_align = flex_item->blk->text_align;
-        lycon->block.line_height = flex_item->blk->line_height;
-        printf("DEBUG: V2 - Inherited text_align=%d, line_height=%d\n", 
-               flex_item->blk->text_align, flex_item->blk->line_height);
-    }
-    
-    // Set up line formatting context for inline content
-    lycon->line.left = content_x_offset;
-    lycon->line.right = content_x_offset + content_width;
-    lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
-    
-    printf("DEBUG: V2 - Content area: %dx%d, offset (%d,%d), line (%d to %d)\n",
-           content_width, content_height, content_x_offset, content_y_offset,
-           lycon->line.left, lycon->line.right);
-    
-    line_init(lycon);
-    
-    // Layout all nested content using standard flow algorithm
-    // This handles: text nodes, nested blocks, inline elements, images, etc.
-    if (flex_item->node && flex_item->node->first_child()) {
-        DomNode* child = flex_item->node->first_child();
-        int child_count = 0;
-        do {
-            child_count++;
-            printf("DEBUG: V2 - Processing child %d: tag=%lu\n", child_count, child->tag());
-            
-            // Use standard layout flow - this handles all HTML content types
-            layout_flow_node(lycon, child);
-            child = child->next_sibling();
-        } while (child);
-        
-        // Finalize any pending line content
-        if (!lycon->line.is_line_start) {
-            line_break(lycon);
-        }
-        
-        printf("DEBUG: V2 - Processed %d children\n", child_count);
-    }
-    
-    // Update flex item content dimensions for intrinsic sizing
-    flex_item->content_width = lycon->block.max_width;
-    flex_item->content_height = lycon->block.advance_y - content_y_offset;
-    
-    printf("DEBUG: V2 - Final content dimensions: %dx%d\n", 
-           flex_item->content_width, flex_item->content_height);
-    
-    // Restore parent context
-    *lycon = saved_context;
-    
-    log_debug("Enhanced flex item content layout v2 complete: %dx%d\n",
-              flex_item->content_width, flex_item->content_height);
+    // Use the main enhanced content layout function
+    layout_flex_item_content(lycon, flex_item);
 }
