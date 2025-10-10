@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Basic Image Layout\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Image styles */\n        img {\n            max-width: 100%;\n            height: auto;\n            display: block;\n            margin: 16px 0;\n        }\n        \n        .image-placeholder {\n            width: 300px;\n            height: 200px;\n            background-color: #e1e5e9;\n            border: 2px dashed #9ca3af;\n            display: flex;\n            align-items: center;\n            justify-content: center;\n            color: #6b7280;\n            font-size: 14px;\n            margin: 16px 0;\n        }\n        \n        .image-center {\n            margin: 16px auto;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n    \n\n\n    Image Layout\n    Here is a paragraph before the image.\n    \n    \n        [Image Placeholder 300x200]\n    \n    \n    This paragraph follows the image. Images should have proper margins and responsive sizing.\n    \n    \n        [Centered Image 300x200]\n    \n    \n    This paragraph follows a centered image.\n    \n    \n    \n    {\n        \"test_id\": \"image_001_basic_layout\",\n        \"category\": \"image\",\n        \"features\": [\"image-display\", \"responsive-width\", \"block-layout\", \"centering\", \"margins\"],\n        \"description\": \"Basic image layout with responsive sizing and centering options\",\n        \"markdown_equivalent\": \"### Image Layout\\n\\nHere is a paragraph before the image.\\n\\n![Image](placeholder.jpg)\\n\\nThis paragraph follows the image...\",\n        \"complexity\": \"basic\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Basic Image Layout\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Image styles */\n        img {\n            max-width: 100%;\n            height: auto;\n            display: block;\n            margin: 16px 0;\n        }\n        \n        .image-placeholder {\n            width: 300px;\n            height: 200px;\n            background-color: #e1e5e9;\n            border: 2px dashed #9ca3af;\n            display: flex;\n            align-items: center;\n            justify-content: center;\n            color: #6b7280;\n            font-size: 14px;\n            margin: 16px 0;\n        }\n        \n        .image-center {\n            margin: 16px auto;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Basic Image Layout",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Basic Image Layout",
+                "length": 24,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Image styles */\n        img {\n            max-width: 100%;\n            height: auto;\n            display: block;\n            margin: 16px 0;\n        }\n        \n        .image-placeholder {\n            width: 300px;\n            height: 200px;\n            background-color: #e1e5e9;\n            border: 2px dashed #9ca3af;\n            display: flex;\n            align-items: center;\n            justify-content: center;\n            color: #6b7280;\n            font-size: 14px;\n            margin: 16px 0;\n        }\n        \n        .image-center {\n            margin: 16px auto;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Image styles */\n        img {\n            max-width: 100%;\n            height: auto;\n            display: block;\n            margin: 16px 0;\n        }\n        \n        .image-placeholder {\n            width: 300px;\n            height: 200px;\n            background-color: #e1e5e9;\n            border: 2px dashed #9ca3af;\n            display: flex;\n            align-items: center;\n            justify-content: center;\n            color: #6b7280;\n            font-size: 14px;\n            margin: 16px 0;\n        }\n        \n        .image-center {\n            margin: 16px auto;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n    ",
+                "length": 1088,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Image Layout\n    Here is a paragraph before the image.\n    \n    \n        [Image Placeholder 300x200]\n    \n    \n    This paragraph follows the image. Images should have proper margins and responsive sizing.\n    \n    \n        [Centered Image 300x200]\n    \n    \n    This paragraph follows a centered image.\n    \n    \n    \n    {\n        \"test_id\": \"image_001_basic_layout\",\n        \"category\": \"image\",\n        \"features\": [\"image-display\", \"responsive-width\", \"block-layout\", \"centering\", \"margins\"],\n        \"description\": \"Basic image layout with responsive sizing and centering options\",\n        \"markdown_equivalent\": \"### Image Layout\\n\\nHere is a paragraph before the image.\\n\\n![Image](placeholder.jpg)\\n\\nThis paragraph follows the image...\",\n        \"complexity\": \"basic\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 7,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "h3",
             "tag": "h3",
             "id": null,
@@ -502,33 +603,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Image Layout",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Image Layout",
-                "parentElement": "h3",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 24,
-                    "width": 128.92,
-                    "height": 22,
-                    "right": 148.92,
-                    "bottom": 46
-                  }
-                ],
                 "length": 12,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 12
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 24,
+                      "width": 128.92,
+                      "height": 22,
+                      "right": 148.92,
+                      "bottom": 46,
+                      "text": "Image Layout",
+                      "startIndex": 0,
+                      "endIndex": 12
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "p:nth-of-type(1)",
             "tag": "p",
             "id": null,
@@ -584,33 +693,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Here is a paragraph before the image.",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 3,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Here is a paragraph before the image.",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 65,
-                    "width": 270.39,
-                    "height": 17,
-                    "right": 290.39,
-                    "bottom": 82
-                  }
-                ],
                 "length": 37,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 37
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 65,
+                      "width": 270.39,
+                      "height": 17,
+                      "right": 290.39,
+                      "bottom": 82,
+                      "text": "Here is a paragraph before the image.",
+                      "startIndex": 0,
+                      "endIndex": 37
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "div.image-placeholder:nth-of-type(1)",
             "tag": "div",
             "id": null,
@@ -668,33 +785,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "[Image Placeholder 300x200]",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 5,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "\n        [Image Placeholder 300x200]\n    ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 78.94,
-                    "y": 193.5,
-                    "width": 182.13,
-                    "height": 16,
-                    "right": 261.06,
-                    "bottom": 209.5
-                  }
-                ],
                 "length": 41,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 41
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 78.94,
+                      "y": 193.5,
+                      "width": 182.13,
+                      "height": 16,
+                      "right": 261.06,
+                      "bottom": 209.5,
+                      "text": "\n        [Image Placeholder 300x200]\n    ",
+                      "startIndex": 0,
+                      "endIndex": 41
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "flex",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "p:nth-of-type(2)",
             "tag": "p",
             "id": null,
@@ -750,41 +875,69 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This paragraph follows the image. Images should have proper margins and responsive sizing.",
-            "hasTextNodes": true,
-            "textNodes": [
-              {
-                "text": "This paragraph follows the image. Images should have proper margins and responsive sizing.",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 321,
-                    "width": 612.78,
-                    "height": 17,
-                    "right": 632.78,
-                    "bottom": 338
-                  },
-                  {
-                    "x": 20,
-                    "y": 345,
-                    "width": 45.36,
-                    "height": 17,
-                    "right": 65.36,
-                    "bottom": 362
-                  }
-                ],
-                "length": 90,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 90
-              }
-            ],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "This paragraph follows the image. Images should have proper margins and responsive ",
+                "length": 83,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 321,
+                      "width": 612.78,
+                      "height": 17,
+                      "right": 632.78,
+                      "bottom": 338,
+                      "text": "This paragraph follows the image. Images should have proper margins and responsive ",
+                      "startIndex": 0,
+                      "endIndex": 83
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "sizing.",
+                "length": 7,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 345,
+                      "width": 45.36,
+                      "height": 17,
+                      "right": 65.36,
+                      "bottom": 362,
+                      "text": "sizing.",
+                      "startIndex": 0,
+                      "endIndex": 7
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "div.image-placeholder.image-center:nth-of-type(2)",
             "tag": "div",
             "id": null,
@@ -843,33 +996,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "[Centered Image 300x200]",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 9,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "\n        [Centered Image 300x200]\n    ",
-                "parentElement": "div",
-                "rects": [
-                  {
-                    "x": 267.11,
-                    "y": 473.5,
-                    "width": 165.78,
-                    "height": 16,
-                    "right": 432.89,
-                    "bottom": 489.5
-                  }
-                ],
                 "length": 38,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 38
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 267.11,
+                      "y": 473.5,
+                      "width": 165.78,
+                      "height": 16,
+                      "right": 432.89,
+                      "bottom": 489.5,
+                      "text": "\n        [Centered Image 300x200]\n    ",
+                      "startIndex": 0,
+                      "endIndex": 38
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "flex",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "p:nth-of-type(3)",
             "tag": "p",
             "id": null,
@@ -925,33 +1086,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This paragraph follows a centered image.",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 11,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "This paragraph follows a centered image.",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 601,
-                    "width": 293.5,
-                    "height": 17,
-                    "right": 313.5,
-                    "bottom": 618
-                  }
-                ],
                 "length": 40,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 40
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 601,
+                      "width": 293.5,
+                      "height": 17,
+                      "right": 313.5,
+                      "bottom": 618,
+                      "text": "This paragraph follows a centered image.",
+                      "startIndex": 0,
+                      "endIndex": 40
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -1007,12 +1176,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"image_001_basic_layout\",\n        \"category\": \"image\",\n        \"features\": [\"image-display\", \"responsive-width\", \"block-layout\", \"centering\", \"margins\"],\n        \"description\": \"Basic image layout with responsive sizing and centering options\",\n        \"markdown_equivalent\": \"### Image Layout\\n\\nHere is a paragraph before the image.\\n\\n![Image](placeholder.jpg)\\n\\nThis paragraph follows the image...\",\n        \"complexity\": \"basic\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 15,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"image_001_basic_layout\",\n        \"category\": \"image\",\n        \"features\": [\"image-display\", \"responsive-width\", \"block-layout\", \"centering\", \"margins\"],\n        \"description\": \"Basic image layout with responsive sizing and centering options\",\n        \"markdown_equivalent\": \"### Image Layout\\n\\nHere is a paragraph before the image.\\n\\n![Image](placeholder.jpg)\\n\\nThis paragraph follows the image...\",\n        \"complexity\": \"basic\"\n    }\n    ",
+                "length": 470,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

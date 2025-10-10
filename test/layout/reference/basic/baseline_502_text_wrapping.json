@@ -1,5 +1,5 @@
 {
-  "test_file": "quote_001_basic_blockquote.html",
+  "test_file": "baseline_502_text_wrapping.html",
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 266,
+      "height": 156,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -358,8 +358,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "Test: Quote Block Layout",
-                "length": 24,
+                "text": "Baseline Test: Text Wrapping",
+                "length": 28,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -452,8 +452,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Blockquote styles */\n        blockquote {\n            margin: 16px 0;\n            padding: 16px 20px;\n            border-left: 4px solid #ddd;\n            background-color: #f9f9f9;\n            font-style: italic;\n            color: #666;\n        }\n        \n        blockquote p {\n            margin: 0;\n        }\n        \n        blockquote p:not(:last-child) {\n            margin-bottom: 8px;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n    ",
-                "length": 906,
+                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; font-size: 16px; }\n        .narrow-container {\n            width: 150px;\n            background-color: #fff0f0;\n            padding: 15px;\n        }\n    ",
+                "length": 238,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -495,12 +495,12 @@
         "layout": {
           "x": 0,
           "y": 0,
-          "width": 700,
-          "height": 266,
-          "contentWidth": 700,
-          "contentHeight": 266,
-          "scrollWidth": 700,
-          "scrollHeight": 266
+          "width": 1200,
+          "height": 156,
+          "contentWidth": 1200,
+          "contentHeight": 156,
+          "scrollWidth": 1200,
+          "scrollHeight": 156
         },
         "computed": {
           "display": "block",
@@ -509,10 +509,10 @@
           "marginRight": 0,
           "marginBottom": 0,
           "marginLeft": 0,
-          "paddingTop": 20,
-          "paddingRight": 20,
-          "paddingBottom": 20,
-          "paddingLeft": 20,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 0,
           "borderTopWidth": 0,
           "borderRightWidth": 0,
           "borderBottomWidth": 0,
@@ -529,7 +529,7 @@
           "order": 0,
           "gap": "normal",
           "fontSize": 16,
-          "lineHeight": "24px",
+          "lineHeight": "normal",
           "fontFamily": "Arial, sans-serif",
           "fontWeight": "400",
           "textAlign": "start",
@@ -548,31 +548,33 @@
         "children": [
           {
             "nodeType": "element",
-            "selector": "h3",
-            "tag": "h3",
+            "selector": "div.narrow-container",
+            "tag": "div",
             "id": null,
-            "classes": [],
+            "classes": [
+              "narrow-container"
+            ],
             "layout": {
-              "x": 20,
-              "y": 20,
-              "width": 660,
-              "height": 30,
-              "contentWidth": 660,
-              "contentHeight": 30,
-              "scrollWidth": 660,
-              "scrollHeight": 30
+              "x": 0,
+              "y": 0,
+              "width": 180,
+              "height": 156,
+              "contentWidth": 180,
+              "contentHeight": 156,
+              "scrollWidth": 180,
+              "scrollHeight": 156
             },
             "computed": {
               "display": "block",
               "position": "static",
               "marginTop": 0,
               "marginRight": 0,
-              "marginBottom": 12,
+              "marginBottom": 0,
               "marginLeft": 0,
-              "paddingTop": 0,
-              "paddingRight": 0,
-              "paddingBottom": 0,
-              "paddingLeft": 0,
+              "paddingTop": 15,
+              "paddingRight": 15,
+              "paddingBottom": 15,
+              "paddingLeft": 15,
               "borderTopWidth": 0,
               "borderRightWidth": 0,
               "borderBottomWidth": 0,
@@ -588,10 +590,10 @@
               "alignSelf": "auto",
               "order": 0,
               "gap": "normal",
-              "fontSize": 20,
-              "lineHeight": "30px",
+              "fontSize": 16,
+              "lineHeight": "normal",
               "fontFamily": "Arial, sans-serif",
-              "fontWeight": "700",
+              "fontWeight": "400",
               "textAlign": "start",
               "verticalAlign": "baseline",
               "top": "auto",
@@ -608,111 +610,21 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "Quote Example",
-                "length": 13,
+                "text": "\n        This is a long ",
+                "length": 24,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
-                      "x": 20,
-                      "y": 24,
-                      "width": 145.61,
-                      "height": 22,
-                      "right": 165.61,
-                      "bottom": 46,
-                      "text": "Quote Example",
-                      "startIndex": 0,
-                      "endIndex": 13
-                    }
-                  ],
-                  "hasLayout": true,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
-                },
-                "depth": 3,
-                "nodeIndex": 0,
-                "children": []
-              }
-            ]
-          },
-          {
-            "nodeType": "element",
-            "selector": "p:nth-of-type(1)",
-            "tag": "p",
-            "id": null,
-            "classes": [],
-            "layout": {
-              "x": 20,
-              "y": 62,
-              "width": 660,
-              "height": 24,
-              "contentWidth": 660,
-              "contentHeight": 24,
-              "scrollWidth": 660,
-              "scrollHeight": 24
-            },
-            "computed": {
-              "display": "block",
-              "position": "static",
-              "marginTop": 0,
-              "marginRight": 0,
-              "marginBottom": 16,
-              "marginLeft": 0,
-              "paddingTop": 0,
-              "paddingRight": 0,
-              "paddingBottom": 0,
-              "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "24px",
-              "fontFamily": "Arial, sans-serif",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 3,
-            "children": [
-              {
-                "nodeType": "text",
-                "text": "Here is a regular paragraph before the quote.",
-                "length": 45,
-                "isWhitespaceOnly": false,
-                "layout": {
-                  "rects": [
-                    {
-                      "x": 20,
-                      "y": 65,
-                      "width": 321.09,
+                      "x": 15,
+                      "y": 15,
+                      "width": 94.27,
                       "height": 17,
-                      "right": 341.09,
-                      "bottom": 82,
-                      "text": "Here is a regular paragraph before the quote.",
+                      "right": 109.27,
+                      "bottom": 32,
+                      "text": "\n        This is a long ",
                       "startIndex": 0,
-                      "endIndex": 45
+                      "endIndex": 24
                     }
                   ],
                   "hasLayout": true,
@@ -723,328 +635,164 @@
                 "depth": 3,
                 "nodeIndex": 0,
                 "children": []
-              }
-            ]
-          },
-          {
-            "nodeType": "element",
-            "selector": "blockquote",
-            "tag": "blockquote",
-            "id": null,
-            "classes": [],
-            "layout": {
-              "x": 20,
-              "y": 102,
-              "width": 660,
-              "height": 88,
-              "contentWidth": 656,
-              "contentHeight": 88,
-              "scrollWidth": 656,
-              "scrollHeight": 88
-            },
-            "computed": {
-              "display": "block",
-              "position": "static",
-              "marginTop": 16,
-              "marginRight": 0,
-              "marginBottom": 16,
-              "marginLeft": 0,
-              "paddingTop": 16,
-              "paddingRight": 20,
-              "paddingBottom": 16,
-              "paddingLeft": 20,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 4,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "24px",
-              "fontFamily": "Arial, sans-serif",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 5,
-            "children": [
-              {
-                "nodeType": "element",
-                "selector": "p:nth-of-type(1)",
-                "tag": "p",
-                "id": null,
-                "classes": [],
-                "layout": {
-                  "x": 44,
-                  "y": 118,
-                  "width": 616,
-                  "height": 24,
-                  "contentWidth": 616,
-                  "contentHeight": 24,
-                  "scrollWidth": 616,
-                  "scrollHeight": 24
-                },
-                "computed": {
-                  "display": "block",
-                  "position": "static",
-                  "marginTop": 0,
-                  "marginRight": 0,
-                  "marginBottom": 8,
-                  "marginLeft": 0,
-                  "paddingTop": 0,
-                  "paddingRight": 0,
-                  "paddingBottom": 0,
-                  "paddingLeft": 0,
-                  "borderTopWidth": 0,
-                  "borderRightWidth": 0,
-                  "borderBottomWidth": 0,
-                  "borderLeftWidth": 0,
-                  "flexDirection": "row",
-                  "flexWrap": "nowrap",
-                  "justifyContent": "normal",
-                  "alignItems": "normal",
-                  "alignContent": "normal",
-                  "flexGrow": 0,
-                  "flexShrink": 1,
-                  "flexBasis": "auto",
-                  "alignSelf": "auto",
-                  "order": 0,
-                  "gap": "normal",
-                  "fontSize": 16,
-                  "lineHeight": "24px",
-                  "fontFamily": "Arial, sans-serif",
-                  "fontWeight": "400",
-                  "textAlign": "start",
-                  "verticalAlign": "baseline",
-                  "top": "auto",
-                  "right": "auto",
-                  "bottom": "auto",
-                  "left": "auto",
-                  "zIndex": "auto",
-                  "overflow": "visible",
-                  "overflowX": "visible",
-                  "overflowY": "visible"
-                },
-                "depth": 3,
-                "elementIndex": 1,
-                "children": [
-                  {
-                    "nodeType": "text",
-                    "text": "This is a blockquote that should have proper indentation, border styling, and italic text.",
-                    "length": 90,
-                    "isWhitespaceOnly": false,
-                    "layout": {
-                      "rects": [
-                        {
-                          "x": 44,
-                          "y": 121,
-                          "width": 608.36,
-                          "height": 17,
-                          "right": 652.36,
-                          "bottom": 138,
-                          "text": "This is a blockquote that should have proper indentation, border styling, and italic text.",
-                          "startIndex": 0,
-                          "endIndex": 90
-                        }
-                      ],
-                      "hasLayout": true,
-                      "parentVisible": true,
-                      "parentDisplay": "block",
-                      "parentVisibility": "visible"
-                    },
-                    "depth": 4,
-                    "nodeIndex": 0,
-                    "children": []
-                  }
-                ]
               },
               {
-                "nodeType": "element",
-                "selector": "p:nth-of-type(2)",
-                "tag": "p",
-                "id": null,
-                "classes": [],
-                "layout": {
-                  "x": 44,
-                  "y": 150,
-                  "width": 616,
-                  "height": 24,
-                  "contentWidth": 616,
-                  "contentHeight": 24,
-                  "scrollWidth": 616,
-                  "scrollHeight": 24
-                },
-                "computed": {
-                  "display": "block",
-                  "position": "static",
-                  "marginTop": 0,
-                  "marginRight": 0,
-                  "marginBottom": 0,
-                  "marginLeft": 0,
-                  "paddingTop": 0,
-                  "paddingRight": 0,
-                  "paddingBottom": 0,
-                  "paddingLeft": 0,
-                  "borderTopWidth": 0,
-                  "borderRightWidth": 0,
-                  "borderBottomWidth": 0,
-                  "borderLeftWidth": 0,
-                  "flexDirection": "row",
-                  "flexWrap": "nowrap",
-                  "justifyContent": "normal",
-                  "alignItems": "normal",
-                  "alignContent": "normal",
-                  "flexGrow": 0,
-                  "flexShrink": 1,
-                  "flexBasis": "auto",
-                  "alignSelf": "auto",
-                  "order": 0,
-                  "gap": "normal",
-                  "fontSize": 16,
-                  "lineHeight": "24px",
-                  "fontFamily": "Arial, sans-serif",
-                  "fontWeight": "400",
-                  "textAlign": "start",
-                  "verticalAlign": "baseline",
-                  "top": "auto",
-                  "right": "auto",
-                  "bottom": "auto",
-                  "left": "auto",
-                  "zIndex": "auto",
-                  "overflow": "visible",
-                  "overflowX": "visible",
-                  "overflowY": "visible"
-                },
-                "depth": 3,
-                "elementIndex": 3,
-                "children": [
-                  {
-                    "nodeType": "text",
-                    "text": "It can contain multiple paragraphs with appropriate spacing.",
-                    "length": 60,
-                    "isWhitespaceOnly": false,
-                    "layout": {
-                      "rects": [
-                        {
-                          "x": 44,
-                          "y": 153,
-                          "width": 422.47,
-                          "height": 17,
-                          "right": 466.47,
-                          "bottom": 170,
-                          "text": "It can contain multiple paragraphs with appropriate spacing.",
-                          "startIndex": 0,
-                          "endIndex": 60
-                        }
-                      ],
-                      "hasLayout": true,
-                      "parentVisible": true,
-                      "parentDisplay": "block",
-                      "parentVisibility": "visible"
-                    },
-                    "depth": 4,
-                    "nodeIndex": 0,
-                    "children": []
-                  }
-                ]
-              }
-            ]
-          },
-          {
-            "nodeType": "element",
-            "selector": "p:nth-of-type(2)",
-            "tag": "p",
-            "id": null,
-            "classes": [],
-            "layout": {
-              "x": 20,
-              "y": 206,
-              "width": 660,
-              "height": 24,
-              "contentWidth": 660,
-              "contentHeight": 24,
-              "scrollWidth": 660,
-              "scrollHeight": 24
-            },
-            "computed": {
-              "display": "block",
-              "position": "static",
-              "marginTop": 0,
-              "marginRight": 0,
-              "marginBottom": 16,
-              "marginLeft": 0,
-              "paddingTop": 0,
-              "paddingRight": 0,
-              "paddingBottom": 0,
-              "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "24px",
-              "fontFamily": "Arial, sans-serif",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 7,
-            "children": [
-              {
                 "nodeType": "text",
-                "text": "And here is another paragraph after the quote block.",
-                "length": 52,
+                "text": "sentence that should ",
+                "length": 21,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
-                      "x": 20,
-                      "y": 209,
-                      "width": 370.92,
+                      "x": 15,
+                      "y": 33,
+                      "width": 147.67,
                       "height": 17,
-                      "right": 390.92,
-                      "bottom": 226,
-                      "text": "And here is another paragraph after the quote block.",
+                      "right": 162.67,
+                      "bottom": 50,
+                      "text": "sentence that should ",
                       "startIndex": 0,
-                      "endIndex": 52
+                      "endIndex": 21
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "wrap across multiple ",
+                "length": 21,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 15,
+                      "y": 51,
+                      "width": 145.83,
+                      "height": 17,
+                      "right": 160.83,
+                      "bottom": 68,
+                      "text": "wrap across multiple ",
+                      "startIndex": 0,
+                      "endIndex": 21
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "lines when the ",
+                "length": 15,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 15,
+                      "y": 69,
+                      "width": 102.3,
+                      "height": 17,
+                      "right": 117.3,
+                      "bottom": 86,
+                      "text": "lines when the ",
+                      "startIndex": 0,
+                      "endIndex": 15
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "container width is ",
+                "length": 19,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 15,
+                      "y": 87,
+                      "width": 123.63,
+                      "height": 17,
+                      "right": 138.63,
+                      "bottom": 104,
+                      "text": "container width is ",
+                      "startIndex": 0,
+                      "endIndex": 19
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "constrained to be ",
+                "length": 18,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 15,
+                      "y": 105,
+                      "width": 122.75,
+                      "height": 17,
+                      "right": 137.75,
+                      "bottom": 122,
+                      "text": "constrained to be ",
+                      "startIndex": 0,
+                      "endIndex": 18
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "narrow.\n    ",
+                "length": 12,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 15,
+                      "y": 123,
+                      "width": 52.47,
+                      "height": 17,
+                      "right": 67.47,
+                      "bottom": 140,
+                      "text": "narrow.\n    ",
+                      "startIndex": 0,
+                      "endIndex": 12
                     }
                   ],
                   "hasLayout": true,
@@ -1101,7 +849,7 @@
               "order": 0,
               "gap": "normal",
               "fontSize": 16,
-              "lineHeight": "24px",
+              "lineHeight": "normal",
               "fontFamily": "Arial, sans-serif",
               "fontWeight": "400",
               "textAlign": "start",
@@ -1116,12 +864,12 @@
               "overflowY": "visible"
             },
             "depth": 2,
-            "elementIndex": 11,
+            "elementIndex": 3,
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n    {\n        \"test_id\": \"quote_001_basic_blockquote\",\n        \"category\": \"quote\",\n        \"features\": [\"blockquote\", \"border-left\", \"background\", \"italic\", \"padding\", \"margin\"],\n        \"description\": \"Basic blockquote with left border, background, and italic styling\",\n        \"markdown_equivalent\": \"### Quote Example\\n\\nHere is a regular paragraph before the quote.\\n\\n> This is a blockquote that should have proper indentation, border styling, and italic text.\\n>\\n> It can contain multiple paragraphs with appropriate spacing.\\n\\nAnd here is another paragraph after the quote block.\",\n        \"complexity\": \"basic\"\n    }\n    ",
-                "length": 633,
+                "text": "\n    {\n        \"test_id\": \"baseline_502_text_wrapping\",\n        \"category\": \"baseline\", \n        \"features\": [\"text-wrapping\", \"word-break\", \"constrained-width\"],\n        \"description\": \"Long text content that wraps within narrow container\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/text.html#white-space-prop\"],\n        \"complexity\": \"basic\",\n        \"expected_behavior\": \"Multi-line text wrapping within 150px wide container with padding\"\n    }\n    ",
+                "length": 467,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -1144,19 +892,19 @@
       "height": 800
     },
     "metadata": {
-      "test_id": "quote_001_basic_blockquote",
-      "category": "quote",
+      "test_id": "baseline_502_text_wrapping",
+      "category": "baseline",
       "features": [
-        "blockquote",
-        "border-left",
-        "background",
-        "italic",
-        "padding",
-        "margin"
+        "text-wrapping",
+        "word-break",
+        "constrained-width"
       ],
-      "description": "Basic blockquote with left border, background, and italic styling",
-      "markdown_equivalent": "### Quote Example\n\nHere is a regular paragraph before the quote.\n\n> This is a blockquote that should have proper indentation, border styling, and italic text.\n>\n> It can contain multiple paragraphs with appropriate spacing.\n\nAnd here is another paragraph after the quote block.",
-      "complexity": "basic"
+      "description": "Long text content that wraps within narrow container",
+      "spec_references": [
+        "https://www.w3.org/TR/CSS22/text.html#white-space-prop"
+      ],
+      "complexity": "basic",
+      "expected_behavior": "Multi-line text wrapping within 150px wide container with padding"
     }
   }
 }

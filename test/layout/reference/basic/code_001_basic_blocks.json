@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Code Block Layout\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Code block styles */\n        pre {\n            background-color: #f6f8fa;\n            border: 1px solid #d1d9e0;\n            border-radius: 6px;\n            padding: 16px;\n            margin: 16px 0;\n            overflow-x: auto;\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            line-height: 1.4;\n        }\n        \n        code {\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            background-color: #f3f4f6;\n            padding: 2px 4px;\n            border-radius: 3px;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n    \n\n\n    Code Examples\n    This paragraph contains inline code snippets for testing.\n    \n    function hello() {\n    console.log(\"Hello, world!\");\n    return true;\n}\n    \n    The above code block should have proper padding and background styling.\n    \n    \n    \n    {\n        \"test_id\": \"code_001_basic_blocks\",\n        \"category\": \"code\",\n        \"features\": [\"code-blocks\", \"pre-formatting\", \"inline-code\", \"monospace\", \"background\"],\n        \"description\": \"Basic code blocks and inline code with monospace fonts and background styling\",\n        \"markdown_equivalent\": \"### Code Examples\\n\\nThis paragraph contains inline `code snippets` for testing.\\n\\n```javascript\\nfunction hello() {\\n    console.log(\\\"Hello, world!\\\");\\n    return true;\\n}\\n```\",\n        \"complexity\": \"basic\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Code Block Layout\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Code block styles */\n        pre {\n            background-color: #f6f8fa;\n            border: 1px solid #d1d9e0;\n            border-radius: 6px;\n            padding: 16px;\n            margin: 16px 0;\n            overflow-x: auto;\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            line-height: 1.4;\n        }\n        \n        code {\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            background-color: #f3f4f6;\n            padding: 2px 4px;\n            border-radius: 3px;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Code Block Layout",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Code Block Layout",
+                "length": 23,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Code block styles */\n        pre {\n            background-color: #f6f8fa;\n            border: 1px solid #d1d9e0;\n            border-radius: 6px;\n            padding: 16px;\n            margin: 16px 0;\n            overflow-x: auto;\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            line-height: 1.4;\n        }\n        \n        code {\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            background-color: #f3f4f6;\n            padding: 2px 4px;\n            border-radius: 3px;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Code block styles */\n        pre {\n            background-color: #f6f8fa;\n            border: 1px solid #d1d9e0;\n            border-radius: 6px;\n            padding: 16px;\n            margin: 16px 0;\n            overflow-x: auto;\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            line-height: 1.4;\n        }\n        \n        code {\n            font-family: 'Courier New', monospace;\n            font-size: 14px;\n            background-color: #f3f4f6;\n            padding: 2px 4px;\n            border-radius: 3px;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n    ",
+                "length": 1066,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Code Examples\n    This paragraph contains inline code snippets for testing.\n    \n    function hello() {\n    console.log(\"Hello, world!\");\n    return true;\n}\n    \n    The above code block should have proper padding and background styling.\n    \n    \n    \n    {\n        \"test_id\": \"code_001_basic_blocks\",\n        \"category\": \"code\",\n        \"features\": [\"code-blocks\", \"pre-formatting\", \"inline-code\", \"monospace\", \"background\"],\n        \"description\": \"Basic code blocks and inline code with monospace fonts and background styling\",\n        \"markdown_equivalent\": \"### Code Examples\\n\\nThis paragraph contains inline `code snippets` for testing.\\n\\n```javascript\\nfunction hello() {\\n    console.log(\\\"Hello, world!\\\");\\n    return true;\\n}\\n```\",\n        \"complexity\": \"basic\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 5,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "h3",
             "tag": "h3",
             "id": null,
@@ -502,33 +603,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Code Examples",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Code Examples",
-                "parentElement": "h3",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 24,
-                    "width": 148.95,
-                    "height": 22,
-                    "right": 168.95,
-                    "bottom": 46
-                  }
-                ],
                 "length": 13,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 13
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 24,
+                      "width": 148.95,
+                      "height": 22,
+                      "right": 168.95,
+                      "bottom": 46,
+                      "text": "Code Examples",
+                      "startIndex": 0,
+                      "endIndex": 13
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "p:nth-of-type(1)",
             "tag": "p",
             "id": null,
@@ -584,50 +693,39 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "This paragraph contains inline code snippets for testing.",
-            "hasTextNodes": true,
-            "textNodes": [
-              {
-                "text": "This paragraph contains inline ",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 65,
-                    "width": 217.91,
-                    "height": 17,
-                    "right": 237.91,
-                    "bottom": 82
-                  }
-                ],
-                "length": 31,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 31
-              },
-              {
-                "text": " for testing.",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 355.13,
-                    "y": 65,
-                    "width": 79.16,
-                    "height": 17,
-                    "right": 434.28,
-                    "bottom": 82
-                  }
-                ],
-                "length": 13,
-                "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 13
-              }
-            ],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 3,
             "children": [
               {
+                "nodeType": "text",
+                "text": "This paragraph contains inline ",
+                "length": 31,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 65,
+                      "width": 217.91,
+                      "height": 17,
+                      "right": 237.91,
+                      "bottom": 82,
+                      "text": "This paragraph contains inline ",
+                      "startIndex": 0,
+                      "endIndex": 31
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "element",
                 "selector": "code",
                 "tag": "code",
                 "id": null,
@@ -683,35 +781,71 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "code snippets",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "code snippets",
-                    "parentElement": "code",
-                    "rects": [
-                      {
-                        "x": 241.91,
-                        "y": 67,
-                        "width": 109.22,
-                        "height": 16,
-                        "right": 351.13,
-                        "bottom": 83
-                      }
-                    ],
                     "length": 13,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 13
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 241.91,
+                          "y": 67,
+                          "width": 109.22,
+                          "height": 16,
+                          "right": 351.13,
+                          "bottom": 83,
+                          "text": "code snippets",
+                          "startIndex": 0,
+                          "endIndex": 13
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": " for testing.",
+                "length": 13,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 355.13,
+                      "y": 65,
+                      "width": 79.16,
+                      "height": 17,
+                      "right": 434.28,
+                      "bottom": 82,
+                      "text": " for testing.",
+                      "startIndex": 0,
+                      "endIndex": 13
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 2,
                 "children": []
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "pre",
             "tag": "pre",
             "id": null,
@@ -767,13 +901,11 @@
               "overflowX": "auto",
               "overflowY": "auto"
             },
-            "textContent": "function hello() {\n    console.log(\"Hello, world!\");\n    return true;\n}",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 5,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "code",
                 "tag": "code",
                 "id": null,
@@ -829,83 +961,127 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "function hello() {\n    console.log(\"Hello, world!\");\n    return true;\n}",
-                "hasTextNodes": true,
-                "textNodes": [
-                  {
-                    "text": "function hello() {\n    console.log(\"Hello, world!\");\n    return true;\n}",
-                    "parentElement": "code",
-                    "rects": [
-                      {
-                        "x": 41,
-                        "y": 120,
-                        "width": 151.23,
-                        "height": 16,
-                        "right": 192.23,
-                        "bottom": 136
-                      },
-                      {
-                        "x": 192.23,
-                        "y": 120,
-                        "width": 0,
-                        "height": 16,
-                        "right": 192.23,
-                        "bottom": 136
-                      },
-                      {
-                        "x": 37,
-                        "y": 139.59,
-                        "width": 277.25,
-                        "height": 16,
-                        "right": 314.25,
-                        "bottom": 155.59
-                      },
-                      {
-                        "x": 314.25,
-                        "y": 139.59,
-                        "width": 0,
-                        "height": 16,
-                        "right": 314.25,
-                        "bottom": 155.59
-                      },
-                      {
-                        "x": 37,
-                        "y": 159.19,
-                        "width": 134.42,
-                        "height": 16,
-                        "right": 171.42,
-                        "bottom": 175.19
-                      },
-                      {
-                        "x": 171.42,
-                        "y": 159.19,
-                        "width": 0,
-                        "height": 16,
-                        "right": 171.42,
-                        "bottom": 175.19
-                      },
-                      {
-                        "x": 37,
-                        "y": 178.78,
-                        "width": 8.41,
-                        "height": 16,
-                        "right": 45.41,
-                        "bottom": 194.78
-                      }
-                    ],
-                    "length": 71,
-                    "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 71
-                  }
-                ],
-                "childCount": 0,
                 "depth": 3,
-                "children": []
+                "elementIndex": 0,
+                "children": [
+                  {
+                    "nodeType": "text",
+                    "text": "function hello() {\n",
+                    "length": 19,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 41,
+                          "y": 120,
+                          "width": 151.23,
+                          "height": 16,
+                          "right": 192.23,
+                          "bottom": 136,
+                          "text": "function hello() {\n",
+                          "startIndex": 0,
+                          "endIndex": 19
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "    console.log(\"Hello, world!\");\n",
+                    "length": 34,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 192.23,
+                          "y": 120,
+                          "width": 0,
+                          "height": 16,
+                          "right": 192.23,
+                          "bottom": 136,
+                          "text": "    console.log(\"Hello, world!\");\n",
+                          "startIndex": 0,
+                          "endIndex": 34
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "    return true;\n",
+                    "length": 17,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 37,
+                          "y": 139.59,
+                          "width": 277.25,
+                          "height": 16,
+                          "right": 314.25,
+                          "bottom": 155.59,
+                          "text": "    return true;\n",
+                          "startIndex": 0,
+                          "endIndex": 17
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "}",
+                    "length": 1,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 314.25,
+                          "y": 139.59,
+                          "width": 0,
+                          "height": 16,
+                          "right": 314.25,
+                          "bottom": 155.59,
+                          "text": "}",
+                          "startIndex": 0,
+                          "endIndex": 1
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  }
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "p:nth-of-type(2)",
             "tag": "p",
             "id": null,
@@ -961,33 +1137,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "The above code block should have proper padding and background styling.",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 7,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "The above code block should have proper padding and background styling.",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 233.38,
-                    "width": 532.81,
-                    "height": 17,
-                    "right": 552.81,
-                    "bottom": 250.38
-                  }
-                ],
                 "length": 71,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 71
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 233.38,
+                      "width": 532.81,
+                      "height": 17,
+                      "right": 552.81,
+                      "bottom": 250.38,
+                      "text": "The above code block should have proper padding and background styling.",
+                      "startIndex": 0,
+                      "endIndex": 71
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -1043,12 +1227,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"code_001_basic_blocks\",\n        \"category\": \"code\",\n        \"features\": [\"code-blocks\", \"pre-formatting\", \"inline-code\", \"monospace\", \"background\"],\n        \"description\": \"Basic code blocks and inline code with monospace fonts and background styling\",\n        \"markdown_equivalent\": \"### Code Examples\\n\\nThis paragraph contains inline `code snippets` for testing.\\n\\n```javascript\\nfunction hello() {\\n    console.log(\\\"Hello, world!\\\");\\n    return true;\\n}\\n```\",\n        \"complexity\": \"basic\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 11,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"code_001_basic_blocks\",\n        \"category\": \"code\",\n        \"features\": [\"code-blocks\", \"pre-formatting\", \"inline-code\", \"monospace\", \"background\"],\n        \"description\": \"Basic code blocks and inline code with monospace fonts and background styling\",\n        \"markdown_equivalent\": \"### Code Examples\\n\\nThis paragraph contains inline `code snippets` for testing.\\n\\n```javascript\\nfunction hello() {\\n    console.log(\\\"Hello, world!\\\");\\n    return true;\\n}\\n```\",\n        \"complexity\": \"basic\"\n    }\n    ",
+                "length": 535,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

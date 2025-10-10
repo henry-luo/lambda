@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Basic List Layout\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 600px;\n        }\n        \n        /* List styles */\n        ul {\n            margin-bottom: 16px;\n            padding-left: 24px;\n        }\n        \n        ol {\n            margin-bottom: 16px;\n            padding-left: 24px;\n        }\n        \n        li {\n            margin-bottom: 8px;\n            line-height: 1.5;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n    \n\n\n    Unordered List\n    \n        First item\n        Second item\n        Third item\n    \n    \n    Ordered List\n    \n        Step one\n        Step two\n        Step three\n    \n    \n    \n    \n    {\n        \"test_id\": \"list_001_basic_lists\",\n        \"category\": \"list\",\n        \"features\": [\"unordered-list\", \"ordered-list\", \"list-indentation\", \"list-margins\"],\n        \"description\": \"Basic unordered and ordered lists with proper indentation and spacing\",\n        \"markdown_equivalent\": \"### Unordered List\\n\\n- First item\\n- Second item\\n- Third item\\n\\n### Ordered List\\n\\n1. Step one\\n2. Step two\\n3. Step three\",\n        \"complexity\": \"basic\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Basic List Layout\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 600px;\n        }\n        \n        /* List styles */\n        ul {\n            margin-bottom: 16px;\n            padding-left: 24px;\n        }\n        \n        ol {\n            margin-bottom: 16px;\n            padding-left: 24px;\n        }\n        \n        li {\n            margin-bottom: 8px;\n            line-height: 1.5;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Basic List Layout",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Basic List Layout",
+                "length": 23,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 600px;\n        }\n        \n        /* List styles */\n        ul {\n            margin-bottom: 16px;\n            padding-left: 24px;\n        }\n        \n        ol {\n            margin-bottom: 16px;\n            padding-left: 24px;\n        }\n        \n        li {\n            margin-bottom: 8px;\n            line-height: 1.5;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 600px;\n        }\n        \n        /* List styles */\n        ul {\n            margin-bottom: 16px;\n            padding-left: 24px;\n        }\n        \n        ol {\n            margin-bottom: 16px;\n            padding-left: 24px;\n        }\n        \n        li {\n            margin-bottom: 8px;\n            line-height: 1.5;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n    ",
+                "length": 731,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Unordered List\n    \n        First item\n        Second item\n        Third item\n    \n    \n    Ordered List\n    \n        Step one\n        Step two\n        Step three\n    \n    \n    \n    \n    {\n        \"test_id\": \"list_001_basic_lists\",\n        \"category\": \"list\",\n        \"features\": [\"unordered-list\", \"ordered-list\", \"list-indentation\", \"list-margins\"],\n        \"description\": \"Basic unordered and ordered lists with proper indentation and spacing\",\n        \"markdown_equivalent\": \"### Unordered List\\n\\n- First item\\n- Second item\\n- Third item\\n\\n### Ordered List\\n\\n1. Step one\\n2. Step two\\n3. Step three\",\n        \"complexity\": \"basic\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 5,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "h3:nth-of-type(1)",
             "tag": "h3",
             "id": null,
@@ -502,33 +603,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Unordered List",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Unordered List",
-                "parentElement": "h3",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 24,
-                    "width": 142.25,
-                    "height": 22,
-                    "right": 162.25,
-                    "bottom": 46
-                  }
-                ],
                 "length": 14,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 14
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 24,
+                      "width": 142.25,
+                      "height": 22,
+                      "right": 162.25,
+                      "bottom": 46,
+                      "text": "Unordered List",
+                      "startIndex": 0,
+                      "endIndex": 14
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "ul",
             "tag": "ul",
             "id": null,
@@ -584,13 +693,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "First item\n        Second item\n        Third item",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 3,
             "depth": 2,
+            "elementIndex": 3,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "li:nth-of-type(1)",
                 "tag": "li",
                 "id": null,
@@ -646,33 +753,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "First item",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "First item",
-                    "parentElement": "li",
-                    "rects": [
-                      {
-                        "x": 44,
-                        "y": 65,
-                        "width": 65.78,
-                        "height": 17,
-                        "right": 109.78,
-                        "bottom": 82
-                      }
-                    ],
                     "length": 10,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 10
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 44,
+                          "y": 65,
+                          "width": 65.78,
+                          "height": 17,
+                          "right": 109.78,
+                          "bottom": 82,
+                          "text": "First item",
+                          "startIndex": 0,
+                          "endIndex": 10
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "list-item",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "li:nth-of-type(2)",
                 "tag": "li",
                 "id": null,
@@ -728,33 +843,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Second item",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Second item",
-                    "parentElement": "li",
-                    "rects": [
-                      {
-                        "x": 44,
-                        "y": 97,
-                        "width": 88.94,
-                        "height": 17,
-                        "right": 132.94,
-                        "bottom": 114
-                      }
-                    ],
                     "length": 11,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 11
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 44,
+                          "y": 97,
+                          "width": 88.94,
+                          "height": 17,
+                          "right": 132.94,
+                          "bottom": 114,
+                          "text": "Second item",
+                          "startIndex": 0,
+                          "endIndex": 11
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "list-item",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "li:nth-of-type(3)",
                 "tag": "li",
                 "id": null,
@@ -810,35 +933,43 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Third item",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Third item",
-                    "parentElement": "li",
-                    "rects": [
-                      {
-                        "x": 44,
-                        "y": 129,
-                        "width": 71.13,
-                        "height": 17,
-                        "right": 115.13,
-                        "bottom": 146
-                      }
-                    ],
                     "length": 10,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 10
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 44,
+                          "y": 129,
+                          "width": 71.13,
+                          "height": 17,
+                          "right": 115.13,
+                          "bottom": 146,
+                          "text": "Third item",
+                          "startIndex": 0,
+                          "endIndex": 10
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "list-item",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "h3:nth-of-type(2)",
             "tag": "h3",
             "id": null,
@@ -894,33 +1025,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Ordered List",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 5,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Ordered List",
-                "parentElement": "h3",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 170,
-                    "width": 118.92,
-                    "height": 22,
-                    "right": 138.92,
-                    "bottom": 192
-                  }
-                ],
                 "length": 12,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 12
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 170,
+                      "width": 118.92,
+                      "height": 22,
+                      "right": 138.92,
+                      "bottom": 192,
+                      "text": "Ordered List",
+                      "startIndex": 0,
+                      "endIndex": 12
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "ol",
             "tag": "ol",
             "id": null,
@@ -976,13 +1115,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Step one\n        Step two\n        Step three",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 3,
             "depth": 2,
+            "elementIndex": 7,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "li:nth-of-type(1)",
                 "tag": "li",
                 "id": null,
@@ -1038,33 +1175,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Step one",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Step one",
-                    "parentElement": "li",
-                    "rects": [
-                      {
-                        "x": 44,
-                        "y": 211,
-                        "width": 64.06,
-                        "height": 17,
-                        "right": 108.06,
-                        "bottom": 228
-                      }
-                    ],
                     "length": 8,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 8
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 44,
+                          "y": 211,
+                          "width": 64.06,
+                          "height": 17,
+                          "right": 108.06,
+                          "bottom": 228,
+                          "text": "Step one",
+                          "startIndex": 0,
+                          "endIndex": 8
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "list-item",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "li:nth-of-type(2)",
                 "tag": "li",
                 "id": null,
@@ -1120,33 +1265,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Step two",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Step two",
-                    "parentElement": "li",
-                    "rects": [
-                      {
-                        "x": 44,
-                        "y": 243,
-                        "width": 62.27,
-                        "height": 17,
-                        "right": 106.27,
-                        "bottom": 260
-                      }
-                    ],
                     "length": 8,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 8
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 44,
+                          "y": 243,
+                          "width": 62.27,
+                          "height": 17,
+                          "right": 106.27,
+                          "bottom": 260,
+                          "text": "Step two",
+                          "startIndex": 0,
+                          "endIndex": 8
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "list-item",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "li:nth-of-type(3)",
                 "tag": "li",
                 "id": null,
@@ -1202,35 +1355,43 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Step three",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Step three",
-                    "parentElement": "li",
-                    "rects": [
-                      {
-                        "x": 44,
-                        "y": 275,
-                        "width": 73.83,
-                        "height": 17,
-                        "right": 117.83,
-                        "bottom": 292
-                      }
-                    ],
                     "length": 10,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 10
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 44,
+                          "y": 275,
+                          "width": 73.83,
+                          "height": 17,
+                          "right": 117.83,
+                          "bottom": 292,
+                          "text": "Step three",
+                          "startIndex": 0,
+                          "endIndex": 10
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "list-item",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -1286,12 +1447,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"list_001_basic_lists\",\n        \"category\": \"list\",\n        \"features\": [\"unordered-list\", \"ordered-list\", \"list-indentation\", \"list-margins\"],\n        \"description\": \"Basic unordered and ordered lists with proper indentation and spacing\",\n        \"markdown_equivalent\": \"### Unordered List\\n\\n- First item\\n- Second item\\n- Third item\\n\\n### Ordered List\\n\\n1. Step one\\n2. Step two\\n3. Step three\",\n        \"complexity\": \"basic\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 11,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"list_001_basic_lists\",\n        \"category\": \"list\",\n        \"features\": [\"unordered-list\", \"ordered-list\", \"list-indentation\", \"list-margins\"],\n        \"description\": \"Basic unordered and ordered lists with proper indentation and spacing\",\n        \"markdown_equivalent\": \"### Unordered List\\n\\n- First item\\n- Second item\\n- Third item\\n\\n### Ordered List\\n\\n1. Step one\\n2. Step two\\n3. Step three\",\n        \"complexity\": \"basic\"\n    }\n    ",
+                "length": 467,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

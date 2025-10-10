@@ -127,6 +127,22 @@
         "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
@@ -188,6 +204,22 @@
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
             "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
@@ -246,6 +278,22 @@
             },
             "depth": 2,
             "elementIndex": 3,
+            "children": []
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
             "children": []
           },
           {
@@ -315,13 +363,32 @@
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
-                  "hasLayout": false
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
                 },
                 "depth": 3,
                 "nodeIndex": 0,
                 "children": []
               }
             ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
+            "children": []
           },
           {
             "nodeType": "element",
@@ -390,13 +457,32 @@
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
-                  "hasLayout": false
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
                 },
                 "depth": 3,
                 "nodeIndex": 0,
                 "children": []
               }
             ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
+            "children": []
           }
         ]
       },
@@ -533,10 +619,16 @@
                       "width": 208.02,
                       "height": 36,
                       "right": 228.02,
-                      "bottom": 62
+                      "bottom": 62,
+                      "text": "Main Heading",
+                      "startIndex": 0,
+                      "endIndex": 12
                     }
                   ],
-                  "hasLayout": true
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
                 },
                 "depth": 3,
                 "nodeIndex": 0,
@@ -617,10 +709,16 @@
                       "width": 272.13,
                       "height": 17,
                       "right": 292.13,
-                      "bottom": 105
+                      "bottom": 105,
+                      "text": "This is a regular paragraph with some ",
+                      "startIndex": 0,
+                      "endIndex": 38
                     }
                   ],
-                  "hasLayout": true
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
                 },
                 "depth": 3,
                 "nodeIndex": 0,
@@ -701,10 +799,16 @@
                           "width": 62.25,
                           "height": 17,
                           "right": 354.38,
-                          "bottom": 105
+                          "bottom": 105,
+                          "text": "italic text",
+                          "startIndex": 0,
+                          "endIndex": 11
                         }
                       ],
-                      "hasLayout": true
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
                     },
                     "depth": 4,
                     "nodeIndex": 0,
@@ -725,10 +829,16 @@
                       "width": 35.59,
                       "height": 17,
                       "right": 389.97,
-                      "bottom": 105
+                      "bottom": 105,
+                      "text": " and ",
+                      "startIndex": 0,
+                      "endIndex": 5
                     }
                   ],
-                  "hasLayout": true
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
                 },
                 "depth": 3,
                 "nodeIndex": 2,
@@ -809,10 +919,16 @@
                           "width": 66.67,
                           "height": 17,
                           "right": 456.64,
-                          "bottom": 105
+                          "bottom": 105,
+                          "text": "bold text",
+                          "startIndex": 0,
+                          "endIndex": 9
                         }
                       ],
-                      "hasLayout": true
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline",
+                      "parentVisibility": "visible"
                     },
                     "depth": 4,
                     "nodeIndex": 0,
@@ -833,10 +949,16 @@
                       "width": 4.45,
                       "height": 17,
                       "right": 461.09,
-                      "bottom": 105
+                      "bottom": 105,
+                      "text": ".",
+                      "startIndex": 0,
+                      "endIndex": 1
                     }
                   ],
-                  "hasLayout": true
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
                 },
                 "depth": 3,
                 "nodeIndex": 4,
@@ -917,10 +1039,16 @@
                       "width": 224.06,
                       "height": 27,
                       "right": 244.06,
-                      "bottom": 164.59
+                      "bottom": 164.59,
+                      "text": "Secondary Heading",
+                      "startIndex": 0,
+                      "endIndex": 17
                     }
                   ],
-                  "hasLayout": true
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
                 },
                 "depth": 3,
                 "nodeIndex": 0,
@@ -1001,10 +1129,16 @@
                       "width": 577.88,
                       "height": 17,
                       "right": 597.88,
-                      "bottom": 202.59
+                      "bottom": 202.59,
+                      "text": "Another paragraph that should have proper spacing and line height for readability.",
+                      "startIndex": 0,
+                      "endIndex": 82
                     }
                   ],
-                  "hasLayout": true
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
                 },
                 "depth": 3,
                 "nodeIndex": 0,
@@ -1079,7 +1213,10 @@
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
-                  "hasLayout": false
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
                 },
                 "depth": 3,
                 "nodeIndex": 0,
