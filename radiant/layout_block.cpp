@@ -85,8 +85,10 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
                 block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
             }
         }
+        log_debug("block: given_height: %d, height: %d, flow height: %d", lycon->block.given_height, block->height, flow_height);
     }
     else {
+        log_debug("finalize block flow, set block height to flow height: %d", flow_height);
         block->height = flow_height;
     }
 }
@@ -346,6 +348,21 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // default iframe size to 300 x 200
         lycon->block.given_width = 300 * lycon->ui_context->pixel_ratio;
         lycon->block.given_height = 200 * lycon->ui_context->pixel_ratio;
+        break;
+    case LXB_TAG_HR:
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
+        // 1px top border
+        block->bound->border->width.top = 1 * lycon->ui_context->pixel_ratio;
+        block->bound->border->width.left = block->bound->border->width.right = block->bound->border->width.bottom = 0;
+        // 0.5em margin
+        block->bound->margin.top = block->bound->margin.bottom =
+            block->bound->margin.left = block->bound->margin.right = 0.5 * lycon->font.face.style.font_size;
+        // // full width
+        // lycon->block.given_width = pa_block.width;
+        // // 2px height + borders
+        // lycon->block.given_height = 2 * lycon->ui_context->pixel_ratio +
+        //     block->bound->border->width.top + block->bound->border->width.bottom;
         break;
     }
 
@@ -765,6 +782,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             lycon->block.max_width = max(lycon->block.max_width, block->width);
         }
         assert(lycon->line.is_line_start);
+        log_debug("block end, pa max_width: %d, pa advance_y: %d, block hg: %d",
+            lycon->block.max_width, lycon->block.advance_y, block->height);
     }
     lycon->prev_view = (View*)block;
     log_debug("block view: %d, end block", block->type);

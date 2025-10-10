@@ -428,8 +428,12 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
         case LXB_TAG_LI:  case LXB_TAG_SUMMARY:
             outer_display = LXB_CSS_VALUE_LIST_ITEM;  inner_display = LXB_CSS_VALUE_FLOW;
             break;
-        case LXB_TAG_IMG:
+        case LXB_TAG_IMG:  case LXB_TAG_VIDEO:
+        case LXB_TAG_INPUT: case LXB_TAG_SELECT: case LXB_TAG_TEXTAREA:  case LXB_TAG_BUTTON:
             outer_display = LXB_CSS_VALUE_INLINE_BLOCK;  inner_display = RDT_DISPLAY_REPLACED;
+            break;
+        case LXB_TAG_HR:
+            outer_display = LXB_CSS_VALUE_BLOCK;  inner_display = RDT_DISPLAY_REPLACED;
             break;
         case LXB_TAG_IFRAME:
             outer_display = LXB_CSS_VALUE_INLINE_BLOCK; inner_display = RDT_DISPLAY_REPLACED;
@@ -626,7 +630,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
         resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_MARGIN, margin, specificity, &span->bound->margin);
-        
+
         // Also set auto flags for shorthand margin property
         if (margin->top.type == LXB_CSS_VALUE_AUTO || margin->top.type == 12) {
             span->margin_top_auto = true;
@@ -640,21 +644,21 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (margin->left.type == LXB_CSS_VALUE_AUTO || margin->left.type == 12) {
             span->margin_left_auto = true;
         }
-        
+
         // Handle shorthand expansion (1-4 values)
         int value_cnt = 0;
         if (margin->top.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
         if (margin->right.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
         if (margin->bottom.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
         if (margin->left.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
-        
+
         if (value_cnt == 1) {
             // margin: auto -> all sides auto
             bool is_auto = (margin->top.type == LXB_CSS_VALUE_AUTO || margin->top.type == 12);
-            span->margin_top_auto = span->margin_right_auto = 
+            span->margin_top_auto = span->margin_right_auto =
             span->margin_bottom_auto = span->margin_left_auto = is_auto;
         }
-        
+
         break;
     }
     case LXB_CSS_PROPERTY_PADDING: {
@@ -1337,7 +1341,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_justify_content_t *justify_content = declr->u.justify_content;
         printf("DEBUG: JUSTIFY_CONTENT parsed - type=%d\n", justify_content->type);
         alloc_flex_prop(lycon, block);
-        
+
         // Handle space-evenly specially since lexbor might not support it
         if (justify_content->type == LXB_CSS_VALUE_SPACE_EVENLY) {
             printf("DEBUG: Setting justify-content to SPACE_EVENLY\n");
@@ -1494,7 +1498,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         // Handle justify-content space-evenly as custom property since lexbor doesn't support it
         else if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "justify-content", 15) == 0) {
             const char* value_str = (const char*)custom->value.data;
-            printf("DEBUG: Custom justify-content property found: '%.*s'\n", 
+            printf("DEBUG: Custom justify-content property found: '%.*s'\n",
                    (int)custom->value.length, value_str);
 
             // Check if the value is "space-evenly"
