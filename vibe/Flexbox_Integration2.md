@@ -316,76 +316,84 @@ void align_items_main_axis_v2(FlexContainerLayout* flex_layout, FlexLineInfo* li
 }
 ```
 
-### Phase 3: Nested Content Layout (Week 5-6)
+### Phase 3: Full Nested Content Flow (Week 5-6)
 
-#### 3.1 Enhanced Content Layout System
+#### 3.1 Proper Nested Content Flow System
 **File**: `/radiant/layout_flex_content.cpp` (Enhanced)
 ```cpp
-// Enhanced flex item content layout with proper text flow
+// Enhanced flex item content layout with full HTML nested content support
 void layout_flex_item_content_v2(LayoutContext* lycon, ViewBlock* flex_item) {
     // Save parent context
     LayoutContext saved_context = *lycon;
     
-    // Set up flex item context
-    lycon->block.width = flex_item->width;
-    lycon->block.height = flex_item->height;
-    lycon->block.advance_y = 0;
-    lycon->block.max_width = 0;
+    // Set up flex item as a proper containing block
+    lycon->parent = (ViewGroup*)flex_item;
+    lycon->prev_view = NULL;
     
-    // Account for padding in content area
+    // Calculate content area dimensions accounting for box model
+    int content_width = flex_item->width;
+    int content_height = flex_item->height;
+    int content_x_offset = 0;
+    int content_y_offset = 0;
+    
     if (flex_item->bound) {
-        lycon->block.width -= (flex_item->bound->padding.left + flex_item->bound->padding.right);
-        lycon->block.height -= (flex_item->bound->padding.top + flex_item->bound->padding.bottom);
+        // Account for padding and border in content area
+        content_width -= (flex_item->bound->padding.left + flex_item->bound->padding.right);
+        content_height -= (flex_item->bound->padding.top + flex_item->bound->padding.bottom);
+        content_x_offset = flex_item->bound->padding.left;
+        content_y_offset = flex_item->bound->padding.top;
+        
+        if (flex_item->bound->border) {
+            content_width -= (flex_item->bound->border->width.left + flex_item->bound->border->width.right);
+            content_height -= (flex_item->bound->border->width.top + flex_item->bound->border->width.bottom);
+            content_x_offset += flex_item->bound->border->width.left;
+            content_y_offset += flex_item->bound->border->width.top;
+        }
     }
     
-    // Set up line context for text layout
-    lycon->line.left = flex_item->bound ? flex_item->bound->padding.left : 0;
-    lycon->line.right = lycon->block.width - (flex_item->bound ? flex_item->bound->padding.right : 0);
+    // Set up block formatting context for nested content
+    lycon->block.width = content_width;
+    lycon->block.height = content_height;
+    lycon->block.advance_y = content_y_offset;
+    lycon->block.max_width = 0;
+    
+    // Inherit text alignment and other block properties from flex item
+    if (flex_item->blk) {
+        lycon->block.text_align = flex_item->blk->text_align;
+        lycon->block.line_height = flex_item->blk->line_height;
+    }
+    
+    // Set up line formatting context for inline content
+    lycon->line.left = content_x_offset;
+    lycon->line.right = content_x_offset + content_width;
     lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
     line_init(lycon);
     
-    // Layout child content with proper flow
+    // Layout all nested content using standard flow algorithm
+    // This handles: text nodes, nested blocks, inline elements, images, etc.
     if (flex_item->node && flex_item->node->first_child()) {
         DomNode* child = flex_item->node->first_child();
         do {
+            // Use standard layout flow - this handles all HTML content types
             layout_flow_node(lycon, child);
             child = child->next_sibling();
         } while (child);
         
-        // Handle final line break
+        // Finalize any pending line content
         if (!lycon->line.is_line_start) {
             line_break(lycon);
         }
     }
     
-    // Update flex item content dimensions
+    // Update flex item content dimensions for intrinsic sizing
     flex_item->content_width = lycon->block.max_width;
-    flex_item->content_height = lycon->block.advance_y;
+    flex_item->content_height = lycon->block.advance_y - content_y_offset;
     
-    // Restore context
+    // Restore parent context
     *lycon = saved_context;
 }
 ```
 
-#### 3.2 Text Positioning Fix
-**File**: `/radiant/layout_flex_text.cpp` (New)
-```cpp
-// Fix text positioning within flex items
-void position_text_in_flex_item(ViewBlock* flex_item) {
-    // Traverse all text nodes within the flex item
-    traverse_text_nodes(flex_item, fix_text_position);
-}
-
-void fix_text_position(ViewText* text_node, ViewBlock* flex_item) {
-    // Calculate proper text position relative to flex item
-    int padding_left = flex_item->bound ? flex_item->bound->padding.left : 0;
-    int padding_top = flex_item->bound ? flex_item->bound->padding.top : 0;
-    
-    // Adjust text position to be relative to flex item content area
-    text_node->x = flex_item->x + padding_left + text_node->relative_x;
-    text_node->y = flex_item->y + padding_top + text_node->relative_y;
-}
-```
 
 ### Phase 4: CSS Property Integration (Week 7-8)
 
@@ -505,13 +513,12 @@ class FlexLayoutTester:
 1. **Multi-Pass Layout Architecture** - Foundation for all other fixes
 2. **Auto Margins Implementation** - Required for centering and positioning
 3. **Justify-Content Enhancement** - Core flex layout feature
-4. **Text Positioning Fix** - Critical for visual correctness
+4. **Full Nested Content Flow** - Critical for supporting complex HTML structures
 
 ### Medium Priority (Important for Full CSS Support)
 1. **Flex-Grow/Shrink Distribution** - Advanced sizing features
-2. **Nested Content Layout** - Complex layout scenarios
-3. **CSS Property Integration** - Complete CSS compatibility
-4. **Advanced Test Suite** - Comprehensive validation
+2. **CSS Property Integration** - Complete CSS compatibility
+3. **Advanced Test Suite** - Comprehensive validation
 
 ## Success Metrics
 

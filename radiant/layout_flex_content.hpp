@@ -10,6 +10,7 @@ typedef struct {
 
 // Core flex item content layout functions
 void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item);
+void layout_flex_item_content_v2(LayoutContext* lycon, ViewBlock* flex_item);  // Phase 3.1 enhanced version
 void layout_block_in_flex_item(LayoutContext* lycon, ViewBlock* block, ViewBlock* flex_item);
 void layout_inline_in_flex_item(LayoutContext* lycon, View* inline_view, ViewBlock* flex_item);
 
