@@ -190,7 +190,7 @@ void line_align(LayoutContext* lycon) {
 }
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
-    log_debug("layout node %s", node->name());
+    log_debug("layout node %s, advance_y: %d", node->name(), lycon->block.advance_y);
     if (node->is_element()) {
         log_debug("Element: %s", node->name());
         lxb_html_element_t *elmt = node->as_element();
@@ -229,6 +229,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         log_debug("layout unknown node type: %d", node->type);
         // skip the node
     }
+    log_debug("end flow node, block advance_y: %d", lycon->block.advance_y);
 }
 
 void load_style(LayoutContext* lycon, unsigned char* style_source) {
