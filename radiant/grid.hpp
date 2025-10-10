@@ -202,6 +202,7 @@ void resolve_grid_template_areas(GridContainerLayout* grid_layout);
 void layout_grid_item_content(struct LayoutContext* lycon, struct ViewBlock* grid_item);
 void layout_grid_item_content_for_sizing(struct LayoutContext* lycon, struct ViewBlock* grid_item);
 void layout_grid_item_final_content(struct LayoutContext* lycon, struct ViewBlock* grid_item);
+void layout_grid_items_content(struct LayoutContext* lycon, struct GridContainerLayout* grid_layout);
 
 // Advanced grid features (Phase 6)
 // Minmax function support
