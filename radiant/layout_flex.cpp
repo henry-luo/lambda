@@ -591,18 +591,20 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             }
         }
 
-        // Distribute positive free space using flex-grow
-        int distributed_space = 0;
+        // Distribute positive free space using flex-grow with improved precision
+        float distributed_space = 0.0f;
         for (int i = 0; i < line->item_count; i++) {
             ViewBlock* item = line->items[i];
             if (item->flex_grow > 0) {
+                float grow_amount_f;
                 int grow_amount;
                 if (i == last_growing_item) {
                     // Last growing item gets remaining space to avoid rounding errors
-                    grow_amount = free_space - distributed_space;
+                    grow_amount = free_space - (int)distributed_space;
                 } else {
-                    grow_amount = (int)((item->flex_grow / line->total_flex_grow) * free_space);
-                    distributed_space += grow_amount;
+                    grow_amount_f = (item->flex_grow / line->total_flex_grow) * free_space;
+                    grow_amount = (int)(grow_amount_f + 0.5f); // Round to nearest integer
+                    distributed_space += grow_amount_f;
                 }
                 int current_size = get_main_axis_size(item, flex_layout);
                 int new_size = current_size + grow_amount;

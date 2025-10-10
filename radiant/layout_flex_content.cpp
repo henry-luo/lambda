@@ -23,10 +23,41 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     lycon->block.height = flex_item->height;
     lycon->block.advance_y = 0;
     lycon->block.max_width = 0;
-    lycon->line.left = 0;
-    lycon->line.right = flex_item->width;
+    
+    // CRITICAL FIX: Set up content area accounting for padding
+    // Text positioning should be relative to the flex item's content area
+    int padding_left = 0;
+    int padding_right = 0;
+    int padding_top = 0;
+    
+    if (flex_item->bound) {
+        padding_left = flex_item->bound->padding.left;
+        padding_right = flex_item->bound->padding.right;
+        padding_top = flex_item->bound->padding.top;
+        lycon->block.width -= (padding_left + padding_right);
+        lycon->block.height -= (flex_item->bound->padding.top + flex_item->bound->padding.bottom);
+    }
+    
+    // Set line boundaries relative to content area (not absolute coordinates)
+    lycon->line.left = padding_left;
+    lycon->line.right = lycon->block.width + padding_left;
     lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
+    
+    printf("DEBUG: Text positioning - flex_item at (%d,%d), content area relative (%d to %d), padding_top=%d\n",
+           flex_item->x, flex_item->y, lycon->line.left, lycon->line.right, padding_top);
+    
     line_init(lycon);
+    
+    // CRITICAL FIX: Apply vertical offset for padding_top
+    // The text should start at flex_item->y + padding_top, not flex_item->y
+    lycon->block.advance_y = padding_top;
+    
+    // CRITICAL FIX: Copy text_align property from flex item to layout context
+    // This is needed for line_align() to work correctly
+    if (flex_item->blk && flex_item->blk->text_align) {
+        lycon->block.text_align = flex_item->blk->text_align;
+        printf("DEBUG: Applied text_align=%d to layout context\n", flex_item->blk->text_align);
+    }
 
     // Layout child content
     DomNode* child = flex_item->node ? flex_item->node->first_child() : NULL;
