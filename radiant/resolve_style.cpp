@@ -1669,9 +1669,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         else if (custom->name.length == 14 && strncmp((const char*)custom->name.data, "grid-auto-flow", 14) == 0) {
             if (block) {
                 alloc_grid_prop(lycon, block);
-
                 const char* value_str = (const char*)custom->value.data;
-
                 // Parse grid-auto-flow values (can be "row", "column", "row dense", "column dense")
                 if (strstr(value_str, "row")) {
                     block->embed->grid->grid_auto_flow = LXB_CSS_VALUE_ROW;
@@ -1690,22 +1688,30 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         else if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "table-layout", 12) == 0) {
-            const char* value_str = (const char*)custom->value.data;
-            if (strstr(value_str, "fixed")) {
-                ViewTable* table = lycon->view->type != RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
-                if (table) {
+            ViewTable* table = lycon->view->type != RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
+            if (table) {
+                const char* value_str = (const char*)custom->value.data;
+                if (strcmp(value_str, "fixed") == 0) {
                     table->table_layout = ViewTable::TABLE_LAYOUT_FIXED;
                     log_debug("Detected table-layout: fixed (inline)");
+                }
+                else if (strcmp(value_str, "auto") == 0) {
+                    table->table_layout = ViewTable::TABLE_LAYOUT_AUTO;
+                    log_debug("Detected table-layout: auto (inline)");
                 }
             }
         }
         else if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "border-collapse", 15) == 0) {
-            const char* value_str = (const char*)custom->value.data;
-            if (strstr(value_str, "collapse")) {
-                ViewTable* table = lycon->view->type != RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
-                if (table) {
+            ViewTable* table = lycon->view->type != RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
+            if (table) {
+                const char* value_str = (const char*)custom->value.data;
+                if (strcmp(value_str, "collapse") == 0) {
                     table->border_collapse = true;
                     log_debug("Detected border-collapse: collapse (inline)");
+                }
+                else if (strcmp(value_str, "separate") == 0) {
+                    table->border_collapse = false;
+                    log_debug("Detected border-collapse: separate (inline)");
                 }
             }
         }
