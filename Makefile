@@ -339,7 +339,7 @@ clean-tree-sitter-minimal:
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
 	    generate-premake clean-premake build-test build-test-linux \
 	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant \
-	    test-radiant capture-browser-layout test-layout
+	    test-radiant capture-layout test-layout
 
 # Help target - shows available commands
 help:
@@ -427,11 +427,11 @@ help:
 	@echo "                             Usage: make test-layout TEST=table_simple (run specific test)"
 	@echo "                             Usage: make test-layout PATTERN=float (run tests matching pattern)"
 	@echo "                             Available suites: auto-detected from test/layout/data/"
-	@echo "  capture-browser-layout   - Extract browser layout references using Puppeteer"
-	@echo "                             Usage: make capture-browser-layout (all suites, skip existing)"
-	@echo "                             Usage: make capture-browser-layout SUITE=baseline"
-	@echo "                             Usage: make capture-browser-layout FORCE=1 (regenerate all)"
-	@echo "                             Usage: make capture-browser-layout FILE=path/to/test.html"
+	@echo "  capture-layout   - Extract browser layout references using Puppeteer"
+	@echo "                             Usage: make capture-layout (all suites, skip existing)"
+	@echo "                             Usage: make capture-layout SUITE=baseline"
+	@echo "                             Usage: make capture-layout FORCE=1 (regenerate all)"
+	@echo "                             Usage: make capture-layout FILE=path/to/test.html"
 	@echo ""
 	@echo "Options:"
 	@echo "  JOBS=N        - Set number of parallel compilation jobs (default: $(JOBS))"
@@ -1382,12 +1382,12 @@ build-test: build-lambda-input
 
 # Capture browser layout references using Puppeteer
 # Usage:
-#   make capture-browser-layout                           # captures all categories (skips existing files)
-#   make capture-browser-layout SUITE=baseline        # captures only baseline category
-#   make capture-browser-layout FILE=path/to/test.html   # captures a single file
-#   make capture-browser-layout FORCE=1                  # force regenerate all existing references
-#   make capture-browser-layout SUITE=basic FORCE=1   # force regenerate specific category
-capture-browser-layout:
+#   make capture-layout                           # captures all categories (skips existing files)
+#   make capture-layout SUITE=baseline        # captures only baseline category
+#   make capture-layout FILE=path/to/test.html   # captures a single file
+#   make capture-layout FORCE=1                  # force regenerate all existing references
+#   make capture-layout SUITE=basic FORCE=1   # force regenerate specific category
+capture-layout:
 	@echo "🧭 Capturing browser layout references..."
 	@if [ -d "test/layout/tools" ]; then \
 	    cd test/layout/tools && \
