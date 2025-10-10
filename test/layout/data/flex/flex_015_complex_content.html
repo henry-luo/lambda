@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Flex Complex Mixed Content</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS */
+        .container {
+            width: 800px;
+            height: 400px;
+            display: flex;
+            gap: 20px;
+            border: 2px solid #333;
+            padding: 15px;
+        }
+        .item {
+            flex: 1;
+            padding: 15px;
+            box-sizing: border-box;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            overflow: hidden;
+        }
+        h3 {
+            margin-bottom: 12px;
+            font-size: 16px;
+            color: #495057;
+            border-bottom: 2px solid #dee2e6;
+            padding-bottom: 5px;
+        }
+        .content-section {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+        }
+        .inline-content {
+            margin: 8px 0;
+            line-height: 1.4;
+        }
+        .highlight-box {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 8px;
+            margin: 8px 0;
+            border-radius: 3px;
+        }
+        ul {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+        li {
+            margin: 3px 0;
+            font-size: 13px;
+        }
+        .code-block {
+            font-family: 'Courier New', monospace;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 8px;
+            margin: 8px 0;
+            font-size: 12px;
+            border-radius: 3px;
+        }
+        .emphasis { font-weight: bold; color: #d63384; }
+        .subtle { font-size: 11px; color: #6c757d; }
+        a { color: #0d6efd; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">
+            <h3>Article Content</h3>
+            <div class="content-section">
+                <p class="inline-content">
+                    This is a <span class="emphasis">complex article</span> with 
+                    <a href="#">embedded links</a> and various content types.
+                </p>
+                <div class="highlight-box">
+                    <strong>Important Note:</strong> This box contains highlighted information 
+                    with <code>inline code</code> elements.
+                </div>
+                <ul>
+                    <li>First bullet point with <span class="emphasis">emphasis</span></li>
+                    <li>Second point with <a href="#">a link</a></li>
+                    <li>Third point with <span class="subtle">subtle text</span></li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="item">
+            <h3>Code Example</h3>
+            <div class="content-section">
+                <p class="inline-content">
+                    Here's a code example with explanation:
+                </p>
+                <div class="code-block">
+function example() {<br>
+&nbsp;&nbsp;return "Hello World";<br>
+}
+                </div>
+                <p class="inline-content">
+                    The above function demonstrates <span class="emphasis">basic syntax</span> 
+                    with proper <a href="#">formatting</a>.
+                </p>
+                <div class="highlight-box">
+                    <span class="subtle">Note:</span> This is formatted as a code block 
+                    within the flex item layout.
+                </div>
+            </div>
+        </div>
+        
+        <div class="item">
+            <h3>Mixed Layout</h3>
+            <div class="content-section">
+                <p class="inline-content">
+                    Complex content mixing:
+                </p>
+                <ul>
+                    <li><span class="emphasis">Bold items</span> in lists</li>
+                    <li>Items with <code>code snippets</code></li>
+                    <li>Links to <a href="#">external resources</a></li>
+                </ul>
+                <div class="highlight-box">
+                    Highlighted section with <span class="emphasis">multiple</span> 
+                    <a href="#">different</a> <code>element</code> 
+                    <span class="subtle">types</span> combined.
+                </div>
+                <p class="subtle">
+                    Footer text with additional context and 
+                    <a href="#">reference links</a>.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "flex_015_complex_content",
+        "category": "content",
+        "features": ["complex-nesting", "mixed-elements", "articles", "code-blocks", "highlights", "multi-level-content"],
+        "description": "Tests complex mixed content within flex items including articles, code blocks, highlighted sections, and deeply nested element combinations",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#flex-items"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

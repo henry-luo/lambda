@@ -634,7 +634,7 @@ class RadiantLayoutTester {
             console.log(`\n📋 Category Summary:`);
             console.log(`   Total Tests: ${results.length}`);
             console.log(`   ✅ Successful: ${successful}`);
-            console.log(`   ❌ Failed: ${failed}`);
+            if (failed > 0) console.log(`   ❌ Failed: ${failed}`);
 
             return results;
 

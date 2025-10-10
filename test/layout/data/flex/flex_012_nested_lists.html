@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Flex Nested Lists</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS */
+        .container {
+            width: 700px;
+            height: 300px;
+            display: flex;
+            gap: 20px;
+            border: 2px solid #333;
+            padding: 15px;
+        }
+        .item {
+            flex: 1;
+            padding: 15px;
+            box-sizing: border-box;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+        }
+        h4 {
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #495057;
+        }
+        ul, ol {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+        li {
+            margin: 3px 0;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        .nested-list {
+            margin-top: 5px;
+        }
+        .description-list dt {
+            font-weight: bold;
+            margin-top: 8px;
+            font-size: 11px;
+        }
+        .description-list dd {
+            margin-left: 15px;
+            margin-bottom: 5px;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">
+            <h4>Unordered Lists</h4>
+            <ul>
+                <li>First item</li>
+                <li>Second item with longer text content</li>
+                <li>Third item
+                    <ul class="nested-list">
+                        <li>Nested item 1</li>
+                        <li>Nested item 2</li>
+                    </ul>
+                </li>
+                <li>Fourth item</li>
+            </ul>
+        </div>
+        <div class="item">
+            <h4>Ordered Lists</h4>
+            <ol>
+                <li>First numbered item</li>
+                <li>Second numbered item</li>
+                <li>Third with nested list
+                    <ol class="nested-list">
+                        <li>Nested numbered 1</li>
+                        <li>Nested numbered 2</li>
+                    </ol>
+                </li>
+            </ol>
+        </div>
+        <div class="item">
+            <h4>Description List</h4>
+            <dl class="description-list">
+                <dt>Term 1</dt>
+                <dd>Definition for term 1</dd>
+                <dt>Term 2</dt>
+                <dd>Definition for term 2 with longer text</dd>
+                <dt>Term 3</dt>
+                <dd>Another definition</dd>
+            </dl>
+        </div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "flex_012_nested_lists",
+        "category": "content",
+        "features": ["nested-lists", "ul", "ol", "dl", "list-items", "nested-structures"],
+        "description": "Tests various list types nested within flex items including unordered, ordered, and description lists with nested sublists",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#flex-items"],
+        "complexity": "medium"
+    }
+    </script>
+</body>
+</html>

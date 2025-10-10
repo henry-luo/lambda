@@ -475,6 +475,7 @@ void print_view_tree(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio) {
     last_slash = strrchr((const char*)url->path.str.data, '/');
     snprintf(vfile, sizeof(vfile), "./test_output/view_tree_%s.txt", last_slash + 1);
     write_string_to_file(vfile, buf->str);
+    write_string_to_file("./view_tree.txt", buf->str);
     strbuf_free(buf);
     // also generate JSON output
     print_view_tree_json(view_root, url, pixel_ratio);

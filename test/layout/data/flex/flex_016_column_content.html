@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Flex Column Direction with Nested Content</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 500px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            border: 2px solid #333;
+            padding: 15px;
+        }
+        .item {
+            flex: 1;
+            padding: 15px;
+            box-sizing: border-box;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+        }
+        h4 {
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #495057;
+            text-align: center;
+        }
+        .text-content {
+            margin: 8px 0;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .nested-section {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #e9ecef;
+            border-left: 3px solid #6c757d;
+        }
+        ul {
+            margin: 8px 0;
+            padding-left: 18px;
+        }
+        li {
+            margin: 3px 0;
+            font-size: 12px;
+        }
+        .highlight {
+            background-color: #fff3cd;
+            padding: 2px 4px;
+            font-weight: bold;
+        }
+        .center-text {
+            text-align: center;
+            font-style: italic;
+            color: #6c757d;
+            margin: 8px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">
+            <h4>First Column Item</h4>
+            <p class="text-content">
+                This is the first item in a column layout with 
+                <span class="highlight">highlighted text</span> and regular content.
+            </p>
+            <div class="nested-section">
+                <p>Nested section with additional information and 
+                structured content layout.</p>
+            </div>
+        </div>
+        
+        <div class="item">
+            <h4>Second Column Item</h4>
+            <ul>
+                <li>First list item with content</li>
+                <li>Second item with <span class="highlight">emphasis</span></li>
+                <li>Third item in the vertical list</li>
+            </ul>
+            <p class="center-text">Centered italic text below the list</p>
+        </div>
+        
+        <div class="item">
+            <h4>Third Column Item</h4>
+            <p class="text-content">
+                Final item demonstrating vertical flex layout with 
+                proper content distribution and text flow.
+            </p>
+            <div class="nested-section">
+                <p>Another nested section to test the vertical 
+                spacing and content layout within column direction.</p>
+            </div>
+            <p class="center-text">Bottom aligned content</p>
+        </div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "flex_016_column_content",
+        "category": "content",
+        "features": ["flex-direction-column", "vertical-layout", "nested-content", "text-alignment", "vertical-spacing"],
+        "description": "Tests nested content within flex items arranged in column direction, including text, lists, and nested sections",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#flex-direction-property"],
+        "complexity": "medium"
+    }
+    </script>
+</body>
+</html>

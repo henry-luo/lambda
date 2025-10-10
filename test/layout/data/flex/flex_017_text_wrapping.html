@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Flex Text Wrapping and Line Breaks</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS */
+        .container {
+            width: 500px;
+            height: 300px;
+            display: flex;
+            gap: 15px;
+            border: 2px solid #333;
+            padding: 15px;
+        }
+        .item {
+            flex: 1;
+            padding: 12px;
+            box-sizing: border-box;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .narrow {
+            width: 120px;
+            flex: none;
+        }
+        .wide {
+            flex: 2;
+        }
+        .long-text {
+            word-wrap: break-word;
+            hyphens: auto;
+        }
+        .no-wrap {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .pre-wrap {
+            white-space: pre-wrap;
+        }
+        h5 {
+            margin-bottom: 8px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item narrow">
+            <h5>Narrow Column</h5>
+            <p class="long-text">
+                This is a very long text that should wrap properly within the narrow flex item boundaries and demonstrate text flow behavior.
+            </p>
+        </div>
+        <div class="item">
+            <h5>Normal Wrapping</h5>
+            <p>
+                This text should wrap normally within the flex item. 
+                It contains multiple sentences that will flow across 
+                multiple lines as needed.
+            </p>
+            <br>
+            <p class="no-wrap">
+                This line should not wrap and will be truncated with ellipsis if too long.
+            </p>
+        </div>
+        <div class="item wide">
+            <h5>Wide Column</h5>
+            <p>
+                This is a wider column that can accommodate more text per line 
+                before wrapping occurs.
+            </p>
+            <p class="pre-wrap">Line 1
+Line 2 with preserved spacing
+    Indented line 3</p>
+        </div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "flex_017_text_wrapping",
+        "category": "content",
+        "features": ["text-wrapping", "line-breaks", "white-space", "text-overflow", "word-wrap"],
+        "description": "Tests text wrapping behavior within flex items of different sizes, including long text, no-wrap, and pre-formatted content",
+        "spec_references": ["https://www.w3.org/TR/css-text-3/#white-space-property"],
+        "complexity": "medium"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Flex Mixed Inline Elements</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS */
+        .container {
+            width: 650px;
+            height: 280px;
+            display: flex;
+            gap: 15px;
+            border: 2px solid #333;
+            padding: 15px;
+        }
+        .item {
+            flex: 1;
+            padding: 12px;
+            box-sizing: border-box;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            line-height: 1.5;
+        }
+        .bold { font-weight: bold; }
+        .italic { font-style: italic; }
+        .underline { text-decoration: underline; }
+        .highlight { background-color: #fff3cd; padding: 2px 4px; }
+        .code { 
+            font-family: 'Courier New', monospace; 
+            background-color: #f8f9fa; 
+            padding: 2px 4px; 
+            border: 1px solid #dee2e6;
+            font-size: 14px;
+        }
+        .small { font-size: 12px; }
+        .large { font-size: 18px; }
+        a {
+            color: #0d6efd;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">
+            This is a paragraph with <span class="bold">bold text</span>, 
+            <span class="italic">italic text</span>, and 
+            <span class="underline">underlined text</span>. 
+            <br><br>
+            It also contains <span class="highlight">highlighted content</span> 
+            and <code class="code">inline code</code> elements.
+        </div>
+        <div class="item">
+            Mixed content with <a href="#">links</a>, 
+            <span class="small">small text</span>, and 
+            <span class="large">larger text</span>. 
+            <br><br>
+            Multiple <span class="bold italic">combined styles</span> 
+            and <span class="highlight underline">overlapping effects</span>.
+        </div>
+        <div class="item">
+            <span class="large bold">Large heading-like text</span>
+            <br><br>
+            Normal paragraph text with 
+            <span class="code">code snippets</span> and 
+            <a href="#">multiple links</a> throughout the 
+            <span class="italic">flowing content</span>.
+        </div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "flex_013_mixed_inline",
+        "category": "content",
+        "features": ["inline-elements", "spans", "links", "code", "text-styling", "mixed-content"],
+        "description": "Tests mixed inline elements within flex items including spans, links, code elements, and various text styling combinations",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#flex-items"],
+        "complexity": "medium"
+    }
+    </script>
+</body>
+</html>

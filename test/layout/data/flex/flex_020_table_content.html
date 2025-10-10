@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Flex with Table Content</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS */
+        .container {
+            width: 800px;
+            height: 300px;
+            display: flex;
+            gap: 20px;
+            border: 2px solid #333;
+            padding: 15px;
+        }
+        .item {
+            flex: 1;
+            padding: 10px;
+            box-sizing: border-box;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        th, td {
+            border: 1px solid #dee2e6;
+            padding: 4px 6px;
+            text-align: left;
+        }
+        th {
+            background-color: #e9ecef;
+            font-weight: bold;
+        }
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        .table-container {
+            margin: 8px 0;
+        }
+        h5 {
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: #495057;
+        }
+        .simple-table {
+            border: none;
+        }
+        .simple-table td {
+            border: none;
+            padding: 2px 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">
+            <h5>Data Table</h5>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Value</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Item A</td>
+                            <td>100</td>
+                            <td>Active</td>
+                        </tr>
+                        <tr>
+                            <td>Item B</td>
+                            <td>250</td>
+                            <td>Pending</td>
+                        </tr>
+                        <tr>
+                            <td>Item C</td>
+                            <td>75</td>
+                            <td>Complete</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        
+        <div class="item">
+            <h5>Simple Layout Table</h5>
+            <table class="simple-table">
+                <tr>
+                    <td><strong>Property:</strong></td>
+                    <td>Value 1</td>
+                </tr>
+                <tr>
+                    <td><strong>Another:</strong></td>
+                    <td>Value 2</td>
+                </tr>
+                <tr>
+                    <td><strong>Third:</strong></td>
+                    <td>Value 3</td>
+                </tr>
+            </table>
+            <p style="margin-top: 10px; font-size: 11px;">
+                Additional text content below the table.
+            </p>
+        </div>
+        
+        <div class="item">
+            <h5>Mixed Content</h5>
+            <p style="font-size: 11px; margin-bottom: 8px;">
+                Text before table content:
+            </p>
+            <table>
+                <tr>
+                    <th>Column 1</th>
+                    <th>Column 2</th>
+                </tr>
+                <tr>
+                    <td>Data A</td>
+                    <td>Data B</td>
+                </tr>
+                <tr>
+                    <td>Data C</td>
+                    <td>Data D</td>
+                </tr>
+            </table>
+            <p style="font-size: 11px; margin-top: 8px;">
+                Text after table content.
+            </p>
+        </div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "flex_020_table_content",
+        "category": "content",
+        "features": ["table-elements", "thead", "tbody", "th", "td", "table-layout", "mixed-table-content"],
+        "description": "Tests table elements nested within flex items including full tables with headers, simple layout tables, and mixed content",
+        "spec_references": ["https://www.w3.org/TR/css-tables-3/", "https://www.w3.org/TR/css-flexbox-1/#flex-items"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

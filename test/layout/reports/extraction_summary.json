@@ -1,11 +1,11 @@
 {
-  "total_files": 40,
-  "generated": 2,
-  "skipped": 38,
+  "total_files": 42,
+  "generated": 42,
+  "skipped": 0,
   "failed": 0,
   "success_rate": 100,
   "browser_info": {
-    "userAgent": "Unknown",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/140.0.0.0 Safari/537.36",
     "viewport": {
       "width": 1200,
       "height": 800,
@@ -17,7 +17,7 @@
       "category": "baseline",
       "file": "baseline_001_empty_document.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 16,
       "error": null
     },
@@ -25,7 +25,7 @@
       "category": "baseline",
       "file": "baseline_002_single_div.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 17,
       "error": null
     },
@@ -33,7 +33,7 @@
       "category": "baseline",
       "file": "baseline_004_two_divs.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 18,
       "error": null
     },
@@ -41,7 +41,7 @@
       "category": "baseline",
       "file": "baseline_007_simple_flexbox.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 19,
       "error": null
     },
@@ -49,7 +49,7 @@
       "category": "baseline",
       "file": "baseline_009_nested_divs.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 18,
       "error": null
     },
@@ -57,7 +57,7 @@
       "category": "baseline",
       "file": "baseline_010_flex_column.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 19,
       "error": null
     },
@@ -65,7 +65,7 @@
       "category": "baseline",
       "file": "baseline_011_basic_border.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 17,
       "error": null
     },
@@ -73,7 +73,7 @@
       "category": "baseline",
       "file": "baseline_101_two_containers.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 18,
       "error": null
     },
@@ -81,7 +81,7 @@
       "category": "baseline",
       "file": "baseline_102_flex_row.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 20,
       "error": null
     },
@@ -89,7 +89,7 @@
       "category": "baseline",
       "file": "baseline_103_flex_column.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 20,
       "error": null
     },
@@ -97,7 +97,7 @@
       "category": "baseline",
       "file": "baseline_104_nested_containers.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 19,
       "error": null
     },
@@ -105,7 +105,7 @@
       "category": "baseline",
       "file": "baseline_105_border_variations.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 19,
       "error": null
     },
@@ -113,7 +113,7 @@
       "category": "baseline",
       "file": "baseline_106_flex_mixed_sizes.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 20,
       "error": null
     },
@@ -121,7 +121,7 @@
       "category": "baseline",
       "file": "baseline_202_font_families.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 22,
       "error": null
     },
@@ -129,7 +129,7 @@
       "category": "baseline",
       "file": "baseline_301_simple_margin.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 19,
       "error": null
     },
@@ -137,7 +137,7 @@
       "category": "baseline",
       "file": "baseline_302_simple_padding.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 18,
       "error": null
     },
@@ -145,7 +145,7 @@
       "category": "baseline",
       "file": "baseline_401_fixed_size_overflow.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 18,
       "error": null
     },
@@ -153,7 +153,7 @@
       "category": "baseline",
       "file": "baseline_501_line_breaks.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 22,
       "error": null
     },
@@ -161,7 +161,7 @@
       "category": "baseline",
       "file": "baseline_503_styled_spans.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 28,
       "error": null
     },
@@ -169,7 +169,7 @@
       "category": "baseline",
       "file": "baseline_801_display_block.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 23,
       "error": null
     },
@@ -177,7 +177,7 @@
       "category": "baseline",
       "file": "baseline_802_display_inline.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 23,
       "error": null
     },
@@ -185,7 +185,7 @@
       "category": "baseline",
       "file": "baseline_803_basic_margin.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 17,
       "error": null
     },
@@ -193,7 +193,7 @@
       "category": "baseline",
       "file": "baseline_804_basic_padding.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 18,
       "error": null
     },
@@ -201,7 +201,7 @@
       "category": "baseline",
       "file": "baseline_805_width_height.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 17,
       "error": null
     },
@@ -209,7 +209,7 @@
       "category": "baseline",
       "file": "baseline_807_position_absolute.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 19,
       "error": null
     },
@@ -217,15 +217,23 @@
       "category": "baseline",
       "file": "baseline_811_basic_border.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 19,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_812_background_color.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 25,
       "error": null
     },
     {
       "category": "baseline",
       "file": "baseline_820_inline_block.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 28,
       "error": null
     },
@@ -233,7 +241,7 @@
       "category": "baseline",
       "file": "block_001_margin_padding.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 12,
       "error": null
     },
@@ -241,7 +249,7 @@
       "category": "baseline",
       "file": "box_001_basic_div.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 19,
       "error": null
     },
@@ -249,7 +257,7 @@
       "category": "baseline",
       "file": "box_002_margin_padding.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 19,
       "error": null
     },
@@ -257,7 +265,7 @@
       "category": "baseline",
       "file": "box_003_border.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 19,
       "error": null
     },
@@ -265,7 +273,7 @@
       "category": "baseline",
       "file": "flex_001_basic_layout.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 23,
       "error": null
     },
@@ -273,15 +281,23 @@
       "category": "baseline",
       "file": "flex_001_row_space_between.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 11,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "flex_002_wrap.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 23,
       "error": null
     },
     {
       "category": "baseline",
       "file": "flex_004_column_direction.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 21,
       "error": null
     },
@@ -289,7 +305,7 @@
       "category": "baseline",
       "file": "flex_006_justify_content.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 21,
       "error": null
     },
@@ -297,7 +313,7 @@
       "category": "baseline",
       "file": "flex_009_auto_margins.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 19,
       "error": null
     },
@@ -305,7 +321,7 @@
       "category": "baseline",
       "file": "flex_010_wrap_reverse.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 23,
       "error": null
     },
@@ -313,7 +329,7 @@
       "category": "baseline",
       "file": "table_001_simple_table.html",
       "success": true,
-      "was_skipped": true,
+      "was_skipped": false,
       "node_count": 24,
       "error": null
     },

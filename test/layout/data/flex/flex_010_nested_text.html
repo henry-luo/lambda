@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Flex Nested Text Content</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS */
+        .container {
+            width: 500px;
+            height: 200px;
+            display: flex;
+            gap: 15px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            flex: 1;
+            padding: 15px;
+            box-sizing: border-box;
+            text-align: left;
+            line-height: 1.4;
+        }
+        .item:nth-child(1) { 
+            background-color: #ffeeee; 
+            text-align: center;
+        }
+        .item:nth-child(2) { 
+            background-color: #eeffee; 
+            text-align: left;
+        }
+        .item:nth-child(3) { 
+            background-color: #eeeeff; 
+            text-align: right;
+        }
+        .highlight {
+            font-weight: bold;
+            color: #d63384;
+        }
+        .small-text {
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">
+            <p>Centered text with <span class="highlight">highlighted</span> content.</p>
+            <p class="small-text">Small subtitle text below.</p>
+        </div>
+        <div class="item">
+            Left-aligned text with multiple lines of content that should wrap properly within the flex item boundaries.
+            <br><br>
+            <span class="highlight">Bold text</span> and normal text mixed together.
+        </div>
+        <div class="item">
+            <p>Right-aligned content</p>
+            <p>Multiple paragraphs</p>
+            <p class="small-text">With different styles</p>
+        </div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "flex_010_nested_text",
+        "category": "content",
+        "features": ["nested-text", "text-alignment", "spans", "paragraphs", "line-breaks"],
+        "description": "Tests various text content nested within flex items including paragraphs, spans, and different text alignments",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#flex-items"],
+        "complexity": "medium"
+    }
+    </script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Flex Nested Flexbox</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS */
+        .container {
+            width: 600px;
+            height: 300px;
+            display: flex;
+            gap: 15px;
+            border: 2px solid #333;
+            padding: 10px;
+        }
+        .item {
+            flex: 1;
+            padding: 10px;
+            box-sizing: border-box;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+        }
+        .nested-flex {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            height: 100%;
+        }
+        .nested-item {
+            flex: 1;
+            padding: 8px;
+            background-color: #e9ecef;
+            border: 1px solid #adb5bd;
+            text-align: center;
+            font-size: 12px;
+        }
+        .horizontal-flex {
+            display: flex;
+            gap: 5px;
+        }
+        .horizontal-item {
+            flex: 1;
+            padding: 6px;
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            font-size: 11px;
+            text-align: center;
+        }
+        h5 {
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: #495057;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">
+            <h5>Vertical Nested Flex</h5>
+            <div class="nested-flex">
+                <div class="nested-item">Nested Item 1</div>
+                <div class="nested-item">Nested Item 2</div>
+                <div class="nested-item">Nested Item 3</div>
+            </div>
+        </div>
+        <div class="item">
+            <h5>Horizontal Nested Flex</h5>
+            <div class="horizontal-flex">
+                <div class="horizontal-item">H1</div>
+                <div class="horizontal-item">H2</div>
+            </div>
+            <br>
+            <div class="horizontal-flex">
+                <div class="horizontal-item">H3</div>
+                <div class="horizontal-item">H4</div>
+                <div class="horizontal-item">H5</div>
+            </div>
+        </div>
+        <div class="item">
+            <h5>Mixed Content</h5>
+            <p style="font-size: 12px; margin-bottom: 8px;">Regular paragraph text</p>
+            <div class="nested-flex" style="height: auto;">
+                <div class="nested-item">Flex item with text</div>
+                <div class="horizontal-flex">
+                    <div class="horizontal-item">Sub 1</div>
+                    <div class="horizontal-item">Sub 2</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "flex_014_nested_flex",
+        "category": "content",
+        "features": ["nested-flexbox", "flex-direction", "nested-layouts", "complex-nesting"],
+        "description": "Tests nested flexbox containers within flex items, including both vertical and horizontal nested flex layouts",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#flex-containers"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

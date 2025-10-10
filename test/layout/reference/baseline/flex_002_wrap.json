@@ -1,5 +1,5 @@
 {
-  "test_file": "baseline_812_background_color.html",
+  "test_file": "flex_002_wrap.html",
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 618,
+      "height": 300,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -358,8 +358,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "Baseline Test: Background Color",
-                "length": 31,
+                "text": "Test: Flex Wrap",
+                "length": 15,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -452,8 +452,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        * { margin: 0; padding: 0; }\n        body { font-family: Arial, sans-serif; padding: 20px; }\n        .box {\n            width: 150px;\n            height: 100px;\n            margin: 10px;\n            padding: 15px;\n            border: 1px solid black;\n        }\n        .red { background-color: red; }\n        .green { background-color: #00ff00; }\n        .blue { background-color: rgb(0, 0, 255); }\n        .transparent { background-color: transparent; }\n    ",
-                "length": 468,
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n\n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: flex;\n            flex-wrap: wrap;\n            gap: 10px;\n            border: 2px solid #333;\n        }\n        .item {\n            width: 200px;\n            height: 50px;\n            padding: 1px;\n            box-sizing: border-box;\n            text-align: center;\n            position: relative;\n        }\n        .item:nth-child(1) { background-color: #ffcccc; }\n        .item:nth-child(2) { background-color: #ccffcc; }\n        .item:nth-child(3) { background-color: #ccccff; }\n    ",
+                "length": 780,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -496,11 +496,11 @@
           "x": 0,
           "y": 0,
           "width": 1200,
-          "height": 618,
+          "height": 300,
           "contentWidth": 1200,
-          "contentHeight": 618,
+          "contentHeight": 300,
           "scrollWidth": 1200,
-          "scrollHeight": 618
+          "scrollHeight": 300
         },
         "computed": {
           "display": "block",
@@ -509,10 +509,10 @@
           "marginRight": 0,
           "marginBottom": 0,
           "marginLeft": 0,
-          "paddingTop": 20,
-          "paddingRight": 20,
-          "paddingBottom": 20,
-          "paddingLeft": 20,
+          "paddingTop": 0,
+          "paddingRight": 0,
+          "paddingBottom": 0,
+          "paddingLeft": 0,
           "borderTopWidth": 0,
           "borderRightWidth": 0,
           "borderBottomWidth": 0,
@@ -548,40 +548,39 @@
         "children": [
           {
             "nodeType": "element",
-            "selector": "div.box.red:nth-of-type(1)",
+            "selector": "div.container",
             "tag": "div",
             "id": null,
             "classes": [
-              "box",
-              "red"
+              "container"
             ],
             "layout": {
-              "x": 30,
-              "y": 30,
-              "width": 182,
-              "height": 132,
-              "contentWidth": 180,
-              "contentHeight": 130,
-              "scrollWidth": 180,
-              "scrollHeight": 130
+              "x": 0,
+              "y": 0,
+              "width": 400,
+              "height": 300,
+              "contentWidth": 396,
+              "contentHeight": 296,
+              "scrollWidth": 396,
+              "scrollHeight": 296
             },
             "computed": {
-              "display": "block",
+              "display": "flex",
               "position": "static",
-              "marginTop": 10,
-              "marginRight": 10,
-              "marginBottom": 10,
-              "marginLeft": 10,
-              "paddingTop": 15,
-              "paddingRight": 15,
-              "paddingBottom": 15,
-              "paddingLeft": 15,
-              "borderTopWidth": 1,
-              "borderRightWidth": 1,
-              "borderBottomWidth": 1,
-              "borderLeftWidth": 1,
+              "marginTop": 0,
+              "marginRight": 0,
+              "marginBottom": 0,
+              "marginLeft": 0,
+              "paddingTop": 0,
+              "paddingRight": 0,
+              "paddingBottom": 0,
+              "paddingLeft": 0,
+              "borderTopWidth": 2,
+              "borderRightWidth": 2,
+              "borderBottomWidth": 2,
+              "borderLeftWidth": 2,
               "flexDirection": "row",
-              "flexWrap": "nowrap",
+              "flexWrap": "wrap",
               "justifyContent": "normal",
               "alignItems": "normal",
               "alignContent": "normal",
@@ -590,7 +589,7 @@
               "flexBasis": "auto",
               "alignSelf": "auto",
               "order": 0,
-              "gap": "normal",
+              "gap": "10px",
               "fontSize": 16,
               "lineHeight": "normal",
               "fontFamily": "Arial, sans-serif",
@@ -610,339 +609,280 @@
             "elementIndex": 1,
             "children": [
               {
-                "nodeType": "text",
-                "text": "Red background",
-                "length": 14,
-                "isWhitespaceOnly": false,
+                "nodeType": "element",
+                "selector": "div.item:nth-of-type(1)",
+                "tag": "div",
+                "id": null,
+                "classes": [
+                  "item"
+                ],
                 "layout": {
-                  "rects": [
-                    {
-                      "x": 46,
-                      "y": 46,
-                      "width": 117.42,
-                      "height": 17,
-                      "right": 163.42,
-                      "bottom": 63,
-                      "text": "Red background",
-                      "startIndex": 0,
-                      "endIndex": 14
-                    }
-                  ],
-                  "hasLayout": true,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
+                  "x": 2,
+                  "y": 2,
+                  "width": 200,
+                  "height": 50,
+                  "contentWidth": 200,
+                  "contentHeight": 50,
+                  "scrollWidth": 200,
+                  "scrollHeight": 50
+                },
+                "computed": {
+                  "display": "block",
+                  "position": "relative",
+                  "marginTop": 0,
+                  "marginRight": 0,
+                  "marginBottom": 0,
+                  "marginLeft": 0,
+                  "paddingTop": 1,
+                  "paddingRight": 1,
+                  "paddingBottom": 1,
+                  "paddingLeft": 1,
+                  "borderTopWidth": 0,
+                  "borderRightWidth": 0,
+                  "borderBottomWidth": 0,
+                  "borderLeftWidth": 0,
+                  "flexDirection": "row",
+                  "flexWrap": "nowrap",
+                  "justifyContent": "normal",
+                  "alignItems": "normal",
+                  "alignContent": "normal",
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "gap": "normal",
+                  "fontSize": 16,
+                  "lineHeight": "normal",
+                  "fontFamily": "Arial, sans-serif",
+                  "fontWeight": "400",
+                  "textAlign": "center",
+                  "verticalAlign": "baseline",
+                  "top": "0px",
+                  "right": "0px",
+                  "bottom": "0px",
+                  "left": "0px",
+                  "zIndex": "auto",
+                  "overflow": "visible",
+                  "overflowX": "visible",
+                  "overflowY": "visible"
                 },
                 "depth": 3,
-                "nodeIndex": 0,
-                "children": []
-              }
-            ]
-          },
-          {
-            "nodeType": "element",
-            "selector": "div.box.green:nth-of-type(2)",
-            "tag": "div",
-            "id": null,
-            "classes": [
-              "box",
-              "green"
-            ],
-            "layout": {
-              "x": 30,
-              "y": 172,
-              "width": 182,
-              "height": 132,
-              "contentWidth": 180,
-              "contentHeight": 130,
-              "scrollWidth": 180,
-              "scrollHeight": 130
-            },
-            "computed": {
-              "display": "block",
-              "position": "static",
-              "marginTop": 10,
-              "marginRight": 10,
-              "marginBottom": 10,
-              "marginLeft": 10,
-              "paddingTop": 15,
-              "paddingRight": 15,
-              "paddingBottom": 15,
-              "paddingLeft": 15,
-              "borderTopWidth": 1,
-              "borderRightWidth": 1,
-              "borderBottomWidth": 1,
-              "borderLeftWidth": 1,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "normal",
-              "fontFamily": "Arial, sans-serif",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 3,
-            "children": [
-              {
-                "nodeType": "text",
-                "text": "Green background",
-                "length": 16,
-                "isWhitespaceOnly": false,
-                "layout": {
-                  "rects": [
-                    {
-                      "x": 46,
-                      "y": 188,
-                      "width": 132.53,
-                      "height": 17,
-                      "right": 178.53,
-                      "bottom": 205,
-                      "text": "Green background",
-                      "startIndex": 0,
-                      "endIndex": 16
-                    }
-                  ],
-                  "hasLayout": true,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
-                },
-                "depth": 3,
-                "nodeIndex": 0,
-                "children": []
-              }
-            ]
-          },
-          {
-            "nodeType": "element",
-            "selector": "div.box.blue:nth-of-type(3)",
-            "tag": "div",
-            "id": null,
-            "classes": [
-              "box",
-              "blue"
-            ],
-            "layout": {
-              "x": 30,
-              "y": 314,
-              "width": 182,
-              "height": 132,
-              "contentWidth": 180,
-              "contentHeight": 130,
-              "scrollWidth": 180,
-              "scrollHeight": 130
-            },
-            "computed": {
-              "display": "block",
-              "position": "static",
-              "marginTop": 10,
-              "marginRight": 10,
-              "marginBottom": 10,
-              "marginLeft": 10,
-              "paddingTop": 15,
-              "paddingRight": 15,
-              "paddingBottom": 15,
-              "paddingLeft": 15,
-              "borderTopWidth": 1,
-              "borderRightWidth": 1,
-              "borderBottomWidth": 1,
-              "borderLeftWidth": 1,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "normal",
-              "fontFamily": "Arial, sans-serif",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 5,
-            "children": [
-              {
-                "nodeType": "text",
-                "text": "Blue background",
-                "length": 15,
-                "isWhitespaceOnly": false,
-                "layout": {
-                  "rects": [
-                    {
-                      "x": 46,
-                      "y": 330,
-                      "width": 120.09,
-                      "height": 17,
-                      "right": 166.09,
-                      "bottom": 347,
-                      "text": "Blue background",
-                      "startIndex": 0,
-                      "endIndex": 15
-                    }
-                  ],
-                  "hasLayout": true,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
-                },
-                "depth": 3,
-                "nodeIndex": 0,
-                "children": []
-              }
-            ]
-          },
-          {
-            "nodeType": "element",
-            "selector": "div.box.transparent:nth-of-type(4)",
-            "tag": "div",
-            "id": null,
-            "classes": [
-              "box",
-              "transparent"
-            ],
-            "layout": {
-              "x": 30,
-              "y": 456,
-              "width": 182,
-              "height": 132,
-              "contentWidth": 180,
-              "contentHeight": 130,
-              "scrollWidth": 180,
-              "scrollHeight": 130
-            },
-            "computed": {
-              "display": "block",
-              "position": "static",
-              "marginTop": 10,
-              "marginRight": 10,
-              "marginBottom": 10,
-              "marginLeft": 10,
-              "paddingTop": 15,
-              "paddingRight": 15,
-              "paddingBottom": 15,
-              "paddingLeft": 15,
-              "borderTopWidth": 1,
-              "borderRightWidth": 1,
-              "borderBottomWidth": 1,
-              "borderLeftWidth": 1,
-              "flexDirection": "row",
-              "flexWrap": "nowrap",
-              "justifyContent": "normal",
-              "alignItems": "normal",
-              "alignContent": "normal",
-              "flexGrow": 0,
-              "flexShrink": 1,
-              "flexBasis": "auto",
-              "alignSelf": "auto",
-              "order": 0,
-              "gap": "normal",
-              "fontSize": 16,
-              "lineHeight": "normal",
-              "fontFamily": "Arial, sans-serif",
-              "fontWeight": "400",
-              "textAlign": "start",
-              "verticalAlign": "baseline",
-              "top": "auto",
-              "right": "auto",
-              "bottom": "auto",
-              "left": "auto",
-              "zIndex": "auto",
-              "overflow": "visible",
-              "overflowX": "visible",
-              "overflowY": "visible"
-            },
-            "depth": 2,
-            "elementIndex": 7,
-            "children": [
-              {
-                "nodeType": "text",
-                "text": "Transparent ",
-                "length": 12,
-                "isWhitespaceOnly": false,
-                "layout": {
-                  "rects": [
-                    {
-                      "x": 46,
-                      "y": 472,
-                      "width": 85.67,
-                      "height": 17,
-                      "right": 131.67,
-                      "bottom": 489,
-                      "text": "Transparent ",
-                      "startIndex": 0,
-                      "endIndex": 12
-                    }
-                  ],
-                  "hasLayout": true,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
-                },
-                "depth": 3,
-                "nodeIndex": 0,
-                "children": []
+                "elementIndex": 1,
+                "children": [
+                  {
+                    "nodeType": "text",
+                    "text": "Item 1",
+                    "length": 6,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 79.77,
+                          "y": 3,
+                          "width": 44.47,
+                          "height": 17,
+                          "right": 124.23,
+                          "bottom": 20,
+                          "text": "Item 1",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  }
+                ]
               },
               {
-                "nodeType": "text",
-                "text": "background",
-                "length": 10,
-                "isWhitespaceOnly": false,
+                "nodeType": "element",
+                "selector": "div.item:nth-of-type(2)",
+                "tag": "div",
+                "id": null,
+                "classes": [
+                  "item"
+                ],
                 "layout": {
-                  "rects": [
-                    {
-                      "x": 46,
-                      "y": 490,
-                      "width": 83.63,
-                      "height": 17,
-                      "right": 129.63,
-                      "bottom": 507,
-                      "text": "background",
-                      "startIndex": 0,
-                      "endIndex": 10
-                    }
-                  ],
-                  "hasLayout": true,
-                  "parentVisible": true,
-                  "parentDisplay": "block",
-                  "parentVisibility": "visible"
+                  "x": 2,
+                  "y": 104,
+                  "width": 200,
+                  "height": 50,
+                  "contentWidth": 200,
+                  "contentHeight": 50,
+                  "scrollWidth": 200,
+                  "scrollHeight": 50
+                },
+                "computed": {
+                  "display": "block",
+                  "position": "relative",
+                  "marginTop": 0,
+                  "marginRight": 0,
+                  "marginBottom": 0,
+                  "marginLeft": 0,
+                  "paddingTop": 1,
+                  "paddingRight": 1,
+                  "paddingBottom": 1,
+                  "paddingLeft": 1,
+                  "borderTopWidth": 0,
+                  "borderRightWidth": 0,
+                  "borderBottomWidth": 0,
+                  "borderLeftWidth": 0,
+                  "flexDirection": "row",
+                  "flexWrap": "nowrap",
+                  "justifyContent": "normal",
+                  "alignItems": "normal",
+                  "alignContent": "normal",
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "gap": "normal",
+                  "fontSize": 16,
+                  "lineHeight": "normal",
+                  "fontFamily": "Arial, sans-serif",
+                  "fontWeight": "400",
+                  "textAlign": "center",
+                  "verticalAlign": "baseline",
+                  "top": "0px",
+                  "right": "0px",
+                  "bottom": "0px",
+                  "left": "0px",
+                  "zIndex": "auto",
+                  "overflow": "visible",
+                  "overflowX": "visible",
+                  "overflowY": "visible"
                 },
                 "depth": 3,
-                "nodeIndex": 0,
-                "children": []
+                "elementIndex": 3,
+                "children": [
+                  {
+                    "nodeType": "text",
+                    "text": "Item 2",
+                    "length": 6,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 79.77,
+                          "y": 105,
+                          "width": 44.47,
+                          "height": 17,
+                          "right": 124.23,
+                          "bottom": 122,
+                          "text": "Item 2",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  }
+                ]
+              },
+              {
+                "nodeType": "element",
+                "selector": "div.item:nth-of-type(3)",
+                "tag": "div",
+                "id": null,
+                "classes": [
+                  "item"
+                ],
+                "layout": {
+                  "x": 2,
+                  "y": 206,
+                  "width": 200,
+                  "height": 50,
+                  "contentWidth": 200,
+                  "contentHeight": 50,
+                  "scrollWidth": 200,
+                  "scrollHeight": 50
+                },
+                "computed": {
+                  "display": "block",
+                  "position": "relative",
+                  "marginTop": 0,
+                  "marginRight": 0,
+                  "marginBottom": 0,
+                  "marginLeft": 0,
+                  "paddingTop": 1,
+                  "paddingRight": 1,
+                  "paddingBottom": 1,
+                  "paddingLeft": 1,
+                  "borderTopWidth": 0,
+                  "borderRightWidth": 0,
+                  "borderBottomWidth": 0,
+                  "borderLeftWidth": 0,
+                  "flexDirection": "row",
+                  "flexWrap": "nowrap",
+                  "justifyContent": "normal",
+                  "alignItems": "normal",
+                  "alignContent": "normal",
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "gap": "normal",
+                  "fontSize": 16,
+                  "lineHeight": "normal",
+                  "fontFamily": "Arial, sans-serif",
+                  "fontWeight": "400",
+                  "textAlign": "center",
+                  "verticalAlign": "baseline",
+                  "top": "0px",
+                  "right": "0px",
+                  "bottom": "0px",
+                  "left": "0px",
+                  "zIndex": "auto",
+                  "overflow": "visible",
+                  "overflowX": "visible",
+                  "overflowY": "visible"
+                },
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
+                  {
+                    "nodeType": "text",
+                    "text": "Item 3",
+                    "length": 6,
+                    "isWhitespaceOnly": false,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 79.77,
+                          "y": 207,
+                          "width": 44.47,
+                          "height": 17,
+                          "right": 124.23,
+                          "bottom": 224,
+                          "text": "Item 3",
+                          "startIndex": 0,
+                          "endIndex": 6
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
+                  }
+                ]
               }
             ]
           },
@@ -1004,12 +944,12 @@
               "overflowY": "visible"
             },
             "depth": 2,
-            "elementIndex": 9,
+            "elementIndex": 5,
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n    {\n        \"test_id\": \"baseline_812_background_color\",\n        \"category\": \"baseline\",\n        \"features\": [\"background-color\", \"color-values\"],\n        \"description\": \"Background color using different color value formats\",\n        \"original_css_test\": \"background-color-001.htm\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS21/colors.html#background-properties\"],\n        \"complexity\": \"fundamental\",\n        \"expected_behavior\": \"Four boxes with red, green, blue, and transparent backgrounds\"\n    }\n    ",
-                "length": 519,
+                "text": "\n    {\n        \"test_id\": \"flex_002_wrap\",\n        \"category\": \"basic\",\n        \"features\": [\"flex-wrap\", \"gap\", \"multi-line\"],\n        \"description\": \"Items wrap to multiple lines when they exceed container width\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-flexbox-1/#flex-wrap-property\"],\n        \"complexity\": \"basic\"\n    }\n    ",
+                "length": 344,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -1032,19 +972,18 @@
       "height": 800
     },
     "metadata": {
-      "test_id": "baseline_812_background_color",
-      "category": "baseline",
+      "test_id": "flex_002_wrap",
+      "category": "basic",
       "features": [
-        "background-color",
-        "color-values"
+        "flex-wrap",
+        "gap",
+        "multi-line"
       ],
-      "description": "Background color using different color value formats",
-      "original_css_test": "background-color-001.htm",
+      "description": "Items wrap to multiple lines when they exceed container width",
       "spec_references": [
-        "https://www.w3.org/TR/CSS21/colors.html#background-properties"
+        "https://www.w3.org/TR/css-flexbox-1/#flex-wrap-property"
       ],
-      "complexity": "fundamental",
-      "expected_behavior": "Four boxes with red, green, blue, and transparent backgrounds"
+      "complexity": "basic"
     }
   }
 }

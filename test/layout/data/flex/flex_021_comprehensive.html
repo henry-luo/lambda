@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Flex Comprehensive Content Types</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+
+        /* Test-specific CSS */
+        .container {
+            width: 900px;
+            height: 500px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            border: 2px solid #333;
+            padding: 15px;
+        }
+        .row {
+            display: flex;
+            gap: 15px;
+            flex: 1;
+        }
+        .item {
+            flex: 1;
+            padding: 12px;
+            box-sizing: border-box;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            overflow: hidden;
+        }
+        h4 {
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #495057;
+            border-bottom: 1px solid #dee2e6;
+            padding-bottom: 4px;
+        }
+        .content-block {
+            margin: 8px 0;
+            padding: 8px;
+            background-color: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 3px;
+        }
+        ul, ol {
+            margin: 6px 0;
+            padding-left: 18px;
+        }
+        li {
+            margin: 2px 0;
+            font-size: 12px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            margin: 6px 0;
+        }
+        th, td {
+            border: 1px solid #dee2e6;
+            padding: 3px 5px;
+            text-align: left;
+        }
+        th {
+            background-color: #e9ecef;
+        }
+        .code-snippet {
+            font-family: 'Courier New', monospace;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 6px;
+            margin: 6px 0;
+            font-size: 11px;
+            border-radius: 2px;
+        }
+        .highlight {
+            background-color: #fff3cd;
+            padding: 1px 3px;
+            font-weight: bold;
+        }
+        .nested-flex {
+            display: flex;
+            gap: 8px;
+            margin: 6px 0;
+        }
+        .nested-item {
+            flex: 1;
+            padding: 6px;
+            background-color: #e9ecef;
+            border: 1px solid #adb5bd;
+            font-size: 11px;
+            text-align: center;
+        }
+        a {
+            color: #0d6efd;
+            text-decoration: none;
+        }
+        p {
+            margin: 4px 0;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="row">
+            <div class="item">
+                <h4>Rich Text Content</h4>
+                <div class="content-block">
+                    <p>
+                        This section contains <strong>bold text</strong>, 
+                        <em>italic text</em>, and <span class="highlight">highlighted content</span>.
+                    </p>
+                    <p>
+                        It also includes <a href="#">links</a> and 
+                        <code class="highlight">inline code</code> elements.
+                    </p>
+                    <ul>
+                        <li>First bullet point</li>
+                        <li>Second with <strong>emphasis</strong></li>
+                        <li>Third with <a href="#">a link</a></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="item">
+                <h4>Code and Tables</h4>
+                <div class="code-snippet">
+function example() {<br>
+&nbsp;&nbsp;return "Hello World";<br>
+}
+                </div>
+                <table>
+                    <tr>
+                        <th>Property</th>
+                        <th>Value</th>
+                    </tr>
+                    <tr>
+                        <td>Width</td>
+                        <td>100px</td>
+                    </tr>
+                    <tr>
+                        <td>Height</td>
+                        <td>50px</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        
+        <div class="row">
+            <div class="item">
+                <h4>Nested Structures</h4>
+                <div class="content-block">
+                    <p>Nested flexbox within flex item:</p>
+                    <div class="nested-flex">
+                        <div class="nested-item">Sub 1</div>
+                        <div class="nested-item">Sub 2</div>
+                        <div class="nested-item">Sub 3</div>
+                    </div>
+                    <ol>
+                        <li>Ordered list item</li>
+                        <li>With <span class="highlight">mixed content</span></li>
+                        <li>And proper <a href="#">formatting</a></li>
+                    </ol>
+                </div>
+            </div>
+            
+            <div class="item">
+                <h4>Complex Mixed</h4>
+                <div class="content-block">
+                    <p>
+                        Complex content mixing all element types:
+                    </p>
+                    <div style="background-color: #fff3cd; padding: 6px; margin: 6px 0;">
+                        <strong>Important:</strong> This box contains 
+                        <code>code</code>, <a href="#">links</a>, and 
+                        <em>styled text</em>.
+                    </div>
+                    <ul>
+                        <li>List with <code>inline code</code></li>
+                        <li>Item with <strong>bold</strong> and <em>italic</em></li>
+                        <li>
+                            Nested content:
+                            <div style="margin-left: 15px; margin-top: 4px;">
+                                <small>Indented sub-content with proper spacing</small>
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="item">
+                <h4>Edge Cases</h4>
+                <div class="content-block">
+                    <p>Empty elements and whitespace:</p>
+                    <div style="height: 20px; background-color: #f8d7da;"></div>
+                    <p>Single character: <span style="font-size: 20px;">X</span></p>
+                    <p>
+                        Long text that should wrap properly within the 
+                        flex item boundaries and demonstrate proper 
+                        text flow behavior in constrained spaces.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Test metadata (hidden) -->
+    <script type="application/json" id="test-metadata">
+    {
+        "test_id": "flex_021_comprehensive",
+        "category": "comprehensive",
+        "features": ["all-content-types", "nested-flex", "tables", "lists", "code", "text-styling", "mixed-elements", "edge-cases"],
+        "description": "Comprehensive test combining all content types within flex layouts including text, lists, tables, code blocks, nested flexbox, and edge cases",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>
