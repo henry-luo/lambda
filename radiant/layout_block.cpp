@@ -1,6 +1,8 @@
 #include "layout.hpp"
 #include "layout_flex.hpp"
 #include "layout_flex_content.hpp"
+#include "layout_flex_measurement.hpp"
+#include "layout_flex_multipass.hpp"
 #include "layout_positioned.hpp"
 #include "grid.hpp"
 
@@ -149,30 +151,45 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 if (!lycon->line.is_line_start) { line_break(lycon); }
             }
             else if (display.inner == LXB_CSS_VALUE_FLEX) {
-                // Initialize flex container if not already done
+                // Enhanced multi-pass flex layout
                 FlexContainerLayout* pa_flex = lycon->flex_container;
                 init_flex_container(lycon, block);
 
-                // process DOM children into View objects first
-                // flex containers need their DOM children
-                // converted to View objects before the flex algorithm can work
+                // PASS 1: Content measurement
+                log_debug("FLEX MULTIPASS: Starting content measurement");
                 int child_count = 0;
                 const int MAX_CHILDREN = 100; // Safety limit
+                DomNode* measure_child = child;
+                do {
+                    log_debug("Measuring flex child %p (count: %d)", measure_child, child_count);
+                    if (child_count >= MAX_CHILDREN) {
+                        log_error("ERROR: Too many flex children, breaking to prevent infinite loop");
+                        break;
+                    }
+                    measure_flex_child_content(lycon, measure_child);
+                    measure_child = measure_child->next_sibling();
+                    child_count++;
+                } while (measure_child);
+
+                // PASS 2: Create View objects with measured sizes
+                log_debug("FLEX MULTIPASS: Creating View objects with measured sizes");
+                child_count = 0;
                 do {
                     log_debug("Processing flex child %p (count: %d)", child, child_count);
                     if (child_count >= MAX_CHILDREN) {
                         log_error("ERROR: Too many flex children, breaking to prevent infinite loop");
                         break;
                     }
-                    layout_flow_node(lycon, child);
+                    layout_flow_node_for_flex(lycon, child);
                     DomNode* next_child = child->next_sibling();
                     log_debug("Got next flex sibling %p", next_child);
                     child = next_child;
                     child_count++;
                 } while (child);
 
-                // run the flex layout algorithm with the processed children
-                layout_flex_container(lycon, block);
+                // PASS 3: Run enhanced flex algorithm with nested content support
+                log_debug("FLEX MULTIPASS: Running enhanced flex algorithm");
+                layout_flex_container_with_nested_content(lycon, block);
 
                 // restore parent flex context
                 cleanup_flex_container(lycon);

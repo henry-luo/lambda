@@ -9,7 +9,6 @@ This document outlines the comprehensive integration plan for the enhanced flexb
 ### Existing Layout System
 - **Block Layout**: `layout_block.cpp` - Handles block-level elements
 - **Inline Layout**: `layout_inline.cpp` - Handles inline elements and text flow
-- **Old Flex Layout**: `layout_flex.cpp` + `layout_flex_nodes.cpp` - Legacy flexbox implementation
 - **Layout Dispatcher**: `layout.cpp` - Routes layout calls based on display type
 
 ### New Flexbox Implementation
@@ -313,30 +312,6 @@ IntrinsicSizes calculate_child_intrinsic_sizes(View* child) {
 Handle complex nested scenarios like flex-in-flex, grid-in-flex, etc.
 
 ```cpp
-// Handle nested layout contexts
-void layout_nested_context(LayoutContext* lycon, ViewBlock* container) {
-    // Determine container and content types
-    DisplayType container_display = container->display;
-
-    // Set up appropriate layout context
-    switch (container_display) {
-        case DISPLAY_FLEX: {
-            // Container is flex - handle flex items that may contain other layouts
-            layout_flex_container_with_nested_content(lycon, container);
-            break;
-        }
-        case DISPLAY_BLOCK: {
-            // Check if parent is flex
-            ViewBlock* parent = (ViewBlock*)container->parent;
-            if (parent && parent->display == DISPLAY_FLEX) {
-                layout_block_in_flex_context(lycon, container, parent);
-            } else {
-                layout_block(lycon, container);
-            }
-            break;
-        }
-    }
-}
 
 // Layout flex container that may contain nested layouts
 void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container) {
@@ -378,18 +353,6 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
 3. **Gradual Rollout**: Enable new implementation for specific use cases first
 4. **Performance Validation**: Ensure new implementation meets performance requirements
 
-### 3.2 Code Removal Plan
-
-**Files to Remove**:
-- `/radiant/layout_flex.cpp` - Old flex algorithm
-- `/radiant/layout_flex_nodes.cpp` - Old flex integration
-- Related test files for old implementation
-
-**Files to Update**:
-- Remove old flex-related code from `layout.cpp`
-- Update build configuration to exclude old files
-- Update documentation and examples
-
 ### 3.3 API Compatibility
 
 **Maintain Compatibility**:
@@ -403,43 +366,6 @@ void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* 
 - Update test expectations where behavior improves
 
 ## Implementation Details
-
-### 4.1 Enhanced ViewBlock Structure
-
-The `ViewSpan` structure has been enhanced with new properties. Ensure proper initialization:
-
-```cpp
-// Enhanced initialization in view creation
-void init_view_span_flex_properties(ViewSpan* span) {
-    // Existing flex properties
-    span->flex_grow = 0.0f;
-    span->flex_shrink = 1.0f;
-    span->flex_basis = -1; // auto
-    span->align_self = LXB_CSS_VALUE_AUTO;
-    span->order = 0;
-    span->flex_basis_is_percent = false;
-
-    // New enhanced properties
-    span->aspect_ratio = 0.0f;
-    span->baseline_offset = 0;
-    span->margin_top_auto = false;
-    span->margin_right_auto = false;
-    span->margin_bottom_auto = false;
-    span->margin_left_auto = false;
-    span->width_is_percent = false;
-    span->height_is_percent = false;
-    span->min_width_is_percent = false;
-    span->max_width_is_percent = false;
-    span->min_height_is_percent = false;
-    span->max_height_is_percent = false;
-    span->min_width = 0;
-    span->max_width = 0;
-    span->min_height = 0;
-    span->max_height = 0;
-    span->position = POS_STATIC;
-    span->visibility = VIS_VISIBLE;
-}
-```
 
 ### 4.2 CSS Integration Points
 
