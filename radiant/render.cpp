@@ -88,28 +88,28 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.face.ft_face, &rdcon->font.face.style, codepoint);
             if (!glyph) {
                 // draw a square box for missing glyph
-                Rect rect = {x + 1, y, (float)(rdcon->font.face.space_width - 2), (float)(rdcon->font.face.ft_face->size->metrics.y_ppem >> 6)};
+                Rect rect = {x + 1, y, (float)(rdcon->font.face.space_width - 2), (float)(rdcon->font.face.ft_face->size->metrics.y_ppem / 64.0)};
                 fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip);
                 x += rdcon->font.face.space_width;
             }
             else {
                 // draw the glyph to the image buffer
-                int ascend = rdcon->font.face.ft_face->size->metrics.ascender >> 6; // still use orginal font ascend to align glyphs at same baseline
+                float ascend = rdcon->font.face.ft_face->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
                 draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap_left, y + ascend - glyph->bitmap_top);
                 // advance to the next position
-                x += glyph->advance.x >> 6;
+                x += glyph->advance.x / 64.0;
             }
         }
     }
     // render text deco
     if (rdcon->font.face.style.text_deco != LXB_CSS_VALUE_NONE) {
-        int thinkness = max(rdcon->font.face.ft_face->underline_thickness >> 6, 1);
+        float thinkness = max(rdcon->font.face.ft_face->underline_thickness / 64.0, 1);
         Rect rect;
         // todo: underline probably shoul draw below/before the text, and leaves a gap where text has descender
         if (rdcon->font.face.style.text_deco == LXB_CSS_VALUE_UNDERLINE) {
             // underline drawn at baseline, with a gap of thickness
             rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y +
-                (rdcon->font.face.ft_face->size->metrics.ascender >> 6) + thinkness;
+                (rdcon->font.face.ft_face->size->metrics.ascender / 64.0) + thinkness;
         }
         else if (rdcon->font.face.style.text_deco == LXB_CSS_VALUE_OVERLINE) {
             rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y;
@@ -207,7 +207,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         dom_wrapper.type = LEXBOR_NODE;
         dom_wrapper.lxb_node = (lxb_dom_node_t*)&lxb_node;
         text.node = &dom_wrapper;
-        int font_size = rdcon->font.face.ft_face->size->metrics.y_ppem >> 6;
+        float font_size = rdcon->font.face.ft_face->size->metrics.y_ppem / 64.0;
         text.x = list_item->x - 20 * ratio;
         text.y = list_item->y;  // align at top the list item
         text.width = text.length * font_size;  text.height = font_size;

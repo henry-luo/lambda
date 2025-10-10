@@ -44,7 +44,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     }
 }
 
-int calculate_vertical_align_offset(PropValue align, float item_height, float line_height, float baseline_pos, float item_baseline) {
+float calculate_vertical_align_offset(PropValue align, float item_height, float line_height, float baseline_pos, float item_baseline) {
     log_debug("calculate vertical align: align=%d, item_height=%f, line_height=%f, baseline_pos=%f, item_baseline=%f",
         align, item_height, line_height, baseline_pos, item_baseline);
     switch (align) {
@@ -65,10 +65,10 @@ int calculate_vertical_align_offset(PropValue align, float item_height, float li
         return line_height - item_height;
     case LXB_CSS_VALUE_SUB:
         // Subscript position (approximately 0.3em lower)
-        return baseline_pos - item_baseline + (int)(0.3 * line_height);
+        return baseline_pos - item_baseline + 0.3 * line_height;
     case LXB_CSS_VALUE_SUPER:
         // Superscript position (approximately 0.3em higher)
-        return baseline_pos - item_baseline - (int)(0.3 * line_height);
+        return baseline_pos - item_baseline - 0.3 * line_height;
     default:
         return baseline_pos - item_baseline; // Default to baseline
     }
@@ -101,7 +101,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         ViewText* text_view = (ViewText*)view;
         float item_height = text_view->height;
         // for text, baseline is at font.ascender
-        float item_baseline = (float)(text_view->font->ft_face->size->metrics.ascender >> 6);
+        float item_baseline = (float)(text_view->font->ft_face->size->metrics.ascender / 64.0);
         float vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
         log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*s'",
@@ -354,8 +354,8 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
         lycon->root_font_size = lycon->font.current_font_size < 0 ?
             lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
     }
-    lycon->block.init_ascender = lycon->font.face.ft_face->size->metrics.ascender >> 6;
-    lycon->block.init_descender = (-lycon->font.face.ft_face->size->metrics.descender) >> 6;
+    lycon->block.init_ascender = lycon->font.face.ft_face->size->metrics.ascender / 64.0;
+    lycon->block.init_descender = (-lycon->font.face.ft_face->size->metrics.descender) / 64.0;
 
     // layout body content
     lxb_dom_element_t *lexbor_body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);

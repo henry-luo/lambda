@@ -88,7 +88,7 @@ void line_break(LayoutContext* lycon) {
 LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode *text_node) {
     unsigned char *str = text_node->text_data();
     if (!str) return RDT_LINE_NOT_FILLED;  // null check
-    int text_width = 0;
+    float text_width = 0;
     do {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
         FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
@@ -97,7 +97,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode *text_node) {
             return RDT_LINE_NOT_FILLED;
         }
         FT_GlyphSlot slot = lycon->font.face.ft_face->glyph;
-        text_width += slot->advance.x >> 6;
+        text_width += slot->advance.x / 64.0;
         if (lycon->line.advance_x + text_width > lycon->line.right) { // line filled up
             return RDT_LINE_FILLED;
         }
@@ -154,13 +154,13 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNode* n
     return RDT_NOT_SURE;
 }
 
-void output_text(LayoutContext* lycon, ViewText* text, int text_length, int text_width) {
+void output_text(LayoutContext* lycon, ViewText* text, int text_length, float text_width) {
     text->length = text_length;  assert(text->length > 0);
     text->width = text_width;  text->font = &lycon->font.face;
     lycon->line.advance_x += text_width;
-    lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.face.ft_face->size->metrics.ascender >> 6);
-    lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.face.ft_face->size->metrics.descender) >> 6);
-    log_debug("text view: '%.*s', x %d, y %d, width %d, height %d, font size %d",
+    lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.face.ft_face->size->metrics.ascender / 64.0);
+    lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.face.ft_face->size->metrics.descender) / 64.0);
+    log_debug("text view: '%.*s', x %f, y %f, width %f, height %f, font size %f",
         text_length,text->node->text_data() + text->start_index, text->x, text->y, text->width, text->height, lycon->font.face.style.font_size);
 }
 
@@ -182,16 +182,16 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     ViewText* text = (ViewText*)alloc_view(lycon, RDT_VIEW_TEXT, text_node);
     lycon->prev_view = (View*)text;
     text->start_index = str - text_start;
-    int font_height = lycon->font.face.ft_face->size->metrics.height >> 6;
+    float font_height = lycon->font.face.ft_face->size->metrics.height / 64.0;
     text->x = lycon->line.advance_x;
     text->height = font_height;  // should text->height be lycon->block.line_height or font_height?
 
     if (lycon->line.vertical_align == LXB_CSS_VALUE_MIDDLE) {
-        log_debug("middle-aligned-text: font %d, line %d", font_height, lycon->block.line_height);
+        log_debug("middle-aligned-text: font %f, line %f", font_height, lycon->block.line_height);
         text->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;
     }
     else if (lycon->line.vertical_align == LXB_CSS_VALUE_BOTTOM) {
-        log_debug("bottom-aligned-text: font %d, line %d", font_height, lycon->block.line_height);
+        log_debug("bottom-aligned-text: font %f, line %f", font_height, lycon->block.line_height);
         text->y = lycon->block.advance_y + lycon->block.line_height - font_height;
     }
     else if (lycon->line.vertical_align == LXB_CSS_VALUE_TOP) {
@@ -200,13 +200,13 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     }
     else { // baseline
         // text->y = lycon->block.advance_y + (lycon->block.line_height - (lycon->line.max_ascender + lycon->line.max_descender))/2
-        //     + lycon->line.max_ascender - (lycon->font.face->size->metrics.ascender >> 6);
+        //     + lycon->line.max_ascender - (lycon->font.face->size->metrics.ascender / 64.0);
         text->y = lycon->block.advance_y;
     }
 
     // layout the text glyphs
     do {
-        int wd;
+        float wd;
         uint32_t codepoint = *str;
         if (is_space(codepoint)) {
             wd = lycon->font.face.space_width;
@@ -221,7 +221,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             else { next_ch = str + 1; }
             FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.face.ft_face, &lycon->font.face.style, codepoint);
-            wd = glyph ? (glyph->advance.x >> 6) : lycon->font.face.space_width;
+            wd = glyph ? (glyph->advance.x / 64.0) : lycon->font.face.space_width;
+            log_debug("char '%c' codepoint %u, width %f", *str, codepoint, wd);
         }
         // handle kerning
         if (lycon->font.face.has_kerning) {
@@ -230,8 +231,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 FT_Vector kerning;
                 FT_Get_Kerning(lycon->font.face.ft_face, lycon->line.prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
                 if (kerning.x) {
-                    text->x += (kerning.x >> 6);
-                    log_debug("apply kerning: %d to char '%c'", kerning.x >> 6, *str);
+                    text->x += (kerning.x / 64.0);
+                    log_debug("apply kerning: %f to char '%c'", kerning.x / 64.0, *str);
                 }
             }
             lycon->line.prev_glyph_index = glyph_index;
@@ -259,7 +260,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                     line_break(lycon);  goto LAYOUT_TEXT;
                 }
                 else { // last_space outside the text, break at start of text
-                    int advance_x = lycon->line.advance_x;
+                    float advance_x = lycon->line.advance_x;  // save current advance_x
                     line_break(lycon);
                     text->y = lycon->block.advance_y;
                     text->x = lycon->line.advance_x;  lycon->line.advance_x = advance_x;
@@ -279,7 +280,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     } while (*str);
     // end of text
     if (lycon->line.last_space) { // need to check if line will fill up
-        int advance_x = lycon->line.advance_x;  lycon->line.advance_x += text->width;
+        float advance_x = lycon->line.advance_x;  lycon->line.advance_x += text->width;
         if (view_has_line_filled(lycon, (View*)text, text->node) == RDT_LINE_FILLED) {
             if (text_start <= lycon->line.last_space && lycon->line.last_space < str) {
                 str = lycon->line.last_space + 1;

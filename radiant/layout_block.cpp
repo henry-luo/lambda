@@ -24,7 +24,7 @@ void layout_table(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
 
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display) {
     // finalize the block size
-    int flow_width, flow_height;
+    float flow_width, flow_height;
     if (block->bound) {
         // max_width already includes padding.left and border.left
         block->content_width = lycon->block.max_width + block->bound->padding.right;
@@ -323,14 +323,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         value = elmt->get_attribute("width", &value_len);
         if (value) {
             StrView width_view = strview_init(value, value_len);
-            int width = call_strview_to_int(&width_view);
+            float width = call_strview_to_int(&width_view);
             if (width >= 0) lycon->block.given_width = width * lycon->ui_context->pixel_ratio;
             // else width attr ignored
         }
         value = elmt->get_attribute("height", &value_len);
         if (value) {
             StrView height_view = strview_init(value, value_len);
-            int height = call_strview_to_int(&height_view);
+            float height = call_strview_to_int(&height_view);
             if (height >= 0) lycon->block.given_height = height * lycon->ui_context->pixel_ratio;
             // else height attr ignored
         }
@@ -381,7 +381,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // CRITICAL FIX: After CSS resolution, handle body margin properly
     // This handles CSS resets like "* { margin: 0; }" properly
     if (elmt_name == LXB_TAG_BODY) {
-        int body_margin_physical = (int)(8.0 * lycon->ui_context->pixel_ratio);
+        float body_margin_physical = 8.0 * lycon->ui_context->pixel_ratio;
 
         if (!block->bound) {
             // No CSS margin properties - apply default body margin
@@ -468,9 +468,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             ImageSurface* img = block->embed->img;
             if (lycon->block.given_width < 0 || lycon->block.given_height < 0) {
                 // scale image by pixel ratio
-                int w = img->width * lycon->ui_context->pixel_ratio;
-                int h = img->height * lycon->ui_context->pixel_ratio;
-                log_debug("image dims: intrinsic - %d x %d, spec - %d x %d", w, h,
+                float w = img->width * lycon->ui_context->pixel_ratio;
+                float h = img->height * lycon->ui_context->pixel_ratio;
+                log_debug("image dims: intrinsic - %f x %f, spec - %f x %f", w, h,
                     lycon->block.given_width, lycon->block.given_height);
                 if (lycon->block.given_width >= 0) { // scale unspecified height
                     lycon->block.given_height = lycon->block.given_width * h / w;
@@ -505,11 +505,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face.ft_face->family_name, block->font);
     }
-    lycon->block.init_ascender = lycon->font.face.ft_face->size->metrics.ascender >> 6;
-    lycon->block.init_descender = (-lycon->font.face.ft_face->size->metrics.descender) >> 6;
+    lycon->block.init_ascender = lycon->font.face.ft_face->size->metrics.ascender / 64.0;
+    lycon->block.init_descender = (-lycon->font.face.ft_face->size->metrics.descender) / 64.0;
 
     // determine block width and height
-    int content_width = 0;
+    float content_width = 0;
     if (lycon->block.given_width >= 0) {
         content_width = lycon->block.given_width;
 
@@ -517,7 +517,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
             // For border-box, the given width includes padding and borders
             // So we need to subtract them to get the content width
-            int padding_and_border = 0;
+            float padding_and_border = 0;
             if (block->bound) {
                 padding_and_border += block->bound->padding.left + block->bound->padding.right;
                 if (block->bound->border) {
@@ -543,7 +543,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 - (block->bound->padding.left + block->bound->padding.right);
         }
     }
-    int content_height = 0;
+    float content_height = 0;
     if (lycon->block.given_height >= 0) {
         content_height = lycon->block.given_height;
 
@@ -551,7 +551,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
             // For border-box, the given height includes padding and borders
             // So we need to subtract them to get the content height
-            int padding_and_border = 0;
+            float padding_and_border = 0;
             if (block->bound) {
                 padding_and_border += block->bound->padding.top + block->bound->padding.bottom;
                 if (block->bound->border) {
@@ -641,7 +641,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (first_child->is_block() && ((ViewBlock*)first_child)->bound) {
                 ViewBlock* first_child_block = (ViewBlock*)first_child;
                 if (first_child_block->bound->margin.top > 0) {
-                    int margin_top = max(block->bound->margin.top, first_child_block->bound->margin.top);
+                    float margin_top = max(block->bound->margin.top, first_child_block->bound->margin.top);
                     block->y += margin_top - block->bound->margin.top;
                     block->bound->margin.top = margin_top;
                     block->height -= first_child_block->bound->margin.top;
@@ -659,11 +659,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (last_child->is_block() && ((ViewBlock*)last_child)->bound) {
                 ViewBlock* last_child_block = (ViewBlock*)last_child;
                 if (last_child_block->bound->margin.bottom > 0) {
-                    int margin_bottom = max(block->bound->margin.bottom, last_child_block->bound->margin.bottom);
+                    float margin_bottom = max(block->bound->margin.bottom, last_child_block->bound->margin.bottom);
                     block->height -= last_child_block->bound->margin.bottom;
                     block->bound->margin.bottom = margin_bottom;
                     last_child_block->bound->margin.bottom = 0;
-                    log_debug("collapsed bottom margin %d between block and last child", margin_bottom);
+                    log_debug("collapsed bottom margin %f between block and last child", margin_bottom);
                 }
             }
         }
@@ -723,11 +723,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             block->x = lycon->line.advance_x;
         }
         if (block->in_line && block->in_line->vertical_align) {
-            int offset = calculate_vertical_align_offset(
+            float offset = calculate_vertical_align_offset(
                 block->in_line->vertical_align, block->height, lycon->block.line_height,
                 lycon->line.max_ascender, block->height);
             block->y = lycon->block.advance_y + offset;  // block->bound->margin.top will be added below
-            log_debug("vertical-aligned-inline-block: offset %d, line %d, block %d, adv: %d, y: %d, va:%d, %d",
+            log_debug("vertical-aligned-inline-block: offset %f, line %f, block %f, adv: %f, y: %f, va:%d, %d",
                 offset, lycon->block.line_height, block->height, lycon->block.advance_y, block->y,
                 block->in_line->vertical_align, LXB_CSS_VALUE_BOTTOM);
         } else {
@@ -743,7 +743,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             block->x, block->y, lycon->line.advance_x, block->bound ? block->bound->margin.left : 0, block->bound ? block->bound->margin.top : 0);
         // update baseline
         if (block->in_line && block->in_line->vertical_align != LXB_CSS_VALUE_BASELINE) {
-            int block_flow_height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
+            float block_flow_height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
             lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->line.max_ascender);
         } else {
             // default baseline alignment for inline block
@@ -763,7 +763,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     else { // normal block
         if (block->bound) {
             // check sibling margin collapsing
-            int collapse = 0;
+            float collapse = 0;
             View* prev_sibling = block->previous_view();
             if (prev_sibling && prev_sibling->is_block() && ((ViewBlock*)prev_sibling)->bound) {
                 ViewBlock* prev_block = (ViewBlock*)prev_sibling;
