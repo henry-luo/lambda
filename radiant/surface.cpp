@@ -154,7 +154,7 @@ void _fill_row(uint8_t* pixels, int x, int wd, uint32_t color) {
 void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound* clip) {
     Rect r;
     if (!surface) return;
-    if (!rect) { r = (Rect){0, 0, surface->width, surface->height};  rect = &r; }
+    if (!rect) { r = (Rect){0, 0, (float)surface->width, (float)surface->height};  rect = &r; }
     printf("fill rect: x:%d, y:%d, wd:%d, hg:%d, color:%x\n", rect->x, rect->y, rect->width, rect->height, color);
     int left = max(clip->left, rect->x), right = min(clip->right, rect->x + rect->width);
     int top = max(clip->top, rect->y), bottom = min(clip->bottom, rect->y + rect->height);
@@ -170,10 +170,10 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
     Rect rect;
     if (!src || !dst || !dst_rect || !clip) return;
     if (!src_rect) { // use the entire source image
-        rect = (Rect){0, 0, src->width, src->height};
+        rect = (Rect){0, 0, (float)src->width, (float)src->height};
         src_rect = &rect;
     }
-    printf("blit surface: src(%d, %d, %d, %d) to dst(%d, %d, %d, %d)\n",
+    printf("blit surface: src(%f, %f, %f, %f) to dst(%f, %f, %f, %f)\n",
         src_rect->x, src_rect->y, src_rect->width, src_rect->height,
         dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height);
     float x_ratio = (float)src_rect->width / dst_rect->width;

@@ -73,12 +73,12 @@ typedef union {
 } Color;
 
 typedef struct Rect {
-    int x, y;
-    int width, height;
+    float x, y;
+    float width, height;
 } Rect;
 
 typedef struct Bound {
-    int left, top, right, bottom;
+    float left, top, right, bottom;
 } Bound;
 
 typedef enum {
@@ -131,7 +131,7 @@ typedef struct {
 
 typedef struct {
     char* family;  // font family name
-    int font_size;  // font size in pixels, scaled by pixel_ratio
+    float font_size;  // font size in pixels, scaled by pixel_ratio
     PropValue font_style;
     PropValue font_weight;
     PropValue text_deco; // CSS text decoration
@@ -145,8 +145,8 @@ typedef struct {
 
 typedef struct {
     union {
-        struct { int top, right, bottom, left; };
-        struct { int top_left, top_right, bottom_right, bottom_left; };
+        struct { float top, right, bottom, left; };
+        struct { float top_left, top_right, bottom_right, bottom_left; };
     };
     uint32_t top_specificity, right_specificity, bottom_specificity, left_specificity;
 } Spacing;
@@ -175,7 +175,7 @@ typedef struct {
 
 typedef struct {
     PropValue position;        // static, relative, absolute, fixed, sticky
-    int top, right, bottom, left;  // offset values in pixels
+    float top, right, bottom, left;  // offset values in pixels
     int z_index;              // stacking order
     bool has_top, has_right, has_bottom, has_left;  // which offsets are set
     PropValue clear;          // clear property for floats
@@ -184,13 +184,13 @@ typedef struct {
 
 typedef struct {
     PropValue text_align;
-    int line_height;  // non-negative
-    int text_indent;  // can be negative
-    int min_width, max_width;  // non-negative
-    int min_height, max_height;  // non-negative
+    float line_height;  // non-negative
+    float text_indent;  // can be negative
+    float min_width, max_width;  // non-negative
+    float min_height, max_height;  // non-negative
     PropValue list_style_type;
     PropValue box_sizing;  // LXB_CSS_VALUE_CONTENT_BOX or LXB_CSS_VALUE_BORDER_BOX
-    int given_width, given_height;  // CSS specified width/height values
+    float given_width, given_height;  // CSS specified width/height values
     PropValue clear;          // clear property for floats
     PropValue float_prop;     // float property (left, right, none)
 } BlockProp;
@@ -204,7 +204,7 @@ struct View {
     DomNode *node;  // DOM node abstraction instead of direct lexbor dependency
     View* next;
     ViewGroup* parent;  // corrected the type to ViewGroup
-    int x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
+    float x, y, width, height;  // (x, y) relative to the BORDER box of parent block, and (width, height) forms the BORDER box of current block
 
     inline bool is_inline() { return type == RDT_VIEW_TEXT || type == RDT_VIEW_INLINE || type == RDT_VIEW_INLINE_BLOCK; }
 
@@ -224,6 +224,7 @@ typedef struct FontBox {
     FontFace face;  // current font face
     int current_font_size;  // font size of current element
 } FontBox;
+
 typedef struct ViewText : View {
     int start_index, length;  // start and length of the text in the style node
     FontFace *font;  // font for this text
@@ -248,7 +249,7 @@ typedef struct ViewSpan : ViewGroup {
 
     // Additional flex item properties from old implementation
     float aspect_ratio;
-    int baseline_offset;
+    float baseline_offset;
 
     // Auto margin flags
     bool margin_top_auto;
@@ -265,8 +266,8 @@ typedef struct ViewSpan : ViewGroup {
     bool max_height_is_percent;
 
     // Min/max constraints
-    int min_width, max_width;
-    int min_height, max_height;
+    float min_width, max_width;
+    float min_height, max_height;
 
     // Position and visibility (from old FlexItem)
     int position;  // PositionType
@@ -296,15 +297,15 @@ typedef struct ViewSpan : ViewGroup {
 } ViewSpan;
 
 typedef struct {
-    int v_scroll_position, h_scroll_position;
-    int v_max_scroll, h_max_scroll;
-    int v_handle_y, v_handle_height;
-    int h_handle_x, h_handle_width;
+    float v_scroll_position, h_scroll_position;
+    float v_max_scroll, h_max_scroll;
+    float v_handle_y, v_handle_height;
+    float h_handle_x, h_handle_width;
 
     bool is_h_hovered, is_v_hovered;
     bool v_is_dragging, h_is_dragging;
-    int drag_start_x, drag_start_y;
-    int v_drag_start_scroll, h_drag_start_scroll;
+    float drag_start_x, drag_start_y;
+    float v_drag_start_scroll, h_drag_start_scroll;
 } ScrollPane;
 
 typedef struct {
@@ -324,8 +325,8 @@ typedef struct FlexProp {
     int justify;        // JustifyContent or LXB_CSS_VALUE_*
     int align_items;    // AlignType or LXB_CSS_VALUE_*
     int align_content;  // AlignType or LXB_CSS_VALUE_*
-    int row_gap;
-    int column_gap;
+    float row_gap;
+    float column_gap;
     WritingMode writing_mode;
     TextDirection text_direction;
 } FlexProp;
@@ -340,8 +341,8 @@ typedef struct GridProp {
     int align_items;             // LXB_CSS_VALUE_STRETCH, etc.
     int grid_auto_flow;          // LXB_CSS_VALUE_ROW, LXB_CSS_VALUE_COLUMN
     // Grid gap properties
-    int row_gap;
-    int column_gap;
+    float row_gap;
+    float column_gap;
 
     // Grid template properties
     GridTrackList* grid_template_rows;
@@ -357,6 +358,7 @@ typedef struct GridProp {
     // Advanced features
     bool is_dense_packing;       // grid-auto-flow: dense
 } GridProp;
+
 typedef struct {
     ImageSurface* img;  // image surface
     Document* doc;  // iframe document
@@ -365,7 +367,7 @@ typedef struct {
 } EmbedProp;
 
 typedef struct ViewBlock : ViewSpan {
-    int content_width, content_height;  // width and height of the child content including padding
+    float content_width, content_height;  // width and height of the child content including padding
     BlockProp* blk;  // block specific style properties
     ScrollProp* scroller;  // handles overflow
     // block content related properties for flexbox, image, iframe
@@ -393,8 +395,8 @@ typedef struct ViewTable : ViewBlock {
     // border_collapse=false => separate borders, apply border-spacing gaps
     // border_collapse=true  => collapsed borders, no gaps between cells
     bool border_collapse;
-    int border_spacing_h; // horizontal spacing between columns (px)
-    int border_spacing_v; // vertical spacing between rows (px)
+    float border_spacing_h; // horizontal spacing between columns (px)
+    float border_spacing_v; // vertical spacing between rows (px)
 
     // Table-specific state will be held externally (e.g., TableModel) and referenced by ViewTable later.
 } ViewTable;
@@ -430,12 +432,12 @@ struct ViewTree {
 
 typedef struct CursorState {
     View* view;
-    int x, y;
+    float x, y;
 } CursorState;
 
 typedef struct CaretState {
     View* view;
-    int x_offset;
+    float x_offset;
 } CaretState;
 
 typedef struct StateStore {
@@ -448,7 +450,7 @@ typedef struct StateStore {
 
 // rendering context structs
 typedef struct {
-    int x, y;  // abs x, y relative to entire canvas/screen
+    float x, y;  // abs x, y relative to entire canvas/screen
     Bound clip;  // clipping rect
 } BlockBlot;
 
@@ -459,8 +461,8 @@ typedef struct {
 
 typedef struct {
     GLFWwindow *window;    // current window
-    int window_width;    // window pixel width
-    int window_height;   // window pixel height
+    float window_width;    // window pixel width
+    float window_height;   // window pixel height
     ImageSurface* surface;  // rendering surface of a window
 
     // font handling

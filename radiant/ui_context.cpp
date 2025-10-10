@@ -76,7 +76,7 @@ int ui_context_init(UiContext* uicon, bool headless) {
     }
 
     // load default fonts
-    uicon->default_font = (FontProp){"Arial", (int)(16 * uicon->pixel_ratio),
+    uicon->default_font = (FontProp){"Arial", (float)(16 * uicon->pixel_ratio),
         LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NONE};
     uicon->fallback_fonts = fallback_fonts;
 

@@ -57,7 +57,8 @@ void target_text_view(EventContext* evcon, ViewText* text) {
         }
         else {
             has_space = false;
-            if (FT_Load_Char(evcon->font.face.ft_face, *p, FT_LOAD_RENDER)) {
+            FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
+            if (FT_Load_Char(evcon->font.face.ft_face, *p, load_flags)) {
                 fprintf(stderr, "Could not load character '%c'\n", *p);
                 continue;
             }

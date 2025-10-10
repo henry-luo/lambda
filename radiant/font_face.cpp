@@ -367,7 +367,7 @@ FontMatchResult find_best_font_match(UiContext* uicon, FontMatchCriteria* criter
     // For now, fall back to existing font loading
     // In a full implementation, we would search @font-face descriptors
     FontProp font_prop = {
-        .font_size = criteria->size,
+        .font_size = (float)criteria->size,
         .font_style = criteria->style,
         .font_weight = criteria->weight
     };
@@ -572,7 +572,8 @@ void setup_font_enhanced(UiContext* uicon, EnhancedFontBox* fbox,
 
     if (fbox->face) {
         // Calculate space width
-        if (FT_Load_Char(fbox->face, ' ', FT_LOAD_RENDER)) {
+        FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
+        if (FT_Load_Char(fbox->face, ' ', load_flags)) {
             clog_warn(font_log, "Could not load space character for %s", font_name);
             fbox->space_width = fbox->face->size->metrics.y_ppem >> 6;
         } else {
