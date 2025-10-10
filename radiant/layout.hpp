@@ -14,24 +14,24 @@ typedef struct StyleContext {
 } StyleContext;
 
 typedef struct Blockbox {
-    int width, height;  // given width and height for the inner content of the block
-    int advance_y;  // advance_y includes padding.top and border.top of current block
-    int max_width, max_height;  // max content width and height (without padding)
-    int line_height;
-    int init_ascender;  // initial ascender of the line at start of the line
-    int init_descender;  // initial descender of the line at start of the line
+    float width, height;  // given width and height for the inner content of the block
+    float advance_y;  // advance_y includes padding.top and border.top of current block
+    float max_width, max_height;  // max content width and height (without padding)
+    float line_height;
+    float init_ascender;  // initial ascender of the line at start of the line
+    float init_descender;  // initial descender of the line at start of the line
     PropValue text_align;
-    int given_width, given_height;  // specified width and height by css or html attributes
+    float given_width, given_height;  // specified width and height by css or html attributes
     struct Blockbox* pa_block;  // parent block
 } Blockbox;
 
 typedef struct Linebox {
-    int left, right;                // left and right bounds of the line
-    int advance_x;
-    int max_ascender;
-    int max_descender;
+    float left, right;                // left and right bounds of the line
+    float advance_x;
+    float max_ascender;
+    float max_descender;
     unsigned char* last_space;      // last space character in the line
-    int last_space_pos;             // position of the last space in the line
+    float last_space_pos;             // position of the last space in the line
     View* start_view;
     PropValue vertical_align;
     bool is_line_start;
@@ -62,8 +62,8 @@ typedef struct FlexContainerLayout : FlexProp {
     int allocated_lines;
 
     // Cached calculations
-    int main_axis_size;
-    int cross_axis_size;
+    float main_axis_size;
+    float cross_axis_size;
     bool needs_reflow;
 } FlexContainerLayout;
 
@@ -77,7 +77,7 @@ typedef struct LayoutContext {
     Blockbox block;  // current blockbox
     Linebox line;  // current linebox
     FontBox font;  // current font style
-    int root_font_size;
+    float root_font_size;
     struct FloatContext* current_float_context;  // Current float context for this layout
     FlexContainerLayout* flex_container; // integrated flex container layout
     GridContainerLayout* grid_container; // integrated grid container layout
@@ -85,8 +85,8 @@ typedef struct LayoutContext {
     Document* doc;
     UiContext* ui_context;
     // Additional fields for test compatibility
-    int width, height;  // context dimensions
-    int dpi;           // dots per inch
+    float width, height;  // context dimensions
+    float dpi;           // dots per inch
     Pool* pool;  // memory pool for view allocation
 } LayoutContext;
 
@@ -122,7 +122,7 @@ bool element_has_positioning(ViewBlock* block);
 bool element_has_float(ViewBlock* block);
 
 void line_init(LayoutContext* lycon);
-int calculate_vertical_align_offset(PropValue align, int item_height, int line_height, int baseline_pos, int item_baseline);
+int calculate_vertical_align_offset(PropValue align, float item_height, float line_height, float baseline_pos, float item_baseline);
 void view_vertical_align(LayoutContext* lycon, View* view);
 
 // DomNode style resolution
@@ -131,7 +131,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 // Chrome-style line height calculation
 // Uses: max(fontSize + 3, ceil(fontSize * 1.2)) * pixelRatio
 // This matches Chrome browser's "normal" line-height behavior more accurately
-int calculate_chrome_line_height(int font_size, float pixel_ratio);
+float calculate_chrome_line_height(float font_size, float pixel_ratio);
 
 // ViewSpan bounding box computation
 void compute_span_bounding_box(ViewSpan* span);

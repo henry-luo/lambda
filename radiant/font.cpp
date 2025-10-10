@@ -135,8 +135,9 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
 FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint) {
     FT_GlyphSlot slot = NULL;  FT_Error error;
     FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
+    FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
     if (char_index > 0) {
-        error = FT_Load_Glyph(face, char_index, FT_LOAD_RENDER);
+        error = FT_Load_Glyph(face, char_index, load_flags);
         if (!error) { slot = face->glyph;  return slot; }
     }
 
@@ -149,7 +150,7 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
         if (fallback_face) {
             char_index = FT_Get_Char_Index(fallback_face, codepoint);
             if (char_index > 0) {
-                error = FT_Load_Glyph(fallback_face, char_index, FT_LOAD_RENDER);
+                error = FT_Load_Glyph(fallback_face, char_index, load_flags);
                 if (!error) {
                     log_font_fallback_triggered(face ? face->family_name : "unknown", *font_ptr);
                     slot = fallback_face->glyph;
@@ -182,7 +183,8 @@ void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp
         return;
     }
 
-    if (FT_Load_Char(fbox->face.ft_face, ' ', FT_LOAD_RENDER)) {
+    FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
+    if (FT_Load_Char(fbox->face.ft_face, ' ', load_flags)) {
         log_warn("Could not load space character for font: %s", font_name);
         fbox->face.space_width = fbox->face.ft_face->size->metrics.y_ppem >> 6;
     } else {

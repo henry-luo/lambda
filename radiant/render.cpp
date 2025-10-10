@@ -88,7 +88,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.face.ft_face, &rdcon->font.face.style, codepoint);
             if (!glyph) {
                 // draw a square box for missing glyph
-                Rect rect = {(int)(x + 1), (int)(y), (int)(rdcon->font.face.space_width - 2), (int)(rdcon->font.face.ft_face->size->metrics.y_ppem >> 6)};
+                Rect rect = {x + 1, y, (float)(rdcon->font.face.space_width - 2), (float)(rdcon->font.face.ft_face->size->metrics.y_ppem >> 6)};
                 fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip);
                 x += rdcon->font.face.space_width;
             }
@@ -583,7 +583,7 @@ void render_init(RenderContext* rdcon, UiContext* uicon) {
 
     // load default font Arial, size 16 px
     setup_font(uicon, &rdcon->font, uicon->default_font.family, &rdcon->ui_context->default_font);
-    rdcon->block.clip = (Bound){0, 0, uicon->surface->width, uicon->surface->height};
+    rdcon->block.clip = (Bound){0, 0, (float)uicon->surface->width, (float)uicon->surface->height};
 }
 
 void render_clean_up(RenderContext* rdcon) {

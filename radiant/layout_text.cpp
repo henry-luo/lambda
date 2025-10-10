@@ -63,12 +63,12 @@ void line_break(LayoutContext* lycon) {
     // CRITICAL FIX: Smart line height selection for mixed font sizes vs uniform text
     // For mixed font sizes (spans), use max to accommodate larger fonts
     // For uniform text, prefer CSS line height for browser compatibility
-    int font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
-    int css_line_height = lycon->block.line_height;
+    float font_line_height = lycon->line.max_ascender + lycon->line.max_descender;
+    float css_line_height = lycon->block.line_height;
 
     // Check if we have mixed font sizes by comparing font height to CSS height
     bool has_mixed_fonts = (font_line_height > css_line_height + 2); // 2px tolerance
-    int used_line_height;
+    float used_line_height;
 
     if (has_mixed_fonts) {
         // Mixed font sizes - use max to accommodate larger fonts
@@ -91,7 +91,8 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode *text_node) {
     int text_width = 0;
     do {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
-        if (FT_Load_Char(lycon->font.face.ft_face, *str, FT_LOAD_RENDER)) {
+        FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
+        if (FT_Load_Char(lycon->font.face.ft_face, *str, load_flags)) {
             fprintf(stderr, "Could not load character '%c'\n", *str);
             return RDT_LINE_NOT_FILLED;
         }

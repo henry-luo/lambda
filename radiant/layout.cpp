@@ -27,12 +27,12 @@ bool is_only_whitespace(const char* str) {
 // Chrome-style line height calculation
 // Uses: max(fontSize + 3, ceil(fontSize * 1.2)) * pixelRatio
 // This matches Chrome browser's "normal" line-height behavior more accurately
-int calculate_chrome_line_height(int font_size, float pixel_ratio) {
-    int base_font_size = (int)(font_size / pixel_ratio);
-    int min_line_height = base_font_size + 2;
-    int proportional_height = (int)ceil(base_font_size * 1.15);
-    int chrome_height = (min_line_height > proportional_height) ? min_line_height : proportional_height;
-    return (int)round(chrome_height * pixel_ratio);
+float calculate_chrome_line_height(float font_size, float pixel_ratio) {
+    float base_font_size = font_size / pixel_ratio;
+    float min_line_height = base_font_size + 2;
+    float proportional_height = ceil(base_font_size * 1.15);
+    float chrome_height = (min_line_height > proportional_height) ? min_line_height : proportional_height;
+    return chrome_height * pixel_ratio;
 }
 
 // DomNode style resolution function
@@ -44,8 +44,8 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     }
 }
 
-int calculate_vertical_align_offset(PropValue align, int item_height, int line_height, int baseline_pos, int item_baseline) {
-    log_debug("calculate vertical align: align=%d, item_height=%d, line_height=%d, baseline_pos=%d, item_baseline=%d",
+int calculate_vertical_align_offset(PropValue align, float item_height, float line_height, float baseline_pos, float item_baseline) {
+    log_debug("calculate vertical align: align=%d, item_height=%f, line_height=%f, baseline_pos=%f, item_baseline=%f",
         align, item_height, line_height, baseline_pos, item_baseline);
     switch (align) {
     case LXB_CSS_VALUE_BASELINE:
@@ -96,30 +96,30 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
 // apply vertical alignment to a view
 void view_vertical_align(LayoutContext* lycon, View* view) {
     log_debug("view_vertical_align: view=%d", view->type);
-    int line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
+    float line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
     if (view->type == RDT_VIEW_TEXT) {
         ViewText* text_view = (ViewText*)view;
-        int item_height = text_view->height;
+        float item_height = text_view->height;
         // for text, baseline is at font.ascender
-        int item_baseline = (int)(text_view->font->ft_face->size->metrics.ascender >> 6);
-        int vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
+        float item_baseline = (float)(text_view->font->ft_face->size->metrics.ascender >> 6);
+        float vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
-        log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%d, line=%d, hg=%d, txt='%.*s'",
+        log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*s'",
             text_view->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
             text_view->length, text_view->node->text_data() + text_view->start_index);
         text_view->y = lycon->block.advance_y + max(vertical_offset, 0);
     }
     else if (view->type == RDT_VIEW_INLINE_BLOCK) {
         ViewBlock* block = (ViewBlock*)view;
-        int item_height = block->height + (block->bound ?
+        float item_height = block->height + (block->bound ?
             block->bound->margin.top + block->bound->margin.bottom : 0);
-        int item_baseline = block->height + (block->bound ? block->bound->margin.top: 0);
+        float item_baseline = block->height + (block->bound ? block->bound->margin.top: 0);
         PropValue align = block->in_line && block->in_line->vertical_align ?
             block->in_line->vertical_align : lycon->line.vertical_align;
-        int vertical_offset = calculate_vertical_align_offset(align, item_height,
+        float vertical_offset = calculate_vertical_align_offset(align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
         block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->bound->margin.top : 0);
-        log_debug("vertical-adjusted-inline-block: y=%d, adv=%d, offset=%d, line=%d, blk=%d",
+        log_debug("vertical-adjusted-inline-block: y=%d, adv=%d, offset=%f, line=%f, blk=%f",
             block->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height);
     }
     else if (view->type == RDT_VIEW_INLINE) {

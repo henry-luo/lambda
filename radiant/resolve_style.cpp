@@ -577,7 +577,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             break;
         case LXB_CSS_VALUE_NORMAL:
             lycon->block.line_height = // lycon->font.face.style.font_size * 1.15;
-                calculate_chrome_line_height(lycon->font.face.style.font_size, lycon->ui_context->pixel_ratio);
+                calculate_chrome_line_height((float)lycon->font.face.style.font_size, lycon->ui_context->pixel_ratio);
             log_debug("normal line-height: using font intrinsic height * 1.15 = %d", lycon->block.line_height);
             break;
         }
