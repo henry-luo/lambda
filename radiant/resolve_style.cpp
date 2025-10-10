@@ -626,6 +626,35 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
         resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_MARGIN, margin, specificity, &span->bound->margin);
+        
+        // Also set auto flags for shorthand margin property
+        if (margin->top.type == LXB_CSS_VALUE_AUTO || margin->top.type == 12) {
+            span->margin_top_auto = true;
+        }
+        if (margin->right.type == LXB_CSS_VALUE_AUTO || margin->right.type == 12) {
+            span->margin_right_auto = true;
+        }
+        if (margin->bottom.type == LXB_CSS_VALUE_AUTO || margin->bottom.type == 12) {
+            span->margin_bottom_auto = true;
+        }
+        if (margin->left.type == LXB_CSS_VALUE_AUTO || margin->left.type == 12) {
+            span->margin_left_auto = true;
+        }
+        
+        // Handle shorthand expansion (1-4 values)
+        int value_cnt = 0;
+        if (margin->top.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
+        if (margin->right.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
+        if (margin->bottom.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
+        if (margin->left.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
+        
+        if (value_cnt == 1) {
+            // margin: auto -> all sides auto
+            bool is_auto = (margin->top.type == LXB_CSS_VALUE_AUTO || margin->top.type == 12);
+            span->margin_top_auto = span->margin_right_auto = 
+            span->margin_bottom_auto = span->margin_left_auto = is_auto;
+        }
+        
         break;
     }
     case LXB_CSS_PROPERTY_PADDING: {
@@ -1306,9 +1335,18 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_JUSTIFY_CONTENT: {
         if (!block) { break; }
         const lxb_css_property_justify_content_t *justify_content = declr->u.justify_content;
+        printf("DEBUG: JUSTIFY_CONTENT parsed - type=%d\n", justify_content->type);
         alloc_flex_prop(lycon, block);
-        // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
-        block->embed->flex->justify = (JustifyContent)justify_content->type;
+        
+        // Handle space-evenly specially since lexbor might not support it
+        if (justify_content->type == LXB_CSS_VALUE_SPACE_EVENLY) {
+            printf("DEBUG: Setting justify-content to SPACE_EVENLY\n");
+            block->embed->flex->justify = LXB_CSS_VALUE_SPACE_EVENLY;
+        } else {
+            // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
+            block->embed->flex->justify = (JustifyContent)justify_content->type;
+            printf("DEBUG: Set justify-content to %d\n", justify_content->type);
+        }
         break;
     }
     case LXB_CSS_PROPERTY_ALIGN_ITEMS: {
@@ -1422,6 +1460,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         log_debug("Processing custom property: %.*s = %.*s\n",
                (int)custom->name.length, (const char*)custom->name.data,
                (int)custom->value.length, (const char*)custom->value.data);
+        printf("DEBUG: Custom property: name='%.*s', value='%.*s'\n",
+               (int)custom->name.length, (const char*)custom->name.data,
+               (int)custom->value.length, (const char*)custom->value.data);
 
         // Handle aspect-ratio as custom property until lexbor supports it
         if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "aspect-ratio", 12) == 0) {
@@ -1453,6 +1494,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         // Handle justify-content space-evenly as custom property since lexbor doesn't support it
         else if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "justify-content", 15) == 0) {
             const char* value_str = (const char*)custom->value.data;
+            printf("DEBUG: Custom justify-content property found: '%.*s'\n", 
+                   (int)custom->value.length, value_str);
 
             // Check if the value is "space-evenly"
             if (custom->value.length == 12 && strncmp(value_str, "space-evenly", 12) == 0) {
@@ -1460,6 +1503,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 if (block) {
                     alloc_flex_prop(lycon, block);
                     block->embed->flex->justify = LXB_CSS_VALUE_SPACE_EVENLY;
+                    printf("DEBUG: Set justify-content to SPACE_EVENLY (%d)\n", LXB_CSS_VALUE_SPACE_EVENLY);
                     log_debug("Set justify-content: space-evenly\n");
                 }
             }
