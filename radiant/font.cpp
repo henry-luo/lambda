@@ -102,9 +102,9 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
     }
     strbuf_free(name_and_size);
     // units_per_EM is the font design size, and does not change with font pixel size
-    log_info("Font loaded: %s, height:%ld, ascend:%ld, descend:%ld, em size: %d",
-        face->family_name, face->size->metrics.height >> 6,
-        face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6, face->units_per_EM >> 6);
+    log_info("Font loaded: %s, height:%f, ascend:%f, descend:%f, em size: %f",
+        face->family_name, face->size->metrics.height / 64.0,
+        face->size->metrics.ascender / 64.0, face->size->metrics.descender / 64.0, face->units_per_EM / 64.0);
     return face;
 }
 
@@ -123,8 +123,8 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     }
     FT_Face face = load_font_face(uicon, name->str, font_style->font_size);
     if (face) {
-        log_info("Loading styled font: %s, ascd: %ld, desc: %ld, em size: %d",
-                name->str, face->size->metrics.ascender >> 6, face->size->metrics.descender >> 6, face->units_per_EM >> 6);
+        log_info("Loading styled font: %s, ascd: %f, desc: %f, em size: %f",
+                name->str, face->size->metrics.ascender / 64.0, face->size->metrics.descender / 64.0, face->units_per_EM / 64.0);
     } else {
         log_error("Failed to load styled font: %s", name->str);
     }
@@ -186,9 +186,9 @@ void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp
     FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
     if (FT_Load_Char(fbox->face.ft_face, ' ', load_flags)) {
         log_warn("Could not load space character for font: %s", font_name);
-        fbox->face.space_width = fbox->face.ft_face->size->metrics.y_ppem >> 6;
+        fbox->face.space_width = fbox->face.ft_face->size->metrics.y_ppem / 64.0;
     } else {
-        fbox->face.space_width = fbox->face.ft_face->glyph->advance.x >> 6;
+        fbox->face.space_width = fbox->face.ft_face->glyph->advance.x / 64.0;
     }
     FT_Bool use_kerning = FT_HAS_KERNING(fbox->face.ft_face);
     fbox->face.has_kerning = use_kerning;

@@ -82,8 +82,8 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     char color_str[32];
     svg_color_to_string(ctx->color, color_str);
 
-    int font_size = ctx->font.face.ft_face ? (ctx->font.face.ft_face->size->metrics.y_ppem >> 6) : 16;
-    float baseline_y = y + (ctx->font.face.ft_face ? (ctx->font.face.ft_face->size->metrics.ascender >> 6) : font_size * 0.8f);
+    float font_size = ctx->font.face.ft_face ? (ctx->font.face.ft_face->size->metrics.y_ppem / 64.0) : 16;
+    float baseline_y = y + (ctx->font.face.ft_face ? (ctx->font.face.ft_face->size->metrics.ascender / 64.0) : font_size * 0.8f);
 
     strbuf_append_format(ctx->svg_content,
         "<text x=\"%.2f\" y=\"%.2f\" font-family=\"%s\" font-size=\"%d\" fill=\"%s\"",

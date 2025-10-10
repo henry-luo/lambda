@@ -31,18 +31,18 @@ typedef struct FontFaceDescriptor {
 // Enhanced font metrics for better typography
 typedef struct EnhancedFontMetrics {
     // Core metrics
-    int ascender, descender, height;
-    int line_gap;               // Additional line spacing
+    float ascender, descender, height;
+    float line_gap;               // Additional line spacing
 
     // Advanced metrics for better typography
-    int x_height;               // Height of lowercase 'x'
-    int cap_height;             // Height of uppercase letters
-    int baseline_offset;        // Baseline position adjustment
+    float x_height;               // Height of lowercase 'x'
+    float cap_height;             // Height of uppercase letters
+    float baseline_offset;        // Baseline position adjustment
 
     // OpenType metrics for better compatibility
-    int typo_ascender, typo_descender, typo_line_gap;
-    int win_ascent, win_descent;
-    int hhea_ascender, hhea_descender, hhea_line_gap;
+    float typo_ascender, typo_descender, typo_line_gap;
+    float win_ascent, win_descent;
+    float hhea_ascender, hhea_descender, hhea_line_gap;
 
     // Performance optimizations
     bool metrics_computed;      // Metrics computation flag

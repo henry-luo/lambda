@@ -221,7 +221,7 @@ FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* 
 
     // CRITICAL FIX: Set font size - this is required for font metrics to be valid
     // Use a default size of 16px if no size is specified
-    int font_size = style ? style->font_size : 16;
+    float font_size = style ? style->font_size : 16;
     error = FT_Set_Pixel_Sizes(face, 0, font_size);
     if (error) {
         clog_error(font_log, "FT_Set_Pixel_Sizes failed: error=%d, size=%d", error, font_size);
@@ -229,8 +229,8 @@ FT_Face load_local_font_file(UiContext* uicon, const char* font_path, FontProp* 
         return NULL;
     }
 
-    clog_info(font_log, "Successfully loaded @font-face: %s (size=%d, height=%ld)",
-              face->family_name, font_size, face->size->metrics.height >> 6);
+    clog_info(font_log, "Successfully loaded @font-face: %s (size=%f, height=%f)",
+        face->family_name, font_size, face->size->metrics.height / 64.0);
     log_font_loading_result(face->family_name, true, NULL);
     return face;
 }
@@ -472,9 +472,9 @@ void compute_enhanced_font_metrics(EnhancedFontBox* fbox) {
     EnhancedFontMetrics* metrics = &fbox->metrics;
 
     // Basic metrics from FreeType
-    metrics->ascender = face->size->metrics.ascender >> 6;
-    metrics->descender = face->size->metrics.descender >> 6;
-    metrics->height = face->size->metrics.height >> 6;
+    metrics->ascender = face->size->metrics.ascender / 64.0;
+    metrics->descender = face->size->metrics.descender / 64.0;
+    metrics->height = face->size->metrics.height / 64.0;
     metrics->line_gap = metrics->height - (metrics->ascender - metrics->descender);
 
     // OpenType metrics (if available)
@@ -575,9 +575,9 @@ void setup_font_enhanced(UiContext* uicon, EnhancedFontBox* fbox,
         FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
         if (FT_Load_Char(fbox->face, ' ', load_flags)) {
             clog_warn(font_log, "Could not load space character for %s", font_name);
-            fbox->space_width = fbox->face->size->metrics.y_ppem >> 6;
+            fbox->space_width = fbox->face->size->metrics.y_ppem / 64.0;
         } else {
-            fbox->space_width = fbox->face->glyph->advance.x >> 6;
+            fbox->space_width = fbox->face->glyph->advance.x / 64.0;
         }
 
         // Compute enhanced metrics
