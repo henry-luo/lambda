@@ -221,8 +221,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             else { next_ch = str + 1; }
             FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.face.ft_face, &lycon->font.face.style, codepoint);
-            wd = glyph ? (glyph->advance.x / 64.0) : lycon->font.face.space_width;
-            log_debug("char '%c' codepoint %u, width %f", *str, codepoint, wd);
+            wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.face.space_width;
+            log_debug("char width: '%c', width %f", *str, wd);
         }
         // handle kerning
         if (lycon->font.face.has_kerning) {
@@ -231,8 +231,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 FT_Vector kerning;
                 FT_Get_Kerning(lycon->font.face.ft_face, lycon->line.prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
                 if (kerning.x) {
-                    text->x += (kerning.x / 64.0);
-                    log_debug("apply kerning: %f to char '%c'", kerning.x / 64.0, *str);
+                    text->x += ((float)kerning.x / 64.0);
+                    log_debug("apply kerning: %f to char '%c'", (float)kerning.x / 64.0, *str);
                 }
             }
             lycon->line.prev_glyph_index = glyph_index;
