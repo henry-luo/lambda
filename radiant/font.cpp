@@ -54,7 +54,7 @@ char* load_font_path(FcConfig *font_config, const char* font_name) {
     return path;
 }
 
-FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
+FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size) {
     // check the hashmap first
     if (uicon->fontface_map == NULL) {
         // create a new hash map. 2nd argument is the initial capacity.
@@ -64,7 +64,7 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, int font_size) {
     }
     StrBuf* name_and_size = strbuf_create(font_name);
     strbuf_append_str(name_and_size, ":");
-    strbuf_append_int(name_and_size, font_size);
+    strbuf_append_int(name_and_size, (int)font_size);
     FontfaceEntry search_key = {.name = name_and_size->str, .face = NULL};
     FontfaceEntry* entry = (FontfaceEntry*) hashmap_get(uicon->fontface_map, &search_key);
     if (entry) {
