@@ -37,11 +37,15 @@ float calculate_chrome_line_height(float font_size, float pixel_ratio) {
 
 // DomNode style resolution function
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
-    log_debug("resolving style for node %p of type %d", node, node ? node->type : -1);
+    log_debug("resolving style for elment '%s' of type %d", node->name(), node ? node->type : -1);
+    log_enter();
     if (node && node->type == LEXBOR_ELEMENT && node->lxb_elmt && node->lxb_elmt->element.style) {
         lexbor_avl_foreach_recursion(NULL, node->lxb_elmt->element.style, resolve_element_style, lycon);
-        log_debug("resolved element style for node %p: %p", node, node->lxb_elmt->element.style);
+        log_debug("resolved element style for: %s", node->name());
+    } else {
+        log_debug("element has no style: %s", node->name());
     }
+    log_leave();
 }
 
 float calculate_vertical_align_offset(PropValue align, float item_height, float line_height, float baseline_pos, float item_baseline) {

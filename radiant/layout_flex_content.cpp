@@ -13,24 +13,24 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
     // Save parent context
     LayoutContext saved_context = *lycon;
-    
+
     // Set up flex item as a proper containing block
     lycon->parent = (ViewGroup*)flex_item;
     lycon->prev_view = NULL;
-    
+
     // Calculate content area dimensions accounting for box model
     int content_width = flex_item->width;
     int content_height = flex_item->height;
     int content_x_offset = 0;
     int content_y_offset = 0;
-    
+
     if (flex_item->bound) {
         // Account for padding and border in content area
         content_width -= (flex_item->bound->padding.left + flex_item->bound->padding.right);
         content_height -= (flex_item->bound->padding.top + flex_item->bound->padding.bottom);
         content_x_offset = flex_item->bound->padding.left;
         content_y_offset = flex_item->bound->padding.top;
-        
+
         if (flex_item->bound->border) {
             content_width -= (flex_item->bound->border->width.left + flex_item->bound->border->width.right);
             content_height -= (flex_item->bound->border->width.top + flex_item->bound->border->width.bottom);
@@ -38,26 +38,26 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
             content_y_offset += flex_item->bound->border->width.top;
         }
     }
-    
+
     // Set up block formatting context for nested content
     lycon->block.width = content_width;
     lycon->block.height = content_height;
     lycon->block.advance_y = content_y_offset;
     lycon->block.max_width = 0;
-    
+
     // Inherit text alignment and other block properties from flex item
     if (flex_item->blk) {
         lycon->block.text_align = flex_item->blk->text_align;
         lycon->block.line_height = flex_item->blk->line_height;
     }
-    
+
     // Set up line formatting context for inline content
     lycon->line.left = content_x_offset;
     lycon->line.right = content_x_offset + content_width;
     lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
-    
+
     line_init(lycon);
-    
+
     // Layout all nested content using standard flow algorithm
     // This handles: text nodes, nested blocks, inline elements, images, etc.
     if (flex_item->node && flex_item->node->first_child()) {
@@ -67,20 +67,20 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
             layout_flow_node(lycon, child);
             child = child->next_sibling();
         } while (child);
-        
+
         // Finalize any pending line content
         if (!lycon->line.is_line_start) {
             line_break(lycon);
         }
     }
-    
+
     // Update flex item content dimensions for intrinsic sizing
     flex_item->content_width = lycon->block.max_width;
     flex_item->content_height = lycon->block.advance_y - content_y_offset;
-    
+
     // Restore parent context
     *lycon = saved_context;
-    
+
     log_debug("Enhanced flex item content layout complete: %dx%d\n",
               flex_item->content_width, flex_item->content_height);
 }
@@ -178,14 +178,13 @@ IntrinsicSizes calculate_block_intrinsic_sizes(ViewBlock* block) {
 
     // Consider constraints
     if (block->blk) {
-        if (block->blk->min_width > 0) {
-            sizes.min_content = max(sizes.min_content, block->blk->min_width);
+        if (block->blk->given_min_width > 0) {
+            sizes.min_content = max(sizes.min_content, block->blk->given_min_width);
         }
-        if (block->blk->max_width > 0) {
-            sizes.max_content = min(sizes.max_content, block->blk->max_width);
+        if (block->blk->given_max_width > 0) {
+            sizes.max_content = min(sizes.max_content, block->blk->given_max_width);
         }
     }
-
     return sizes;
 }
 

@@ -6,18 +6,18 @@
 #include <string.h>
 AlignType resolve_align_type(PropValue value);
 
-int resolve_length_value(LayoutContext* lycon, uintptr_t property,
+float resolve_length_value(LayoutContext* lycon, uintptr_t property,
     const lxb_css_value_length_percentage_t *value);
 
 lxb_status_t style_print_callback(const lxb_char_t *data, size_t len, void *ctx) {
-    printf("style rule: %.*s\n", (int) len, (const char *) data);
+    log_debug("style rule: %.*s", (int) len, (const char *) data);
     return LXB_STATUS_OK;
 }
 
 lxb_status_t lxb_html_element_style_print(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     lexbor_avl_node_t *node, void *ctx) {
     lxb_css_rule_declaration_t *declr = (lxb_css_rule_declaration_t *) node->value;
-    printf("style entry: %ld\n", declr->type);
+    log_debug("style entry: %ld", declr->type);
     lxb_css_rule_declaration_serialize(declr, style_print_callback, NULL);
     return LXB_STATUS_OK;
 }
@@ -193,7 +193,7 @@ Color resolve_color_value(const lxb_css_value_color_t *color) {
         switch (hex->type) {
             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_4:
             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_3:
-                printf("color 3/4 hex: %d, %d, %d, %d\n", rgba->r, rgba->g, rgba->b, rgba->a);
+                log_debug("color 3/4 hex: %d, %d, %d, %d", rgba->r, rgba->g, rgba->b, rgba->a);
                 r = (rgba->r << 4) | rgba->r;
                 g = (rgba->g << 4) | rgba->g;
                 b = (rgba->b << 4) | rgba->b;
@@ -202,9 +202,9 @@ Color resolve_color_value(const lxb_css_value_color_t *color) {
                 return c;
             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_8:
             case LXB_CSS_PROPERTY_COLOR_HEX_TYPE_6:
-                printf("color 6 hex: %d, %d, %d\n", rgba->r, rgba->g, rgba->b);
+                log_debug("color 6 hex: %d, %d, %d", rgba->r, rgba->g, rgba->b);
                 // r = rgba->r;  g = rgba->g;  b = rgba->b;  a = rgba->a;
-                // c.c = (r << 24) | (g << 16) | (b << 8) | a;  printf("c: %d\n", c.c);
+                // c.c = (r << 24) | (g << 16) | (b << 8) | a;  log_debug("c: %d", c.c);
                 c.c = *((uint32_t*)rgba);
                 return c;
         }
@@ -228,9 +228,9 @@ Color resolve_color_value(const lxb_css_value_color_t *color) {
 }
 
 void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* decl) {
-    printf("resolve font size property\n");
+    log_debug("resolve font size property");
     if (!decl) {
-        printf("no decl\n");
+        log_debug("no decl");
         if (lycon->elmt->style) {
             if (lycon->elmt->as_element()) {
                 decl = lxb_dom_element_style_by_id((lxb_dom_element_t*)lycon->elmt->as_element(), LXB_CSS_PROPERTY_FONT_SIZE);
@@ -238,29 +238,29 @@ void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* d
         }
     }
     if (decl) {
-        printf("got decl\n");
+        log_debug("got decl");
         lxb_css_property_font_size_t* font_size = decl->u.font_size;
-        printf("resolving font length\n");
+        log_debug("resolving font length");
         lycon->font.current_font_size = resolve_length_value(lycon,
             LXB_CSS_PROPERTY_FONT_SIZE, &font_size->length);
         return;
     }
     // use font size from context
     lycon->font.current_font_size = lycon->font.face.style.font_size;
-    printf("resolved font size\n");
+    log_debug("resolved font size");
 }
 
-int resolve_length_value(LayoutContext* lycon, uintptr_t property,
+float resolve_length_value(LayoutContext* lycon, uintptr_t property,
     const lxb_css_value_length_percentage_t *value) {
-    int result = 0;
-    log_debug("length value type %d", value->type);
+    float result = 0;
+
     switch (value->type) {
     case LXB_CSS_VALUE__NUMBER:  // keep it as it is
-        printf("number value\n");
+        log_debug("number value");
         result = value->u.length.num;
         break;
     case LXB_CSS_VALUE__LENGTH:
-        printf("length value unit: %d\n", value->u.length.unit);
+        log_debug("length value unit: %d", value->u.length.unit);
         result = value->u.length.num;
         switch (value->u.length.unit) {
         // absolute units
@@ -292,7 +292,7 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         //     break;
         case LXB_CSS_UNIT_REM:
             if (lycon->root_font_size < 0) {
-                printf("resolving font size for rem value");
+                log_debug("resolving font size for rem value");
                 resolve_font_size(lycon, NULL);
                 lycon->root_font_size = lycon->font.current_font_size < 0 ?
                     lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
@@ -304,7 +304,7 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
                 result = value->u.length.num * lycon->font.face.style.font_size;
             } else {
                 if (lycon->font.current_font_size < 0) {
-                    printf("resolving font size for em value");
+                    log_debug("resolving font size for em value");
                     resolve_font_size(lycon, NULL);
                 }
                 result = value->u.length.num * lycon->font.current_font_size;
@@ -312,7 +312,7 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
             break;
         default:
             result = 0;
-            printf("Unknown unit: %d\n", value->u.length.unit);
+            log_debug("Unknown unit: %d", value->u.length.unit);
         }
         break;
     case LXB_CSS_VALUE__PERCENTAGE:
@@ -320,7 +320,7 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
             result = value->u.percentage.num * lycon->font.face.style.font_size / 100;
         } else {
             // todo: handle % based on property
-            printf("DEBUG: Percentage calculation: %.2f%% of parent width %d = %.2f\n",
+            log_debug("Percentage calculation: %.2f%% of parent width %d = %.2f",
                    value->u.percentage.num, lycon->block.pa_block->width,
                    value->u.percentage.num * lycon->block.pa_block->width / 100);
             result = value->u.percentage.num * lycon->block.pa_block->width / 100;
@@ -332,12 +332,12 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
             property == LXB_CSS_PROPERTY_MARGIN_RIGHT) ? LENGTH_AUTO : 0;
         break;
     case 12:  // Handle actual parsed value for 'auto'
-        printf("DEBUG: Found auto value (type 12) for property %d\n", property);
+        log_debug("Found auto value (type 12) for property %d", property);
         if (property == LXB_CSS_PROPERTY_MARGIN || property == LXB_CSS_PROPERTY_MARGIN_LEFT ||
             property == LXB_CSS_PROPERTY_MARGIN_RIGHT) {
             result = LENGTH_AUTO;
         } else if (property == LXB_CSS_PROPERTY_WIDTH || property == LXB_CSS_PROPERTY_HEIGHT) {
-            printf("DEBUG: Setting width/height auto to -1 (special marker)\n");
+            log_debug("Setting width/height auto to -1 (special marker)");
             result = -1;  // Use -1 as a special marker for width/height auto
         } else {
             result = 0;
@@ -347,6 +347,7 @@ int resolve_length_value(LayoutContext* lycon, uintptr_t property,
         log_warn("unknown length type: %d (LXB_CSS_VALUE_AUTO=%d)", value->type, LXB_CSS_VALUE_AUTO);
         result = 0;
     }
+    log_debug("length value: type %d, val %f", value->type, result);
     return (int)result;
 }
 
@@ -493,12 +494,12 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
                         inner_display = LXB_CSS_VALUE_FLEX;
                         break;
                     case LXB_CSS_VALUE_GRID:
-                        printf("DEBUG: GRID case matched! Setting inner=GRID\n");
+                        log_debug("DEBUG: GRID case matched! Setting inner=GRID\n");
                         outer_display = LXB_CSS_VALUE_BLOCK;
                         inner_display = LXB_CSS_VALUE_GRID;
                         break;
                     case 246:  // Actual parsed value for 'grid'
-                        printf("DEBUG: GRID case matched (value 246)! Setting inner=GRID\n");
+                        log_debug("DEBUG: GRID case matched (value 246)! Setting inner=GRID\n");
                         outer_display = LXB_CSS_VALUE_BLOCK;
                         inner_display = LXB_CSS_VALUE_GRID;
                         break;
@@ -527,12 +528,12 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
                         inner_display = LXB_CSS_VALUE_TABLE_CELL;
                         break;
                     case LXB_CSS_VALUE_NONE:
-                        printf("DEBUG: NONE case matched! Setting display=none\n");
+                        log_debug("DEBUG: NONE case matched! Setting display=none");
                         outer_display = LXB_CSS_VALUE_NONE;
                         inner_display = LXB_CSS_VALUE_NONE;
                         break;
                     default:  // unknown display
-                        printf("DEBUG: Unknown display value %d, defaulting to inline flow\n", display_decl->u.display->a);
+                        log_debug("DEBUG: Unknown display value %d, defaulting to inline flow", display_decl->u.display->a);
                         outer_display = LXB_CSS_VALUE_INLINE;
                         inner_display = LXB_CSS_VALUE_FLOW;
                 }
@@ -551,10 +552,13 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     uint32_t specificity = ((lxb_style_node_t *) node)->sp;
     lxb_css_rule_declaration_t *declr = (lxb_css_rule_declaration_t *) node->value;
     const lxb_css_entry_data_t *data = lxb_css_property_by_id(declr->type);
-    if (!data) { return LXB_STATUS_ERROR_NOT_EXISTS; }
+    if (!data) {
+        log_debug("no data for property: %ld %s", declr->type);
+        return LXB_STATUS_ERROR_NOT_EXISTS;
+    }
 
-    printf("style entry: %ld %s, specy: %d\n", declr->type, data->name, specificity);
-    if (!lycon->view) { printf("missing view"); return LXB_STATUS_ERROR_NOT_EXISTS; }
+    log_debug("style entry: %ld, %s, specificity: %d", declr->type, data->name, specificity);
+    if (!lycon->view) { log_debug("missing view");  return LXB_STATUS_ERROR_NOT_EXISTS; }
     ViewSpan* span = (ViewSpan*)lycon->view;
     ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
     Color c;  int length;
@@ -595,7 +599,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_CURSOR: {
         const lxb_css_property_cursor_t *cursor = declr->u.cursor;
-        printf("cursor property: %d\n", cursor->type);
+        log_debug("cursor property: %d", cursor->type);
         if (!span->in_line) {
             span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
         }
@@ -604,7 +608,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_COLOR: {
         const lxb_css_property_color_t *color = declr->u.color;
-        printf("color property: %d, red: %d\n", color->type, LXB_CSS_VALUE_RED);
+        log_debug("color property: %d, red: %d", color->type, LXB_CSS_VALUE_RED);
         if (!span->in_line) {
             span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
         }
@@ -614,7 +618,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_BACKGROUND:  case LXB_CSS_PROPERTY_BACKGROUND_COLOR: {
         const lxb_css_property_background_color_t *background_color = declr->u.background_color;
-        printf("background color property: %d\n", background_color->type);
+        log_debug("background color property: %d", background_color->type);
         if (!span->bound) {
             span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
@@ -1093,13 +1097,13 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         span->font->family = (char*)alloc_prop(lycon, font_family->first->u.str.length + 1);
         strncpy(span->font->family, (char*)font_family->first->u.str.data, font_family->first->u.str.length);
         span->font->family[font_family->first->u.str.length] = '\0';
-        printf("font family property: %s\n", span->font->family);
+        log_debug("font family property: %s", span->font->family);
         break;
     }
     case LXB_CSS_PROPERTY_FONT_SIZE: {
-        printf("before resolving font size\n");
+        log_debug("before resolving font size");
         resolve_font_size(lycon, declr);
-        printf("after resolving font size\n");
+        log_debug("after resolving font size");
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_size = lycon->font.current_font_size;
         assert(span->font->font_size >= 0);
@@ -1107,19 +1111,19 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_FONT_STYLE: {
         const lxb_css_property_font_style_t *font_style = declr->u.font_style;
-        printf("font style property: %d\n", font_style->type);
+        log_debug("font style property: %d", font_style->type);
         break;
     }
     case LXB_CSS_PROPERTY_FONT_WEIGHT: {
         const lxb_css_property_font_weight_t *font_weight = declr->u.font_weight;
-        printf("font weight property: %d\n", font_weight->type);
+        log_debug("font weight property: %d", font_weight->type);
         if (!span->font) { span->font = alloc_font_prop(lycon); }
         span->font->font_weight = font_weight->type;
         break;
     }
     case LXB_CSS_PROPERTY_TEXT_DECORATION: {
         const lxb_css_property_text_decoration_t *text_decoration = declr->u.text_decoration;
-        printf("text decoration property: %d\n", text_decoration->line.type);
+        log_debug("text decoration property: %d", text_decoration->line.type);
         if (!span->font) {
             span->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
         }
@@ -1129,7 +1133,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_TEXT_ALIGN: {
         if (!block) { break; }
         const lxb_css_property_text_align_t *text_align = declr->u.text_align;
-        printf("text align property: %d\n", text_align->type);
+        log_debug("text align property: %d", text_align->type);
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->text_align = text_align->type;
         break;
@@ -1137,8 +1141,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_WIDTH: {
         const lxb_css_property_width_t *width = declr->u.width;
         lycon->block.given_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_WIDTH, width);
-        printf("width property: %d\n", lycon->block.given_width);
-
+        log_debug("width property: %d", lycon->block.given_width);
         // Store the raw width value for box-sizing calculations
         if (block) {
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
@@ -1149,8 +1152,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_HEIGHT: {
         const lxb_css_property_height_t *height = declr->u.height;
         lycon->block.given_height = resolve_length_value(lycon, LXB_CSS_PROPERTY_HEIGHT, height);
-        printf("height property: %d\n", lycon->block.given_height);
-
+        log_debug("height property: %d", lycon->block.given_height);
         // Store the raw height value for box-sizing calculations
         if (block) {
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
@@ -1163,38 +1165,38 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_box_sizing_t *box_sizing = declr->u.box_sizing;
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         block->blk->box_sizing = box_sizing->type;
-        printf("box-sizing property: %d (border-box=%d)\n", box_sizing->type, LXB_CSS_VALUE_BORDER_BOX);
+        log_debug("box-sizing property: %d (border-box=%d)", box_sizing->type, LXB_CSS_VALUE_BORDER_BOX);
         break;
     }
     case LXB_CSS_PROPERTY_MIN_WIDTH: {
         if (!block) { break; }
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->min_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_MIN_WIDTH, declr->u.width);
+        block->blk->given_min_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_MIN_WIDTH, declr->u.width);
         break;
     }
     case LXB_CSS_PROPERTY_MAX_WIDTH: {
         if (!block) { break; }
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        printf("max width property: %d\n", declr->u.width->type);
-        block->blk->max_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_MAX_WIDTH, declr->u.width);
+        block->blk->given_max_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_MAX_WIDTH, declr->u.width);
+        log_debug("max width property: %d, val %f", declr->u.width->type, block->blk->given_max_width);
         break;
     }
     case LXB_CSS_PROPERTY_MIN_HEIGHT: {
         if (!block) { break; }
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->min_height = resolve_length_value(lycon, LXB_CSS_PROPERTY_MIN_HEIGHT, declr->u.height);
+        block->blk->given_min_height = resolve_length_value(lycon, LXB_CSS_PROPERTY_MIN_HEIGHT, declr->u.height);
         break;
     }
     case LXB_CSS_PROPERTY_MAX_HEIGHT: {
         if (!block) { break; }
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->max_height = resolve_length_value(lycon, LXB_CSS_PROPERTY_MAX_HEIGHT, declr->u.height);
+        block->blk->given_max_height = resolve_length_value(lycon, LXB_CSS_PROPERTY_MAX_HEIGHT, declr->u.height);
         break;
     }
     case LXB_CSS_PROPERTY_OVERFLOW_X: {
         if (!block) { break; }
         const lxb_css_property_overflow_x_t *overflow_x = declr->u.overflow_x;
-        printf("overflow x property: %d\n", overflow_x->type);
+        log_debug("overflow x property: %d", overflow_x->type);
         if (!block->scroller) {
             block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
         }
@@ -1204,7 +1206,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_OVERFLOW_Y: {
         if (!block) { break; }
         const lxb_css_property_overflow_y_t *overflow = declr->u.overflow_y;
-        printf("overflow property: %d\n", overflow->type);
+        log_debug("overflow property: %d", overflow->type);
         if (!block->scroller) {
             block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
         }
@@ -1212,20 +1214,20 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         break;
     }
     case LXB_CSS_PROPERTY_POSITION: {
-        printf("DEBUG: Entering LXB_CSS_PROPERTY_POSITION case!\n");
+        log_debug("DEBUG: Entering LXB_CSS_PROPERTY_POSITION case!");
         if (!block) {
-            printf("DEBUG: No block available for position property\n");
+            log_debug("DEBUG: No block available for position property");
             break;
         }
         const lxb_css_property_position_t *position = declr->u.position;
-        printf("DEBUG: CSS position property parsed: value=%d (STATIC=%d, RELATIVE=%d, ABSOLUTE=%d, FIXED=%d)\n",
+        log_debug("DEBUG: CSS position property parsed: value=%d (STATIC=%d, RELATIVE=%d, ABSOLUTE=%d, FIXED=%d)",
                   position->type, LXB_CSS_VALUE_STATIC, LXB_CSS_VALUE_RELATIVE, LXB_CSS_VALUE_ABSOLUTE, LXB_CSS_VALUE_FIXED);
         if (!block->position) {
             block->position = alloc_position_prop(lycon);
-            printf("DEBUG: Allocated new PositionProp for block\n");
+            log_debug("DEBUG: Allocated new PositionProp for block");
         }
         block->position->position = position->type;
-        printf("DEBUG: Stored position value %d in block->position->position\n", position->type);
+        log_debug("DEBUG: Stored position value %d in block->position->position", position->type);
         break;
     }
     case LXB_CSS_PROPERTY_TOP: {
@@ -1275,13 +1277,13 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_CLEAR: {
         if (!block) { break; }
         const lxb_css_property_clear_t *clear = declr->u.clear;
-        printf("DEBUG: CSS clear property parsed: value=%d (LEFT=47, RIGHT=48, BOTH=372, NONE=%d)\n",
+        log_debug("CSS clear property parsed: value=%d (LEFT=47, RIGHT=48, BOTH=372, NONE=%d)",
                clear->type, LXB_CSS_VALUE_NONE);
         if (!block->position) {
             block->position = alloc_position_prop(lycon);
         }
         block->position->clear = clear->type;
-        printf("DEBUG: Stored clear value %d in block->position->clear\n", clear->type);
+        log_debug("Stored clear value %d in block->position->clear", clear->type);
         break;
     }
     case LXB_CSS_PROPERTY_Z_INDEX: {
@@ -1319,7 +1321,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_flex_wrap_t *flex_wrap = declr->u.flex_wrap;
         alloc_flex_prop(lycon, block);
         // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
-        printf("DEBUG: Setting flex-wrap to %d\n", flex_wrap->type);
+        log_debug("DEBUG: Setting flex-wrap to %d", flex_wrap->type);
         block->embed->flex->wrap = (FlexWrap)flex_wrap->type;
         break;
     }
@@ -1339,17 +1341,17 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_JUSTIFY_CONTENT: {
         if (!block) { break; }
         const lxb_css_property_justify_content_t *justify_content = declr->u.justify_content;
-        printf("DEBUG: JUSTIFY_CONTENT parsed - type=%d\n", justify_content->type);
+        log_debug("DEBUG: JUSTIFY_CONTENT parsed - type=%d", justify_content->type);
         alloc_flex_prop(lycon, block);
 
         // Handle space-evenly specially since lexbor might not support it
         if (justify_content->type == LXB_CSS_VALUE_SPACE_EVENLY) {
-            printf("DEBUG: Setting justify-content to SPACE_EVENLY\n");
+            log_debug("Setting justify-content to SPACE_EVENLY");
             block->embed->flex->justify = LXB_CSS_VALUE_SPACE_EVENLY;
         } else {
             // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
             block->embed->flex->justify = (JustifyContent)justify_content->type;
-            printf("DEBUG: Set justify-content to %d\n", justify_content->type);
+            log_debug("Set justify-content to %d", justify_content->type);
         }
         break;
     }
@@ -1359,7 +1361,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         alloc_flex_prop(lycon, block);
         // CRITICAL FIX: Now that enums align with Lexbor constants, use directly
         block->embed->flex->align_items = (AlignType)align_items->type;
-        printf("DEBUG: CSS align-items parsed: type=%d\n", align_items->type);
+        log_debug("CSS align-items parsed: type=%d", align_items->type);
         break;
     }
     case LXB_CSS_PROPERTY_ALIGN_CONTENT: {
@@ -1464,7 +1466,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         log_debug("Processing custom property: %.*s = %.*s\n",
                (int)custom->name.length, (const char*)custom->name.data,
                (int)custom->value.length, (const char*)custom->value.data);
-        printf("DEBUG: Custom property: name='%.*s', value='%.*s'\n",
+        log_debug("Custom property: name='%.*s', value='%.*s'",
                (int)custom->name.length, (const char*)custom->name.data,
                (int)custom->value.length, (const char*)custom->value.data);
 
@@ -1498,8 +1500,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         // Handle justify-content space-evenly as custom property since lexbor doesn't support it
         else if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "justify-content", 15) == 0) {
             const char* value_str = (const char*)custom->value.data;
-            printf("DEBUG: Custom justify-content property found: '%.*s'\n",
-                   (int)custom->value.length, value_str);
+            log_debug("Custom justify-content property found: '%.*s'", (int)custom->value.length, value_str);
 
             // Check if the value is "space-evenly"
             if (custom->value.length == 12 && strncmp(value_str, "space-evenly", 12) == 0) {
@@ -1507,8 +1508,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 if (block) {
                     alloc_flex_prop(lycon, block);
                     block->embed->flex->justify = LXB_CSS_VALUE_SPACE_EVENLY;
-                    printf("DEBUG: Set justify-content to SPACE_EVENLY (%d)\n", LXB_CSS_VALUE_SPACE_EVENLY);
-                    log_debug("Set justify-content: space-evenly\n");
+                    log_debug("Set justify-content to SPACE_EVENLY (%d)", LXB_CSS_VALUE_SPACE_EVENLY);
                 }
             }
         }
@@ -1539,16 +1539,16 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                     }
                     // Check if this is a grid container
                     if (!block->embed && block->embed->grid) {
-                        printf("DEBUG: Setting gap on grid container: %dpx\n", gap_px);
+                        log_debug("Setting gap on grid container: %dpx", gap_px);
                         block->embed->grid->row_gap = gap_px;
                         block->embed->grid->column_gap = gap_px;
-                        log_debug("Set grid gap: %dpx (from %s)\n", gap_px, value_str);
+                        log_debug("Set grid gap: %dpx (from %s)", gap_px, value_str);
                     } else {
                         // Fallback to flex container for backward compatibility
                         alloc_flex_prop(lycon, block);
                         block->embed->flex->row_gap = gap_px;
                         block->embed->flex->column_gap = gap_px;
-                        log_debug("Set flex gap: %dpx (from %s)\n", gap_px, value_str);
+                        log_debug("Set flex gap: %dpx (from %s)", gap_px, value_str);
                     }
                 }
             }
@@ -1556,9 +1556,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
         // grid-template-rows
         else if (custom->name.length == 18 && strncmp((const char*)custom->name.data, "grid-template-rows", 18) == 0) {
-            printf("DEBUG: grid-template-rows matched! block=%p\n", block);
+            log_debug("grid-template-rows matched! block=%p", block);
             if (block) {
-                printf("DEBUG: Inside grid-template-rows block processing\n");
+                log_debug("Inside grid-template-rows block processing");
                 alloc_grid_prop(lycon, block);
 
                 // Enhanced parsing for advanced features
@@ -1568,24 +1568,22 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 template_str[len] = '\0';
 
                 // Parse the template string (handles minmax, repeat, etc.)
-                printf("DEBUG: About to parse grid-template-rows: '%s'\n", template_str);
+                log_debug("About to parse grid-template-rows: '%s'", template_str);
                 if (block->embed->grid->grid_template_rows) {
-                    printf("DEBUG: Calling parse_grid_template_tracks for rows\n");
+                    log_debug("Calling parse_grid_template_tracks for rows");
                     parse_grid_template_tracks(block->embed->grid->grid_template_rows, template_str);
                 } else {
-                    printf("DEBUG: grid_template_rows is NULL!\n");
+                    log_debug("grid_template_rows is NULL!");
                 }
-
-                printf("DEBUG: Set grid-template-rows: %s\n", template_str);
-                log_debug("Set grid-template-rows: %s\n", template_str);
+                log_debug("Set grid-template-rows: %s", template_str);
             }
         }
 
         // grid-template-columns
         else if (custom->name.length == 21 && strncmp((const char*)custom->name.data, "grid-template-columns", 21) == 0) {
-            printf("DEBUG: grid-template-columns matched! block=%p\n", block);
+            log_debug("grid-template-columns matched! block=%p", block);
             if (block) {
-                printf("DEBUG: Inside grid-template-columns block processing\n");
+                log_debug("Inside grid-template-columns block processing");
                 alloc_grid_prop(lycon, block);
 
                 // Enhanced parsing for advanced features
@@ -1595,36 +1593,34 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 template_str[len] = '\0';
 
                 // Parse the template string (handles minmax, repeat, etc.)
-                printf("DEBUG: About to parse grid-template-columns: '%s'\n", template_str);
+                log_debug("About to parse grid-template-columns: '%s'", template_str);
                 if (block->embed->grid->grid_template_columns) {
-                    printf("DEBUG: Calling parse_grid_template_tracks for columns\n");
+                    log_debug("Calling parse_grid_template_tracks for columns");
                     parse_grid_template_tracks(block->embed->grid->grid_template_columns, template_str);
                 } else {
-                    printf("DEBUG: grid_template_columns is NULL!\n");
+                    log_debug("grid_template_columns is NULL!");
                 }
-
-                printf("DEBUG: Set grid-template-columns: %s\n", template_str);
-                log_debug("Set grid-template-columns: %s\n", template_str);
+                log_debug("Set grid-template-columns: %s", template_str);
             }
         }
 
         // grid-template-areas
         else if (custom->name.length == 19 && strncmp((const char*)custom->name.data, "grid-template-areas", 19) == 0) {
-            printf("DEBUG: grid-template-areas matched! block=%p\n", block);
+            log_debug("grid-template-areas matched! block=%p", block);
             if (block) {
-                printf("DEBUG: Inside grid-template-areas block processing\n");
+                log_debug("Inside grid-template-areas block processing");
                 alloc_grid_prop(lycon, block);
-                printf("DEBUG: Grid container allocated, grid_container=%p\n", block->embed->grid);
+                log_debug("Grid container allocated, grid_container=%p", block->embed->grid);
 
                 // Parse grid template areas
                 char areas_str[256];
                 int len = min((int)custom->value.length, 255);
                 strncpy(areas_str, (const char*)custom->value.data, len);
                 areas_str[len] = '\0';
-                printf("DEBUG: About to parse grid-template-areas: '%s'\n", areas_str);
+                log_debug("About to parse grid-template-areas: '%s'", areas_str);
                 parse_grid_template_areas(block->embed->grid, areas_str);
-                printf("DEBUG: Finished parsing grid-template-areas\n");
-                log_debug("Set grid-template-areas: %s\n", areas_str);
+                log_debug("Finished parsing grid-template-areas");
+                log_debug("Set grid-template-areas: %s", areas_str);
             }
         }
 
@@ -1788,6 +1784,9 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
     }
+    default:
+        log_debug("unknown property: %d", declr->type);
+        break;
     }
 
     return LXB_STATUS_OK;

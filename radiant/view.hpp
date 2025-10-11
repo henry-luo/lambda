@@ -187,8 +187,8 @@ typedef struct {
     PropValue text_align;
     float line_height;  // non-negative
     float text_indent;  // can be negative
-    float min_width, max_width;  // non-negative
-    float min_height, max_height;  // non-negative
+    float given_min_width, given_max_width;  // non-negative
+    float given_min_height, given_max_height;  // non-negative
     PropValue list_style_type;
     PropValue box_sizing;  // LXB_CSS_VALUE_CONTENT_BOX or LXB_CSS_VALUE_BORDER_BOX
     float given_width, given_height;  // CSS specified width/height values

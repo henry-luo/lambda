@@ -141,6 +141,7 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
 FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint, bool for_rendering) {
     FT_GlyphSlot slot = NULL;  FT_Error error;
     FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
+    // FT_LOAD_NO_HINTING matches browser closely, whereas FT_LOAD_FORCE_AUTOHINT makes the text narrower
     FT_Int32 load_flags = for_rendering ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
     if (char_index > 0) {
         error = FT_Load_Glyph(face, char_index, load_flags);
@@ -190,7 +191,7 @@ void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp
     }
 
     // Use sub-pixel rendering flags for better quality
-    FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING; // FT_LOAD_FORCE_AUTOHINT; // FT_LOAD_RENDER | FT_LOAD_TARGET_LCD | FT_LOAD_FORCE_AUTOHINT;
+    FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
     if (FT_Load_Char(fbox->face.ft_face, ' ', load_flags)) {
         log_warn("Could not load space character for font: %s", font_name);
         fbox->face.space_width = fbox->face.ft_face->size->metrics.y_ppem / 64.0;
