@@ -88,16 +88,18 @@ void line_break(LayoutContext* lycon) {
 LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode *text_node) {
     unsigned char *str = text_node->text_data();
     if (!str) return RDT_LINE_NOT_FILLED;  // null check
-    float text_width = 0;
+    float text_width = 0.0f;
     do {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
-        FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
+        // Use sub-pixel rendering flags for better quality
+        FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_LCD | FT_LOAD_FORCE_AUTOHINT;
         if (FT_Load_Char(lycon->font.face.ft_face, *str, load_flags)) {
             fprintf(stderr, "Could not load character '%c'\n", *str);
             return RDT_LINE_NOT_FILLED;
         }
         FT_GlyphSlot slot = lycon->font.face.ft_face->glyph;
-        text_width += slot->advance.x / 64.0;
+        // Use precise float calculation for advance
+        text_width += (float)(slot->advance.x) / 64.0f;
         if (lycon->line.advance_x + text_width > lycon->line.right) { // line filled up
             return RDT_LINE_FILLED;
         }
@@ -220,7 +222,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 else { next_ch = str + bytes; }
             }
             else { next_ch = str + 1; }
-            FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.face.ft_face, &lycon->font.face.style, codepoint);
+            FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.face.ft_face, &lycon->font.face.style, codepoint, false);
             wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.face.space_width;
             log_debug("char width: '%c', width %f", *str, wd);
         }

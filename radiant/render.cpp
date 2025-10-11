@@ -85,7 +85,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             if (bytes <= 0) { p++;  codepoint = 0; }
             else { p += bytes; }
 
-            FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.face.ft_face, &rdcon->font.face.style, codepoint);
+            FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.face.ft_face, &rdcon->font.face.style, codepoint, true);
             if (!glyph) {
                 // draw a square box for missing glyph
                 Rect rect = {x + 1, y, (float)(rdcon->font.face.space_width - 2), (float)(rdcon->font.face.ft_face->size->metrics.y_ppem / 64.0)};

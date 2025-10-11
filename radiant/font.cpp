@@ -88,6 +88,12 @@ FT_Face load_font_face(UiContext* uicon, const char* font_name, float font_size)
             // Set height of the font
             FT_Set_Pixel_Sizes(face, 0, font_size);
             log_debug("Font loaded: %s, size: %dpx", font_name, font_size);
+            // Set font size using 26.6 fixed point for sub-pixel precision
+            // Convert float font_size to 26.6 fixed point (multiply by 64)
+            // FT_F26Dot6 char_size = (FT_F26Dot6)(font_size * 64.0);
+            // FT_Set_Char_Size(face, 0, char_size, 96, 96); // 96 DPI for screen
+            // log_debug("Font loaded: %s, size: %.1fpx (26.6 fixed: %ld)", font_name, font_size, char_size);
+
             // put the font face into the hashmap
             if (uicon->fontface_map) {
                 // copy the font name
@@ -132,10 +138,10 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     return face;
 }
 
-FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint) {
+FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint, bool for_rendering) {
     FT_GlyphSlot slot = NULL;  FT_Error error;
     FT_UInt char_index = FT_Get_Char_Index(face, codepoint);
-    FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
+    FT_Int32 load_flags = for_rendering ? (FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL) : (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
     if (char_index > 0) {
         error = FT_Load_Glyph(face, char_index, load_flags);
         if (!error) { slot = face->glyph;  return slot; }
@@ -183,11 +189,13 @@ void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp
         return;
     }
 
-    FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
+    // Use sub-pixel rendering flags for better quality
+    FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING; // FT_LOAD_FORCE_AUTOHINT; // FT_LOAD_RENDER | FT_LOAD_TARGET_LCD | FT_LOAD_FORCE_AUTOHINT;
     if (FT_Load_Char(fbox->face.ft_face, ' ', load_flags)) {
         log_warn("Could not load space character for font: %s", font_name);
         fbox->face.space_width = fbox->face.ft_face->size->metrics.y_ppem / 64.0;
     } else {
+        // Use float precision for space width calculation
         fbox->face.space_width = fbox->face.ft_face->glyph->advance.x / 64.0;
     }
     FT_Bool use_kerning = FT_HAS_KERNING(fbox->face.ft_face);

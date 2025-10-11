@@ -1,5 +1,7 @@
 #include "view.hpp"
 #include <locale.h>
+#include <freetype/ftlcdfil.h>  // For FT_Library_SetLcdFilter
+#include "font_precision.h"      // For configure_freetype_subpixel
 
 #include "../lib/log.h"
 void view_pool_destroy(ViewTree* tree);
@@ -32,10 +34,21 @@ int ui_context_init(UiContext* uicon, bool headless) {
 
     setlocale(LC_ALL, "");  // Set locale to support Unicode (input)
 
-    // init FreeType
+    // init FreeType with sub-pixel rendering configuration
     if (FT_Init_FreeType(&uicon->ft_library)) {
         fprintf(stderr, "Could not initialize FreeType library\n");
         return EXIT_FAILURE;
+    }
+
+    // Configure sub-pixel rendering for better text quality
+    configure_freetype_subpixel(uicon->ft_library);
+
+    // Configure FreeType for better sub-pixel rendering
+    FT_Error lcd_error = FT_Library_SetLcdFilter(uicon->ft_library, FT_LCD_FILTER_DEFAULT);
+    if (lcd_error) {
+        log_debug("Could not set LCD filter (FreeType version may not support it)");
+    } else {
+        log_debug("LCD filter enabled for sub-pixel rendering");
     }
     // init Fontconfig
     uicon->font_config = FcInitLoadConfigAndFonts();
