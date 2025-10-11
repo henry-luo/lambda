@@ -16,6 +16,7 @@ LineFillStatus span_has_line_filled(LayoutContext* lycon, DomNode* span) {
 }
 
 void line_init(LayoutContext* lycon) {
+    log_debug("initialize new line");
     lycon->line.max_ascender = lycon->line.max_descender = 0;
     lycon->line.advance_x = lycon->line.left;
     lycon->line.is_line_start = true;  lycon->line.has_space = false;
@@ -92,7 +93,7 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode *text_node) {
     do {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
         // Use sub-pixel rendering flags for better quality
-        FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_LCD | FT_LOAD_FORCE_AUTOHINT;
+        FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
         if (FT_Load_Char(lycon->font.face.ft_face, *str, load_flags)) {
             fprintf(stderr, "Could not load character '%c'\n", *str);
             return RDT_LINE_NOT_FILLED;
@@ -224,7 +225,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             else { next_ch = str + 1; }
             FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.face.ft_face, &lycon->font.face.style, codepoint, false);
             wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.face.space_width;
-            log_debug("char width: '%c', width %f", *str, wd);
+            // log_debug("char width: '%c', width %f", *str, wd);
         }
         // handle kerning
         if (lycon->font.face.has_kerning) {
@@ -239,7 +240,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             lycon->line.prev_glyph_index = glyph_index;
         }
-        // printf("char: %c, width: %d\n", *str, wd);
+        log_debug("layout char: %c, x: %f, width: %f, wd: %f, line right: %f", *str, text->x, text->width, wd, lycon->line.right);
         text->width += wd;
         if (text->x + text->width > lycon->line.right) { // line filled up
             log_debug("line filled up");

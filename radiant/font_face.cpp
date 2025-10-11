@@ -572,7 +572,7 @@ void setup_font_enhanced(UiContext* uicon, EnhancedFontBox* fbox,
 
     if (fbox->face) {
         // Calculate space width
-        FT_Int32 load_flags = FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
+        FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING); // FT_LOAD_RENDER | FT_LOAD_TARGET_NORMAL;
         if (FT_Load_Char(fbox->face, ' ', load_flags)) {
             clog_warn(font_log, "Could not load space character for %s", font_name);
             fbox->space_width = fbox->face->size->metrics.y_ppem / 64.0;

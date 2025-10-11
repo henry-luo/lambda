@@ -158,7 +158,7 @@ BlockProp* alloc_block_prop(LayoutContext* lycon) {
     BlockProp* prop = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
     prop->line_height = lycon->block.line_height;  // inherit from parent
     prop->text_align = lycon->block.text_align;  // inherit from parent
-    prop->min_height = prop->min_width = prop->max_height = prop->max_width = -1;  // -1 for undefined
+    prop->given_min_height = prop->given_min_width = prop->given_max_height = prop->given_max_width = -1;  // -1 for undefined
     prop->box_sizing = LXB_CSS_VALUE_CONTENT_BOX;  // default to content-box
     prop->given_width = prop->given_height = -1;  // -1 for not specified
     return prop;
@@ -316,10 +316,10 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         strbuf_append_format(buf, "txt-indent:%f ", block->blk->text_indent);
         strbuf_append_format(buf, "ls-sty-type:%d\n", block->blk->list_style_type);
         strbuf_append_char_n(buf, ' ', indent);
-        strbuf_append_format(buf, "min-wd:%f ", block->blk->min_width);
-        strbuf_append_format(buf, "max-wd:%f ", block->blk->max_width);
-        strbuf_append_format(buf, "min-hg:%f ", block->blk->min_height);
-        strbuf_append_format(buf, "max-hg:%f ", block->blk->max_height);
+        strbuf_append_format(buf, "min-wd:%f ", block->blk->given_min_width);
+        strbuf_append_format(buf, "max-wd:%f ", block->blk->given_max_width);
+        strbuf_append_format(buf, "min-hg:%f ", block->blk->given_min_height);
+        strbuf_append_format(buf, "max-hg:%f ", block->blk->given_max_height);
 
         // Add box-sizing and given dimensions debugging
         if (block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
@@ -819,13 +819,13 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_format(buf, "\"text_indent\": %.2f,\n", block->blk->text_indent);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"min_width\": %.2f,\n", block->blk->min_width);
+        strbuf_append_format(buf, "\"min_width\": %.2f,\n", block->blk->given_min_width);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"max_width\": %.2f,\n", block->blk->max_width);
+        strbuf_append_format(buf, "\"max_width\": %.2f,\n", block->blk->given_max_width);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"min_height\": %.2f,\n", block->blk->min_height);
+        strbuf_append_format(buf, "\"min_height\": %.2f,\n", block->blk->given_min_height);
         strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"max_height\": %.2f,\n", block->blk->max_height);
+        strbuf_append_format(buf, "\"max_height\": %.2f,\n", block->blk->given_max_height);
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_format(buf, "\"box_sizing\": \"%s\"",
             block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX ? "border-box" : "content-box");
