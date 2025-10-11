@@ -90,7 +90,7 @@ int calculate_basic_text_width(LayoutContext* lycon, const char* text, int lengt
         if (codepoint == ' ') {
             total_width += lycon->font.space_width;
         } else {
-            FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.face, &lycon->font.style, codepoint);
+            FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.face, &lycon->font.style, codepoint, false);
             if (glyph) {
                 total_width += glyph->advance.x / 64.0;
             } else {

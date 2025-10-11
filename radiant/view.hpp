@@ -135,6 +135,7 @@ typedef struct {
     PropValue font_style;
     PropValue font_weight;
     PropValue text_deco; // CSS text decoration
+    bool use_no_hinting;  // Enable no-hinting mode for sub-pixel precision
 } FontProp;
 
 typedef struct {
@@ -486,6 +487,6 @@ typedef struct {
 } UiContext;
 
 extern FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font_style);
-extern FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint);
+extern FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, uint32_t codepoint, bool for_rendering);
 extern void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop);
 extern ImageSurface* load_image(UiContext* uicon, const char *file_path);
