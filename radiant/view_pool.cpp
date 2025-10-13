@@ -156,7 +156,7 @@ void* alloc_prop(LayoutContext* lycon, size_t size) {
 
 BlockProp* alloc_block_prop(LayoutContext* lycon) {
     BlockProp* prop = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
-    prop->line_height = -2;  // -2 to inherit
+    prop->line_height = null;
     prop->text_align = lycon->block.text_align;  // inherit from parent
     prop->given_min_height = prop->given_min_width = prop->given_max_height = prop->given_max_width = -1;  // -1 for undefined
     prop->box_sizing = LXB_CSS_VALUE_CONTENT_BOX;  // default to content-box

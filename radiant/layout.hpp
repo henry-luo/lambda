@@ -128,7 +128,7 @@ void view_vertical_align(LayoutContext* lycon, View* view);
 // DomNode style resolution
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 
-float calculate_normal_line_height(FontBox *fbox);
+float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_height);
 float inherit_line_height(LayoutContext* lycon, ViewBlock* block);
 
 // ViewSpan bounding box computation

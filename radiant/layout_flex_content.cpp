@@ -48,7 +48,7 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
     // Inherit text alignment and other block properties from flex item
     if (flex_item->blk) {
         lycon->block.text_align = flex_item->blk->text_align;
-        lycon->block.line_height = flex_item->blk->line_height;
+        // lycon->block.line_height = flex_item->blk->line_height;
     }
 
     // Set up line formatting context for inline content

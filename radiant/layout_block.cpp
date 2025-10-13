@@ -21,6 +21,7 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void layout_table(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
+float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_height);
 
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display) {
     // finalize the block size
@@ -561,20 +562,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face.ft_face->family_name, block->font);
     }
     // setup line height
-    if (!block->blk) {  // inherit from parent
+    if (!block->blk || !block->blk->line_height || block->blk->line_height->type== LXB_CSS_VALUE_INHERIT) {  // inherit from parent
         lycon->block.line_height = inherit_line_height(lycon, block);
     }
     else {
-        if (block->blk->line_height >= 0) {
-            lycon->block.line_height = block->blk->line_height;
-        }
-        else if (block->blk->line_height == -2)  { // inherit
-            lycon->block.line_height = inherit_line_height(lycon, block);
-        }
-        else { // normal
-            lycon->block.line_height = calculate_normal_line_height(&lycon->font);
-        }
+        lycon->block.line_height = calc_line_height(&lycon->font, block->blk->line_height);
     }
+
     log_debug("block line_height: %f, font size: %f", lycon->block.line_height, lycon->font.face.ft_face->size->metrics.height / 64.0);
     // setup initial ascender and descender
     lycon->block.init_ascender = lycon->font.face.ft_face->size->metrics.ascender / 64.0;

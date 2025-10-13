@@ -39,7 +39,25 @@ float calculate_chrome_line_height(float font_size, float pixel_ratio) {
     return chrome_height * pixel_ratio;
 }
 
-float calculate_normal_line_height(FontBox *fbox) {
+float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_height) {
+    float height;
+    if (line_height) {
+        switch (line_height->type) {
+        case LXB_CSS_VALUE__NUMBER:
+            height = line_height->u.number.num * fbox->face.style.font_size;
+            log_debug("property number: %lf", line_height->u.number.num);
+            return height;
+        case LXB_CSS_VALUE__LENGTH:
+            height = line_height->u.length.num;  // px
+            log_debug("property unit: %d", line_height->u.length.unit);
+            return height;
+        case LXB_CSS_VALUE__PERCENTAGE:
+            height = line_height->u.percentage.num * fbox->face.style.font_size;
+            log_debug("property percentage: %lf", line_height->u.percentage.num);
+            return height;
+        }
+    }
+    // default as 'normal'
     FT_Pos asc  = fbox->face.ft_face->size->metrics.ascender;  // 26.6 fixed-point pixels
     FT_Pos desc = fbox->face.ft_face->size->metrics.descender; // 26.6 fixed-point pixels
     FT_Pos gap;
@@ -66,19 +84,14 @@ float inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
     while (pa && !pa->is_block()) { pa = pa->parent; }
     if (pa) {
         ViewBlock* pa_block = (ViewBlock*)pa;
-        if (pa_block->blk) {
-            if (pa_block->blk->line_height >= 0) {
-                log_debug("inherited line_height: %d", pa_block->blk->line_height);
-                return pa_block->blk->line_height;
-            }
-            else if (pa_block->blk->line_height == -1) goto NORMAL;
+        if (pa_block->blk && pa_block->blk->line_height && pa_block->blk->line_height->type != LXB_CSS_VALUE_INHERIT) {
+            return calc_line_height(&lycon->font, pa_block->blk->line_height);
         }
         block = pa_block;
         goto INHERIT;
     }
     // else initial value - 'normal'
-    NORMAL:
-    return calculate_normal_line_height(&lycon->font);
+    return calc_line_height(&lycon->font, NULL);
 }
 
 // DomNode style resolution function

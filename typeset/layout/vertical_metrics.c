@@ -923,16 +923,16 @@ bool position_math_accent(InlineBox* base, InlineBox* accent, double* x_offset, 
 }
 
 // Line height calculations
-// double calculate_normal_line_height(ViewFont* font, double font_size) {
-//     if (!font || font_size <= 0) return font_size * 1.2;
+double calculate_normal_line_height(ViewFont* font, double font_size) {
+    if (!font || font_size <= 0) return font_size * 1.2;
 
-//     FontMetrics metrics;
-//     if (font_get_metrics(font, &metrics)) {
-//         return metrics.line_height * font_size / metrics.units_per_em;
-//     }
+    FontMetrics metrics;
+    if (font_get_metrics(font, &metrics)) {
+        return metrics.line_height * font_size / metrics.units_per_em;
+    }
 
-//     return font_size * 1.2; // Default fallback
-// }
+    return font_size * 1.2; // Default fallback
+}
 
 double calculate_numeric_line_height(ViewFont* font, double font_size, double multiplier) {
     return font_size * multiplier;
