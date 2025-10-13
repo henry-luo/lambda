@@ -252,7 +252,20 @@ float adjust_min_max_width(ViewBlock* block, float width) {
     return width;
 }
 
-float adjust_border_padding (ViewBlock* block, float width) {
+float adjust_min_max_height(ViewBlock* block, float height) {
+    if (block->blk) {
+        if (block->blk->given_max_height >= 0 && height > block->blk->given_max_height) {
+            height = block->blk->given_max_height;
+        }
+        // Note: given_min_height overrides given_max_height if both are specified
+        if (block->blk->given_min_height >= 0 && height < block->blk->given_min_height) {
+            height = block->blk->given_min_height;
+        }
+    }
+    return height;
+}
+
+float adjust_border_padding_width(ViewBlock* block, float width) {
     // for border-box, the given width includes padding and borders
     // so we need to subtract them to get the content width
     float padding_and_border = 0;
@@ -265,6 +278,21 @@ float adjust_border_padding (ViewBlock* block, float width) {
     width = max(width - padding_and_border, 0);
     log_debug("box-sizing: border-box - padding+border=%f, content_width=%f", padding_and_border, width);
     return width;
+}
+
+float adjust_border_padding_height(ViewBlock* block, float height) {
+    // for border-box, the given height includes padding and borders
+    // so we need to subtract them to get the content height
+    float padding_and_border = 0;
+    if (block->bound) {
+        padding_and_border += block->bound->padding.top + block->bound->padding.bottom;
+        if (block->bound->border) {
+            padding_and_border += block->bound->border->width.top + block->bound->border->width.bottom;
+        }
+    }
+    height = max(height - padding_and_border, 0);
+    log_debug("box-sizing: border-box - padding+border=%f, content_height=%f", padding_and_border, height);
+    return height;
 }
 
 void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
@@ -541,7 +569,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         content_width = max(lycon->block.given_width, 0);
         content_width = adjust_min_max_width(block, content_width);
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
-            if (block->bound) content_width = adjust_border_padding(block, content_width);
+            if (block->bound) content_width = adjust_border_padding_width(block, content_width);
         }
     }
     else { // derive from parent block width
@@ -553,9 +581,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         else { content_width = pa_block.width; }
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
             content_width = adjust_min_max_width(block, content_width);
-            if (block->bound) content_width = adjust_border_padding(block, content_width);
+            if (block->bound) content_width = adjust_border_padding_width(block, content_width);
         } else {
-            content_width = adjust_border_padding(block, content_width);
+            content_width = adjust_border_padding_width(block, content_width);
             if (block->bound) content_width = adjust_min_max_width(block, content_width);
         }
     }
@@ -564,44 +592,26 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         block->blk && block->blk->given_max_width >= 0 ? block->blk->given_max_width : -1);
 
     float content_height = -1;
-    if (lycon->block.given_height >= 0) { content_height = lycon->block.given_height; }
-    if (block->blk) {
-        if (block->blk->given_max_height >= 0) { content_height = min(content_height >= 0 ? content_height : INT_MAX, block->blk->given_max_height); }
-        // Note: given_min_height overrides given_max_height if both are specified
-        if (block->blk->given_min_height >= 0) { content_height = max(content_height, block->blk->given_min_height); }
-    }
-    if (content_height >= 0) {
-        // Apply box-sizing calculation for height
+    if (lycon->block.given_height >= 0) {
+        content_height = max(lycon->block.given_height, 0);
+        content_height = adjust_min_max_height(block, content_height);
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
-            // For border-box, the given height includes padding and borders
-            // So we need to subtract them to get the content height
-            float padding_and_border = 0;
-            if (block->bound) {
-                padding_and_border += block->bound->padding.top + block->bound->padding.bottom;
-                if (block->bound->border) {
-                    padding_and_border += block->bound->border->width.top + block->bound->border->width.bottom;
-                }
-            }
-            content_height = max(content_height - padding_and_border, 0);
-            log_debug("box-sizing: border-box - given_height=%d, padding+border=%d, content_height=%d",
-                   lycon->block.given_height, padding_and_border, content_height);
-        } else {
-            log_debug("box-sizing: content-box - given_height=%d, content_height=%d",
-                   lycon->block.given_height, content_height);
+            if (block->bound) content_height = adjust_border_padding_height(block, content_height);
         }
     }
-    else {
-        if (!block->bound) {
-            content_height = pa_block.height;
+    else { // derive from content flow height
+        content_height = lycon->block.advance_y;
+        if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+            content_height = adjust_min_max_height(block, content_height);
+            if (block->bound) content_height = adjust_border_padding_height(block, content_height);
         } else {
-            content_height = pa_block.height
-                - (block->bound->margin.top + block->bound->margin.bottom)
-                - (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0)
-                - (block->bound->padding.top + block->bound->padding.bottom);
+            content_height = adjust_border_padding_height(block, content_height);
+            if (block->bound) content_height = adjust_min_max_height(block, content_height);
         }
     }
-    // ensure non-negative content_width and content_height
-     content_height = max(content_height, 0);
+    assert(content_height >= 0);
+    log_debug("content_height=%f, given_height=%f, max_height=%f", content_height, lycon->block.given_height,
+        block->blk && block->blk->given_max_height >= 0 ? block->blk->given_max_height : -1);
     lycon->block.width = content_width;  lycon->block.height = content_height;
 
     if (block->bound) {
