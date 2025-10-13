@@ -570,27 +570,22 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         lxb_css_property_line_height_t* line_height = declr->u.line_height;
         switch (line_height->type) {
         case LXB_CSS_VALUE__NUMBER:
-            block->blk->line_height = line_height->u.number.num * lycon->font.face.style.font_size;
-            if (block->blk->line_height < 0) block->blk->line_height = -1;  // mark as normal/default value
-            log_debug("property number: %lf", line_height->u.number.num);
+            if (line_height->u.number.num >= 0) block->blk->line_height = line_height;
             break;
         case LXB_CSS_VALUE__LENGTH:
-            block->blk->line_height = line_height->u.length.num;
-            if (block->blk->line_height < 0) block->blk->line_height = -1;  // mark as normal/default value
-            log_debug("property unit: %d", line_height->u.length.unit);
+            if (line_height->u.length.num >= 0) block->blk->line_height = line_height;
             break;
         case LXB_CSS_VALUE__PERCENTAGE:
-            block->blk->line_height = line_height->u.percentage.num * lycon->font.face.style.font_size;
-            if (block->blk->line_height < 0) block->blk->line_height = -1;  // mark as normal/default value
-            log_debug("property percentage: %lf", line_height->u.percentage.num);
+            if (line_height->u.percentage.num >= 0) block->blk->line_height = line_height;
             break;
         case LXB_CSS_VALUE_NORMAL:
-            block->blk->line_height = -1; // mark as normal/default value
+            block->blk->line_height = line_height;
             break;
         case LXB_CSS_VALUE_INHERIT:
-            block->blk->line_height = -2;
+            block->blk->line_height = line_height;
             break;
         }
+        // ignored
         break;
     }
     case LXB_CSS_PROPERTY_VERTICAL_ALIGN: {

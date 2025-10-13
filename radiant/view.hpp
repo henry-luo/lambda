@@ -186,7 +186,7 @@ typedef struct {
 
 typedef struct {
     PropValue text_align;
-    float line_height;  // non-negative
+    lxb_css_property_line_height_t *line_height;
     float text_indent;  // can be negative
     float given_min_width, given_max_width;  // non-negative
     float given_min_height, given_max_height;  // non-negative
