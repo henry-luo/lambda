@@ -60,22 +60,21 @@ float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_heigh
     // default as 'normal'
     FT_Pos asc  = fbox->face.ft_face->size->metrics.ascender;  // 26.6 fixed-point pixels
     FT_Pos desc = fbox->face.ft_face->size->metrics.descender; // 26.6 fixed-point pixels
-    FT_Pos gap;
+    FT_Pos gap, lineHeight;
 
+    // Chrome seems to just use font height, not asc+desc, for line-height
     // Get OS/2 table using proper FreeType API
-    TT_OS2* os2_table = (TT_OS2*)FT_Get_Sfnt_Table(fbox->face.ft_face, FT_SFNT_OS2);
-    if (os2_table && os2_table->sTypoLineGap != 0) {
-        // Scale the OS/2 line gap to current font size
-        gap = FT_MulFix(os2_table->sTypoLineGap, fbox->face.ft_face->size->metrics.y_scale);
-        log_debug("Using scaled OS/2 sTypoLineGap: %d", gap);
-    } else {
-        gap = fbox->face.ft_face->size->metrics.height - (asc - desc); // fallback
-        gap = max(gap, 0); // ensure non-negative gap
-        log_debug("Using fallback line gap: %d", gap);
-    }
-    log_debug("line gap: %d", gap);
-    FT_Pos lineHeight = asc - desc + gap;  // should it be 1.2 or 1.15 times?
-    return lineHeight / 64.0f; // convert from 26.6 fixed-point to float pixels
+    // TT_OS2* os2_table = (TT_OS2*)FT_Get_Sfnt_Table(fbox->face.ft_face, FT_SFNT_OS2);
+    // if (os2_table && os2_table->sTypoLineGap != 0) {
+    //     // Scale the OS/2 line gap to current font size
+    //     gap = FT_MulFix(os2_table->sTypoLineGap, fbox->face.ft_face->size->metrics.y_scale);
+    //     log_debug("Using scaled OS/2 sTypoLineGap: %f", gap / 64.0f);
+    //     lineHeight = asc - desc + gap;
+    // } else {
+        lineHeight = fbox->face.ft_face->size->metrics.height;
+    // }
+    log_debug("got lineHeight: %f", lineHeight / 64.0f);
+    return lineHeight / 64.0f;
 }
 
 float inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
