@@ -189,6 +189,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     text->x = lycon->line.advance_x;
     text->height = font_height;  // should text->height be lycon->block.line_height or font_height?
 
+    // lead_y applies to baseline aligned text; not other vertical aligns
     if (lycon->line.vertical_align == LXB_CSS_VALUE_MIDDLE) {
         log_debug("middle-aligned-text: font %f, line %f", font_height, lycon->block.line_height);
         text->y = lycon->block.advance_y + (lycon->block.line_height - font_height) / 2;
@@ -202,9 +203,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         text->y = lycon->block.advance_y;
     }
     else { // baseline
-        // text->y = lycon->block.advance_y + (lycon->block.line_height - (lycon->line.max_ascender + lycon->line.max_descender))/2
-        //     + lycon->line.max_ascender - (lycon->font.face->size->metrics.ascender / 64.0);
-        text->y = lycon->block.advance_y;
+        text->y = lycon->block.advance_y + lycon->block.lead_y;
     }
 
     // layout the text glyphs

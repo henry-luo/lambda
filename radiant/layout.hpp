@@ -20,6 +20,7 @@ typedef struct Blockbox {
     float line_height;
     float init_ascender;  // initial ascender of the line at start of the line
     float init_descender;  // initial descender of the line at start of the line
+    float lead_y; // leading space when line height is greater than font size
     PropValue text_align;
     float given_width, given_height;  // specified width and height by css or html attributes
     struct Blockbox* pa_block;  // parent block
