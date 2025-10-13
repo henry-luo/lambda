@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 377,
+      "height": 379,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -452,8 +452,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 700px;\n        }\n        \n        /* Horizontal rule styles */\n        hr {\n            border: none;\n            height: 1px;\n            background-color: #d1d9e0;\n            margin: 24px 0;\n        }\n        \n        .thick-hr {\n            height: 2px;\n            background-color: #6b7280;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n    ",
-                "length": 771,
+                "text": "\n        /*\n        @font-face {\n            font-family: \"LocalTestArial\";\n            src: url(\"file:///System/Library/Fonts/Supplemental/Arial.ttf\") format(\"truetype\");\n        }\n            */\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body {\n            font-family: 'Arial', sans-serif;\n            font-size: 16px;\n            line-height: 1.5;\n            padding: 20px;\n            max-width: 700px;\n            background-color: aqua;\n            border: 1px solid #f33;\n        }\n\n        /* Horizontal rule styles */\n        hr {\n            border: none;\n            height: 1px;\n            background-color: #d1d9e0;\n            margin: 24px 0;\n        }\n\n        .thick-hr {\n            height: 2px;\n            background-color: #6b7280;\n        }\n\n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n\n        p {\n            margin-bottom: 16px;\n        }\n    ",
+                "length": 1004,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -496,10 +496,10 @@
           "x": 0,
           "y": 0,
           "width": 700,
-          "height": 377,
-          "contentWidth": 700,
+          "height": 379,
+          "contentWidth": 698,
           "contentHeight": 377,
-          "scrollWidth": 700,
+          "scrollWidth": 698,
           "scrollHeight": 377
         },
         "computed": {
@@ -513,10 +513,10 @@
           "paddingRight": 20,
           "paddingBottom": 20,
           "paddingLeft": 20,
-          "borderTopWidth": 0,
-          "borderRightWidth": 0,
-          "borderBottomWidth": 0,
-          "borderLeftWidth": 0,
+          "borderTopWidth": 1,
+          "borderRightWidth": 1,
+          "borderBottomWidth": 1,
+          "borderLeftWidth": 1,
           "flexDirection": "row",
           "flexWrap": "nowrap",
           "justifyContent": "normal",
@@ -553,13 +553,13 @@
             "id": null,
             "classes": [],
             "layout": {
-              "x": 20,
-              "y": 20,
-              "width": 660,
+              "x": 21,
+              "y": 21,
+              "width": 658,
               "height": 30,
-              "contentWidth": 660,
+              "contentWidth": 658,
               "contentHeight": 30,
-              "scrollWidth": 660,
+              "scrollWidth": 658,
               "scrollHeight": 30
             },
             "computed": {
@@ -614,12 +614,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 20,
-                      "y": 24,
+                      "x": 21,
+                      "y": 25,
                       "width": 116.7,
                       "height": 22,
-                      "right": 136.7,
-                      "bottom": 46,
+                      "right": 137.7,
+                      "bottom": 47,
                       "text": "Section One",
                       "startIndex": 0,
                       "endIndex": 11
@@ -643,13 +643,13 @@
             "id": null,
             "classes": [],
             "layout": {
-              "x": 20,
-              "y": 62,
-              "width": 660,
+              "x": 21,
+              "y": 63,
+              "width": 658,
               "height": 24,
-              "contentWidth": 660,
+              "contentWidth": 658,
               "contentHeight": 24,
-              "scrollWidth": 660,
+              "scrollWidth": 658,
               "scrollHeight": 24
             },
             "computed": {
@@ -704,12 +704,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 20,
-                      "y": 65,
+                      "x": 21,
+                      "y": 66,
                       "width": 629.66,
                       "height": 17,
-                      "right": 649.66,
-                      "bottom": 82,
+                      "right": 650.66,
+                      "bottom": 83,
                       "text": "This is the first section with some content that should be separated from the next section.",
                       "startIndex": 0,
                       "endIndex": 91
@@ -733,13 +733,13 @@
             "id": null,
             "classes": [],
             "layout": {
-              "x": 20,
-              "y": 110,
-              "width": 660,
+              "x": 21,
+              "y": 111,
+              "width": 658,
               "height": 1,
-              "contentWidth": 660,
+              "contentWidth": 658,
               "contentHeight": 1,
-              "scrollWidth": 660,
+              "scrollWidth": 658,
               "scrollHeight": 1
             },
             "computed": {
@@ -794,13 +794,13 @@
             "id": null,
             "classes": [],
             "layout": {
-              "x": 20,
-              "y": 135,
-              "width": 660,
+              "x": 21,
+              "y": 136,
+              "width": 658,
               "height": 30,
-              "contentWidth": 660,
+              "contentWidth": 658,
               "contentHeight": 30,
-              "scrollWidth": 660,
+              "scrollWidth": 658,
               "scrollHeight": 30
             },
             "computed": {
@@ -855,12 +855,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 20,
-                      "y": 139,
+                      "x": 21,
+                      "y": 140,
                       "width": 116.31,
                       "height": 22,
-                      "right": 136.31,
-                      "bottom": 161,
+                      "right": 137.31,
+                      "bottom": 162,
                       "text": "Section Two",
                       "startIndex": 0,
                       "endIndex": 11
@@ -884,13 +884,13 @@
             "id": null,
             "classes": [],
             "layout": {
-              "x": 20,
-              "y": 177,
-              "width": 660,
+              "x": 21,
+              "y": 178,
+              "width": 658,
               "height": 48,
-              "contentWidth": 660,
+              "contentWidth": 658,
               "contentHeight": 48,
-              "scrollWidth": 660,
+              "scrollWidth": 658,
               "scrollHeight": 48
             },
             "computed": {
@@ -945,12 +945,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 20,
-                      "y": 180,
+                      "x": 21,
+                      "y": 181,
                       "width": 632.97,
                       "height": 17,
-                      "right": 652.97,
-                      "bottom": 197,
+                      "right": 653.97,
+                      "bottom": 198,
                       "text": "This section is separated by a horizontal rule. The rule should have proper spacing above ",
                       "startIndex": 0,
                       "endIndex": 90
@@ -973,12 +973,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 20,
-                      "y": 204,
+                      "x": 21,
+                      "y": 205,
                       "width": 76.52,
                       "height": 17,
-                      "right": 96.52,
-                      "bottom": 221,
+                      "right": 97.52,
+                      "bottom": 222,
                       "text": "and below.",
                       "startIndex": 0,
                       "endIndex": 10
@@ -1004,13 +1004,13 @@
               "thick-hr"
             ],
             "layout": {
-              "x": 20,
-              "y": 249,
-              "width": 660,
+              "x": 21,
+              "y": 250,
+              "width": 658,
               "height": 2,
-              "contentWidth": 660,
+              "contentWidth": 658,
               "contentHeight": 2,
-              "scrollWidth": 660,
+              "scrollWidth": 658,
               "scrollHeight": 2
             },
             "computed": {
@@ -1065,13 +1065,13 @@
             "id": null,
             "classes": [],
             "layout": {
-              "x": 20,
-              "y": 275,
-              "width": 660,
+              "x": 21,
+              "y": 276,
+              "width": 658,
               "height": 30,
-              "contentWidth": 660,
+              "contentWidth": 658,
               "contentHeight": 30,
-              "scrollWidth": 660,
+              "scrollWidth": 658,
               "scrollHeight": 30
             },
             "computed": {
@@ -1126,12 +1126,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 20,
-                      "y": 279,
+                      "x": 21,
+                      "y": 280,
                       "width": 132.27,
                       "height": 22,
-                      "right": 152.27,
-                      "bottom": 301,
+                      "right": 153.27,
+                      "bottom": 302,
                       "text": "Section Three",
                       "startIndex": 0,
                       "endIndex": 13
@@ -1155,13 +1155,13 @@
             "id": null,
             "classes": [],
             "layout": {
-              "x": 20,
-              "y": 317,
-              "width": 660,
+              "x": 21,
+              "y": 318,
+              "width": 658,
               "height": 24,
-              "contentWidth": 660,
+              "contentWidth": 658,
               "contentHeight": 24,
-              "scrollWidth": 660,
+              "scrollWidth": 658,
               "scrollHeight": 24
             },
             "computed": {
@@ -1216,12 +1216,12 @@
                 "layout": {
                   "rects": [
                     {
-                      "x": 20,
-                      "y": 320,
+                      "x": 21,
+                      "y": 321,
                       "width": 479.92,
                       "height": 17,
-                      "right": 499.92,
-                      "bottom": 337,
+                      "right": 500.92,
+                      "bottom": 338,
                       "text": "This final section is separated by a thicker horizontal rule for variety.",
                       "startIndex": 0,
                       "endIndex": 73

@@ -21,7 +21,6 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void layout_table(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
-float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_height);
 
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display) {
     // finalize the block size
@@ -277,7 +276,8 @@ float adjust_border_padding_width(ViewBlock* block, float width) {
         }
     }
     width = max(width - padding_and_border, 0);
-    log_debug("box-sizing: border-box - padding+border=%f, content_width=%f", padding_and_border, width);
+    log_debug("box-sizing: border-box - padding+border=%f, content_width=%f, border_width=%f", padding_and_border, width,
+        block->bound && block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
     return width;
 }
 
@@ -314,8 +314,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->block.pa_block = &pa_block;  lycon->elmt = elmt;
     lycon->block.width = lycon->block.height = 0;
     lycon->block.given_width = -1;  lycon->block.given_height = -1;
-    // lycon->block.line_height // inherit from parent context
-    log_debug("layout block line_height: %d", lycon->block.line_height);
 
     uintptr_t elmt_name = elmt->tag();
     ViewBlock* block = (ViewBlock*)alloc_view(lycon,
@@ -503,6 +501,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;
     line_init(lycon);
     block->x = pa_line.left;  block->y = pa_block.advance_y;
+    log_debug("block init position: %f, %f", block->x, block->y);
 
     if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
         value = elmt->get_attribute("src", &value_len);
@@ -568,11 +567,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     else {
         lycon->block.line_height = calc_line_height(&lycon->font, block->blk->line_height);
     }
-
     log_debug("block line_height: %f, font size: %f", lycon->block.line_height, lycon->font.face.ft_face->size->metrics.height / 64.0);
     // setup initial ascender and descender
     lycon->block.init_ascender = lycon->font.face.ft_face->size->metrics.ascender / 64.0;
     lycon->block.init_descender = (-lycon->font.face.ft_face->size->metrics.descender) / 64.0;
+    lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
 
     // determine block width and height
     float content_width = -1;
@@ -655,7 +654,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->line.right = lycon->block.width;
     }
 
-    log_debug("layout-block-sizes: x:%d, y:%d, wd:%d, hg:%d, line-hg:%d, given-w:%d, given-h:%d",
+    log_debug("layout-block-sizes: x:%f, y:%f, wd:%f, hg:%f, line-hg:%f, given-w:%f, given-h:%f",
         block->x, block->y, block->width, block->height, lycon->block.line_height, lycon->block.given_width, lycon->block.given_height);
 
     // layout block content
