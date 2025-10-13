@@ -8,6 +8,7 @@ extern "C" {
 #include <fontconfig/fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_SFNT_NAMES_H
 #include <thorvg_capi.h>
 #ifdef __cplusplus
 }

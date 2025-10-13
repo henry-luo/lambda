@@ -3,6 +3,10 @@
 #include "layout_positioned.hpp"
 #include "font_face.h"
 
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include FT_TRUETYPE_TABLES_H
+
 #include "../lib/log.h"
 void view_pool_init(ViewTree* tree);
 void view_pool_destroy(ViewTree* tree);
@@ -33,6 +37,48 @@ float calculate_chrome_line_height(float font_size, float pixel_ratio) {
     float proportional_height = ceil(base_font_size * 1.15);
     float chrome_height = (min_line_height > proportional_height) ? min_line_height : proportional_height;
     return chrome_height * pixel_ratio;
+}
+
+float calculate_normal_line_height(FontBox *fbox) {
+    FT_Pos asc  = fbox->face.ft_face->size->metrics.ascender;  // 26.6 fixed-point pixels
+    FT_Pos desc = fbox->face.ft_face->size->metrics.descender; // 26.6 fixed-point pixels
+    FT_Pos gap;
+
+    // Get OS/2 table using proper FreeType API
+    TT_OS2* os2_table = (TT_OS2*)FT_Get_Sfnt_Table(fbox->face.ft_face, FT_SFNT_OS2);
+    if (os2_table && os2_table->sTypoLineGap != 0) {
+        // Scale the OS/2 line gap to current font size
+        gap = FT_MulFix(os2_table->sTypoLineGap, fbox->face.ft_face->size->metrics.y_scale);
+        log_debug("Using scaled OS/2 sTypoLineGap: %d", gap);
+    } else {
+        gap = fbox->face.ft_face->size->metrics.height - (asc - desc); // Fallback
+        log_debug("Using fallback line gap: %d", gap);
+    }
+
+    FT_Pos lineHeight = asc - desc + gap;
+    return lineHeight / 64.0f; // Convert from 26.6 fixed-point to float pixels
+}
+
+float inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
+    // Inherit line height from parent
+    INHERIT:
+    ViewGroup* pa = block->parent;
+    while (pa && !pa->is_block()) { pa = pa->parent; }
+    if (pa) {
+        ViewBlock* pa_block = (ViewBlock*)pa;
+        if (pa_block->blk) {
+            if (pa_block->blk->line_height >= 0) {
+                log_debug("inherited line_height: %d", pa_block->blk->line_height);
+                return pa_block->blk->line_height;
+            }
+            else if (pa_block->blk->line_height == -1) goto NORMAL;
+        }
+        block = pa_block;
+        goto INHERIT;
+    }
+    // else initial value - 'normal'
+    NORMAL:
+    return calculate_normal_line_height(&lycon->font);
 }
 
 // DomNode style resolution function
@@ -329,8 +375,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     // CRITICAL FIX: Let HTML element auto-size to content instead of forcing viewport height
     // This matches browser behavior where HTML element fits content, not viewport
     lycon->block.height = 0;  // Will be calculated based on content
-    lycon->block.advance_y = 0;
-    lycon->block.line_height = calculate_chrome_line_height(lycon->ui_context->default_font.font_size, lycon->ui_context->pixel_ratio);
+    lycon->block.advance_y = 0;  lycon->block.line_height = -1;
     lycon->block.text_align = LXB_CSS_VALUE_LEFT;
     lycon->line.left = 0;  lycon->line.right = lycon->block.width;
     lycon->line.vertical_align = LXB_CSS_VALUE_BASELINE;

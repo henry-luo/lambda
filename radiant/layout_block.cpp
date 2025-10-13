@@ -560,6 +560,23 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     if (block->font) {
         setup_font(lycon->ui_context, &lycon->font, pa_font.face.ft_face->family_name, block->font);
     }
+    // setup line height
+    if (!block->blk) {  // inherit from parent
+        lycon->block.line_height = inherit_line_height(lycon, block);
+    }
+    else {
+        if (block->blk->line_height >= 0) {
+            lycon->block.line_height = block->blk->line_height;
+        }
+        else if (block->blk->line_height == -2)  { // inherit
+            lycon->block.line_height = inherit_line_height(lycon, block);
+        }
+        else { // normal
+            lycon->block.line_height = calculate_normal_line_height(&lycon->font);
+        }
+    }
+    log_debug("block line_height: %f, font size: %f", lycon->block.line_height, lycon->font.face.ft_face->size->metrics.height / 64.0);
+    // setup initial ascender and descender
     lycon->block.init_ascender = lycon->font.face.ft_face->size->metrics.ascender / 64.0;
     lycon->block.init_descender = (-lycon->font.face.ft_face->size->metrics.descender) / 64.0;
 
