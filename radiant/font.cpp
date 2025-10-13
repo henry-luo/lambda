@@ -129,8 +129,9 @@ FT_Face load_styled_font(UiContext* uicon, const char* font_name, FontProp* font
     }
     FT_Face face = load_font_face(uicon, name->str, font_style->font_size);
     if (face) {
-        log_info("Loading styled font: %s, ascd: %f, desc: %f, em size: %f",
-                name->str, face->size->metrics.ascender / 64.0, face->size->metrics.descender / 64.0, face->units_per_EM / 64.0);
+        log_info("Loading styled font: %s, ascd: %f, desc: %f, em size: %f, font height: %f",
+            name->str, face->size->metrics.ascender / 64.0, face->size->metrics.descender / 64.0,
+            face->units_per_EM / 64.0, face->size->metrics.height / 64.0);
     } else {
         log_error("Failed to load styled font: %s", name->str);
     }

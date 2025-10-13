@@ -69,12 +69,13 @@ float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_heigh
         gap = FT_MulFix(os2_table->sTypoLineGap, fbox->face.ft_face->size->metrics.y_scale);
         log_debug("Using scaled OS/2 sTypoLineGap: %d", gap);
     } else {
-        gap = fbox->face.ft_face->size->metrics.height - (asc - desc); // Fallback
+        gap = fbox->face.ft_face->size->metrics.height - (asc - desc); // fallback
+        gap = max(gap, 0); // ensure non-negative gap
         log_debug("Using fallback line gap: %d", gap);
     }
-
-    FT_Pos lineHeight = asc - desc + gap;
-    return lineHeight / 64.0f; // Convert from 26.6 fixed-point to float pixels
+    log_debug("line gap: %d", gap);
+    FT_Pos lineHeight = asc - desc + gap;  // should it be 1.2 or 1.15 times?
+    return lineHeight / 64.0f; // convert from 26.6 fixed-point to float pixels
 }
 
 float inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
@@ -253,7 +254,7 @@ void line_align(LayoutContext* lycon) {
 }
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
-    log_debug("layout node %s, advance_y: %d", node->name(), lycon->block.advance_y);
+    log_debug("layout node %s, advance_y: %f", node->name(), lycon->block.advance_y);
     if (node->is_element()) {
         log_debug("Element: %s", node->name());
         lxb_html_element_t *elmt = node->as_element();

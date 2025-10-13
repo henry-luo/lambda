@@ -328,8 +328,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     resolve_inline_default(lycon, (ViewSpan*)block);
     switch (elmt_name) {
     case LXB_TAG_BODY: {
-        // Default body margin will be applied after CSS resolution
-        // to respect CSS resets and specificity cascading
+        if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
+        // margin: 8px
+        block->bound->margin.top = block->bound->margin.right =
+            block->bound->margin.bottom = block->bound->margin.left = 8 * lycon->ui_context->pixel_ratio;
+        block->bound->margin.top_specificity = block->bound->margin.right_specificity =
+            block->bound->margin.bottom_specificity = block->bound->margin.left_specificity = -1;
         break;
     }
     case LXB_TAG_H1:
@@ -356,19 +360,21 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         break;
     case LXB_TAG_P:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
-        // CRITICAL FIX: Don't set default margins yet - wait until after CSS resolution
-        // This will be handled in the post-CSS resolution logic
+        // margin: 1em 0;
+        block->bound->margin.top = block->bound->margin.bottom = lycon->font.face.style.font_size;
+        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
         break;
     case LXB_TAG_UL:  case LXB_TAG_OL:
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
-        block->blk->list_style_type = elmt_name == LXB_TAG_UL ?
-            LXB_CSS_VALUE_DISC : LXB_CSS_VALUE_DECIMAL;
+        block->blk->list_style_type = elmt_name == LXB_TAG_UL ? LXB_CSS_VALUE_DISC : LXB_CSS_VALUE_DECIMAL;
         if (!block->bound) {
             block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
         // margin: 1em 0; padding: 0 0 0 40px;
         block->bound->margin.top = block->bound->margin.bottom = lycon->font.face.style.font_size;
+        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
         block->bound->padding.left = 40 * lycon->ui_context->pixel_ratio;
+        block->bound->padding.left_specificity = -1;
         break;
     case LXB_TAG_CENTER:
         if (!block->blk) { block->blk = alloc_block_prop(lycon); }
@@ -395,8 +401,9 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (!block->bound->border) { block->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp)); }
         // todo: inset border style
         block->bound->border->width.top = block->bound->border->width.right =
-            block->bound->border->width.bottom = block->bound->border->width.left =
-            1 * lycon->ui_context->pixel_ratio;
+            block->bound->border->width.bottom = block->bound->border->width.left = 1 * lycon->ui_context->pixel_ratio;
+        block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
+            block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
         if (!block->scroller) { block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp)); }
         block->scroller->overflow_x = LXB_CSS_VALUE_AUTO;
         block->scroller->overflow_y = LXB_CSS_VALUE_AUTO;
@@ -410,90 +417,18 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // 1px top border
         block->bound->border->width.top = 1 * lycon->ui_context->pixel_ratio;
         block->bound->border->width.left = block->bound->border->width.right = block->bound->border->width.bottom = 0;
+        block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
+            block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
         // 0.5em margin
         block->bound->margin.top = block->bound->margin.bottom =
             block->bound->margin.left = block->bound->margin.right = 0.5 * lycon->font.face.style.font_size;
-        // // full width
-        // lycon->block.given_width = pa_block.width;
-        // // 2px height + borders
-        // lycon->block.given_height = 2 * lycon->ui_context->pixel_ratio +
-        //     block->bound->border->width.top + block->bound->border->width.bottom;
+        block->bound->margin.top_specificity = block->bound->margin.bottom_specificity =
+            block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
         break;
     }
 
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
-
-    // CRITICAL FIX: After CSS resolution, update font face if font size changed
-    // This ensures the font face matches the resolved font size
-    if (lycon->font.current_font_size > 0 && lycon->font.current_font_size != lycon->font.face.style.font_size) {
-        // Font size was changed by CSS, need to reload font face
-        lycon->font.face.style.font_size = lycon->font.current_font_size;
-        lycon->font.face.ft_face = load_styled_font(lycon->ui_context, lycon->font.face.ft_face->family_name, &lycon->font.face.style);
-        log_debug("Updated font face for new font size: %d", lycon->font.face.style.font_size);
-    }
-
-    // CRITICAL FIX: After CSS resolution, handle body margin properly
-    // This handles CSS resets like "* { margin: 0; }" properly
-    if (elmt_name == LXB_TAG_BODY) {
-        float body_margin_physical = 8.0 * lycon->ui_context->pixel_ratio;
-        if (!block->bound) {
-            // No CSS margin properties - apply default body margin
-            block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-            block->bound->margin.top = block->bound->margin.bottom =
-                block->bound->margin.left = block->bound->margin.right = body_margin_physical;
-            log_debug("DEBUG: Applied default body margin (no CSS): %d", body_margin_physical);
-        } else {
-            // CSS margin properties exist - check if it's a reset (all margins are 0)
-            if (block->bound->margin.top == 0 && block->bound->margin.bottom == 0 &&
-                block->bound->margin.left == 0 && block->bound->margin.right == 0) {
-                // CSS reset detected - keep margins at 0
-                log_debug("DEBUG: CSS margin reset detected - keeping margins at 0");
-            } else {
-                // CSS has some non-zero margins - check for unset margins and apply defaults
-                if (block->bound->margin.top_specificity == 0) {
-                    block->bound->margin.top = body_margin_physical;
-                }
-                if (block->bound->margin.bottom_specificity == 0) {
-                    block->bound->margin.bottom = body_margin_physical;
-                }
-                if (block->bound->margin.left_specificity == 0) {
-                    block->bound->margin.left = body_margin_physical;
-                }
-                if (block->bound->margin.right_specificity == 0) {
-                    block->bound->margin.right = body_margin_physical;
-                }
-                log_debug("DEBUG: Applied partial default body margins");
-            }
-        }
-    }
-
-    // CRITICAL FIX: After CSS resolution, handle paragraph margins properly
-    // Apply default paragraph margins only if not explicitly set by CSS
-    if (elmt_name == LXB_TAG_P) {
-        if (!block->bound) {
-            // No CSS margin properties - apply default paragraph margins
-            block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
-            block->bound->margin.top = block->bound->margin.bottom = lycon->font.face.style.font_size;
-            log_debug("Applied default paragraph margins (no CSS): %d", lycon->font.face.style.font_size);
-        } else {
-            // CSS margin properties exist - check if it's a reset (all margins are 0)
-            if (block->bound->margin.top == 0 && block->bound->margin.bottom == 0 &&
-                block->bound->margin.left == 0 && block->bound->margin.right == 0) {
-                // CSS reset detected - keep margins at 0
-                log_debug("CSS paragraph margin reset detected - keeping margins at 0");
-            } else {
-                // CSS has some non-zero margins - check for unset margins and apply defaults
-                if (block->bound->margin.top_specificity == 0) {
-                    block->bound->margin.top = lycon->font.face.style.font_size;
-                }
-                if (block->bound->margin.bottom_specificity == 0) {
-                    block->bound->margin.bottom = lycon->font.face.style.font_size;
-                }
-                log_debug("Applied partial default paragraph margins");
-            }
-        }
-    }
 
     lycon->block.advance_y = 0;  lycon->block.max_width = 0;
     if (block->blk) lycon->block.text_align = block->blk->text_align;
@@ -567,11 +502,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     else {
         lycon->block.line_height = calc_line_height(&lycon->font, block->blk->line_height);
     }
-    log_debug("block line_height: %f, font size: %f", lycon->block.line_height, lycon->font.face.ft_face->size->metrics.height / 64.0);
     // setup initial ascender and descender
     lycon->block.init_ascender = lycon->font.face.ft_face->size->metrics.ascender / 64.0;
     lycon->block.init_descender = (-lycon->font.face.ft_face->size->metrics.descender) / 64.0;
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
+    log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, lycon->font.face.ft_face->size->metrics.height / 64.0,
+        lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 
     // determine block width and height
     float content_width = -1;
@@ -813,7 +749,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             lycon->block.max_width = max(lycon->block.max_width, block->width);
         }
         assert(lycon->line.is_line_start);
-        log_debug("block end, pa max_width: %d, pa advance_y: %d, block hg: %d",
+        log_debug("block end, pa max_width: %f, pa advance_y: %f, block hg: %f",
             lycon->block.max_width, lycon->block.advance_y, block->height);
     }
     lycon->prev_view = (View*)block;
