@@ -77,8 +77,8 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
          type == RDT_VIEW_TABLE || type == RDT_VIEW_TABLE_ROW_GROUP ||
          type == RDT_VIEW_TABLE_ROW || type == RDT_VIEW_TABLE_CELL) &&
         lycon->parent && (lycon->parent->type == RDT_VIEW_BLOCK || lycon->parent->type == RDT_VIEW_INLINE_BLOCK ||
-                          lycon->parent->type == RDT_VIEW_TABLE || lycon->parent->type == RDT_VIEW_TABLE_ROW_GROUP ||
-                          lycon->parent->type == RDT_VIEW_TABLE_ROW || lycon->parent->type == RDT_VIEW_TABLE_CELL)) {
+            lycon->parent->type == RDT_VIEW_TABLE || lycon->parent->type == RDT_VIEW_TABLE_ROW_GROUP ||
+            lycon->parent->type == RDT_VIEW_TABLE_ROW || lycon->parent->type == RDT_VIEW_TABLE_CELL)) {
         ViewBlock* block_child = (ViewBlock*)view;
         ViewBlock* block_parent = (ViewBlock*)lycon->parent;
 
@@ -280,9 +280,9 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
         if (span->bound->background) {
             strbuf_append_format(buf, "bgcolor:#%x ", span->bound->background->color.c);
         }
-        strbuf_append_format(buf, "margin:{left:%d, right:%d, top:%d, bottom:%d} ",
+        strbuf_append_format(buf, "margin:{left:%.1f, right:%.1f, top:%.1f, bottom:%.1f} ",
             span->bound->margin.left, span->bound->margin.right, span->bound->margin.top, span->bound->margin.bottom);
-        strbuf_append_format(buf, "padding:{left:%d, right:%d, top:%d, bottom:%d}",
+        strbuf_append_format(buf, "padding:{left:%.1f, right:%.1f, top:%.1f, bottom:%.1f}",
             span->bound->padding.left, span->bound->padding.right, span->bound->padding.top, span->bound->padding.bottom);
         strbuf_append_str(buf, "}\n");
 
@@ -293,14 +293,14 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
                 span->bound->border->top_color.c, span->bound->border->right_color.c,
                 span->bound->border->bottom_color.c, span->bound->border->left_color.c);
             strbuf_append_char_n(buf, ' ', indent);
-            strbuf_append_format(buf, "  t-wd:%d, r-wd:%d, b-wd:%d, l-wd:%d, "
+            strbuf_append_format(buf, "  t-wd:%f, r-wd:%f, b-wd:%f, l-wd:%f, "
                 "t-sty:%d, r-sty:%d, b-sty:%d, l-sty:%d\n",
                 span->bound->border->width.top, span->bound->border->width.right,
                 span->bound->border->width.bottom, span->bound->border->width.left,
                 span->bound->border->top_style, span->bound->border->right_style,
                 span->bound->border->bottom_style, span->bound->border->left_style);
             strbuf_append_char_n(buf, ' ', indent);
-            strbuf_append_format(buf, "  tl-rds:%d, tr-rds:%d, br-rds:%d, bl-rds:%d}\n",
+            strbuf_append_format(buf, "  tl-rds:%f, tr-rds:%f, br-rds:%f, bl-rds:%f}\n",
                 span->bound->border->radius.top_left, span->bound->border->radius.top_right,
                 span->bound->border->radius.bottom_right, span->bound->border->radius.bottom_left);
         }
@@ -328,10 +328,10 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
             strbuf_append_str(buf, "box-sizing:content-box ");
         }
         if (block->blk->given_width >= 0) {
-            strbuf_append_format(buf, "given-wd:%d ", block->blk->given_width);
+            strbuf_append_format(buf, "given-wd:%f ", block->blk->given_width);
         }
         if (block->blk->given_height >= 0) {
-            strbuf_append_format(buf, "given-hg:%d ", block->blk->given_height);
+            strbuf_append_format(buf, "given-hg:%f ", block->blk->given_height);
         }
         strbuf_append_str(buf, "}\n");
     }
@@ -381,7 +381,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
 
 void print_block(ViewBlock* block, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent);
-    strbuf_append_format(buf, "[view-%s:%s, x:%d, y:%d, wd:%d, hg:%d\n",
+    strbuf_append_format(buf, "[view-%s:%s, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
         block->type == RDT_VIEW_BLOCK ? "block" :
         block->type == RDT_VIEW_INLINE_BLOCK ? "inline-block" :
         block->type == RDT_VIEW_LIST_ITEM ? "list-item" :
@@ -390,7 +390,7 @@ void print_block(ViewBlock* block, StrBuf* buf, int indent) {
         block->type == RDT_VIEW_TABLE_ROW ? "table-row" :
         block->type == RDT_VIEW_TABLE_CELL ? "table-cell" : "image",
         block->node->name(),
-        block->x, block->y, block->width, block->height);
+        (float)block->x, (float)block->y, (float)block->width, (float)block->height);
     print_block_props(block, buf, indent + 2);
     print_inline_props((ViewSpan*)block, buf, indent+2);
     print_view_group((ViewGroup*)block, buf, indent+2);
@@ -411,8 +411,8 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
             else if (view->type == RDT_VIEW_INLINE) {
                 strbuf_append_char_n(buf, ' ', indent);
                 ViewSpan* span = (ViewSpan*)view;
-                strbuf_append_format(buf, "[view-inline:%s, x:%d, y:%d, wd:%d, hg:%d\n",
-                    span->node->name(), span->x, span->y, span->width, span->height);
+                strbuf_append_format(buf, "[view-inline:%s, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
+                    span->node->name(), (float)span->x, (float)span->y, (float)span->width, (float)span->height);
                 print_inline_props(span, buf, indent + 2);
                 print_view_group((ViewGroup*)view, buf, indent + 2);
                 strbuf_append_char_n(buf, ' ', indent);
@@ -420,8 +420,8 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
             }
             else if (view->type == RDT_VIEW_BR) {
                 strbuf_append_char_n(buf, ' ', indent);
-                strbuf_append_format(buf, "[br: x:%d, y:%d, wd:%d, hg:%d]\n",
-                    view->x, view->y, view->width, view->height);
+                strbuf_append_format(buf, "[br: x:%.1f, y:%.1f, wd:%.1f, hg:%.1f]\n",
+                    (float)view->x, (float)view->y, (float)view->width, (float)view->height);
             }
             else if (view->type == RDT_VIEW_TEXT) {
                 strbuf_append_char_n(buf, ' ', indent);
@@ -439,8 +439,8 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                         if (*s == '\n' || *s == '\r' || *s == '\'') { *s = '^'; }
                         s++;
                     }
-                    strbuf_append_format(buf, "', start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d\n",
-                        text->start_index, text->length, text->x, text->y, text->width, text->height);
+                    strbuf_append_format(buf, "', start:%d, len:%d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
+                        text->start_index, text->length, (float)text->x, (float)text->y, (float)text->width, (float)text->height);
                 }
             }
             else {
@@ -521,8 +521,8 @@ void append_json_string(StrBuf* buf, const char* str) {
 
 void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio) {
     // calculate absolute position for view
-    int abs_x = view->x;
-    int abs_y = view->y;
+    float abs_x = view->x;
+    float abs_y = view->y;
     // Calculate absolute position by traversing up the parent chain
     ViewGroup* parent = view->parent;
     while (parent && (parent->type == RDT_VIEW_BLOCK || parent->type == RDT_VIEW_INLINE_BLOCK ||
@@ -535,19 +535,19 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio) {
     }
 
     // Convert absolute view dimensions to CSS pixels
-    int css_x = (int)round(abs_x / pixel_ratio);
-    int css_y = (int)round(abs_y / pixel_ratio);
-    int css_width = (int)round(view->width / pixel_ratio);
-    int css_height = (int)round(view->height / pixel_ratio);
+    float css_x = abs_x / pixel_ratio;
+    float css_y = abs_y / pixel_ratio;
+    float css_width = view->width / pixel_ratio;
+    float css_height = view->height / pixel_ratio;
 
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"x\": %d,\n", css_x);
+    strbuf_append_format(buf, "\"x\": %.1f,\n", css_x);
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"y\": %d,\n", css_y);
+    strbuf_append_format(buf, "\"y\": %.1f,\n", css_y);
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"width\": %d,\n", css_width);
+    strbuf_append_format(buf, "\"width\": %.1f,\n", css_width);
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"height\": %d\n", css_height);
+    strbuf_append_format(buf, "\"height\": %.1f\n", css_height);
 }
 
 // Recursive JSON generation for view blocks
