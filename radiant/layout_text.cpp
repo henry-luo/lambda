@@ -233,7 +233,12 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 FT_Vector kerning;
                 FT_Get_Kerning(lycon->font.face.ft_face, lycon->line.prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
                 if (kerning.x) {
-                    text->x += ((float)kerning.x / 64.0);
+                    if (str == text_start + text->start_index) {
+                        text->x += ((float)kerning.x / 64.0);
+                    }
+                    else {
+                        text->width += ((float)kerning.x / 64.0);
+                    }
                     log_debug("apply kerning: %f to char '%c'", (float)kerning.x / 64.0, *str);
                 }
             }
