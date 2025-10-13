@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Overflow Behavior\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 800px;\n            height: 900px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .overflow-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n        }\n        \n        .test-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        .overflow-box {\n            width: 200px;\n            height: 100px;\n            border: 2px solid #666;\n            background-color: #f0f0f0;\n            padding: 10px;\n            margin: 10px;\n            display: inline-block;\n            vertical-align: top;\n        }\n        \n        .content {\n            background-color: #ffcccc;\n            padding: 5px;\n            border: 1px solid #999;\n        }\n        \n        .long-content {\n            width: 300px;\n            height: 150px;\n            background-color: #ccffcc;\n            border: 1px solid #666;\n            padding: 10px;\n        }\n        \n        /* Overflow behaviors */\n        .overflow-visible {\n            overflow: visible;\n            background-color: #ffffcc;\n        }\n        \n        .overflow-hidden {\n            overflow: hidden;\n            background-color: #ffccff;\n        }\n        \n        .overflow-scroll {\n            overflow: scroll;\n            background-color: #ccffff;\n        }\n        \n        .overflow-auto {\n            overflow: auto;\n            background-color: #ccccff;\n        }\n        \n        /* Individual axis overflow */\n        .overflow-x-scroll {\n            overflow-x: scroll;\n            overflow-y: hidden;\n            background-color: #ffccaa;\n        }\n        \n        .overflow-y-scroll {\n            overflow-x: hidden;\n            overflow-y: scroll;\n            background-color: #ccffaa;\n        }\n        \n        /* Text overflow */\n        .text-overflow-test {\n            width: 150px;\n            height: 30px;\n            border: 1px solid #666;\n            background-color: white;\n            padding: 5px;\n            margin: 5px;\n            display: inline-block;\n            line-height: 20px;\n        }\n        \n        .text-ellipsis {\n            white-space: nowrap;\n            overflow: hidden;\n            text-overflow: ellipsis;\n            background-color: #ffeecc;\n        }\n        \n        .text-clip {\n            white-space: nowrap;\n            overflow: hidden;\n            text-overflow: clip;\n            background-color: #eeffcc;\n        }\n    \n\n\n    \n        \n            Overflow: visible (default)\n            \n                \n                    This content is larger than its container and will overflow visibly outside the bounds.\n                \n            \n        \n        \n        \n            Overflow: hidden\n            \n                \n                    This content is larger than its container but will be clipped and hidden.\n                \n            \n        \n        \n        \n            Overflow: scroll\n            \n                \n                    This content is larger than its container and will have scrollbars (always visible).\n                \n            \n        \n        \n        \n            Overflow: auto\n            \n                \n                    This content is larger than its container and will have scrollbars only when needed.\n                \n            \n        \n        \n        \n            Axis-specific overflow\n            \n                \n                    Horizontal scroll only - vertical content is clipped.\n                \n            \n            \n                \n                    Vertical scroll only - horizontal content is clipped.\n                \n            \n        \n        \n        \n            Text overflow behavior\n            \n                This is a very long text that will be truncated with ellipsis\n            \n            \n                This is a very long text that will be clipped without ellipsis\n            \n        \n        \n        \n            No overflow (content fits)\n            \n                \n                    This content fits nicely within its container bounds.\n                \n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"box_012_overflow\",\n        \"category\": \"advanced\",\n        \"features\": [\"overflow\", \"overflow-visible\", \"overflow-hidden\", \"overflow-scroll\", \"overflow-auto\", \"overflow-x\", \"overflow-y\", \"text-overflow\", \"ellipsis\", \"clip\"],\n        \"description\": \"Overflow property behavior with various values and axis-specific controls\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visufx.html#overflow\"],\n        \"complexity\": \"intermediate\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Overflow Behavior\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 800px;\n            height: 900px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .overflow-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n        }\n        \n        .test-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        .overflow-box {\n            width: 200px;\n            height: 100px;\n            border: 2px solid #666;\n            background-color: #f0f0f0;\n            padding: 10px;\n            margin: 10px;\n            display: inline-block;\n            vertical-align: top;\n        }\n        \n        .content {\n            background-color: #ffcccc;\n            padding: 5px;\n            border: 1px solid #999;\n        }\n        \n        .long-content {\n            width: 300px;\n            height: 150px;\n            background-color: #ccffcc;\n            border: 1px solid #666;\n            padding: 10px;\n        }\n        \n        /* Overflow behaviors */\n        .overflow-visible {\n            overflow: visible;\n            background-color: #ffffcc;\n        }\n        \n        .overflow-hidden {\n            overflow: hidden;\n            background-color: #ffccff;\n        }\n        \n        .overflow-scroll {\n            overflow: scroll;\n            background-color: #ccffff;\n        }\n        \n        .overflow-auto {\n            overflow: auto;\n            background-color: #ccccff;\n        }\n        \n        /* Individual axis overflow */\n        .overflow-x-scroll {\n            overflow-x: scroll;\n            overflow-y: hidden;\n            background-color: #ffccaa;\n        }\n        \n        .overflow-y-scroll {\n            overflow-x: hidden;\n            overflow-y: scroll;\n            background-color: #ccffaa;\n        }\n        \n        /* Text overflow */\n        .text-overflow-test {\n            width: 150px;\n            height: 30px;\n            border: 1px solid #666;\n            background-color: white;\n            padding: 5px;\n            margin: 5px;\n            display: inline-block;\n            line-height: 20px;\n        }\n        \n        .text-ellipsis {\n            white-space: nowrap;\n            overflow: hidden;\n            text-overflow: ellipsis;\n            background-color: #ffeecc;\n        }\n        \n        .text-clip {\n            white-space: nowrap;\n            overflow: hidden;\n            text-overflow: clip;\n            background-color: #eeffcc;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Overflow Behavior",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Overflow Behavior",
+                "length": 23,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 800px;\n            height: 900px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .overflow-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n        }\n        \n        .test-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        .overflow-box {\n            width: 200px;\n            height: 100px;\n            border: 2px solid #666;\n            background-color: #f0f0f0;\n            padding: 10px;\n            margin: 10px;\n            display: inline-block;\n            vertical-align: top;\n        }\n        \n        .content {\n            background-color: #ffcccc;\n            padding: 5px;\n            border: 1px solid #999;\n        }\n        \n        .long-content {\n            width: 300px;\n            height: 150px;\n            background-color: #ccffcc;\n            border: 1px solid #666;\n            padding: 10px;\n        }\n        \n        /* Overflow behaviors */\n        .overflow-visible {\n            overflow: visible;\n            background-color: #ffffcc;\n        }\n        \n        .overflow-hidden {\n            overflow: hidden;\n            background-color: #ffccff;\n        }\n        \n        .overflow-scroll {\n            overflow: scroll;\n            background-color: #ccffff;\n        }\n        \n        .overflow-auto {\n            overflow: auto;\n            background-color: #ccccff;\n        }\n        \n        /* Individual axis overflow */\n        .overflow-x-scroll {\n            overflow-x: scroll;\n            overflow-y: hidden;\n            background-color: #ffccaa;\n        }\n        \n        .overflow-y-scroll {\n            overflow-x: hidden;\n            overflow-y: scroll;\n            background-color: #ccffaa;\n        }\n        \n        /* Text overflow */\n        .text-overflow-test {\n            width: 150px;\n            height: 30px;\n            border: 1px solid #666;\n            background-color: white;\n            padding: 5px;\n            margin: 5px;\n            display: inline-block;\n            line-height: 20px;\n        }\n        \n        .text-ellipsis {\n            white-space: nowrap;\n            overflow: hidden;\n            text-overflow: ellipsis;\n            background-color: #ffeecc;\n        }\n        \n        .text-clip {\n            white-space: nowrap;\n            overflow: hidden;\n            text-overflow: clip;\n            background-color: #eeffcc;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 800px;\n            height: 900px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .overflow-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n        }\n        \n        .test-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        .overflow-box {\n            width: 200px;\n            height: 100px;\n            border: 2px solid #666;\n            background-color: #f0f0f0;\n            padding: 10px;\n            margin: 10px;\n            display: inline-block;\n            vertical-align: top;\n        }\n        \n        .content {\n            background-color: #ffcccc;\n            padding: 5px;\n            border: 1px solid #999;\n        }\n        \n        .long-content {\n            width: 300px;\n            height: 150px;\n            background-color: #ccffcc;\n            border: 1px solid #666;\n            padding: 10px;\n        }\n        \n        /* Overflow behaviors */\n        .overflow-visible {\n            overflow: visible;\n            background-color: #ffffcc;\n        }\n        \n        .overflow-hidden {\n            overflow: hidden;\n            background-color: #ffccff;\n        }\n        \n        .overflow-scroll {\n            overflow: scroll;\n            background-color: #ccffff;\n        }\n        \n        .overflow-auto {\n            overflow: auto;\n            background-color: #ccccff;\n        }\n        \n        /* Individual axis overflow */\n        .overflow-x-scroll {\n            overflow-x: scroll;\n            overflow-y: hidden;\n            background-color: #ffccaa;\n        }\n        \n        .overflow-y-scroll {\n            overflow-x: hidden;\n            overflow-y: scroll;\n            background-color: #ccffaa;\n        }\n        \n        /* Text overflow */\n        .text-overflow-test {\n            width: 150px;\n            height: 30px;\n            border: 1px solid #666;\n            background-color: white;\n            padding: 5px;\n            margin: 5px;\n            display: inline-block;\n            line-height: 20px;\n        }\n        \n        .text-ellipsis {\n            white-space: nowrap;\n            overflow: hidden;\n            text-overflow: ellipsis;\n            background-color: #ffeecc;\n        }\n        \n        .text-clip {\n            white-space: nowrap;\n            overflow: hidden;\n            text-overflow: clip;\n            background-color: #eeffcc;\n        }\n    ",
+                "length": 2872,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Overflow: visible (default)\n            \n                \n                    This content is larger than its container and will overflow visibly outside the bounds.\n                \n            \n        \n        \n        \n            Overflow: hidden\n            \n                \n                    This content is larger than its container but will be clipped and hidden.\n                \n            \n        \n        \n        \n            Overflow: scroll\n            \n                \n                    This content is larger than its container and will have scrollbars (always visible).\n                \n            \n        \n        \n        \n            Overflow: auto\n            \n                \n                    This content is larger than its container and will have scrollbars only when needed.\n                \n            \n        \n        \n        \n            Axis-specific overflow\n            \n                \n                    Horizontal scroll only - vertical content is clipped.\n                \n            \n            \n                \n                    Vertical scroll only - horizontal content is clipped.\n                \n            \n        \n        \n        \n            Text overflow behavior\n            \n                This is a very long text that will be truncated with ellipsis\n            \n            \n                This is a very long text that will be clipped without ellipsis\n            \n        \n        \n        \n            No overflow (content fits)\n            \n                \n                    This content fits nicely within its container bounds.\n                \n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"box_012_overflow\",\n        \"category\": \"advanced\",\n        \"features\": [\"overflow\", \"overflow-visible\", \"overflow-hidden\", \"overflow-scroll\", \"overflow-auto\", \"overflow-x\", \"overflow-y\", \"text-overflow\", \"ellipsis\", \"clip\"],\n        \"description\": \"Overflow property behavior with various values and axis-specific controls\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visufx.html#overflow\"],\n        \"complexity\": \"intermediate\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.test-container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Overflow: visible (default)\n            \n                \n                    This content is larger than its container and will overflow visibly outside the bounds.\n                \n            \n        \n        \n        \n            Overflow: hidden\n            \n                \n                    This content is larger than its container but will be clipped and hidden.\n                \n            \n        \n        \n        \n            Overflow: scroll\n            \n                \n                    This content is larger than its container and will have scrollbars (always visible).\n                \n            \n        \n        \n        \n            Overflow: auto\n            \n                \n                    This content is larger than its container and will have scrollbars only when needed.\n                \n            \n        \n        \n        \n            Axis-specific overflow\n            \n                \n                    Horizontal scroll only - vertical content is clipped.\n                \n            \n            \n                \n                    Vertical scroll only - horizontal content is clipped.\n                \n            \n        \n        \n        \n            Text overflow behavior\n            \n                This is a very long text that will be truncated with ellipsis\n            \n            \n                This is a very long text that will be clipped without ellipsis\n            \n        \n        \n        \n            No overflow (content fits)\n            \n                \n                    This content fits nicely within its container bounds.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 7,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.overflow-test:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,13 +667,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Overflow: visible (default)\n            \n                \n                    This content is larger than its container and will overflow visibly outside the bounds.",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -632,33 +729,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Overflow: visible (default)",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Overflow: visible (default)",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 58,
-                            "width": 195.59,
-                            "height": 17,
-                            "right": 233.59,
-                            "bottom": 75
-                          }
-                        ],
                         "length": 27,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 27
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 58,
+                              "width": 195.59,
+                              "height": 17,
+                              "right": 233.59,
+                              "bottom": 75,
+                              "text": "Overflow: visible (default)",
+                              "startIndex": 0,
+                              "endIndex": 27
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.overflow-box.overflow-visible:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -717,13 +822,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "This content is larger than its container and will overflow visibly outside the bounds.",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div.long-content",
                         "tag": "div",
                         "id": null,
@@ -781,53 +884,101 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "This content is larger than its container and will overflow visibly outside the bounds.",
-                        "hasTextNodes": true,
-                        "textNodes": [
-                          {
-                            "text": "\n                    This content is larger than its container and will overflow visibly outside the bounds.\n                ",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 71,
-                                "y": 119,
-                                "width": 274.81,
-                                "height": 17,
-                                "right": 345.81,
-                                "bottom": 136
-                              },
-                              {
-                                "x": 71,
-                                "y": 137,
-                                "width": 248.13,
-                                "height": 17,
-                                "right": 319.13,
-                                "bottom": 154
-                              },
-                              {
-                                "x": 71,
-                                "y": 155,
-                                "width": 56.94,
-                                "height": 17,
-                                "right": 127.94,
-                                "bottom": 172
-                              }
-                            ],
-                            "length": 125,
-                            "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 125
-                          }
-                        ],
-                        "childCount": 0,
                         "depth": 5,
-                        "children": []
+                        "elementIndex": 1,
+                        "children": [
+                          {
+                            "nodeType": "text",
+                            "text": "\n                    This content is larger than its container ",
+                            "length": 63,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 119,
+                                  "width": 274.81,
+                                  "height": 17,
+                                  "right": 345.81,
+                                  "bottom": 136,
+                                  "text": "\n                    This content is larger than its container ",
+                                  "startIndex": 0,
+                                  "endIndex": 63
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "text",
+                            "text": "and will overflow visibly outside the ",
+                            "length": 38,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 137,
+                                  "width": 248.13,
+                                  "height": 17,
+                                  "right": 319.13,
+                                  "bottom": 154,
+                                  "text": "and will overflow visibly outside the ",
+                                  "startIndex": 0,
+                                  "endIndex": 38
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "text",
+                            "text": "bounds.\n                ",
+                            "length": 24,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 155,
+                                  "width": 56.94,
+                                  "height": 17,
+                                  "right": 127.94,
+                                  "bottom": 172,
+                                  "text": "bounds.\n                ",
+                                  "startIndex": 0,
+                                  "endIndex": 24
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          }
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.overflow-test:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -885,13 +1036,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Overflow: hidden\n            \n                \n                    This content is larger than its container but will be clipped and hidden.",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -949,33 +1098,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Overflow: hidden",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Overflow: hidden",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 258,
-                            "width": 130.67,
-                            "height": 17,
-                            "right": 168.67,
-                            "bottom": 275
-                          }
-                        ],
                         "length": 16,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 16
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 258,
+                              "width": 130.67,
+                              "height": 17,
+                              "right": 168.67,
+                              "bottom": 275,
+                              "text": "Overflow: hidden",
+                              "startIndex": 0,
+                              "endIndex": 16
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.overflow-box.overflow-hidden:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1034,13 +1191,11 @@
                       "overflowX": "hidden",
                       "overflowY": "hidden"
                     },
-                    "textContent": "This content is larger than its container but will be clipped and hidden.",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div.long-content",
                         "tag": "div",
                         "id": null,
@@ -1098,45 +1253,73 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "This content is larger than its container but will be clipped and hidden.",
-                        "hasTextNodes": true,
-                        "textNodes": [
-                          {
-                            "text": "\n                    This content is larger than its container but will be clipped and hidden.\n                ",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 71,
-                                "y": 319,
-                                "width": 274.81,
-                                "height": 17,
-                                "right": 345.81,
-                                "bottom": 336
-                              },
-                              {
-                                "x": 71,
-                                "y": 337,
-                                "width": 214.38,
-                                "height": 17,
-                                "right": 285.38,
-                                "bottom": 354
-                              }
-                            ],
-                            "length": 111,
-                            "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 111
-                          }
-                        ],
-                        "childCount": 0,
                         "depth": 5,
-                        "children": []
+                        "elementIndex": 1,
+                        "children": [
+                          {
+                            "nodeType": "text",
+                            "text": "\n                    This content is larger than its container ",
+                            "length": 63,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 319,
+                                  "width": 274.81,
+                                  "height": 17,
+                                  "right": 345.81,
+                                  "bottom": 336,
+                                  "text": "\n                    This content is larger than its container ",
+                                  "startIndex": 0,
+                                  "endIndex": 63
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "text",
+                            "text": "but will be clipped and hidden.\n                ",
+                            "length": 48,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 337,
+                                  "width": 214.38,
+                                  "height": 17,
+                                  "right": 285.38,
+                                  "bottom": 354,
+                                  "text": "but will be clipped and hidden.\n                ",
+                                  "startIndex": 0,
+                                  "endIndex": 48
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          }
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.overflow-test:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -1194,13 +1377,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Overflow: scroll\n            \n                \n                    This content is larger than its container and will have scrollbars (always visible).",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -1258,33 +1439,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Overflow: scroll",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Overflow: scroll",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 458,
-                            "width": 120.92,
-                            "height": 17,
-                            "right": 158.92,
-                            "bottom": 475
-                          }
-                        ],
                         "length": 16,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 16
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 458,
+                              "width": 120.92,
+                              "height": 17,
+                              "right": 158.92,
+                              "bottom": 475,
+                              "text": "Overflow: scroll",
+                              "startIndex": 0,
+                              "endIndex": 16
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.overflow-box.overflow-scroll:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1343,13 +1532,11 @@
                       "overflowX": "scroll",
                       "overflowY": "scroll"
                     },
-                    "textContent": "This content is larger than its container and will have scrollbars (always visible).",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div.long-content",
                         "tag": "div",
                         "id": null,
@@ -1407,53 +1594,101 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "This content is larger than its container and will have scrollbars (always visible).",
-                        "hasTextNodes": true,
-                        "textNodes": [
-                          {
-                            "text": "\n                    This content is larger than its container and will have scrollbars (always visible).\n                ",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 71,
-                                "y": 519,
-                                "width": 274.81,
-                                "height": 17,
-                                "right": 345.81,
-                                "bottom": 536
-                              },
-                              {
-                                "x": 71,
-                                "y": 537,
-                                "width": 224.09,
-                                "height": 17,
-                                "right": 295.09,
-                                "bottom": 554
-                              },
-                              {
-                                "x": 71,
-                                "y": 555,
-                                "width": 54.23,
-                                "height": 17,
-                                "right": 125.23,
-                                "bottom": 572
-                              }
-                            ],
-                            "length": 122,
-                            "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 122
-                          }
-                        ],
-                        "childCount": 0,
                         "depth": 5,
-                        "children": []
+                        "elementIndex": 1,
+                        "children": [
+                          {
+                            "nodeType": "text",
+                            "text": "\n                    This content is larger than its container ",
+                            "length": 63,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 519,
+                                  "width": 274.81,
+                                  "height": 17,
+                                  "right": 345.81,
+                                  "bottom": 536,
+                                  "text": "\n                    This content is larger than its container ",
+                                  "startIndex": 0,
+                                  "endIndex": 63
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "text",
+                            "text": "and will have scrollbars (always ",
+                            "length": 33,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 537,
+                                  "width": 224.09,
+                                  "height": 17,
+                                  "right": 295.09,
+                                  "bottom": 554,
+                                  "text": "and will have scrollbars (always ",
+                                  "startIndex": 0,
+                                  "endIndex": 33
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "text",
+                            "text": "visible).\n                ",
+                            "length": 26,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 555,
+                                  "width": 54.23,
+                                  "height": 17,
+                                  "right": 125.23,
+                                  "bottom": 572,
+                                  "text": "visible).\n                ",
+                                  "startIndex": 0,
+                                  "endIndex": 26
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          }
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.overflow-test:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -1511,13 +1746,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Overflow: auto\n            \n                \n                    This content is larger than its container and will have scrollbars only when needed.",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 7,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -1575,33 +1808,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Overflow: auto",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Overflow: auto",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 658,
-                            "width": 112.02,
-                            "height": 17,
-                            "right": 150.02,
-                            "bottom": 675
-                          }
-                        ],
                         "length": 14,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 14
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 658,
+                              "width": 112.02,
+                              "height": 17,
+                              "right": 150.02,
+                              "bottom": 675,
+                              "text": "Overflow: auto",
+                              "startIndex": 0,
+                              "endIndex": 14
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.overflow-box.overflow-auto:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1660,13 +1901,11 @@
                       "overflowX": "auto",
                       "overflowY": "auto"
                     },
-                    "textContent": "This content is larger than its container and will have scrollbars only when needed.",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div.long-content",
                         "tag": "div",
                         "id": null,
@@ -1724,53 +1963,101 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "This content is larger than its container and will have scrollbars only when needed.",
-                        "hasTextNodes": true,
-                        "textNodes": [
-                          {
-                            "text": "\n                    This content is larger than its container and will have scrollbars only when needed.\n                ",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 71,
-                                "y": 719,
-                                "width": 274.81,
-                                "height": 17,
-                                "right": 345.81,
-                                "bottom": 736
-                              },
-                              {
-                                "x": 71,
-                                "y": 737,
-                                "width": 241.91,
-                                "height": 17,
-                                "right": 312.91,
-                                "bottom": 754
-                              },
-                              {
-                                "x": 71,
-                                "y": 755,
-                                "width": 57.84,
-                                "height": 17,
-                                "right": 128.84,
-                                "bottom": 772
-                              }
-                            ],
-                            "length": 122,
-                            "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 122
-                          }
-                        ],
-                        "childCount": 0,
                         "depth": 5,
-                        "children": []
+                        "elementIndex": 1,
+                        "children": [
+                          {
+                            "nodeType": "text",
+                            "text": "\n                    This content is larger than its container ",
+                            "length": 63,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 719,
+                                  "width": 274.81,
+                                  "height": 17,
+                                  "right": 345.81,
+                                  "bottom": 736,
+                                  "text": "\n                    This content is larger than its container ",
+                                  "startIndex": 0,
+                                  "endIndex": 63
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "text",
+                            "text": "and will have scrollbars only when ",
+                            "length": 35,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 737,
+                                  "width": 241.91,
+                                  "height": 17,
+                                  "right": 312.91,
+                                  "bottom": 754,
+                                  "text": "and will have scrollbars only when ",
+                                  "startIndex": 0,
+                                  "endIndex": 35
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "text",
+                            "text": "needed.\n                ",
+                            "length": 24,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 755,
+                                  "width": 57.84,
+                                  "height": 17,
+                                  "right": 128.84,
+                                  "bottom": 772,
+                                  "text": "needed.\n                ",
+                                  "startIndex": 0,
+                                  "endIndex": 24
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          }
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.overflow-test:nth-of-type(5)",
                 "tag": "div",
                 "id": null,
@@ -1828,13 +2115,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Axis-specific overflow\n            \n                \n                    Horizontal scroll only - vertical content is clipped.\n                \n            \n            \n                \n                    Vertical scroll only - horizontal content is clipped.",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 3,
                 "depth": 3,
+                "elementIndex": 9,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -1892,33 +2177,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Axis-specific overflow",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Axis-specific overflow",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 858,
-                            "width": 168.95,
-                            "height": 17,
-                            "right": 206.95,
-                            "bottom": 875
-                          }
-                        ],
                         "length": 22,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 22
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 858,
+                              "width": 168.95,
+                              "height": 17,
+                              "right": 206.95,
+                              "bottom": 875,
+                              "text": "Axis-specific overflow",
+                              "startIndex": 0,
+                              "endIndex": 22
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.overflow-box.overflow-x-scroll:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1977,13 +2270,11 @@
                       "overflowX": "scroll",
                       "overflowY": "hidden"
                     },
-                    "textContent": "Horizontal scroll only - vertical content is clipped.",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div.long-content",
                         "tag": "div",
                         "id": null,
@@ -2041,43 +2332,96 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Horizontal scroll only - vertical content is clipped.",
-                        "hasTextNodes": true,
-                        "textNodes": [
-                          {
-                            "text": "\n                    Horizontal scroll only - vertical content is clipped.\n                ",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 71,
-                                "y": 919,
-                                "width": 269.44,
-                                "height": 17,
-                                "right": 340.44,
-                                "bottom": 936
-                              },
-                              {
-                                "x": 71,
-                                "y": 937,
-                                "width": 71.16,
-                                "height": 17,
-                                "right": 142.16,
-                                "bottom": 954
-                              }
-                            ],
-                            "length": 91,
-                            "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 91
-                          }
-                        ],
-                        "childCount": 0,
                         "depth": 5,
-                        "children": []
+                        "elementIndex": 1,
+                        "children": [
+                          {
+                            "nodeType": "text",
+                            "text": "\n                    Horizontal scroll only - vertical content ",
+                            "length": 63,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 919,
+                                  "width": 269.44,
+                                  "height": 17,
+                                  "right": 340.44,
+                                  "bottom": 936,
+                                  "text": "\n                    Horizontal scroll only - vertical content ",
+                                  "startIndex": 0,
+                                  "endIndex": 63
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "text",
+                            "text": "is clipped.\n                ",
+                            "length": 28,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 71,
+                                  "y": 937,
+                                  "width": 71.16,
+                                  "height": 17,
+                                  "right": 142.16,
+                                  "bottom": 954,
+                                  "text": "is clipped.\n                ",
+                                  "startIndex": 0,
+                                  "endIndex": 28
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          }
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 258,
+                          "y": 886,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 262.45,
+                          "bottom": 903
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 4,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "element",
                     "selector": "div.overflow-box.overflow-y-scroll:nth-of-type(3)",
                     "tag": "div",
                     "id": null,
@@ -2136,13 +2480,11 @@
                       "overflowX": "hidden",
                       "overflowY": "scroll"
                     },
-                    "textContent": "Vertical scroll only - horizontal content is clipped.",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 5,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div.long-content",
                         "tag": "div",
                         "id": null,
@@ -2200,45 +2542,73 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Vertical scroll only - horizontal content is clipped.",
-                        "hasTextNodes": true,
-                        "textNodes": [
-                          {
-                            "text": "\n                    Vertical scroll only - horizontal content is clipped.\n                ",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 295.45,
-                                "y": 919,
-                                "width": 268.58,
-                                "height": 17,
-                                "right": 564.03,
-                                "bottom": 936
-                              },
-                              {
-                                "x": 295.45,
-                                "y": 937,
-                                "width": 71.16,
-                                "height": 17,
-                                "right": 366.61,
-                                "bottom": 954
-                              }
-                            ],
-                            "length": 91,
-                            "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 91
-                          }
-                        ],
-                        "childCount": 0,
                         "depth": 5,
-                        "children": []
+                        "elementIndex": 1,
+                        "children": [
+                          {
+                            "nodeType": "text",
+                            "text": "\n                    Vertical scroll only - horizontal content ",
+                            "length": 63,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 295.45,
+                                  "y": 919,
+                                  "width": 268.58,
+                                  "height": 17,
+                                  "right": 564.03,
+                                  "bottom": 936,
+                                  "text": "\n                    Vertical scroll only - horizontal content ",
+                                  "startIndex": 0,
+                                  "endIndex": 63
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "text",
+                            "text": "is clipped.\n                ",
+                            "length": 28,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 295.45,
+                                  "y": 937,
+                                  "width": 71.16,
+                                  "height": 17,
+                                  "right": 366.61,
+                                  "bottom": 954,
+                                  "text": "is clipped.\n                ",
+                                  "startIndex": 0,
+                                  "endIndex": 28
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          }
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.overflow-test:nth-of-type(6)",
                 "tag": "div",
                 "id": null,
@@ -2296,13 +2666,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Text overflow behavior\n            \n                This is a very long text that will be truncated with ellipsis\n            \n            \n                This is a very long text that will be clipped without ellipsis",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 3,
                 "depth": 3,
+                "elementIndex": 11,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -2360,33 +2728,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Text overflow behavior",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Text overflow behavior",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 1058,
-                            "width": 173.08,
-                            "height": 17,
-                            "right": 211.08,
-                            "bottom": 1075
-                          }
-                        ],
                         "length": 22,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 22
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 1058,
+                              "width": 173.08,
+                              "height": 17,
+                              "right": 211.08,
+                              "bottom": 1075,
+                              "text": "Text overflow behavior",
+                              "startIndex": 0,
+                              "endIndex": 22
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.text-overflow-test.text-ellipsis:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -2445,41 +2821,66 @@
                       "overflowX": "hidden",
                       "overflowY": "hidden"
                     },
-                    "textContent": "This is a very long text that will be truncated with ellipsis",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 3,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "\n                This is a very long text that will be truncated with ellipsis\n            ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 49,
-                            "y": 1098,
-                            "width": 395.73,
-                            "height": 17,
-                            "right": 444.73,
-                            "bottom": 1115
-                          },
-                          {
-                            "x": 49,
-                            "y": 1098,
-                            "width": 120.05,
-                            "height": 17,
-                            "right": 169.05,
-                            "bottom": 1115
-                          }
-                        ],
                         "length": 91,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 91
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 49,
+                              "y": 1098,
+                              "width": 395.73,
+                              "height": 17,
+                              "right": 444.73,
+                              "bottom": 1115,
+                              "text": "\n                This is a very long text that will be truncated with ellipsis\n            ",
+                              "startIndex": 0,
+                              "endIndex": 91
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 198,
+                          "y": 1112,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 202.45,
+                          "bottom": 1129
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 4,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.text-overflow-test.text-clip:nth-of-type(3)",
                     "tag": "div",
                     "id": null,
@@ -2538,35 +2939,43 @@
                       "overflowX": "hidden",
                       "overflowY": "hidden"
                     },
-                    "textContent": "This is a very long text that will be clipped without ellipsis",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 5,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "\n                This is a very long text that will be clipped without ellipsis\n            ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 213.45,
-                            "y": 1098,
-                            "width": 401.97,
-                            "height": 17,
-                            "right": 615.42,
-                            "bottom": 1115
-                          }
-                        ],
                         "length": 92,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 92
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 213.45,
+                              "y": 1098,
+                              "width": 401.97,
+                              "height": 17,
+                              "right": 615.42,
+                              "bottom": 1115,
+                              "text": "\n                This is a very long text that will be clipped without ellipsis\n            ",
+                              "startIndex": 0,
+                              "endIndex": 92
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.overflow-test:nth-of-type(7)",
                 "tag": "div",
                 "id": null,
@@ -2624,13 +3033,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "No overflow (content fits)\n            \n                \n                    This content fits nicely within its container bounds.",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 13,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -2688,33 +3095,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "No overflow (content fits)",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "No overflow (content fits)",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 1182,
-                            "width": 192.89,
-                            "height": 17,
-                            "right": 230.89,
-                            "bottom": 1199
-                          }
-                        ],
                         "length": 26,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 26
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 1182,
+                              "width": 192.89,
+                              "height": 17,
+                              "right": 230.89,
+                              "bottom": 1199,
+                              "text": "No overflow (content fits)",
+                              "startIndex": 0,
+                              "endIndex": 26
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.overflow-box.overflow-auto:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -2773,13 +3188,11 @@
                       "overflowX": "auto",
                       "overflowY": "auto"
                     },
-                    "textContent": "This content fits nicely within its container bounds.",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div.content",
                         "tag": "div",
                         "id": null,
@@ -2837,47 +3250,94 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "This content fits nicely within its container bounds.",
-                        "hasTextNodes": true,
-                        "textNodes": [
-                          {
-                            "text": "\n                    This content fits nicely within its container bounds.\n                ",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 66,
-                                "y": 1238,
-                                "width": 157.41,
-                                "height": 17,
-                                "right": 223.41,
-                                "bottom": 1255
-                              },
-                              {
-                                "x": 66,
-                                "y": 1256,
-                                "width": 131.63,
-                                "height": 17,
-                                "right": 197.63,
-                                "bottom": 1273
-                              },
-                              {
-                                "x": 66,
-                                "y": 1274,
-                                "width": 56.94,
-                                "height": 17,
-                                "right": 122.94,
-                                "bottom": 1291
-                              }
-                            ],
-                            "length": 91,
-                            "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 91
-                          }
-                        ],
-                        "childCount": 0,
                         "depth": 5,
-                        "children": []
+                        "elementIndex": 1,
+                        "children": [
+                          {
+                            "nodeType": "text",
+                            "text": "\n                    This content fits nicely ",
+                            "length": 46,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 66,
+                                  "y": 1238,
+                                  "width": 157.41,
+                                  "height": 17,
+                                  "right": 223.41,
+                                  "bottom": 1255,
+                                  "text": "\n                    This content fits nicely ",
+                                  "startIndex": 0,
+                                  "endIndex": 46
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "text",
+                            "text": "within its container ",
+                            "length": 21,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 66,
+                                  "y": 1256,
+                                  "width": 131.63,
+                                  "height": 17,
+                                  "right": 197.63,
+                                  "bottom": 1273,
+                                  "text": "within its container ",
+                                  "startIndex": 0,
+                                  "endIndex": 21
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "text",
+                            "text": "bounds.\n                ",
+                            "length": 24,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 66,
+                                  "y": 1274,
+                                  "width": 56.94,
+                                  "height": 17,
+                                  "right": 122.94,
+                                  "bottom": 1291,
+                                  "text": "bounds.\n                ",
+                                  "startIndex": 0,
+                                  "endIndex": 24
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          }
+                        ]
                       }
                     ]
                   }
@@ -2886,6 +3346,7 @@
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -2941,12 +3402,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"box_012_overflow\",\n        \"category\": \"advanced\",\n        \"features\": [\"overflow\", \"overflow-visible\", \"overflow-hidden\", \"overflow-scroll\", \"overflow-auto\", \"overflow-x\", \"overflow-y\", \"text-overflow\", \"ellipsis\", \"clip\"],\n        \"description\": \"Overflow property behavior with various values and axis-specific controls\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visufx.html#overflow\"],\n        \"complexity\": \"intermediate\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"box_012_overflow\",\n        \"category\": \"advanced\",\n        \"features\": [\"overflow\", \"overflow-visible\", \"overflow-hidden\", \"overflow-scroll\", \"overflow-auto\", \"overflow-x\", \"overflow-y\", \"text-overflow\", \"ellipsis\", \"clip\"],\n        \"description\": \"Overflow property behavior with various values and axis-specific controls\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visufx.html#overflow\"],\n        \"complexity\": \"intermediate\"\n    }\n    ",
+                "length": 480,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

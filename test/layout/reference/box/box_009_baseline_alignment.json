@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Text Baseline Alignment\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 800px;\n            height: 700px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .baseline-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n            line-height: 3; /* Generous line-height to show baseline clearly */\n        }\n        \n        .test-title {\n            display: block;\n            font-weight: bold;\n            margin-bottom: 10px;\n            line-height: normal;\n        }\n        \n        /* Different font sizes */\n        .small-text {\n            font-size: 12px;\n            background-color: #ffcccc;\n            vertical-align: baseline;\n        }\n        \n        .medium-text {\n            font-size: 16px;\n            background-color: #ccffcc;\n            vertical-align: baseline;\n        }\n        \n        .large-text {\n            font-size: 24px;\n            background-color: #ccccff;\n            vertical-align: baseline;\n        }\n        \n        .xlarge-text {\n            font-size: 32px;\n            background-color: #ffffcc;\n            vertical-align: baseline;\n        }\n        \n        /* Inline blocks with different heights */\n        .inline-block {\n            display: inline-block;\n            padding: 5px 10px;\n            margin: 0 5px;\n            border: 1px solid #666;\n            text-align: center;\n        }\n        \n        .short-block {\n            height: 30px;\n            line-height: 20px;\n            background-color: #ffccff;\n            vertical-align: baseline;\n        }\n        \n        .medium-block {\n            height: 50px;\n            line-height: 40px;\n            background-color: #ccffff;\n            vertical-align: baseline;\n        }\n        \n        .tall-block {\n            height: 70px;\n            line-height: 60px;\n            background-color: #ffccaa;\n            vertical-align: baseline;\n        }\n        \n        /* Different vertical alignments for comparison */\n        .align-top {\n            vertical-align: top;\n            background-color: #aaffcc;\n        }\n        \n        .align-middle {\n            vertical-align: middle;\n            background-color: #aaccff;\n        }\n        \n        .align-bottom {\n            vertical-align: bottom;\n            background-color: #ffaacc;\n        }\n        \n        /* Visual baseline indicator */\n        .baseline-indicator {\n            border-bottom: 2px solid red;\n            display: inline;\n            position: relative;\n        }\n    \n\n\n    \n        \n            Mixed font sizes on baseline:\n            Small\n            Medium\n            Large\n            XL\n            baseline\n        \n        \n        \n            Inline-block elements with different heights (baseline aligned):\n            Short\n            Medium\n            Tall\n            text baseline\n        \n        \n        \n            Mixed vertical alignments for comparison:\n            Top\n            Middle\n            Bottom\n            Baseline\n        \n        \n        \n            Images and text baseline alignment:\n            \n            Text after image\n            \n            baseline\n        \n        \n        \n            Sub and superscript baseline behavior:\n            Normal text\n            subscript\n            and\n            superscript\n            baseline\n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"box_009_baseline_alignment\",\n        \"category\": \"baseline\",\n        \"features\": [\"baseline-alignment\", \"font-size-mixing\", \"inline-block-baseline\", \"image-baseline\", \"sub-sup-baseline\", \"vertical-align-baseline\"],\n        \"description\": \"Text and inline element baseline alignment with various font sizes, heights, and element types\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visudet.html#leading\"],\n        \"complexity\": \"intermediate\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Text Baseline Alignment\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 800px;\n            height: 700px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .baseline-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n            line-height: 3; /* Generous line-height to show baseline clearly */\n        }\n        \n        .test-title {\n            display: block;\n            font-weight: bold;\n            margin-bottom: 10px;\n            line-height: normal;\n        }\n        \n        /* Different font sizes */\n        .small-text {\n            font-size: 12px;\n            background-color: #ffcccc;\n            vertical-align: baseline;\n        }\n        \n        .medium-text {\n            font-size: 16px;\n            background-color: #ccffcc;\n            vertical-align: baseline;\n        }\n        \n        .large-text {\n            font-size: 24px;\n            background-color: #ccccff;\n            vertical-align: baseline;\n        }\n        \n        .xlarge-text {\n            font-size: 32px;\n            background-color: #ffffcc;\n            vertical-align: baseline;\n        }\n        \n        /* Inline blocks with different heights */\n        .inline-block {\n            display: inline-block;\n            padding: 5px 10px;\n            margin: 0 5px;\n            border: 1px solid #666;\n            text-align: center;\n        }\n        \n        .short-block {\n            height: 30px;\n            line-height: 20px;\n            background-color: #ffccff;\n            vertical-align: baseline;\n        }\n        \n        .medium-block {\n            height: 50px;\n            line-height: 40px;\n            background-color: #ccffff;\n            vertical-align: baseline;\n        }\n        \n        .tall-block {\n            height: 70px;\n            line-height: 60px;\n            background-color: #ffccaa;\n            vertical-align: baseline;\n        }\n        \n        /* Different vertical alignments for comparison */\n        .align-top {\n            vertical-align: top;\n            background-color: #aaffcc;\n        }\n        \n        .align-middle {\n            vertical-align: middle;\n            background-color: #aaccff;\n        }\n        \n        .align-bottom {\n            vertical-align: bottom;\n            background-color: #ffaacc;\n        }\n        \n        /* Visual baseline indicator */\n        .baseline-indicator {\n            border-bottom: 2px solid red;\n            display: inline;\n            position: relative;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Text Baseline Alignment",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Text Baseline Alignment",
+                "length": 29,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 800px;\n            height: 700px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .baseline-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n            line-height: 3; /* Generous line-height to show baseline clearly */\n        }\n        \n        .test-title {\n            display: block;\n            font-weight: bold;\n            margin-bottom: 10px;\n            line-height: normal;\n        }\n        \n        /* Different font sizes */\n        .small-text {\n            font-size: 12px;\n            background-color: #ffcccc;\n            vertical-align: baseline;\n        }\n        \n        .medium-text {\n            font-size: 16px;\n            background-color: #ccffcc;\n            vertical-align: baseline;\n        }\n        \n        .large-text {\n            font-size: 24px;\n            background-color: #ccccff;\n            vertical-align: baseline;\n        }\n        \n        .xlarge-text {\n            font-size: 32px;\n            background-color: #ffffcc;\n            vertical-align: baseline;\n        }\n        \n        /* Inline blocks with different heights */\n        .inline-block {\n            display: inline-block;\n            padding: 5px 10px;\n            margin: 0 5px;\n            border: 1px solid #666;\n            text-align: center;\n        }\n        \n        .short-block {\n            height: 30px;\n            line-height: 20px;\n            background-color: #ffccff;\n            vertical-align: baseline;\n        }\n        \n        .medium-block {\n            height: 50px;\n            line-height: 40px;\n            background-color: #ccffff;\n            vertical-align: baseline;\n        }\n        \n        .tall-block {\n            height: 70px;\n            line-height: 60px;\n            background-color: #ffccaa;\n            vertical-align: baseline;\n        }\n        \n        /* Different vertical alignments for comparison */\n        .align-top {\n            vertical-align: top;\n            background-color: #aaffcc;\n        }\n        \n        .align-middle {\n            vertical-align: middle;\n            background-color: #aaccff;\n        }\n        \n        .align-bottom {\n            vertical-align: bottom;\n            background-color: #ffaacc;\n        }\n        \n        /* Visual baseline indicator */\n        .baseline-indicator {\n            border-bottom: 2px solid red;\n            display: inline;\n            position: relative;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 800px;\n            height: 700px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .baseline-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n            line-height: 3; /* Generous line-height to show baseline clearly */\n        }\n        \n        .test-title {\n            display: block;\n            font-weight: bold;\n            margin-bottom: 10px;\n            line-height: normal;\n        }\n        \n        /* Different font sizes */\n        .small-text {\n            font-size: 12px;\n            background-color: #ffcccc;\n            vertical-align: baseline;\n        }\n        \n        .medium-text {\n            font-size: 16px;\n            background-color: #ccffcc;\n            vertical-align: baseline;\n        }\n        \n        .large-text {\n            font-size: 24px;\n            background-color: #ccccff;\n            vertical-align: baseline;\n        }\n        \n        .xlarge-text {\n            font-size: 32px;\n            background-color: #ffffcc;\n            vertical-align: baseline;\n        }\n        \n        /* Inline blocks with different heights */\n        .inline-block {\n            display: inline-block;\n            padding: 5px 10px;\n            margin: 0 5px;\n            border: 1px solid #666;\n            text-align: center;\n        }\n        \n        .short-block {\n            height: 30px;\n            line-height: 20px;\n            background-color: #ffccff;\n            vertical-align: baseline;\n        }\n        \n        .medium-block {\n            height: 50px;\n            line-height: 40px;\n            background-color: #ccffff;\n            vertical-align: baseline;\n        }\n        \n        .tall-block {\n            height: 70px;\n            line-height: 60px;\n            background-color: #ffccaa;\n            vertical-align: baseline;\n        }\n        \n        /* Different vertical alignments for comparison */\n        .align-top {\n            vertical-align: top;\n            background-color: #aaffcc;\n        }\n        \n        .align-middle {\n            vertical-align: middle;\n            background-color: #aaccff;\n        }\n        \n        .align-bottom {\n            vertical-align: bottom;\n            background-color: #ffaacc;\n        }\n        \n        /* Visual baseline indicator */\n        .baseline-indicator {\n            border-bottom: 2px solid red;\n            display: inline;\n            position: relative;\n        }\n    ",
+                "length": 2857,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Mixed font sizes on baseline:\n            Small\n            Medium\n            Large\n            XL\n            baseline\n        \n        \n        \n            Inline-block elements with different heights (baseline aligned):\n            Short\n            Medium\n            Tall\n            text baseline\n        \n        \n        \n            Mixed vertical alignments for comparison:\n            Top\n            Middle\n            Bottom\n            Baseline\n        \n        \n        \n            Images and text baseline alignment:\n            \n            Text after image\n            \n            baseline\n        \n        \n        \n            Sub and superscript baseline behavior:\n            Normal text\n            subscript\n            and\n            superscript\n            baseline\n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"box_009_baseline_alignment\",\n        \"category\": \"baseline\",\n        \"features\": [\"baseline-alignment\", \"font-size-mixing\", \"inline-block-baseline\", \"image-baseline\", \"sub-sup-baseline\", \"vertical-align-baseline\"],\n        \"description\": \"Text and inline element baseline alignment with various font sizes, heights, and element types\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visudet.html#leading\"],\n        \"complexity\": \"intermediate\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.test-container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Mixed font sizes on baseline:\n            Small\n            Medium\n            Large\n            XL\n            baseline\n        \n        \n        \n            Inline-block elements with different heights (baseline aligned):\n            Short\n            Medium\n            Tall\n            text baseline\n        \n        \n        \n            Mixed vertical alignments for comparison:\n            Top\n            Middle\n            Bottom\n            Baseline\n        \n        \n        \n            Images and text baseline alignment:\n            \n            Text after image\n            \n            baseline\n        \n        \n        \n            Sub and superscript baseline behavior:\n            Normal text\n            subscript\n            and\n            superscript\n            baseline",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 5,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.baseline-test:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,13 +667,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Mixed font sizes on baseline:\n            Small\n            Medium\n            Large\n            XL\n            baseline",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 6,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "span.test-title:nth-of-type(1)",
                     "tag": "span",
                     "id": null,
@@ -632,33 +729,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Mixed font sizes on baseline:",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Mixed font sizes on baseline:",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 58,
-                            "width": 221.38,
-                            "height": 17,
-                            "right": 259.38,
-                            "bottom": 75
-                          }
-                        ],
                         "length": 29,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 29
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 58,
+                              "width": 221.38,
+                              "height": 17,
+                              "right": 259.38,
+                              "bottom": 75,
+                              "text": "Mixed font sizes on baseline:",
+                              "startIndex": 0,
+                              "endIndex": 29
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.small-text:nth-of-type(2)",
                     "tag": "span",
                     "id": null,
@@ -716,33 +821,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Small",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 3,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Small",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 134,
-                            "width": 30.02,
-                            "height": 14,
-                            "right": 68.02,
-                            "bottom": 148
-                          }
-                        ],
                         "length": 5,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 5
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 134,
+                              "width": 30.02,
+                              "height": 14,
+                              "right": 68.02,
+                              "bottom": 148,
+                              "text": "Small",
+                              "startIndex": 0,
+                              "endIndex": 5
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 68.02,
+                          "y": 131,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 72.47,
+                          "bottom": 148
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 4,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.medium-text:nth-of-type(3)",
                     "tag": "span",
                     "id": null,
@@ -800,33 +938,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Medium",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 5,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Medium",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 72.47,
-                            "y": 131,
-                            "width": 56.91,
-                            "height": 17,
-                            "right": 129.38,
-                            "bottom": 148
-                          }
-                        ],
                         "length": 6,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 6
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 72.47,
+                              "y": 131,
+                              "width": 56.91,
+                              "height": 17,
+                              "right": 129.38,
+                              "bottom": 148,
+                              "text": "Medium",
+                              "startIndex": 0,
+                              "endIndex": 6
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 129.38,
+                          "y": 131,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 133.83,
+                          "bottom": 148
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 6,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.large-text:nth-of-type(4)",
                     "tag": "span",
                     "id": null,
@@ -884,33 +1055,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Large",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 7,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Large",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 133.83,
-                            "y": 123,
-                            "width": 61.39,
-                            "height": 27,
-                            "right": 195.22,
-                            "bottom": 150
-                          }
-                        ],
                         "length": 5,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 5
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 133.83,
+                              "y": 123,
+                              "width": 61.39,
+                              "height": 27,
+                              "right": 195.22,
+                              "bottom": 150,
+                              "text": "Large",
+                              "startIndex": 0,
+                              "endIndex": 5
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 195.22,
+                          "y": 131,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 199.67,
+                          "bottom": 148
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 8,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.xlarge-text:nth-of-type(5)",
                     "tag": "span",
                     "id": null,
@@ -968,33 +1172,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "XL",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 9,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "XL",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 199.67,
-                            "y": 116,
-                            "width": 39.14,
-                            "height": 36,
-                            "right": 238.81,
-                            "bottom": 152
-                          }
-                        ],
                         "length": 2,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 2
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 199.67,
+                              "y": 116,
+                              "width": 39.14,
+                              "height": 36,
+                              "right": 238.81,
+                              "bottom": 152,
+                              "text": "XL",
+                              "startIndex": 0,
+                              "endIndex": 2
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 238.81,
+                          "y": 131,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 243.27,
+                          "bottom": 148
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 10,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.baseline-indicator:nth-of-type(6)",
                     "tag": "span",
                     "id": null,
@@ -1052,35 +1289,43 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "baseline",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 11,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "baseline",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 243.27,
-                            "y": 131,
-                            "width": 59.61,
-                            "height": 17,
-                            "right": 302.88,
-                            "bottom": 148
-                          }
-                        ],
                         "length": 8,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 8
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 243.27,
+                              "y": 131,
+                              "width": 59.61,
+                              "height": 17,
+                              "right": 302.88,
+                              "bottom": 148,
+                              "text": "baseline",
+                              "startIndex": 0,
+                              "endIndex": 8
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.baseline-test:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -1138,13 +1383,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Inline-block elements with different heights (baseline aligned):\n            Short\n            Medium\n            Tall\n            text baseline",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 5,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "span.test-title:nth-of-type(1)",
                     "tag": "span",
                     "id": null,
@@ -1202,33 +1445,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Inline-block elements with different heights (baseline aligned):",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Inline-block elements with different heights (baseline aligned):",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 234,
-                            "width": 473.84,
-                            "height": 17,
-                            "right": 511.84,
-                            "bottom": 251
-                          }
-                        ],
                         "length": 64,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 64
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 234,
+                              "width": 473.84,
+                              "height": 17,
+                              "right": 511.84,
+                              "bottom": 251,
+                              "text": "Inline-block elements with different heights (baseline aligned):",
+                              "startIndex": 0,
+                              "endIndex": 64
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.inline-block.short-block:nth-of-type(2)",
                     "tag": "span",
                     "id": null,
@@ -1287,33 +1538,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Short",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 3,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Short",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 54,
-                            "y": 289,
-                            "width": 38.25,
-                            "height": 17,
-                            "right": 92.25,
-                            "bottom": 306
-                          }
-                        ],
                         "length": 5,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 5
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 54,
+                              "y": 289,
+                              "width": 38.25,
+                              "height": 17,
+                              "right": 92.25,
+                              "bottom": 306,
+                              "text": "Short",
+                              "startIndex": 0,
+                              "endIndex": 5
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 108.25,
+                          "y": 289,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 112.7,
+                          "bottom": 306
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 4,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.inline-block.medium-block:nth-of-type(3)",
                     "tag": "span",
                     "id": null,
@@ -1372,33 +1656,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Medium",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 5,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Medium",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 128.7,
-                            "y": 289,
-                            "width": 56.91,
-                            "height": 17,
-                            "right": 185.61,
-                            "bottom": 306
-                          }
-                        ],
                         "length": 6,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 6
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 128.7,
+                              "y": 289,
+                              "width": 56.91,
+                              "height": 17,
+                              "right": 185.61,
+                              "bottom": 306,
+                              "text": "Medium",
+                              "startIndex": 0,
+                              "endIndex": 6
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 201.61,
+                          "y": 289,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 206.06,
+                          "bottom": 306
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 6,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.inline-block.tall-block:nth-of-type(4)",
                     "tag": "span",
                     "id": null,
@@ -1457,33 +1774,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Tall",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 7,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Tall",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 222.06,
-                            "y": 289,
-                            "width": 24.02,
-                            "height": 17,
-                            "right": 246.08,
-                            "bottom": 306
-                          }
-                        ],
                         "length": 4,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 4
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 222.06,
+                              "y": 289,
+                              "width": 24.02,
+                              "height": 17,
+                              "right": 246.08,
+                              "bottom": 306,
+                              "text": "Tall",
+                              "startIndex": 0,
+                              "endIndex": 4
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 262.08,
+                          "y": 289,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 266.53,
+                          "bottom": 306
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 8,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.baseline-indicator:nth-of-type(5)",
                     "tag": "span",
                     "id": null,
@@ -1541,35 +1891,43 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "text baseline",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 9,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "text baseline",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 266.53,
-                            "y": 289,
-                            "width": 89.84,
-                            "height": 17,
-                            "right": 356.38,
-                            "bottom": 306
-                          }
-                        ],
                         "length": 13,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 13
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 266.53,
+                              "y": 289,
+                              "width": 89.84,
+                              "height": 17,
+                              "right": 356.38,
+                              "bottom": 306,
+                              "text": "text baseline",
+                              "startIndex": 0,
+                              "endIndex": 13
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.baseline-test:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -1627,13 +1985,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Mixed vertical alignments for comparison:\n            Top\n            Middle\n            Bottom\n            Baseline",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 5,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "span.test-title:nth-of-type(1)",
                     "tag": "span",
                     "id": null,
@@ -1691,33 +2047,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Mixed vertical alignments for comparison:",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Mixed vertical alignments for comparison:",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 384,
-                            "width": 320.97,
-                            "height": 17,
-                            "right": 358.97,
-                            "bottom": 401
-                          }
-                        ],
                         "length": 41,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 41
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 384,
+                              "width": 320.97,
+                              "height": 17,
+                              "right": 358.97,
+                              "bottom": 401,
+                              "text": "Mixed vertical alignments for comparison:",
+                              "startIndex": 0,
+                              "endIndex": 41
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.inline-block.short-block.align-top:nth-of-type(2)",
                     "tag": "span",
                     "id": null,
@@ -1777,33 +2141,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Top",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 3,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Top",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 54,
-                            "y": 419,
-                            "width": 25.8,
-                            "height": 17,
-                            "right": 79.8,
-                            "bottom": 436
-                          }
-                        ],
                         "length": 3,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 3
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 54,
+                              "y": 419,
+                              "width": 25.8,
+                              "height": 17,
+                              "right": 79.8,
+                              "bottom": 436,
+                              "text": "Top",
+                              "startIndex": 0,
+                              "endIndex": 3
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 95.8,
+                          "y": 447.16,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 100.25,
+                          "bottom": 464.16
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 4,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.inline-block.medium-block.align-middle:nth-of-type(3)",
                     "tag": "span",
                     "id": null,
@@ -1863,33 +2260,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Middle",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 5,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Middle",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 116.25,
-                            "y": 449,
-                            "width": 47.14,
-                            "height": 17,
-                            "right": 163.39,
-                            "bottom": 466
-                          }
-                        ],
                         "length": 6,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 6
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 116.25,
+                              "y": 449,
+                              "width": 47.14,
+                              "height": 17,
+                              "right": 163.39,
+                              "bottom": 466,
+                              "text": "Middle",
+                              "startIndex": 0,
+                              "endIndex": 6
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 179.39,
+                          "y": 447.16,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 183.84,
+                          "bottom": 464.16
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 6,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.inline-block.tall-block.align-bottom:nth-of-type(4)",
                     "tag": "span",
                     "id": null,
@@ -1949,33 +2379,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Bottom",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 7,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Bottom",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 199.84,
-                            "y": 439,
-                            "width": 50.69,
-                            "height": 17,
-                            "right": 250.53,
-                            "bottom": 456
-                          }
-                        ],
                         "length": 6,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 6
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 199.84,
+                              "y": 439,
+                              "width": 50.69,
+                              "height": 17,
+                              "right": 250.53,
+                              "bottom": 456,
+                              "text": "Bottom",
+                              "startIndex": 0,
+                              "endIndex": 6
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 266.53,
+                          "y": 447.16,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 270.98,
+                          "bottom": 464.16
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 8,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.inline-block.medium-block:nth-of-type(5)",
                     "tag": "span",
                     "id": null,
@@ -2034,35 +2497,43 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Baseline",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 9,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Baseline",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 286.98,
-                            "y": 447.16,
-                            "width": 61.38,
-                            "height": 17,
-                            "right": 348.36,
-                            "bottom": 464.16
-                          }
-                        ],
                         "length": 8,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 8
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 286.98,
+                              "y": 447.16,
+                              "width": 61.38,
+                              "height": 17,
+                              "right": 348.36,
+                              "bottom": 464.16,
+                              "text": "Baseline",
+                              "startIndex": 0,
+                              "endIndex": 8
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.baseline-test:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -2120,13 +2591,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Images and text baseline alignment:\n            \n            Text after image\n            \n            baseline",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 5,
                 "depth": 3,
+                "elementIndex": 7,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "span.test-title:nth-of-type(1)",
                     "tag": "span",
                     "id": null,
@@ -2184,33 +2653,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Images and text baseline alignment:",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Images and text baseline alignment:",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 534,
-                            "width": 274.75,
-                            "height": 17,
-                            "right": 312.75,
-                            "bottom": 551
-                          }
-                        ],
                         "length": 35,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 35
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 534,
+                              "width": 274.75,
+                              "height": 17,
+                              "right": 312.75,
+                              "bottom": 551,
+                              "text": "Images and text baseline alignment:",
+                              "startIndex": 0,
+                              "endIndex": 35
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "img:nth-of-type(1)",
                     "tag": "img",
                     "id": null,
@@ -2266,14 +2743,37 @@
                       "overflowX": "clip",
                       "overflowY": "clip"
                     },
-                    "textContent": null,
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 0,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": []
                   },
                   {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 88,
+                          "y": 608,
+                          "width": 4.16,
+                          "height": 17,
+                          "right": 92.16,
+                          "bottom": 625
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 4,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "element",
                     "selector": "span:nth-of-type(2)",
                     "tag": "span",
                     "id": null,
@@ -2329,33 +2829,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Text after image",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 5,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Text after image",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 92.16,
-                            "y": 608,
-                            "width": 113.83,
-                            "height": 17,
-                            "right": 205.98,
-                            "bottom": 625
-                          }
-                        ],
                         "length": 16,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 16
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 92.16,
+                              "y": 608,
+                              "width": 113.83,
+                              "height": 17,
+                              "right": 205.98,
+                              "bottom": 625,
+                              "text": "Text after image",
+                              "startIndex": 0,
+                              "endIndex": 16
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 205.98,
+                          "y": 608,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 210.44,
+                          "bottom": 625
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 6,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "img:nth-of-type(2)",
                     "tag": "img",
                     "id": null,
@@ -2411,14 +2944,37 @@
                       "overflowX": "clip",
                       "overflowY": "clip"
                     },
-                    "textContent": null,
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 0,
                     "depth": 4,
+                    "elementIndex": 7,
                     "children": []
                   },
                   {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 240.44,
+                          "y": 608,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 244.89,
+                          "bottom": 625
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 8,
+                    "children": []
+                  },
+                  {
+                    "nodeType": "element",
                     "selector": "span.baseline-indicator:nth-of-type(3)",
                     "tag": "span",
                     "id": null,
@@ -2476,35 +3032,43 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "baseline",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 9,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "baseline",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 244.89,
-                            "y": 608,
-                            "width": 59.61,
-                            "height": 17,
-                            "right": 304.5,
-                            "bottom": 625
-                          }
-                        ],
                         "length": 8,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 8
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 244.89,
+                              "y": 608,
+                              "width": 59.61,
+                              "height": 17,
+                              "right": 304.5,
+                              "bottom": 625,
+                              "text": "baseline",
+                              "startIndex": 0,
+                              "endIndex": 8
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.baseline-test:nth-of-type(5)",
                 "tag": "div",
                 "id": null,
@@ -2562,13 +3126,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Sub and superscript baseline behavior:\n            Normal text\n            subscript\n            and\n            superscript\n            baseline",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 6,
                 "depth": 3,
+                "elementIndex": 9,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "span.test-title:nth-of-type(1)",
                     "tag": "span",
                     "id": null,
@@ -2626,33 +3188,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Sub and superscript baseline behavior:",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Sub and superscript baseline behavior:",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 693,
-                            "width": 299.64,
-                            "height": 17,
-                            "right": 337.64,
-                            "bottom": 710
-                          }
-                        ],
                         "length": 38,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 38
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 693,
+                              "width": 299.64,
+                              "height": 17,
+                              "right": 337.64,
+                              "bottom": 710,
+                              "text": "Sub and superscript baseline behavior:",
+                              "startIndex": 0,
+                              "endIndex": 38
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span:nth-of-type(2)",
                     "tag": "span",
                     "id": null,
@@ -2708,33 +3278,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Normal text",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 3,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Normal text",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 737.33,
-                            "width": 81.8,
-                            "height": 17,
-                            "right": 119.8,
-                            "bottom": 754.33
-                          }
-                        ],
                         "length": 11,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 11
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 737.33,
+                              "width": 81.8,
+                              "height": 17,
+                              "right": 119.8,
+                              "bottom": 754.33,
+                              "text": "Normal text",
+                              "startIndex": 0,
+                              "endIndex": 11
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 119.8,
+                          "y": 737.33,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 124.25,
+                          "bottom": 754.33
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 4,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "sub",
                     "tag": "sub",
                     "id": null,
@@ -2790,33 +3393,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "subscript",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 5,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "subscript",
-                        "parentElement": "sub",
-                        "rects": [
-                          {
-                            "x": 124.25,
-                            "y": 743.52,
-                            "width": 53.34,
-                            "height": 15,
-                            "right": 177.59,
-                            "bottom": 758.52
-                          }
-                        ],
                         "length": 9,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 9
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 124.25,
+                              "y": 743.52,
+                              "width": 53.34,
+                              "height": 15,
+                              "right": 177.59,
+                              "bottom": 758.52,
+                              "text": "subscript",
+                              "startIndex": 0,
+                              "endIndex": 9
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 177.59,
+                          "y": 737.33,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 182.05,
+                          "bottom": 754.33
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 6,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span:nth-of-type(3)",
                     "tag": "span",
                     "id": null,
@@ -2872,33 +3508,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "and",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 7,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "and",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 182.05,
-                            "y": 737.33,
-                            "width": 26.7,
-                            "height": 17,
-                            "right": 208.75,
-                            "bottom": 754.33
-                          }
-                        ],
                         "length": 3,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 3
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 182.05,
+                              "y": 737.33,
+                              "width": 26.7,
+                              "height": 17,
+                              "right": 208.75,
+                              "bottom": 754.33,
+                              "text": "and",
+                              "startIndex": 0,
+                              "endIndex": 3
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 208.75,
+                          "y": 737.33,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 213.2,
+                          "bottom": 754.33
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 8,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "sup",
                     "tag": "sup",
                     "id": null,
@@ -2954,33 +3623,66 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "superscript",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 9,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "superscript",
-                        "parentElement": "sup",
-                        "rects": [
-                          {
-                            "x": 213.2,
-                            "y": 733,
-                            "width": 65.2,
-                            "height": 15,
-                            "right": 278.41,
-                            "bottom": 748
-                          }
-                        ],
                         "length": 11,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 11
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 213.2,
+                              "y": 733,
+                              "width": 65.2,
+                              "height": 15,
+                              "right": 278.41,
+                              "bottom": 748,
+                              "text": "superscript",
+                              "startIndex": 0,
+                              "endIndex": 11
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
+                    ]
+                  },
+                  {
+                    "nodeType": "text",
+                    "text": "\n            ",
+                    "length": 13,
+                    "isWhitespaceOnly": true,
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 278.41,
+                          "y": 737.33,
+                          "width": 4.45,
+                          "height": 17,
+                          "right": 282.86,
+                          "bottom": 754.33
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "block",
+                      "parentVisibility": "visible"
+                    },
                     "depth": 4,
+                    "nodeIndex": 10,
                     "children": []
                   },
                   {
+                    "nodeType": "element",
                     "selector": "span.baseline-indicator:nth-of-type(4)",
                     "tag": "span",
                     "id": null,
@@ -3038,37 +3740,45 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "baseline",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 11,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "baseline",
-                        "parentElement": "span",
-                        "rects": [
-                          {
-                            "x": 282.86,
-                            "y": 737.33,
-                            "width": 59.61,
-                            "height": 17,
-                            "right": 342.47,
-                            "bottom": 754.33
-                          }
-                        ],
                         "length": 8,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 8
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 282.86,
+                              "y": 737.33,
+                              "width": 59.61,
+                              "height": 17,
+                              "right": 342.47,
+                              "bottom": 754.33,
+                              "text": "baseline",
+                              "startIndex": 0,
+                              "endIndex": 8
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   }
                 ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -3124,12 +3834,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"box_009_baseline_alignment\",\n        \"category\": \"baseline\",\n        \"features\": [\"baseline-alignment\", \"font-size-mixing\", \"inline-block-baseline\", \"image-baseline\", \"sub-sup-baseline\", \"vertical-align-baseline\"],\n        \"description\": \"Text and inline element baseline alignment with various font sizes, heights, and element types\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visudet.html#leading\"],\n        \"complexity\": \"intermediate\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"box_009_baseline_alignment\",\n        \"category\": \"baseline\",\n        \"features\": [\"baseline-alignment\", \"font-size-mixing\", \"inline-block-baseline\", \"image-baseline\", \"sub-sup-baseline\", \"vertical-align-baseline\"],\n        \"description\": \"Text and inline element baseline alignment with various font sizes, heights, and element types\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visudet.html#leading\"],\n        \"complexity\": \"intermediate\"\n    }\n    ",
+                "length": 491,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

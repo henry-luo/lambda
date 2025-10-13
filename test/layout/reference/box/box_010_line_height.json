@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Line Height and Leading\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 700px;\n            height: 800px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .line-height-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n            width: 400px;\n        }\n        \n        .test-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        .text-sample {\n            border: 1px solid #ccc;\n            padding: 5px;\n            margin: 10px 0;\n        }\n        \n        .line-height-normal {\n            line-height: normal;\n            background-color: #ffcccc;\n        }\n        \n        .line-height-1 {\n            line-height: 1;\n            background-color: #ccffcc;\n        }\n        \n        .line-height-1-5 {\n            line-height: 1.5;\n            background-color: #ccccff;\n        }\n        \n        .line-height-2 {\n            line-height: 2;\n            background-color: #ffffcc;\n        }\n        \n        .line-height-px {\n            line-height: 40px;\n            background-color: #ffccff;\n        }\n        \n        .line-height-percent {\n            line-height: 120%;\n            background-color: #ccffff;\n        }\n        \n        /* Inline mixing demonstration */\n        .inline-mix {\n            line-height: 1.5;\n        }\n        \n        .inline-large {\n            font-size: 24px;\n            background-color: #ffaaaa;\n        }\n        \n        .inline-small {\n            font-size: 12px;\n            background-color: #aaffaa;\n        }\n        \n        .inline-normal {\n            font-size: 16px;\n            background-color: #aaaaff;\n        }\n        \n        /* Baseline grid visualization */\n        .baseline-grid {\n            background-image: linear-gradient(to bottom, transparent 0px, transparent 15px, #ff000020 15px, #ff000020 16px, transparent 16px, transparent 31px, #ff000020 31px, #ff000020 32px);\n            background-size: 100% 32px;\n            line-height: 2; /* 32px line height for 16px font */\n            padding: 10px;\n            border: 1px solid #999;\n        }\n    \n\n\n    \n        \n            Line-height: normal\n            \n                This text uses the normal line-height, which is typically around 1.2 times the font size. This creates comfortable reading spacing.\n            \n        \n        \n        \n            Line-height: 1 (no leading)\n            \n                This text uses line-height: 1, meaning no extra space between lines. Text may appear cramped with descenders touching ascenders.\n            \n        \n        \n        \n            Line-height: 1.5\n            \n                This text uses line-height: 1.5, providing generous spacing between lines for improved readability.\n            \n        \n        \n        \n            Line-height: 2 (double spacing)\n            \n                This text uses line-height: 2, creating double-spaced text like traditional typewritten documents.\n            \n        \n        \n        \n            Line-height: 40px (fixed)\n            \n                This text uses a fixed line-height of 40px, regardless of font size changes.\n            \n        \n        \n        \n            Mixed font sizes with line-height: 1.5\n            \n                Small text and \n                normal text and \n                large text all sharing the same line-height multiplier.\n            \n        \n        \n        \n            Baseline grid visualization\n            \n                This text is laid out on a baseline grid. The red lines show where the baselines should align for consistent vertical rhythm.\n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"box_010_line_height\",\n        \"category\": \"baseline\",\n        \"features\": [\"line-height\", \"leading\", \"baseline-grid\", \"vertical-rhythm\", \"font-size-interaction\"],\n        \"description\": \"Line-height property behavior with various values and its interaction with baseline alignment\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visudet.html#line-height\"],\n        \"complexity\": \"intermediate\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Line Height and Leading\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 700px;\n            height: 800px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .line-height-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n            width: 400px;\n        }\n        \n        .test-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        .text-sample {\n            border: 1px solid #ccc;\n            padding: 5px;\n            margin: 10px 0;\n        }\n        \n        .line-height-normal {\n            line-height: normal;\n            background-color: #ffcccc;\n        }\n        \n        .line-height-1 {\n            line-height: 1;\n            background-color: #ccffcc;\n        }\n        \n        .line-height-1-5 {\n            line-height: 1.5;\n            background-color: #ccccff;\n        }\n        \n        .line-height-2 {\n            line-height: 2;\n            background-color: #ffffcc;\n        }\n        \n        .line-height-px {\n            line-height: 40px;\n            background-color: #ffccff;\n        }\n        \n        .line-height-percent {\n            line-height: 120%;\n            background-color: #ccffff;\n        }\n        \n        /* Inline mixing demonstration */\n        .inline-mix {\n            line-height: 1.5;\n        }\n        \n        .inline-large {\n            font-size: 24px;\n            background-color: #ffaaaa;\n        }\n        \n        .inline-small {\n            font-size: 12px;\n            background-color: #aaffaa;\n        }\n        \n        .inline-normal {\n            font-size: 16px;\n            background-color: #aaaaff;\n        }\n        \n        /* Baseline grid visualization */\n        .baseline-grid {\n            background-image: linear-gradient(to bottom, transparent 0px, transparent 15px, #ff000020 15px, #ff000020 16px, transparent 16px, transparent 31px, #ff000020 31px, #ff000020 32px);\n            background-size: 100% 32px;\n            line-height: 2; /* 32px line height for 16px font */\n            padding: 10px;\n            border: 1px solid #999;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Line Height and Leading",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Line Height and Leading",
+                "length": 29,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 700px;\n            height: 800px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .line-height-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n            width: 400px;\n        }\n        \n        .test-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        .text-sample {\n            border: 1px solid #ccc;\n            padding: 5px;\n            margin: 10px 0;\n        }\n        \n        .line-height-normal {\n            line-height: normal;\n            background-color: #ffcccc;\n        }\n        \n        .line-height-1 {\n            line-height: 1;\n            background-color: #ccffcc;\n        }\n        \n        .line-height-1-5 {\n            line-height: 1.5;\n            background-color: #ccccff;\n        }\n        \n        .line-height-2 {\n            line-height: 2;\n            background-color: #ffffcc;\n        }\n        \n        .line-height-px {\n            line-height: 40px;\n            background-color: #ffccff;\n        }\n        \n        .line-height-percent {\n            line-height: 120%;\n            background-color: #ccffff;\n        }\n        \n        /* Inline mixing demonstration */\n        .inline-mix {\n            line-height: 1.5;\n        }\n        \n        .inline-large {\n            font-size: 24px;\n            background-color: #ffaaaa;\n        }\n        \n        .inline-small {\n            font-size: 12px;\n            background-color: #aaffaa;\n        }\n        \n        .inline-normal {\n            font-size: 16px;\n            background-color: #aaaaff;\n        }\n        \n        /* Baseline grid visualization */\n        .baseline-grid {\n            background-image: linear-gradient(to bottom, transparent 0px, transparent 15px, #ff000020 15px, #ff000020 16px, transparent 16px, transparent 31px, #ff000020 31px, #ff000020 32px);\n            background-size: 100% 32px;\n            line-height: 2; /* 32px line height for 16px font */\n            padding: 10px;\n            border: 1px solid #999;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 700px;\n            height: 800px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .line-height-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n            width: 400px;\n        }\n        \n        .test-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        .text-sample {\n            border: 1px solid #ccc;\n            padding: 5px;\n            margin: 10px 0;\n        }\n        \n        .line-height-normal {\n            line-height: normal;\n            background-color: #ffcccc;\n        }\n        \n        .line-height-1 {\n            line-height: 1;\n            background-color: #ccffcc;\n        }\n        \n        .line-height-1-5 {\n            line-height: 1.5;\n            background-color: #ccccff;\n        }\n        \n        .line-height-2 {\n            line-height: 2;\n            background-color: #ffffcc;\n        }\n        \n        .line-height-px {\n            line-height: 40px;\n            background-color: #ffccff;\n        }\n        \n        .line-height-percent {\n            line-height: 120%;\n            background-color: #ccffff;\n        }\n        \n        /* Inline mixing demonstration */\n        .inline-mix {\n            line-height: 1.5;\n        }\n        \n        .inline-large {\n            font-size: 24px;\n            background-color: #ffaaaa;\n        }\n        \n        .inline-small {\n            font-size: 12px;\n            background-color: #aaffaa;\n        }\n        \n        .inline-normal {\n            font-size: 16px;\n            background-color: #aaaaff;\n        }\n        \n        /* Baseline grid visualization */\n        .baseline-grid {\n            background-image: linear-gradient(to bottom, transparent 0px, transparent 15px, #ff000020 15px, #ff000020 16px, transparent 16px, transparent 31px, #ff000020 31px, #ff000020 32px);\n            background-size: 100% 32px;\n            line-height: 2; /* 32px line height for 16px font */\n            padding: 10px;\n            border: 1px solid #999;\n        }\n    ",
+                "length": 2482,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Line-height: normal\n            \n                This text uses the normal line-height, which is typically around 1.2 times the font size. This creates comfortable reading spacing.\n            \n        \n        \n        \n            Line-height: 1 (no leading)\n            \n                This text uses line-height: 1, meaning no extra space between lines. Text may appear cramped with descenders touching ascenders.\n            \n        \n        \n        \n            Line-height: 1.5\n            \n                This text uses line-height: 1.5, providing generous spacing between lines for improved readability.\n            \n        \n        \n        \n            Line-height: 2 (double spacing)\n            \n                This text uses line-height: 2, creating double-spaced text like traditional typewritten documents.\n            \n        \n        \n        \n            Line-height: 40px (fixed)\n            \n                This text uses a fixed line-height of 40px, regardless of font size changes.\n            \n        \n        \n        \n            Mixed font sizes with line-height: 1.5\n            \n                Small text and \n                normal text and \n                large text all sharing the same line-height multiplier.\n            \n        \n        \n        \n            Baseline grid visualization\n            \n                This text is laid out on a baseline grid. The red lines show where the baselines should align for consistent vertical rhythm.\n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"box_010_line_height\",\n        \"category\": \"baseline\",\n        \"features\": [\"line-height\", \"leading\", \"baseline-grid\", \"vertical-rhythm\", \"font-size-interaction\"],\n        \"description\": \"Line-height property behavior with various values and its interaction with baseline alignment\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visudet.html#line-height\"],\n        \"complexity\": \"intermediate\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.test-container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Line-height: normal\n            \n                This text uses the normal line-height, which is typically around 1.2 times the font size. This creates comfortable reading spacing.\n            \n        \n        \n        \n            Line-height: 1 (no leading)\n            \n                This text uses line-height: 1, meaning no extra space between lines. Text may appear cramped with descenders touching ascenders.\n            \n        \n        \n        \n            Line-height: 1.5\n            \n                This text uses line-height: 1.5, providing generous spacing between lines for improved readability.\n            \n        \n        \n        \n            Line-height: 2 (double spacing)\n            \n                This text uses line-height: 2, creating double-spaced text like traditional typewritten documents.\n            \n        \n        \n        \n            Line-height: 40px (fixed)\n            \n                This text uses a fixed line-height of 40px, regardless of font size changes.\n            \n        \n        \n        \n            Mixed font sizes with line-height: 1.5\n            \n                Small text and \n                normal text and \n                large text all sharing the same line-height multiplier.\n            \n        \n        \n        \n            Baseline grid visualization\n            \n                This text is laid out on a baseline grid. The red lines show where the baselines should align for consistent vertical rhythm.",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 7,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.line-height-test:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,13 +667,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Line-height: normal\n            \n                This text uses the normal line-height, which is typically around 1.2 times the font size. This creates comfortable reading spacing.",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -632,33 +729,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Line-height: normal",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Line-height: normal",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 58,
-                            "width": 149.33,
-                            "height": 17,
-                            "right": 187.33,
-                            "bottom": 75
-                          }
-                        ],
                         "length": 19,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 19
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 58,
+                              "width": 149.33,
+                              "height": 17,
+                              "right": 187.33,
+                              "bottom": 75,
+                              "text": "Line-height: normal",
+                              "startIndex": 0,
+                              "endIndex": 19
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.text-sample.line-height-normal:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -717,51 +822,99 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "This text uses the normal line-height, which is typically around 1.2 times the font size. This creates comfortable reading spacing.",
-                    "hasTextNodes": true,
-                    "textNodes": [
-                      {
-                        "text": "\n                This text uses the normal line-height, which is typically around 1.2 times the font size. This creates comfortable reading spacing.\n            ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 44,
-                            "y": 92,
-                            "width": 322.81,
-                            "height": 17,
-                            "right": 366.81,
-                            "bottom": 109
-                          },
-                          {
-                            "x": 44,
-                            "y": 110,
-                            "width": 310.08,
-                            "height": 17,
-                            "right": 354.08,
-                            "bottom": 127
-                          },
-                          {
-                            "x": 44,
-                            "y": 128,
-                            "width": 262.38,
-                            "height": 17,
-                            "right": 306.38,
-                            "bottom": 145
-                          }
-                        ],
-                        "length": 161,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 161
-                      }
-                    ],
-                    "childCount": 0,
                     "depth": 4,
-                    "children": []
+                    "elementIndex": 3,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "\n                This text uses the normal line-height, which is ",
+                        "length": 65,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 92,
+                              "width": 322.81,
+                              "height": 17,
+                              "right": 366.81,
+                              "bottom": 109,
+                              "text": "\n                This text uses the normal line-height, which is ",
+                              "startIndex": 0,
+                              "endIndex": 65
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "typically around 1.2 times the font size. This ",
+                        "length": 47,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 110,
+                              "width": 310.08,
+                              "height": 17,
+                              "right": 354.08,
+                              "bottom": 127,
+                              "text": "typically around 1.2 times the font size. This ",
+                              "startIndex": 0,
+                              "endIndex": 47
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "creates comfortable reading spacing.\n            ",
+                        "length": 49,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 128,
+                              "width": 262.38,
+                              "height": 17,
+                              "right": 306.38,
+                              "bottom": 145,
+                              "text": "creates comfortable reading spacing.\n            ",
+                              "startIndex": 0,
+                              "endIndex": 49
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      }
+                    ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.line-height-test:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -819,13 +972,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Line-height: 1 (no leading)\n            \n                This text uses line-height: 1, meaning no extra space between lines. Text may appear cramped with descenders touching ascenders.",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -883,33 +1034,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Line-height: 1 (no leading)",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Line-height: 1 (no leading)",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 214,
-                            "width": 199.98,
-                            "height": 17,
-                            "right": 237.98,
-                            "bottom": 231
-                          }
-                        ],
                         "length": 27,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 27
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 214,
+                              "width": 199.98,
+                              "height": 17,
+                              "right": 237.98,
+                              "bottom": 231,
+                              "text": "Line-height: 1 (no leading)",
+                              "startIndex": 0,
+                              "endIndex": 27
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.text-sample.line-height-1:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -968,51 +1127,99 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "This text uses line-height: 1, meaning no extra space between lines. Text may appear cramped with descenders touching ascenders.",
-                    "hasTextNodes": true,
-                    "textNodes": [
-                      {
-                        "text": "\n                This text uses line-height: 1, meaning no extra space between lines. Text may appear cramped with descenders touching ascenders.\n            ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 44,
-                            "y": 247,
-                            "width": 327.3,
-                            "height": 17,
-                            "right": 371.3,
-                            "bottom": 264
-                          },
-                          {
-                            "x": 44,
-                            "y": 263,
-                            "width": 338.56,
-                            "height": 17,
-                            "right": 382.56,
-                            "bottom": 280
-                          },
-                          {
-                            "x": 44,
-                            "y": 279,
-                            "width": 263.27,
-                            "height": 17,
-                            "right": 307.27,
-                            "bottom": 296
-                          }
-                        ],
-                        "length": 158,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 158
-                      }
-                    ],
-                    "childCount": 0,
                     "depth": 4,
-                    "children": []
+                    "elementIndex": 3,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "\n                This text uses line-height: 1, meaning no extra ",
+                        "length": 65,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 247,
+                              "width": 327.3,
+                              "height": 17,
+                              "right": 371.3,
+                              "bottom": 264,
+                              "text": "\n                This text uses line-height: 1, meaning no extra ",
+                              "startIndex": 0,
+                              "endIndex": 65
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "space between lines. Text may appear cramped ",
+                        "length": 45,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 263,
+                              "width": 338.56,
+                              "height": 17,
+                              "right": 382.56,
+                              "bottom": 280,
+                              "text": "space between lines. Text may appear cramped ",
+                              "startIndex": 0,
+                              "endIndex": 45
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "with descenders touching ascenders.\n            ",
+                        "length": 48,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 279,
+                              "width": 263.27,
+                              "height": 17,
+                              "right": 307.27,
+                              "bottom": 296,
+                              "text": "with descenders touching ascenders.\n            ",
+                              "startIndex": 0,
+                              "endIndex": 48
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      }
+                    ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.line-height-test:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -1070,13 +1277,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Line-height: 1.5\n            \n                This text uses line-height: 1.5, providing generous spacing between lines for improved readability.",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -1134,33 +1339,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Line-height: 1.5",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Line-height: 1.5",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 364,
-                            "width": 118.23,
-                            "height": 17,
-                            "right": 156.23,
-                            "bottom": 381
-                          }
-                        ],
                         "length": 16,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 16
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 364,
+                              "width": 118.23,
+                              "height": 17,
+                              "right": 156.23,
+                              "bottom": 381,
+                              "text": "Line-height: 1.5",
+                              "startIndex": 0,
+                              "endIndex": 16
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.text-sample.line-height-1-5:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1219,43 +1432,71 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "This text uses line-height: 1.5, providing generous spacing between lines for improved readability.",
-                    "hasTextNodes": true,
-                    "textNodes": [
-                      {
-                        "text": "\n                This text uses line-height: 1.5, providing generous spacing between lines for improved readability.\n            ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 44,
-                            "y": 401,
-                            "width": 353.09,
-                            "height": 17,
-                            "right": 397.09,
-                            "bottom": 418
-                          },
-                          {
-                            "x": 44,
-                            "y": 425,
-                            "width": 331.44,
-                            "height": 17,
-                            "right": 375.44,
-                            "bottom": 442
-                          }
-                        ],
-                        "length": 129,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 129
-                      }
-                    ],
-                    "childCount": 0,
                     "depth": 4,
-                    "children": []
+                    "elementIndex": 3,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "\n                This text uses line-height: 1.5, providing generous ",
+                        "length": 69,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 401,
+                              "width": 353.09,
+                              "height": 17,
+                              "right": 397.09,
+                              "bottom": 418,
+                              "text": "\n                This text uses line-height: 1.5, providing generous ",
+                              "startIndex": 0,
+                              "endIndex": 69
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "spacing between lines for improved readability.\n            ",
+                        "length": 60,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 425,
+                              "width": 331.44,
+                              "height": 17,
+                              "right": 375.44,
+                              "bottom": 442,
+                              "text": "spacing between lines for improved readability.\n            ",
+                              "startIndex": 0,
+                              "endIndex": 60
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      }
+                    ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.line-height-test:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -1313,13 +1554,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Line-height: 2 (double spacing)\n            \n                This text uses line-height: 2, creating double-spaced text like traditional typewritten documents.",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 7,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -1377,33 +1616,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Line-height: 2 (double spacing)",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Line-height: 2 (double spacing)",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 514,
-                            "width": 237.33,
-                            "height": 17,
-                            "right": 275.33,
-                            "bottom": 531
-                          }
-                        ],
                         "length": 31,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 31
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 514,
+                              "width": 237.33,
+                              "height": 17,
+                              "right": 275.33,
+                              "bottom": 531,
+                              "text": "Line-height: 2 (double spacing)",
+                              "startIndex": 0,
+                              "endIndex": 31
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.text-sample.line-height-2:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1462,43 +1709,71 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "This text uses line-height: 2, creating double-spaced text like traditional typewritten documents.",
-                    "hasTextNodes": true,
-                    "textNodes": [
-                      {
-                        "text": "\n                This text uses line-height: 2, creating double-spaced text like traditional typewritten documents.\n            ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 44,
-                            "y": 555,
-                            "width": 318.41,
-                            "height": 17,
-                            "right": 362.41,
-                            "bottom": 572
-                          },
-                          {
-                            "x": 44,
-                            "y": 587,
-                            "width": 353.08,
-                            "height": 17,
-                            "right": 397.08,
-                            "bottom": 604
-                          }
-                        ],
-                        "length": 128,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 128
-                      }
-                    ],
-                    "childCount": 0,
                     "depth": 4,
-                    "children": []
+                    "elementIndex": 3,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "\n                This text uses line-height: 2, creating double-",
+                        "length": 64,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 555,
+                              "width": 318.41,
+                              "height": 17,
+                              "right": 362.41,
+                              "bottom": 572,
+                              "text": "\n                This text uses line-height: 2, creating double-",
+                              "startIndex": 0,
+                              "endIndex": 64
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "spaced text like traditional typewritten documents.\n            ",
+                        "length": 64,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 587,
+                              "width": 353.08,
+                              "height": 17,
+                              "right": 397.08,
+                              "bottom": 604,
+                              "text": "spaced text like traditional typewritten documents.\n            ",
+                              "startIndex": 0,
+                              "endIndex": 64
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      }
+                    ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.line-height-test:nth-of-type(5)",
                 "tag": "div",
                 "id": null,
@@ -1556,13 +1831,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Line-height: 40px (fixed)\n            \n                This text uses a fixed line-height of 40px, regardless of font size changes.",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 9,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -1620,33 +1893,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Line-height: 40px (fixed)",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Line-height: 40px (fixed)",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 680,
-                            "width": 184.91,
-                            "height": 17,
-                            "right": 222.91,
-                            "bottom": 697
-                          }
-                        ],
                         "length": 25,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 25
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 680,
+                              "width": 184.91,
+                              "height": 17,
+                              "right": 222.91,
+                              "bottom": 697,
+                              "text": "Line-height: 40px (fixed)",
+                              "startIndex": 0,
+                              "endIndex": 25
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.text-sample.line-height-px:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1705,43 +1986,71 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "This text uses a fixed line-height of 40px, regardless of font size changes.",
-                    "hasTextNodes": true,
-                    "textNodes": [
-                      {
-                        "text": "\n                This text uses a fixed line-height of 40px, regardless of font size changes.\n            ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 44,
-                            "y": 725,
-                            "width": 289.94,
-                            "height": 17,
-                            "right": 333.94,
-                            "bottom": 742
-                          },
-                          {
-                            "x": 44,
-                            "y": 765,
-                            "width": 225.91,
-                            "height": 17,
-                            "right": 269.91,
-                            "bottom": 782
-                          }
-                        ],
-                        "length": 106,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 106
-                      }
-                    ],
-                    "childCount": 0,
                     "depth": 4,
-                    "children": []
+                    "elementIndex": 3,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "\n                This text uses a fixed line-height of 40px, ",
+                        "length": 61,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 725,
+                              "width": 289.94,
+                              "height": 17,
+                              "right": 333.94,
+                              "bottom": 742,
+                              "text": "\n                This text uses a fixed line-height of 40px, ",
+                              "startIndex": 0,
+                              "endIndex": 61
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "regardless of font size changes.\n            ",
+                        "length": 45,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 765,
+                              "width": 225.91,
+                              "height": 17,
+                              "right": 269.91,
+                              "bottom": 782,
+                              "text": "regardless of font size changes.\n            ",
+                              "startIndex": 0,
+                              "endIndex": 45
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      }
+                    ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.line-height-test:nth-of-type(6)",
                 "tag": "div",
                 "id": null,
@@ -1799,13 +2108,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Mixed font sizes with line-height: 1.5\n            \n                Small text and \n                normal text and \n                large text all sharing the same line-height multiplier.",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 11,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -1863,33 +2170,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Mixed font sizes with line-height: 1.5",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Mixed font sizes with line-height: 1.5",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 862,
-                            "width": 277.36,
-                            "height": 17,
-                            "right": 315.36,
-                            "bottom": 879
-                          }
-                        ],
                         "length": 38,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 38
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 862,
+                              "width": 277.36,
+                              "height": 17,
+                              "right": 315.36,
+                              "bottom": 879,
+                              "text": "Mixed font sizes with line-height: 1.5",
+                              "startIndex": 0,
+                              "endIndex": 38
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.text-sample.inline-mix:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1948,76 +2263,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Small text and \n                normal text and \n                large text all sharing the same line-height multiplier.",
-                    "hasTextNodes": true,
-                    "textNodes": [
-                      {
-                        "text": " and \n                ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 96.69,
-                            "y": 908,
-                            "width": 35.59,
-                            "height": 17,
-                            "right": 132.28,
-                            "bottom": 925
-                          }
-                        ],
-                        "length": 22,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 22
-                      },
-                      {
-                        "text": " and \n                ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 211.42,
-                            "y": 908,
-                            "width": 35.59,
-                            "height": 17,
-                            "right": 247.02,
-                            "bottom": 925
-                          }
-                        ],
-                        "length": 22,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 22
-                      },
-                      {
-                        "text": " all sharing the same line-height multiplier.\n            ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 345.73,
-                            "y": 908,
-                            "width": 20.45,
-                            "height": 17,
-                            "right": 366.19,
-                            "bottom": 925
-                          },
-                          {
-                            "x": 44,
-                            "y": 935,
-                            "width": 273.03,
-                            "height": 17,
-                            "right": 317.03,
-                            "bottom": 952
-                          }
-                        ],
-                        "length": 58,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 58
-                      }
-                    ],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "span.inline-small:nth-of-type(1)",
                         "tag": "span",
                         "id": null,
@@ -2075,33 +2325,69 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Small text",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Small text",
-                            "parentElement": "span",
-                            "rects": [
-                              {
-                                "x": 44,
-                                "y": 911,
-                                "width": 52.69,
-                                "height": 14,
-                                "right": 96.69,
-                                "bottom": 925
-                              }
-                            ],
                             "length": 10,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 10
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 44,
+                                  "y": 911,
+                                  "width": 52.69,
+                                  "height": 14,
+                                  "right": 96.69,
+                                  "bottom": 925,
+                                  "text": "Small text",
+                                  "startIndex": 0,
+                                  "endIndex": 10
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "inline",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
+                        ]
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": " and \n                ",
+                        "length": 22,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 96.69,
+                              "y": 908,
+                              "width": 35.59,
+                              "height": 17,
+                              "right": 132.28,
+                              "bottom": 925,
+                              "text": " and \n                ",
+                              "startIndex": 0,
+                              "endIndex": 22
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
                         "depth": 5,
+                        "nodeIndex": 2,
                         "children": []
                       },
                       {
+                        "nodeType": "element",
                         "selector": "span.inline-normal:nth-of-type(2)",
                         "tag": "span",
                         "id": null,
@@ -2159,33 +2445,69 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "normal text",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "normal text",
-                            "parentElement": "span",
-                            "rects": [
-                              {
-                                "x": 132.28,
-                                "y": 908,
-                                "width": 79.14,
-                                "height": 17,
-                                "right": 211.42,
-                                "bottom": 925
-                              }
-                            ],
                             "length": 11,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 11
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 132.28,
+                                  "y": 908,
+                                  "width": 79.14,
+                                  "height": 17,
+                                  "right": 211.42,
+                                  "bottom": 925,
+                                  "text": "normal text",
+                                  "startIndex": 0,
+                                  "endIndex": 11
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "inline",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
+                        ]
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": " and \n                ",
+                        "length": 22,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 211.42,
+                              "y": 908,
+                              "width": 35.59,
+                              "height": 17,
+                              "right": 247.02,
+                              "bottom": 925,
+                              "text": " and \n                ",
+                              "startIndex": 0,
+                              "endIndex": 22
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
                         "depth": 5,
+                        "nodeIndex": 4,
                         "children": []
                       },
                       {
+                        "nodeType": "element",
                         "selector": "span.inline-large:nth-of-type(3)",
                         "tag": "span",
                         "id": null,
@@ -2243,30 +2565,93 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "large text",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "large text",
-                            "parentElement": "span",
-                            "rects": [
-                              {
-                                "x": 247.02,
-                                "y": 900,
-                                "width": 98.72,
-                                "height": 27,
-                                "right": 345.73,
-                                "bottom": 927
-                              }
-                            ],
                             "length": 10,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 10
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 247.02,
+                                  "y": 900,
+                                  "width": 98.72,
+                                  "height": 27,
+                                  "right": 345.73,
+                                  "bottom": 927,
+                                  "text": "large text",
+                                  "startIndex": 0,
+                                  "endIndex": 10
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "inline",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
+                        ]
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": " all ",
+                        "length": 5,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 345.73,
+                              "y": 908,
+                              "width": 20.45,
+                              "height": 17,
+                              "right": 366.19,
+                              "bottom": 925,
+                              "text": " all ",
+                              "startIndex": 0,
+                              "endIndex": 5
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
                         "depth": 5,
+                        "nodeIndex": 6,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "sharing the same line-height multiplier.\n            ",
+                        "length": 53,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 44,
+                              "y": 935,
+                              "width": 273.03,
+                              "height": 17,
+                              "right": 317.03,
+                              "bottom": 952,
+                              "text": "sharing the same line-height multiplier.\n            ",
+                              "startIndex": 0,
+                              "endIndex": 53
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 6,
                         "children": []
                       }
                     ]
@@ -2274,6 +2659,7 @@
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.line-height-test:nth-of-type(7)",
                 "tag": "div",
                 "id": null,
@@ -2331,13 +2717,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Baseline grid visualization\n            \n                This text is laid out on a baseline grid. The red lines show where the baselines should align for consistent vertical rhythm.",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 13,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -2395,33 +2779,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Baseline grid visualization",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Baseline grid visualization",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 1024,
-                            "width": 200.95,
-                            "height": 17,
-                            "right": 238.95,
-                            "bottom": 1041
-                          }
-                        ],
                         "length": 27,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 27
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 1024,
+                              "width": 200.95,
+                              "height": 17,
+                              "right": 238.95,
+                              "bottom": 1041,
+                              "text": "Baseline grid visualization",
+                              "startIndex": 0,
+                              "endIndex": 27
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.baseline-grid:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -2479,53 +2871,101 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "This text is laid out on a baseline grid. The red lines show where the baselines should align for consistent vertical rhythm.",
-                    "hasTextNodes": true,
-                    "textNodes": [
-                      {
-                        "text": "\n                This text is laid out on a baseline grid. The red lines show where the baselines should align for consistent vertical rhythm.\n            ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 49,
-                            "y": 1070,
-                            "width": 327,
-                            "height": 17,
-                            "right": 376,
-                            "bottom": 1087
-                          },
-                          {
-                            "x": 49,
-                            "y": 1102,
-                            "width": 334.42,
-                            "height": 17,
-                            "right": 383.42,
-                            "bottom": 1119
-                          },
-                          {
-                            "x": 49,
-                            "y": 1134,
-                            "width": 184.95,
-                            "height": 17,
-                            "right": 233.95,
-                            "bottom": 1151
-                          }
-                        ],
-                        "length": 155,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 155
-                      }
-                    ],
-                    "childCount": 0,
                     "depth": 4,
-                    "children": []
+                    "elementIndex": 3,
+                    "children": [
+                      {
+                        "nodeType": "text",
+                        "text": "\n                This text is laid out on a baseline grid. The red ",
+                        "length": 67,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 49,
+                              "y": 1070,
+                              "width": 327,
+                              "height": 17,
+                              "right": 376,
+                              "bottom": 1087,
+                              "text": "\n                This text is laid out on a baseline grid. The red ",
+                              "startIndex": 0,
+                              "endIndex": 67
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "lines show where the baselines should align for ",
+                        "length": 48,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 49,
+                              "y": 1102,
+                              "width": 334.42,
+                              "height": 17,
+                              "right": 383.42,
+                              "bottom": 1119,
+                              "text": "lines show where the baselines should align for ",
+                              "startIndex": 0,
+                              "endIndex": 48
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "consistent vertical rhythm.\n            ",
+                        "length": 40,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 49,
+                              "y": 1134,
+                              "width": 184.95,
+                              "height": 17,
+                              "right": 233.95,
+                              "bottom": 1151,
+                              "text": "consistent vertical rhythm.\n            ",
+                              "startIndex": 0,
+                              "endIndex": 40
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      }
+                    ]
                   }
                 ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -2581,12 +3021,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"box_010_line_height\",\n        \"category\": \"baseline\",\n        \"features\": [\"line-height\", \"leading\", \"baseline-grid\", \"vertical-rhythm\", \"font-size-interaction\"],\n        \"description\": \"Line-height property behavior with various values and its interaction with baseline alignment\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visudet.html#line-height\"],\n        \"complexity\": \"intermediate\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"box_010_line_height\",\n        \"category\": \"baseline\",\n        \"features\": [\"line-height\", \"leading\", \"baseline-grid\", \"vertical-rhythm\", \"font-size-interaction\"],\n        \"description\": \"Line-height property behavior with various values and its interaction with baseline alignment\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visudet.html#line-height\"],\n        \"complexity\": \"intermediate\"\n    }\n    ",
+                "length": 442,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

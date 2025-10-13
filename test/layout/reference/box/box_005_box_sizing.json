@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Box-Sizing Property\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 600px;\n            height: 400px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Common box styles */\n        .box {\n            width: 200px;\n            height: 100px;\n            margin: 20px;\n            padding: 20px;\n            border: 10px solid #666;\n            background-color: white;\n            text-align: center;\n            line-height: 1.2;\n            font-size: 14px;\n            display: inline-block;\n            vertical-align: top;\n        }\n        \n        .content-box {\n            box-sizing: content-box;\n            background-color: #ffcccc;\n        }\n        \n        .border-box {\n            box-sizing: border-box;\n            background-color: #ccffcc;\n        }\n        \n        .comparison-container {\n            border: 1px dashed #999;\n            margin: 10px 0;\n            background-color: #f0f0f0;\n            position: relative;\n        }\n        \n        .size-label {\n            position: absolute;\n            top: -15px;\n            left: 5px;\n            background-color: #f9f9f9;\n            padding: 2px 5px;\n            font-size: 11px;\n            border: 1px solid #ccc;\n        }\n    \n\n\n    \n        \n            Content-box: Total = 200 + 20*2 + 10*2 = 260px wide\n            \n                Content-box\n                200×100 + padding + border\n            \n        \n        \n        \n            Border-box: Total = 200px wide (includes padding + border)\n            \n                Border-box\n                200×100 total\n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"box_005_box_sizing\",\n        \"category\": \"intermediate\",\n        \"features\": [\"box-sizing\", \"content-box\", \"border-box\", \"width-calculation\"],\n        \"description\": \"Box-sizing property demonstration showing content-box vs border-box behavior\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-ui-3/#box-sizing\"],\n        \"complexity\": \"intermediate\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Box-Sizing Property\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 600px;\n            height: 400px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Common box styles */\n        .box {\n            width: 200px;\n            height: 100px;\n            margin: 20px;\n            padding: 20px;\n            border: 10px solid #666;\n            background-color: white;\n            text-align: center;\n            line-height: 1.2;\n            font-size: 14px;\n            display: inline-block;\n            vertical-align: top;\n        }\n        \n        .content-box {\n            box-sizing: content-box;\n            background-color: #ffcccc;\n        }\n        \n        .border-box {\n            box-sizing: border-box;\n            background-color: #ccffcc;\n        }\n        \n        .comparison-container {\n            border: 1px dashed #999;\n            margin: 10px 0;\n            background-color: #f0f0f0;\n            position: relative;\n        }\n        \n        .size-label {\n            position: absolute;\n            top: -15px;\n            left: 5px;\n            background-color: #f9f9f9;\n            padding: 2px 5px;\n            font-size: 11px;\n            border: 1px solid #ccc;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Box-Sizing Property",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Box-Sizing Property",
+                "length": 25,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 600px;\n            height: 400px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Common box styles */\n        .box {\n            width: 200px;\n            height: 100px;\n            margin: 20px;\n            padding: 20px;\n            border: 10px solid #666;\n            background-color: white;\n            text-align: center;\n            line-height: 1.2;\n            font-size: 14px;\n            display: inline-block;\n            vertical-align: top;\n        }\n        \n        .content-box {\n            box-sizing: content-box;\n            background-color: #ffcccc;\n        }\n        \n        .border-box {\n            box-sizing: border-box;\n            background-color: #ccffcc;\n        }\n        \n        .comparison-container {\n            border: 1px dashed #999;\n            margin: 10px 0;\n            background-color: #f0f0f0;\n            position: relative;\n        }\n        \n        .size-label {\n            position: absolute;\n            top: -15px;\n            left: 5px;\n            background-color: #f9f9f9;\n            padding: 2px 5px;\n            font-size: 11px;\n            border: 1px solid #ccc;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 600px;\n            height: 400px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Common box styles */\n        .box {\n            width: 200px;\n            height: 100px;\n            margin: 20px;\n            padding: 20px;\n            border: 10px solid #666;\n            background-color: white;\n            text-align: center;\n            line-height: 1.2;\n            font-size: 14px;\n            display: inline-block;\n            vertical-align: top;\n        }\n        \n        .content-box {\n            box-sizing: content-box;\n            background-color: #ffcccc;\n        }\n        \n        .border-box {\n            box-sizing: border-box;\n            background-color: #ccffcc;\n        }\n        \n        .comparison-container {\n            border: 1px dashed #999;\n            margin: 10px 0;\n            background-color: #f0f0f0;\n            position: relative;\n        }\n        \n        .size-label {\n            position: absolute;\n            top: -15px;\n            left: 5px;\n            background-color: #f9f9f9;\n            padding: 2px 5px;\n            font-size: 11px;\n            border: 1px solid #ccc;\n        }\n    ",
+                "length": 1455,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Content-box: Total = 200 + 20*2 + 10*2 = 260px wide\n            \n                Content-box\n                200×100 + padding + border\n            \n        \n        \n        \n            Border-box: Total = 200px wide (includes padding + border)\n            \n                Border-box\n                200×100 total\n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"box_005_box_sizing\",\n        \"category\": \"intermediate\",\n        \"features\": [\"box-sizing\", \"content-box\", \"border-box\", \"width-calculation\"],\n        \"description\": \"Box-sizing property demonstration showing content-box vs border-box behavior\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-ui-3/#box-sizing\"],\n        \"complexity\": \"intermediate\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.test-container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Content-box: Total = 200 + 20*2 + 10*2 = 260px wide\n            \n                Content-box\n                200×100 + padding + border\n            \n        \n        \n        \n            Border-box: Total = 200px wide (includes padding + border)\n            \n                Border-box\n                200×100 total",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 2,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.comparison-container:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,13 +667,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Content-box: Total = 200 + 20*2 + 10*2 = 260px wide\n            \n                Content-box\n                200×100 + padding + border",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.size-label:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -632,33 +729,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Content-box: Total = 200 + 20*2 + 10*2 = 260px wide",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Content-box: Total = 200 + 20*2 + 10*2 = 260px wide",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 34,
-                            "y": 21,
-                            "width": 258.5,
-                            "height": 12,
-                            "right": 292.5,
-                            "bottom": 33
-                          }
-                        ],
                         "length": 51,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 51
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 34,
+                              "y": 21,
+                              "width": 258.5,
+                              "height": 12,
+                              "right": 292.5,
+                              "bottom": 33,
+                              "text": "Content-box: Total = 200 + 20*2 + 10*2 = 260px wide",
+                              "startIndex": 0,
+                              "endIndex": 51
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.box.content-box:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -717,50 +822,39 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Content-box\n                200×100 + padding + border",
-                    "hasTextNodes": true,
-                    "textNodes": [
-                      {
-                        "text": "\n                Content-box",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 134.86,
-                            "y": 83,
-                            "width": 76.28,
-                            "height": 16,
-                            "right": 211.14,
-                            "bottom": 99
-                          }
-                        ],
-                        "length": 28,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 28
-                      },
-                      {
-                        "text": "\n                200×100 + padding + border\n            ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 84.44,
-                            "y": 99.8,
-                            "width": 177.11,
-                            "height": 16,
-                            "right": 261.55,
-                            "bottom": 115.8
-                          }
-                        ],
-                        "length": 56,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 56
-                      }
-                    ],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "text",
+                        "text": "\n                Content-box",
+                        "length": 28,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 134.86,
+                              "y": 83,
+                              "width": 76.28,
+                              "height": 16,
+                              "right": 211.14,
+                              "bottom": 99,
+                              "text": "\n                Content-box",
+                              "startIndex": 0,
+                              "endIndex": 28
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "element",
                         "selector": "br",
                         "tag": "br",
                         "id": null,
@@ -816,11 +910,36 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": null,
-                        "hasTextNodes": false,
-                        "textNodes": [],
-                        "childCount": 0,
                         "depth": 5,
+                        "elementIndex": 1,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "\n                200×100 + padding + border\n            ",
+                        "length": 56,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 84.44,
+                              "y": 99.8,
+                              "width": 177.11,
+                              "height": 16,
+                              "right": 261.55,
+                              "bottom": 115.8,
+                              "text": "\n                200×100 + padding + border\n            ",
+                              "startIndex": 0,
+                              "endIndex": 56
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 2,
                         "children": []
                       }
                     ]
@@ -828,6 +947,7 @@
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.comparison-container:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -885,13 +1005,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Border-box: Total = 200px wide (includes padding + border)\n            \n                Border-box\n                200×100 total",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.size-label:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -949,33 +1067,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Border-box: Total = 200px wide (includes padding + border)",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Border-box: Total = 200px wide (includes padding + border)",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 34,
-                            "y": 233,
-                            "width": 289.03,
-                            "height": 12,
-                            "right": 323.03,
-                            "bottom": 245
-                          }
-                        ],
                         "length": 58,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 58
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 34,
+                              "y": 233,
+                              "width": 289.03,
+                              "height": 12,
+                              "right": 323.03,
+                              "bottom": 245,
+                              "text": "Border-box: Total = 200px wide (includes padding + border)",
+                              "startIndex": 0,
+                              "endIndex": 58
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.box.border-box:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1034,50 +1160,39 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Border-box\n                200×100 total",
-                    "hasTextNodes": true,
-                    "textNodes": [
-                      {
-                        "text": "\n                Border-box",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 108.36,
-                            "y": 295,
-                            "width": 69.27,
-                            "height": 16,
-                            "right": 177.63,
-                            "bottom": 311
-                          }
-                        ],
-                        "length": 27,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 27
-                      },
-                      {
-                        "text": "\n                200×100 total\n            ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 100.38,
-                            "y": 311.8,
-                            "width": 85.25,
-                            "height": 16,
-                            "right": 185.63,
-                            "bottom": 327.8
-                          }
-                        ],
-                        "length": 43,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 43
-                      }
-                    ],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "text",
+                        "text": "\n                Border-box",
+                        "length": 27,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 108.36,
+                              "y": 295,
+                              "width": 69.27,
+                              "height": 16,
+                              "right": 177.63,
+                              "bottom": 311,
+                              "text": "\n                Border-box",
+                              "startIndex": 0,
+                              "endIndex": 27
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "element",
                         "selector": "br",
                         "tag": "br",
                         "id": null,
@@ -1133,11 +1248,36 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": null,
-                        "hasTextNodes": false,
-                        "textNodes": [],
-                        "childCount": 0,
                         "depth": 5,
+                        "elementIndex": 1,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "text",
+                        "text": "\n                200×100 total\n            ",
+                        "length": 43,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 100.38,
+                              "y": 311.8,
+                              "width": 85.25,
+                              "height": 16,
+                              "right": 185.63,
+                              "bottom": 327.8,
+                              "text": "\n                200×100 total\n            ",
+                              "startIndex": 0,
+                              "endIndex": 43
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "inline-block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 2,
                         "children": []
                       }
                     ]
@@ -1147,6 +1287,7 @@
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -1202,12 +1343,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"box_005_box_sizing\",\n        \"category\": \"intermediate\",\n        \"features\": [\"box-sizing\", \"content-box\", \"border-box\", \"width-calculation\"],\n        \"description\": \"Box-sizing property demonstration showing content-box vs border-box behavior\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-ui-3/#box-sizing\"],\n        \"complexity\": \"intermediate\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"box_005_box_sizing\",\n        \"category\": \"intermediate\",\n        \"features\": [\"box-sizing\", \"content-box\", \"border-box\", \"width-calculation\"],\n        \"description\": \"Box-sizing property demonstration showing content-box vs border-box behavior\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-ui-3/#box-sizing\"],\n        \"complexity\": \"intermediate\"\n    }\n    ",
+                "length": 395,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

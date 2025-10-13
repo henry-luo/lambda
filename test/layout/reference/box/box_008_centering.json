@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Block Centering\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 600px;\n            height: 700px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Common box styles */\n        .example-section {\n            margin: 20px 0;\n            border: 1px dashed #999;\n            padding: 15px;\n            background-color: white;\n            position: relative;\n        }\n        \n        .section-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        .box {\n            width: 200px;\n            height: 60px;\n            border: 1px solid #666;\n            text-align: center;\n            line-height: 60px;\n            font-size: 14px;\n        }\n        \n        /* Horizontal centering */\n        .margin-auto {\n            margin: 10px auto;\n            background-color: #ffcccc;\n        }\n        \n        /* Absolute positioning centering */\n        .absolute-container {\n            position: relative;\n            height: 100px;\n            background-color: #f0f0f0;\n        }\n        \n        .absolute-center {\n            position: absolute;\n            left: 50%;\n            top: 50%;\n            transform: translate(-50%, -50%);\n            background-color: #ccffcc;\n        }\n        \n        .absolute-horizontal {\n            position: absolute;\n            left: 50%;\n            top: 20px;\n            transform: translateX(-50%);\n            background-color: #ccccff;\n        }\n        \n        .absolute-vertical {\n            position: absolute;\n            top: 50%;\n            left: 20px;\n            transform: translateY(-50%);\n            background-color: #ffffcc;\n        }\n        \n        /* Table-cell centering */\n        .table-container {\n            display: table-cell;\n            width: 300px;\n            height: 100px;\n            vertical-align: middle;\n            text-align: center;\n            border: 1px solid #ccc;\n            background-color: #f0f0f0;\n        }\n        \n        .table-centered {\n            display: inline-block;\n            background-color: #ffccff;\n        }\n    \n\n\n    \n        \n            Horizontal centering with margin: auto\n            Margin auto\n        \n        \n        \n            Absolute positioning centering\n            \n                Both centered\n            \n        \n        \n        \n            Horizontal only (absolute)\n            \n                H-centered\n            \n        \n        \n        \n            Vertical only (absolute)\n            \n                V-centered\n            \n        \n        \n        \n            Table-cell centering\n            \n                Table center\n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"box_008_centering\",\n        \"category\": \"alignment\",\n        \"features\": [\"centering\", \"margin-auto\", \"absolute-positioning\", \"transform\", \"table-cell\", \"horizontal-centering\", \"vertical-centering\"],\n        \"description\": \"Various techniques for centering block elements horizontally and vertically\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visudet.html#Computing_widths_and_margins\"],\n        \"complexity\": \"intermediate\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Block Centering\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 600px;\n            height: 700px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Common box styles */\n        .example-section {\n            margin: 20px 0;\n            border: 1px dashed #999;\n            padding: 15px;\n            background-color: white;\n            position: relative;\n        }\n        \n        .section-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        .box {\n            width: 200px;\n            height: 60px;\n            border: 1px solid #666;\n            text-align: center;\n            line-height: 60px;\n            font-size: 14px;\n        }\n        \n        /* Horizontal centering */\n        .margin-auto {\n            margin: 10px auto;\n            background-color: #ffcccc;\n        }\n        \n        /* Absolute positioning centering */\n        .absolute-container {\n            position: relative;\n            height: 100px;\n            background-color: #f0f0f0;\n        }\n        \n        .absolute-center {\n            position: absolute;\n            left: 50%;\n            top: 50%;\n            transform: translate(-50%, -50%);\n            background-color: #ccffcc;\n        }\n        \n        .absolute-horizontal {\n            position: absolute;\n            left: 50%;\n            top: 20px;\n            transform: translateX(-50%);\n            background-color: #ccccff;\n        }\n        \n        .absolute-vertical {\n            position: absolute;\n            top: 50%;\n            left: 20px;\n            transform: translateY(-50%);\n            background-color: #ffffcc;\n        }\n        \n        /* Table-cell centering */\n        .table-container {\n            display: table-cell;\n            width: 300px;\n            height: 100px;\n            vertical-align: middle;\n            text-align: center;\n            border: 1px solid #ccc;\n            background-color: #f0f0f0;\n        }\n        \n        .table-centered {\n            display: inline-block;\n            background-color: #ffccff;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Block Centering",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Block Centering",
+                "length": 21,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 600px;\n            height: 700px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Common box styles */\n        .example-section {\n            margin: 20px 0;\n            border: 1px dashed #999;\n            padding: 15px;\n            background-color: white;\n            position: relative;\n        }\n        \n        .section-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        .box {\n            width: 200px;\n            height: 60px;\n            border: 1px solid #666;\n            text-align: center;\n            line-height: 60px;\n            font-size: 14px;\n        }\n        \n        /* Horizontal centering */\n        .margin-auto {\n            margin: 10px auto;\n            background-color: #ffcccc;\n        }\n        \n        /* Absolute positioning centering */\n        .absolute-container {\n            position: relative;\n            height: 100px;\n            background-color: #f0f0f0;\n        }\n        \n        .absolute-center {\n            position: absolute;\n            left: 50%;\n            top: 50%;\n            transform: translate(-50%, -50%);\n            background-color: #ccffcc;\n        }\n        \n        .absolute-horizontal {\n            position: absolute;\n            left: 50%;\n            top: 20px;\n            transform: translateX(-50%);\n            background-color: #ccccff;\n        }\n        \n        .absolute-vertical {\n            position: absolute;\n            top: 50%;\n            left: 20px;\n            transform: translateY(-50%);\n            background-color: #ffffcc;\n        }\n        \n        /* Table-cell centering */\n        .table-container {\n            display: table-cell;\n            width: 300px;\n            height: 100px;\n            vertical-align: middle;\n            text-align: center;\n            border: 1px solid #ccc;\n            background-color: #f0f0f0;\n        }\n        \n        .table-centered {\n            display: inline-block;\n            background-color: #ffccff;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 600px;\n            height: 700px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Common box styles */\n        .example-section {\n            margin: 20px 0;\n            border: 1px dashed #999;\n            padding: 15px;\n            background-color: white;\n            position: relative;\n        }\n        \n        .section-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        .box {\n            width: 200px;\n            height: 60px;\n            border: 1px solid #666;\n            text-align: center;\n            line-height: 60px;\n            font-size: 14px;\n        }\n        \n        /* Horizontal centering */\n        .margin-auto {\n            margin: 10px auto;\n            background-color: #ffcccc;\n        }\n        \n        /* Absolute positioning centering */\n        .absolute-container {\n            position: relative;\n            height: 100px;\n            background-color: #f0f0f0;\n        }\n        \n        .absolute-center {\n            position: absolute;\n            left: 50%;\n            top: 50%;\n            transform: translate(-50%, -50%);\n            background-color: #ccffcc;\n        }\n        \n        .absolute-horizontal {\n            position: absolute;\n            left: 50%;\n            top: 20px;\n            transform: translateX(-50%);\n            background-color: #ccccff;\n        }\n        \n        .absolute-vertical {\n            position: absolute;\n            top: 50%;\n            left: 20px;\n            transform: translateY(-50%);\n            background-color: #ffffcc;\n        }\n        \n        /* Table-cell centering */\n        .table-container {\n            display: table-cell;\n            width: 300px;\n            height: 100px;\n            vertical-align: middle;\n            text-align: center;\n            border: 1px solid #ccc;\n            background-color: #f0f0f0;\n        }\n        \n        .table-centered {\n            display: inline-block;\n            background-color: #ffccff;\n        }\n    ",
+                "length": 2375,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Horizontal centering with margin: auto\n            Margin auto\n        \n        \n        \n            Absolute positioning centering\n            \n                Both centered\n            \n        \n        \n        \n            Horizontal only (absolute)\n            \n                H-centered\n            \n        \n        \n        \n            Vertical only (absolute)\n            \n                V-centered\n            \n        \n        \n        \n            Table-cell centering\n            \n                Table center\n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"box_008_centering\",\n        \"category\": \"alignment\",\n        \"features\": [\"centering\", \"margin-auto\", \"absolute-positioning\", \"transform\", \"table-cell\", \"horizontal-centering\", \"vertical-centering\"],\n        \"description\": \"Various techniques for centering block elements horizontally and vertically\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visudet.html#Computing_widths_and_margins\"],\n        \"complexity\": \"intermediate\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.test-container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Horizontal centering with margin: auto\n            Margin auto\n        \n        \n        \n            Absolute positioning centering\n            \n                Both centered\n            \n        \n        \n        \n            Horizontal only (absolute)\n            \n                H-centered\n            \n        \n        \n        \n            Vertical only (absolute)\n            \n                V-centered\n            \n        \n        \n        \n            Table-cell centering\n            \n                Table center",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 5,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.example-section:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,13 +667,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Horizontal centering with margin: auto\n            Margin auto",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.section-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -632,33 +729,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Horizontal centering with margin: auto",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Horizontal centering with margin: auto",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 58,
-                            "width": 292.45,
-                            "height": 17,
-                            "right": 330.45,
-                            "bottom": 75
-                          }
-                        ],
                         "length": 38,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 38
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 58,
+                              "width": 292.45,
+                              "height": 17,
+                              "right": 330.45,
+                              "bottom": 75,
+                              "text": "Horizontal centering with margin: auto",
+                              "startIndex": 0,
+                              "endIndex": 38
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.box.margin-auto:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -717,35 +822,43 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Margin auto",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 3,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Margin auto",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 263.03,
-                            "y": 109,
-                            "width": 73.94,
-                            "height": 16,
-                            "right": 336.97,
-                            "bottom": 125
-                          }
-                        ],
                         "length": 11,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 11
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 263.03,
+                              "y": 109,
+                              "width": 73.94,
+                              "height": 16,
+                              "right": 336.97,
+                              "bottom": 125,
+                              "text": "Margin auto",
+                              "startIndex": 0,
+                              "endIndex": 11
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.example-section:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -803,13 +916,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Absolute positioning centering\n            \n                Both centered",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.section-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -867,33 +978,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Absolute positioning centering",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Absolute positioning centering",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 208,
-                            "width": 235.56,
-                            "height": 17,
-                            "right": 273.56,
-                            "bottom": 225
-                          }
-                        ],
                         "length": 30,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 30
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 208,
+                              "width": 235.56,
+                              "height": 17,
+                              "right": 273.56,
+                              "bottom": 225,
+                              "text": "Absolute positioning centering",
+                              "startIndex": 0,
+                              "endIndex": 30
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.absolute-container:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -951,13 +1070,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Both centered",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div.box.absolute-center",
                         "tag": "div",
                         "id": null,
@@ -1016,37 +1133,45 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Both centered",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Both centered",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 256.41,
-                                "y": 279,
-                                "width": 87.17,
-                                "height": 16,
-                                "right": 343.58,
-                                "bottom": 295
-                              }
-                            ],
                             "length": 13,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 13
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 256.41,
+                                  "y": 279,
+                                  "width": 87.17,
+                                  "height": 16,
+                                  "right": 343.58,
+                                  "bottom": 295,
+                                  "text": "Both centered",
+                                  "startIndex": 0,
+                                  "endIndex": 13
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.example-section:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -1104,13 +1229,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Horizontal only (absolute)\n            \n                H-centered",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.section-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -1168,33 +1291,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Horizontal only (absolute)",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Horizontal only (absolute)",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 388,
-                            "width": 196.45,
-                            "height": 17,
-                            "right": 234.45,
-                            "bottom": 405
-                          }
-                        ],
                         "length": 26,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 26
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 388,
+                              "width": 196.45,
+                              "height": 17,
+                              "right": 234.45,
+                              "bottom": 405,
+                              "text": "Horizontal only (absolute)",
+                              "startIndex": 0,
+                              "endIndex": 26
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.absolute-container:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1252,13 +1383,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "H-centered",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div.box.absolute-horizontal",
                         "tag": "div",
                         "id": null,
@@ -1317,37 +1446,45 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "H-centered",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "H-centered",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 265.36,
-                                "y": 459,
-                                "width": 69.27,
-                                "height": 16,
-                                "right": 334.63,
-                                "bottom": 475
-                              }
-                            ],
                             "length": 10,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 10
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 265.36,
+                                  "y": 459,
+                                  "width": 69.27,
+                                  "height": 16,
+                                  "right": 334.63,
+                                  "bottom": 475,
+                                  "text": "H-centered",
+                                  "startIndex": 0,
+                                  "endIndex": 10
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.example-section:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -1405,13 +1542,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Vertical only (absolute)\n            \n                V-centered",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 7,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.section-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -1469,33 +1604,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Vertical only (absolute)",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Vertical only (absolute)",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 568,
-                            "width": 175.16,
-                            "height": 17,
-                            "right": 213.16,
-                            "bottom": 585
-                          }
-                        ],
                         "length": 24,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 24
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 568,
+                              "width": 175.16,
+                              "height": 17,
+                              "right": 213.16,
+                              "bottom": 585,
+                              "text": "Vertical only (absolute)",
+                              "startIndex": 0,
+                              "endIndex": 24
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.absolute-container:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1553,13 +1696,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "V-centered",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div.box.absolute-vertical",
                         "tag": "div",
                         "id": null,
@@ -1618,37 +1759,45 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "V-centered",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "V-centered",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 124.14,
-                                "y": 639,
-                                "width": 67.72,
-                                "height": 16,
-                                "right": 191.86,
-                                "bottom": 655
-                              }
-                            ],
                             "length": 10,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 10
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 124.14,
+                                  "y": 639,
+                                  "width": 67.72,
+                                  "height": 16,
+                                  "right": 191.86,
+                                  "bottom": 655,
+                                  "text": "V-centered",
+                                  "startIndex": 0,
+                                  "endIndex": 10
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.example-section:nth-of-type(5)",
                 "tag": "div",
                 "id": null,
@@ -1706,13 +1855,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Table-cell centering\n            \n                Table center",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 9,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.section-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -1770,33 +1917,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Table-cell centering",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Table-cell centering",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 748,
-                            "width": 149.08,
-                            "height": 17,
-                            "right": 187.08,
-                            "bottom": 765
-                          }
-                        ],
                         "length": 20,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 20
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 748,
+                              "width": 149.08,
+                              "height": 17,
+                              "right": 187.08,
+                              "bottom": 765,
+                              "text": "Table-cell centering",
+                              "startIndex": 0,
+                              "endIndex": 20
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.table-container:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1854,13 +2009,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Table center",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div.box.table-centered",
                         "tag": "div",
                         "id": null,
@@ -1919,31 +2072,38 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Table center",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Table center",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 149.86,
-                                "y": 819,
-                                "width": 76.28,
-                                "height": 16,
-                                "right": 226.14,
-                                "bottom": 835
-                              }
-                            ],
                             "length": 12,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 12
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 149.86,
+                                  "y": 819,
+                                  "width": 76.28,
+                                  "height": 16,
+                                  "right": 226.14,
+                                  "bottom": 835,
+                                  "text": "Table center",
+                                  "startIndex": 0,
+                                  "endIndex": 12
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "inline-block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }
@@ -1952,6 +2112,7 @@
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -2007,12 +2168,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"box_008_centering\",\n        \"category\": \"alignment\",\n        \"features\": [\"centering\", \"margin-auto\", \"absolute-positioning\", \"transform\", \"table-cell\", \"horizontal-centering\", \"vertical-centering\"],\n        \"description\": \"Various techniques for centering block elements horizontally and vertically\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visudet.html#Computing_widths_and_margins\"],\n        \"complexity\": \"intermediate\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"box_008_centering\",\n        \"category\": \"alignment\",\n        \"features\": [\"centering\", \"margin-auto\", \"absolute-positioning\", \"transform\", \"table-cell\", \"horizontal-centering\", \"vertical-centering\"],\n        \"description\": \"Various techniques for centering block elements horizontally and vertically\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/visudet.html#Computing_widths_and_margins\"],\n        \"complexity\": \"intermediate\"\n    }\n    ",
+                "length": 478,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

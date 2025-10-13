@@ -1,6 +1,6 @@
 {
-  "total_files": 49,
-  "generated": 49,
+  "total_files": 52,
+  "generated": 52,
   "skipped": 0,
   "failed": 0,
   "success_rate": 100,
@@ -279,6 +279,14 @@
     },
     {
       "category": "baseline",
+      "file": "box_001_width_height.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 26,
+      "error": null
+    },
+    {
+      "category": "baseline",
       "file": "box_002_margin_padding.html",
       "success": true,
       "was_skipped": false,
@@ -287,10 +295,26 @@
     },
     {
       "category": "baseline",
+      "file": "box_002_margins.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 27,
+      "error": null
+    },
+    {
+      "category": "baseline",
       "file": "box_003_border.html",
       "success": true,
       "was_skipped": false,
       "node_count": 19,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "box_003_padding.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 32,
       "error": null
     },
     {

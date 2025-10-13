@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Border Properties\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 700px;\n            height: 600px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .box {\n            width: 150px;\n            height: 80px;\n            margin: 15px;\n            padding: 10px;\n            background-color: white;\n            text-align: center;\n            line-height: 1.2;\n            font-size: 12px;\n            display: inline-block;\n            vertical-align: top;\n        }\n        \n        .border-none {\n            border: none;\n            background-color: #ffcccc;\n        }\n        \n        .border-solid {\n            border: 3px solid #ff0000;\n            background-color: #ccffcc;\n        }\n        \n        .border-dashed {\n            border: 2px dashed #00aa00;\n            background-color: #ccccff;\n        }\n        \n        .border-dotted {\n            border: 4px dotted #0000ff;\n            background-color: #ffffcc;\n        }\n        \n        .border-double {\n            border: 6px double #aa00aa;\n            background-color: #ffccff;\n        }\n        \n        .border-individual {\n            border-top: 2px solid #ff0000;\n            border-right: 4px dashed #00aa00;\n            border-bottom: 3px dotted #0000ff;\n            border-left: 5px double #aa00aa;\n            background-color: #ccffaa;\n        }\n        \n        .border-radius {\n            border: 2px solid #666;\n            border-radius: 10px;\n            background-color: #aaccff;\n        }\n        \n        .border-radius-individual {\n            border: 2px solid #666;\n            border-top-left-radius: 20px;\n            border-top-right-radius: 5px;\n            border-bottom-right-radius: 15px;\n            border-bottom-left-radius: 0px;\n            background-color: #ffaacc;\n        }\n    \n\n\n    \n        No border\n        Solid 3px\n        Dashed 2px\n        Dotted 4px\n        Double 6px\n        Individual sides\n        Radius 10px\n        Individual radius\n    \n    \n    \n    \n    {\n        \"test_id\": \"box_004_borders\",\n        \"category\": \"basic\",\n        \"features\": [\"border\", \"border-style\", \"border-width\", \"border-color\", \"border-radius\", \"border-individual-sides\"],\n        \"description\": \"Border properties including styles, widths, individual sides, and border-radius\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html#border-properties\"],\n        \"complexity\": \"intermediate\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Border Properties\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 700px;\n            height: 600px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .box {\n            width: 150px;\n            height: 80px;\n            margin: 15px;\n            padding: 10px;\n            background-color: white;\n            text-align: center;\n            line-height: 1.2;\n            font-size: 12px;\n            display: inline-block;\n            vertical-align: top;\n        }\n        \n        .border-none {\n            border: none;\n            background-color: #ffcccc;\n        }\n        \n        .border-solid {\n            border: 3px solid #ff0000;\n            background-color: #ccffcc;\n        }\n        \n        .border-dashed {\n            border: 2px dashed #00aa00;\n            background-color: #ccccff;\n        }\n        \n        .border-dotted {\n            border: 4px dotted #0000ff;\n            background-color: #ffffcc;\n        }\n        \n        .border-double {\n            border: 6px double #aa00aa;\n            background-color: #ffccff;\n        }\n        \n        .border-individual {\n            border-top: 2px solid #ff0000;\n            border-right: 4px dashed #00aa00;\n            border-bottom: 3px dotted #0000ff;\n            border-left: 5px double #aa00aa;\n            background-color: #ccffaa;\n        }\n        \n        .border-radius {\n            border: 2px solid #666;\n            border-radius: 10px;\n            background-color: #aaccff;\n        }\n        \n        .border-radius-individual {\n            border: 2px solid #666;\n            border-top-left-radius: 20px;\n            border-top-right-radius: 5px;\n            border-bottom-right-radius: 15px;\n            border-bottom-left-radius: 0px;\n            background-color: #ffaacc;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Border Properties",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Border Properties",
+                "length": 23,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 700px;\n            height: 600px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .box {\n            width: 150px;\n            height: 80px;\n            margin: 15px;\n            padding: 10px;\n            background-color: white;\n            text-align: center;\n            line-height: 1.2;\n            font-size: 12px;\n            display: inline-block;\n            vertical-align: top;\n        }\n        \n        .border-none {\n            border: none;\n            background-color: #ffcccc;\n        }\n        \n        .border-solid {\n            border: 3px solid #ff0000;\n            background-color: #ccffcc;\n        }\n        \n        .border-dashed {\n            border: 2px dashed #00aa00;\n            background-color: #ccccff;\n        }\n        \n        .border-dotted {\n            border: 4px dotted #0000ff;\n            background-color: #ffffcc;\n        }\n        \n        .border-double {\n            border: 6px double #aa00aa;\n            background-color: #ffccff;\n        }\n        \n        .border-individual {\n            border-top: 2px solid #ff0000;\n            border-right: 4px dashed #00aa00;\n            border-bottom: 3px dotted #0000ff;\n            border-left: 5px double #aa00aa;\n            background-color: #ccffaa;\n        }\n        \n        .border-radius {\n            border: 2px solid #666;\n            border-radius: 10px;\n            background-color: #aaccff;\n        }\n        \n        .border-radius-individual {\n            border: 2px solid #666;\n            border-top-left-radius: 20px;\n            border-top-right-radius: 5px;\n            border-bottom-right-radius: 15px;\n            border-bottom-left-radius: 0px;\n            background-color: #ffaacc;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 700px;\n            height: 600px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .box {\n            width: 150px;\n            height: 80px;\n            margin: 15px;\n            padding: 10px;\n            background-color: white;\n            text-align: center;\n            line-height: 1.2;\n            font-size: 12px;\n            display: inline-block;\n            vertical-align: top;\n        }\n        \n        .border-none {\n            border: none;\n            background-color: #ffcccc;\n        }\n        \n        .border-solid {\n            border: 3px solid #ff0000;\n            background-color: #ccffcc;\n        }\n        \n        .border-dashed {\n            border: 2px dashed #00aa00;\n            background-color: #ccccff;\n        }\n        \n        .border-dotted {\n            border: 4px dotted #0000ff;\n            background-color: #ffffcc;\n        }\n        \n        .border-double {\n            border: 6px double #aa00aa;\n            background-color: #ffccff;\n        }\n        \n        .border-individual {\n            border-top: 2px solid #ff0000;\n            border-right: 4px dashed #00aa00;\n            border-bottom: 3px dotted #0000ff;\n            border-left: 5px double #aa00aa;\n            background-color: #ccffaa;\n        }\n        \n        .border-radius {\n            border: 2px solid #666;\n            border-radius: 10px;\n            background-color: #aaccff;\n        }\n        \n        .border-radius-individual {\n            border: 2px solid #666;\n            border-top-left-radius: 20px;\n            border-top-right-radius: 5px;\n            border-bottom-right-radius: 15px;\n            border-bottom-left-radius: 0px;\n            background-color: #ffaacc;\n        }\n    ",
+                "length": 2087,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "No border\n        Solid 3px\n        Dashed 2px\n        Dotted 4px\n        Double 6px\n        Individual sides\n        Radius 10px\n        Individual radius\n    \n    \n    \n    \n    {\n        \"test_id\": \"box_004_borders\",\n        \"category\": \"basic\",\n        \"features\": [\"border\", \"border-style\", \"border-width\", \"border-color\", \"border-radius\", \"border-individual-sides\"],\n        \"description\": \"Border properties including styles, widths, individual sides, and border-radius\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html#border-properties\"],\n        \"complexity\": \"intermediate\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.test-container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "No border\n        Solid 3px\n        Dashed 2px\n        Dotted 4px\n        Double 6px\n        Individual sides\n        Radius 10px\n        Individual radius",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 8,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.box.border-none:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -569,33 +668,66 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "No border",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "No border",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 85.31,
-                        "y": 47,
-                        "width": 53.38,
-                        "height": 14,
-                        "right": 138.69,
-                        "bottom": 61
-                      }
-                    ],
                     "length": 9,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 9
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 85.31,
+                          "y": 47,
+                          "width": 53.38,
+                          "height": 14,
+                          "right": 138.69,
+                          "bottom": 61,
+                          "text": "No border",
+                          "startIndex": 0,
+                          "endIndex": 9
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline-block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 202,
+                      "y": 22,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 206.45,
+                      "bottom": 39
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 2,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.box.border-solid:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -654,33 +786,66 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Solid 3px",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 3,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Solid 3px",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 271.77,
-                        "y": 50,
-                        "width": 49.38,
-                        "height": 14,
-                        "right": 321.14,
-                        "bottom": 64
-                      }
-                    ],
                     "length": 9,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 9
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 271.77,
+                          "y": 50,
+                          "width": 49.38,
+                          "height": 14,
+                          "right": 321.14,
+                          "bottom": 64,
+                          "text": "Solid 3px",
+                          "startIndex": 0,
+                          "endIndex": 9
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline-block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 386.45,
+                      "y": 22,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 390.91,
+                      "bottom": 39
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 4,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.box.border-dashed:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -739,33 +904,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Dashed 2px",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 5,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Dashed 2px",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 448.88,
-                        "y": 49,
-                        "width": 64.05,
-                        "height": 14,
-                        "right": 512.92,
-                        "bottom": 63
-                      }
-                    ],
                     "length": 10,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 10
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 448.88,
+                          "y": 49,
+                          "width": 64.05,
+                          "height": 14,
+                          "right": 512.92,
+                          "bottom": 63,
+                          "text": "Dashed 2px",
+                          "startIndex": 0,
+                          "endIndex": 10
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline-block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.box.border-dotted:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -824,33 +997,66 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Dotted 4px",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 7,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Dotted 4px",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 82.97,
-                        "y": 161,
-                        "width": 58.05,
-                        "height": 14,
-                        "right": 141.02,
-                        "bottom": 175
-                      }
-                    ],
                     "length": 10,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 10
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 82.97,
+                          "y": 161,
+                          "width": 58.05,
+                          "height": 14,
+                          "right": 141.02,
+                          "bottom": 175,
+                          "text": "Dotted 4px",
+                          "startIndex": 0,
+                          "endIndex": 10
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline-block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 202,
+                      "y": 132,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 206.45,
+                      "bottom": 149
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 8,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.box.border-double:nth-of-type(5)",
                 "tag": "div",
                 "id": null,
@@ -909,33 +1115,66 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Double 6px",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 9,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Double 6px",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 266.09,
-                        "y": 163,
-                        "width": 60.72,
-                        "height": 14,
-                        "right": 326.81,
-                        "bottom": 177
-                      }
-                    ],
                     "length": 10,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 10
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 266.09,
+                          "y": 163,
+                          "width": 60.72,
+                          "height": 14,
+                          "right": 326.81,
+                          "bottom": 177,
+                          "text": "Double 6px",
+                          "startIndex": 0,
+                          "endIndex": 10
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline-block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 386.45,
+                      "y": 132,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 390.91,
+                      "bottom": 149
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 10,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.box.border-individual:nth-of-type(6)",
                 "tag": "div",
                 "id": null,
@@ -994,33 +1233,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Individual sides",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 11,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Individual sides",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 440.38,
-                        "y": 159,
-                        "width": 82.06,
-                        "height": 14,
-                        "right": 522.44,
-                        "bottom": 173
-                      }
-                    ],
                     "length": 16,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 16
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 440.38,
+                          "y": 159,
+                          "width": 82.06,
+                          "height": 14,
+                          "right": 522.44,
+                          "bottom": 173,
+                          "text": "Individual sides",
+                          "startIndex": 0,
+                          "endIndex": 16
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline-block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.box.border-radius:nth-of-type(7)",
                 "tag": "div",
                 "id": null,
@@ -1079,33 +1326,66 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Radius 10px",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 13,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Radius 10px",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 78.64,
-                        "y": 269,
-                        "width": 66.72,
-                        "height": 14,
-                        "right": 145.36,
-                        "bottom": 283
-                      }
-                    ],
                     "length": 11,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 11
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 78.64,
+                          "y": 269,
+                          "width": 66.72,
+                          "height": 14,
+                          "right": 145.36,
+                          "bottom": 283,
+                          "text": "Radius 10px",
+                          "startIndex": 0,
+                          "endIndex": 11
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline-block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
+                ]
+              },
+              {
+                "nodeType": "text",
+                "text": "\n        ",
+                "length": 9,
+                "isWhitespaceOnly": true,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 202,
+                      "y": 242,
+                      "width": 4.45,
+                      "height": 17,
+                      "right": 206.45,
+                      "bottom": 259
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
                 "depth": 3,
+                "nodeIndex": 14,
                 "children": []
               },
               {
+                "nodeType": "element",
                 "selector": "div.box.border-radius-individual:nth-of-type(8)",
                 "tag": "div",
                 "id": null,
@@ -1164,35 +1444,43 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Individual radius",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 15,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Individual radius",
-                    "parentElement": "div",
-                    "rects": [
-                      {
-                        "x": 253.09,
-                        "y": 269,
-                        "width": 86.72,
-                        "height": 14,
-                        "right": 339.81,
-                        "bottom": 283
-                      }
-                    ],
                     "length": 17,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 17
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 253.09,
+                          "y": 269,
+                          "width": 86.72,
+                          "height": 14,
+                          "right": 339.81,
+                          "bottom": 283,
+                          "text": "Individual radius",
+                          "startIndex": 0,
+                          "endIndex": 17
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "inline-block",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -1248,12 +1536,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"box_004_borders\",\n        \"category\": \"basic\",\n        \"features\": [\"border\", \"border-style\", \"border-width\", \"border-color\", \"border-radius\", \"border-individual-sides\"],\n        \"description\": \"Border properties including styles, widths, individual sides, and border-radius\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html#border-properties\"],\n        \"complexity\": \"intermediate\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"box_004_borders\",\n        \"category\": \"basic\",\n        \"features\": [\"border\", \"border-style\", \"border-width\", \"border-color\", \"border-radius\", \"border-individual-sides\"],\n        \"description\": \"Border properties including styles, widths, individual sides, and border-radius\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html#border-properties\"],\n        \"complexity\": \"intermediate\"\n    }\n    ",
+                "length": 438,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

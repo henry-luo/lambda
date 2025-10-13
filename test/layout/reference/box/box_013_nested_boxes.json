@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Nested Box Models\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 800px;\n            height: 800px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .nested-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n        }\n        \n        .test-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        /* Outer container */\n        .outer-box {\n            width: 400px;\n            height: 200px;\n            margin: 20px;\n            padding: 20px;\n            border: 3px solid #666;\n            background-color: #ffcccc;\n            position: relative;\n        }\n        \n        /* Middle container */\n        .middle-box {\n            width: 80%;\n            height: 70%;\n            margin: 10px;\n            padding: 15px;\n            border: 2px solid #333;\n            background-color: #ccffcc;\n            position: relative;\n        }\n        \n        /* Inner container */\n        .inner-box {\n            width: 60%;\n            height: 50%;\n            margin: 5px;\n            padding: 10px;\n            border: 1px solid #000;\n            background-color: #ccccff;\n            text-align: center;\n            font-size: 12px;\n            line-height: 1.2;\n        }\n        \n        /* Margin collapse demonstration */\n        .margin-collapse-parent {\n            background-color: #ffffcc;\n            border: 3px solid #666;\n            /* No padding to allow margin collapse */\n            width: 300px;\n            margin: 20px;\n        }\n        \n        .margin-collapse-child {\n            margin: 30px;\n            padding: 15px;\n            background-color: #ffccff;\n            border: 1px solid #333;\n        }\n        \n        /* Margin collapse prevented */\n        .margin-no-collapse-parent {\n            background-color: #ccffff;\n            border: 3px solid #666;\n            padding: 1px; /* Prevents margin collapse */\n            width: 300px;\n            margin: 20px;\n        }\n        \n        .margin-no-collapse-child {\n            margin: 30px;\n            padding: 15px;\n            background-color: #ffccaa;\n            border: 1px solid #333;\n        }\n        \n        /* Different box-sizing inheritance */\n        .content-box-parent {\n            box-sizing: content-box;\n            width: 200px;\n            height: 100px;\n            padding: 20px;\n            border: 5px solid #666;\n            background-color: #ffaacc;\n            margin: 10px;\n        }\n        \n        .border-box-child {\n            box-sizing: border-box;\n            width: 100%;\n            height: 100%;\n            padding: 10px;\n            border: 2px solid #333;\n            background-color: #aaffcc;\n        }\n        \n        /* Labels for measurements */\n        .label {\n            position: absolute;\n            background-color: rgba(255, 255, 255, 0.9);\n            padding: 2px 5px;\n            font-size: 10px;\n            border: 1px solid #999;\n            z-index: 10;\n        }\n        \n        .label-outer { top: -15px; left: 0; }\n        .label-middle { top: 25px; right: -60px; }\n        .label-inner { bottom: -15px; left: 0; }\n    \n\n\n    \n        \n            Nested box model with percentage dimensions\n            \n                Outer: 400×200px\n                \n                    Middle: 80%×70%\n                    \n                        Inner: 60%×50%\n                        Innermost content\n                    \n                \n            \n        \n        \n        \n            Margin collapse demonstration\n            \n                \n                    Margin collapse (no parent padding):\n                    \n                        \n                            Child with 30px margin\n                        \n                    \n                \n                \n                    No collapse (parent has padding):\n                    \n                        \n                            Child with 30px margin\n                        \n                    \n                \n            \n        \n        \n        \n            Mixed box-sizing in nested elements\n            \n                Parent: content-box\n                \n                    Child: border-box (100% of parent's content area)\n                \n            \n        \n        \n        \n            Deeply nested with different properties\n            \n                Level 1\n                \n                    Level 2\n                    \n                        Level 3\n                        \n                            Level 4 - Deepest content\n                        \n                    \n                \n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"box_013_nested_boxes\",\n        \"category\": \"advanced\",\n        \"features\": [\"nested-boxes\", \"percentage-dimensions\", \"margin-collapse\", \"box-sizing-inheritance\", \"deep-nesting\"],\n        \"description\": \"Complex nested box model scenarios with percentage dimensions, margin collapse, and mixed box-sizing\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html#collapsing-margins\"],\n        \"complexity\": \"advanced\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Nested Box Models\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 800px;\n            height: 800px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .nested-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n        }\n        \n        .test-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        /* Outer container */\n        .outer-box {\n            width: 400px;\n            height: 200px;\n            margin: 20px;\n            padding: 20px;\n            border: 3px solid #666;\n            background-color: #ffcccc;\n            position: relative;\n        }\n        \n        /* Middle container */\n        .middle-box {\n            width: 80%;\n            height: 70%;\n            margin: 10px;\n            padding: 15px;\n            border: 2px solid #333;\n            background-color: #ccffcc;\n            position: relative;\n        }\n        \n        /* Inner container */\n        .inner-box {\n            width: 60%;\n            height: 50%;\n            margin: 5px;\n            padding: 10px;\n            border: 1px solid #000;\n            background-color: #ccccff;\n            text-align: center;\n            font-size: 12px;\n            line-height: 1.2;\n        }\n        \n        /* Margin collapse demonstration */\n        .margin-collapse-parent {\n            background-color: #ffffcc;\n            border: 3px solid #666;\n            /* No padding to allow margin collapse */\n            width: 300px;\n            margin: 20px;\n        }\n        \n        .margin-collapse-child {\n            margin: 30px;\n            padding: 15px;\n            background-color: #ffccff;\n            border: 1px solid #333;\n        }\n        \n        /* Margin collapse prevented */\n        .margin-no-collapse-parent {\n            background-color: #ccffff;\n            border: 3px solid #666;\n            padding: 1px; /* Prevents margin collapse */\n            width: 300px;\n            margin: 20px;\n        }\n        \n        .margin-no-collapse-child {\n            margin: 30px;\n            padding: 15px;\n            background-color: #ffccaa;\n            border: 1px solid #333;\n        }\n        \n        /* Different box-sizing inheritance */\n        .content-box-parent {\n            box-sizing: content-box;\n            width: 200px;\n            height: 100px;\n            padding: 20px;\n            border: 5px solid #666;\n            background-color: #ffaacc;\n            margin: 10px;\n        }\n        \n        .border-box-child {\n            box-sizing: border-box;\n            width: 100%;\n            height: 100%;\n            padding: 10px;\n            border: 2px solid #333;\n            background-color: #aaffcc;\n        }\n        \n        /* Labels for measurements */\n        .label {\n            position: absolute;\n            background-color: rgba(255, 255, 255, 0.9);\n            padding: 2px 5px;\n            font-size: 10px;\n            border: 1px solid #999;\n            z-index: 10;\n        }\n        \n        .label-outer { top: -15px; left: 0; }\n        .label-middle { top: 25px; right: -60px; }\n        .label-inner { bottom: -15px; left: 0; }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Nested Box Models",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Nested Box Models",
+                "length": 23,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 800px;\n            height: 800px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .nested-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n        }\n        \n        .test-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        /* Outer container */\n        .outer-box {\n            width: 400px;\n            height: 200px;\n            margin: 20px;\n            padding: 20px;\n            border: 3px solid #666;\n            background-color: #ffcccc;\n            position: relative;\n        }\n        \n        /* Middle container */\n        .middle-box {\n            width: 80%;\n            height: 70%;\n            margin: 10px;\n            padding: 15px;\n            border: 2px solid #333;\n            background-color: #ccffcc;\n            position: relative;\n        }\n        \n        /* Inner container */\n        .inner-box {\n            width: 60%;\n            height: 50%;\n            margin: 5px;\n            padding: 10px;\n            border: 1px solid #000;\n            background-color: #ccccff;\n            text-align: center;\n            font-size: 12px;\n            line-height: 1.2;\n        }\n        \n        /* Margin collapse demonstration */\n        .margin-collapse-parent {\n            background-color: #ffffcc;\n            border: 3px solid #666;\n            /* No padding to allow margin collapse */\n            width: 300px;\n            margin: 20px;\n        }\n        \n        .margin-collapse-child {\n            margin: 30px;\n            padding: 15px;\n            background-color: #ffccff;\n            border: 1px solid #333;\n        }\n        \n        /* Margin collapse prevented */\n        .margin-no-collapse-parent {\n            background-color: #ccffff;\n            border: 3px solid #666;\n            padding: 1px; /* Prevents margin collapse */\n            width: 300px;\n            margin: 20px;\n        }\n        \n        .margin-no-collapse-child {\n            margin: 30px;\n            padding: 15px;\n            background-color: #ffccaa;\n            border: 1px solid #333;\n        }\n        \n        /* Different box-sizing inheritance */\n        .content-box-parent {\n            box-sizing: content-box;\n            width: 200px;\n            height: 100px;\n            padding: 20px;\n            border: 5px solid #666;\n            background-color: #ffaacc;\n            margin: 10px;\n        }\n        \n        .border-box-child {\n            box-sizing: border-box;\n            width: 100%;\n            height: 100%;\n            padding: 10px;\n            border: 2px solid #333;\n            background-color: #aaffcc;\n        }\n        \n        /* Labels for measurements */\n        .label {\n            position: absolute;\n            background-color: rgba(255, 255, 255, 0.9);\n            padding: 2px 5px;\n            font-size: 10px;\n            border: 1px solid #999;\n            z-index: 10;\n        }\n        \n        .label-outer { top: -15px; left: 0; }\n        .label-middle { top: 25px; right: -60px; }\n        .label-inner { bottom: -15px; left: 0; }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test container */\n        .test-container {\n            width: 800px;\n            height: 800px;\n            border: 2px solid #333;\n            padding: 20px;\n            background-color: #f9f9f9;\n        }\n        \n        /* Test-specific CSS */\n        .nested-test {\n            margin: 20px 0;\n            padding: 15px;\n            border: 1px dashed #999;\n            background-color: white;\n        }\n        \n        .test-title {\n            font-weight: bold;\n            margin-bottom: 10px;\n            color: #333;\n        }\n        \n        /* Outer container */\n        .outer-box {\n            width: 400px;\n            height: 200px;\n            margin: 20px;\n            padding: 20px;\n            border: 3px solid #666;\n            background-color: #ffcccc;\n            position: relative;\n        }\n        \n        /* Middle container */\n        .middle-box {\n            width: 80%;\n            height: 70%;\n            margin: 10px;\n            padding: 15px;\n            border: 2px solid #333;\n            background-color: #ccffcc;\n            position: relative;\n        }\n        \n        /* Inner container */\n        .inner-box {\n            width: 60%;\n            height: 50%;\n            margin: 5px;\n            padding: 10px;\n            border: 1px solid #000;\n            background-color: #ccccff;\n            text-align: center;\n            font-size: 12px;\n            line-height: 1.2;\n        }\n        \n        /* Margin collapse demonstration */\n        .margin-collapse-parent {\n            background-color: #ffffcc;\n            border: 3px solid #666;\n            /* No padding to allow margin collapse */\n            width: 300px;\n            margin: 20px;\n        }\n        \n        .margin-collapse-child {\n            margin: 30px;\n            padding: 15px;\n            background-color: #ffccff;\n            border: 1px solid #333;\n        }\n        \n        /* Margin collapse prevented */\n        .margin-no-collapse-parent {\n            background-color: #ccffff;\n            border: 3px solid #666;\n            padding: 1px; /* Prevents margin collapse */\n            width: 300px;\n            margin: 20px;\n        }\n        \n        .margin-no-collapse-child {\n            margin: 30px;\n            padding: 15px;\n            background-color: #ffccaa;\n            border: 1px solid #333;\n        }\n        \n        /* Different box-sizing inheritance */\n        .content-box-parent {\n            box-sizing: content-box;\n            width: 200px;\n            height: 100px;\n            padding: 20px;\n            border: 5px solid #666;\n            background-color: #ffaacc;\n            margin: 10px;\n        }\n        \n        .border-box-child {\n            box-sizing: border-box;\n            width: 100%;\n            height: 100%;\n            padding: 10px;\n            border: 2px solid #333;\n            background-color: #aaffcc;\n        }\n        \n        /* Labels for measurements */\n        .label {\n            position: absolute;\n            background-color: rgba(255, 255, 255, 0.9);\n            padding: 2px 5px;\n            font-size: 10px;\n            border: 1px solid #999;\n            z-index: 10;\n        }\n        \n        .label-outer { top: -15px; left: 0; }\n        .label-middle { top: 25px; right: -60px; }\n        .label-inner { bottom: -15px; left: 0; }\n    ",
+                "length": 3541,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Nested box model with percentage dimensions\n            \n                Outer: 400×200px\n                \n                    Middle: 80%×70%\n                    \n                        Inner: 60%×50%\n                        Innermost content\n                    \n                \n            \n        \n        \n        \n            Margin collapse demonstration\n            \n                \n                    Margin collapse (no parent padding):\n                    \n                        \n                            Child with 30px margin\n                        \n                    \n                \n                \n                    No collapse (parent has padding):\n                    \n                        \n                            Child with 30px margin\n                        \n                    \n                \n            \n        \n        \n        \n            Mixed box-sizing in nested elements\n            \n                Parent: content-box\n                \n                    Child: border-box (100% of parent's content area)\n                \n            \n        \n        \n        \n            Deeply nested with different properties\n            \n                Level 1\n                \n                    Level 2\n                    \n                        Level 3\n                        \n                            Level 4 - Deepest content\n                        \n                    \n                \n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"box_013_nested_boxes\",\n        \"category\": \"advanced\",\n        \"features\": [\"nested-boxes\", \"percentage-dimensions\", \"margin-collapse\", \"box-sizing-inheritance\", \"deep-nesting\"],\n        \"description\": \"Complex nested box model scenarios with percentage dimensions, margin collapse, and mixed box-sizing\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html#collapsing-margins\"],\n        \"complexity\": \"advanced\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.test-container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Nested box model with percentage dimensions\n            \n                Outer: 400×200px\n                \n                    Middle: 80%×70%\n                    \n                        Inner: 60%×50%\n                        Innermost content\n                    \n                \n            \n        \n        \n        \n            Margin collapse demonstration\n            \n                \n                    Margin collapse (no parent padding):\n                    \n                        \n                            Child with 30px margin\n                        \n                    \n                \n                \n                    No collapse (parent has padding):\n                    \n                        \n                            Child with 30px margin\n                        \n                    \n                \n            \n        \n        \n        \n            Mixed box-sizing in nested elements\n            \n                Parent: content-box\n                \n                    Child: border-box (100% of parent's content area)\n                \n            \n        \n        \n        \n            Deeply nested with different properties\n            \n                Level 1\n                \n                    Level 2\n                    \n                        Level 3\n                        \n                            Level 4 - Deepest content",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 4,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.nested-test:nth-of-type(1)",
                 "tag": "div",
                 "id": null,
@@ -568,13 +667,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Nested box model with percentage dimensions\n            \n                Outer: 400×200px\n                \n                    Middle: 80%×70%\n                    \n                        Inner: 60%×50%\n                        Innermost content",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -632,33 +729,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Nested box model with percentage dimensions",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Nested box model with percentage dimensions",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 58,
-                            "width": 357.41,
-                            "height": 17,
-                            "right": 395.41,
-                            "bottom": 75
-                          }
-                        ],
                         "length": 43,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 43
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 58,
+                              "width": 357.41,
+                              "height": 17,
+                              "right": 395.41,
+                              "bottom": 75,
+                              "text": "Nested box model with percentage dimensions",
+                              "startIndex": 0,
+                              "endIndex": 43
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.outer-box:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -716,13 +821,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Outer: 400×200px\n                \n                    Middle: 80%×70%\n                    \n                        Inner: 60%×50%\n                        Innermost content",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 2,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div.label.label-outer:nth-of-type(1)",
                         "tag": "div",
                         "id": null,
@@ -781,33 +884,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Outer: 400×200px",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Outer: 400×200px",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 67,
-                                "y": 87,
-                                "width": 80.34,
-                                "height": 11,
-                                "right": 147.34,
-                                "bottom": 98
-                              }
-                            ],
                             "length": 16,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 16
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 67,
+                                  "y": 87,
+                                  "width": 80.34,
+                                  "height": 11,
+                                  "right": 147.34,
+                                  "bottom": 98,
+                                  "text": "Outer: 400×200px",
+                                  "startIndex": 0,
+                                  "endIndex": 16
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "div.middle-box:nth-of-type(2)",
                         "tag": "div",
                         "id": null,
@@ -865,13 +976,11 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Middle: 80%×70%\n                    \n                        Inner: 60%×50%\n                        Innermost content",
-                        "hasTextNodes": false,
-                        "textNodes": [],
-                        "childCount": 2,
                         "depth": 5,
+                        "elementIndex": 3,
                         "children": [
                           {
+                            "nodeType": "element",
                             "selector": "div.label.label-middle:nth-of-type(1)",
                             "tag": "div",
                             "id": null,
@@ -930,33 +1039,41 @@
                               "overflowX": "visible",
                               "overflowY": "visible"
                             },
-                            "textContent": "Middle: 80%×70%",
-                            "hasTextNodes": true,
-                            "textNodes": [
+                            "depth": 6,
+                            "elementIndex": 1,
+                            "children": [
                               {
+                                "nodeType": "text",
                                 "text": "Middle: 80%×70%",
-                                "parentElement": "div",
-                                "rects": [
-                                  {
-                                    "x": 345.3,
-                                    "y": 159,
-                                    "width": 80.89,
-                                    "height": 11,
-                                    "right": 426.19,
-                                    "bottom": 170
-                                  }
-                                ],
                                 "length": 15,
                                 "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 15
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 345.3,
+                                      "y": 159,
+                                      "width": 80.89,
+                                      "height": 11,
+                                      "right": 426.19,
+                                      "bottom": 170,
+                                      "text": "Middle: 80%×70%",
+                                      "startIndex": 0,
+                                      "endIndex": 15
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "block",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
                               }
-                            ],
-                            "childCount": 0,
-                            "depth": 6,
-                            "children": []
+                            ]
                           },
                           {
+                            "nodeType": "element",
                             "selector": "div.inner-box:nth-of-type(2)",
                             "tag": "div",
                             "id": null,
@@ -1014,32 +1131,11 @@
                               "overflowX": "visible",
                               "overflowY": "visible"
                             },
-                            "textContent": "Inner: 60%×50%\n                        Innermost content",
-                            "hasTextNodes": true,
-                            "textNodes": [
-                              {
-                                "text": "\n                        Innermost content\n                    ",
-                                "parentElement": "div",
-                                "rects": [
-                                  {
-                                    "x": 139.72,
-                                    "y": 162,
-                                    "width": 96.06,
-                                    "height": 14,
-                                    "right": 235.78,
-                                    "bottom": 176
-                                  }
-                                ],
-                                "length": 63,
-                                "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 63
-                              }
-                            ],
-                            "childCount": 1,
                             "depth": 6,
+                            "elementIndex": 3,
                             "children": [
                               {
+                                "nodeType": "element",
                                 "selector": "div.label.label-inner",
                                 "tag": "div",
                                 "id": null,
@@ -1098,30 +1194,65 @@
                                   "overflowX": "visible",
                                   "overflowY": "visible"
                                 },
-                                "textContent": "Inner: 60%×50%",
-                                "hasTextNodes": true,
-                                "textNodes": [
+                                "depth": 7,
+                                "elementIndex": 1,
+                                "children": [
                                   {
+                                    "nodeType": "text",
                                     "text": "Inner: 60%×50%",
-                                    "parentElement": "div",
-                                    "rects": [
-                                      {
-                                        "x": 99,
-                                        "y": 234.8,
-                                        "width": 74.22,
-                                        "height": 11,
-                                        "right": 173.22,
-                                        "bottom": 245.8
-                                      }
-                                    ],
                                     "length": 14,
                                     "isWhitespaceOnly": false,
-                                    "startOffset": 0,
-                                    "endOffset": 14
+                                    "layout": {
+                                      "rects": [
+                                        {
+                                          "x": 99,
+                                          "y": 234.8,
+                                          "width": 74.22,
+                                          "height": 11,
+                                          "right": 173.22,
+                                          "bottom": 245.8,
+                                          "text": "Inner: 60%×50%",
+                                          "startIndex": 0,
+                                          "endIndex": 14
+                                        }
+                                      ],
+                                      "hasLayout": true,
+                                      "parentVisible": true,
+                                      "parentDisplay": "block",
+                                      "parentVisibility": "visible"
+                                    },
+                                    "depth": 8,
+                                    "nodeIndex": 0,
+                                    "children": []
                                   }
-                                ],
-                                "childCount": 0,
+                                ]
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "\n                        Innermost content\n                    ",
+                                "length": 63,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 139.72,
+                                      "y": 162,
+                                      "width": 96.06,
+                                      "height": 14,
+                                      "right": 235.78,
+                                      "bottom": 176,
+                                      "text": "\n                        Innermost content\n                    ",
+                                      "startIndex": 0,
+                                      "endIndex": 63
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "block",
+                                  "parentVisibility": "visible"
+                                },
                                 "depth": 7,
+                                "nodeIndex": 2,
                                 "children": []
                               }
                             ]
@@ -1133,6 +1264,7 @@
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.nested-test:nth-of-type(2)",
                 "tag": "div",
                 "id": null,
@@ -1190,13 +1322,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Margin collapse demonstration\n            \n                \n                    Margin collapse (no parent padding):\n                    \n                        \n                            Child with 30px margin\n                        \n                    \n                \n                \n                    No collapse (parent has padding):\n                    \n                        \n                            Child with 30px margin",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -1254,33 +1384,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Margin collapse demonstration",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Margin collapse demonstration",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 368,
-                            "width": 236.48,
-                            "height": 17,
-                            "right": 274.48,
-                            "bottom": 385
-                          }
-                        ],
                         "length": 29,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 29
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 368,
+                              "width": 236.48,
+                              "height": 17,
+                              "right": 274.48,
+                              "bottom": 385,
+                              "text": "Margin collapse demonstration",
+                              "startIndex": 0,
+                              "endIndex": 29
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -1336,13 +1474,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Margin collapse (no parent padding):\n                    \n                        \n                            Child with 30px margin\n                        \n                    \n                \n                \n                    No collapse (parent has padding):\n                    \n                        \n                            Child with 30px margin",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 2,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div:nth-of-type(1)",
                         "tag": "div",
                         "id": null,
@@ -1398,13 +1534,11 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Margin collapse (no parent padding):\n                    \n                        \n                            Child with 30px margin",
-                        "hasTextNodes": false,
-                        "textNodes": [],
-                        "childCount": 2,
                         "depth": 5,
+                        "elementIndex": 1,
                         "children": [
                           {
+                            "nodeType": "element",
                             "selector": "div:nth-of-type(1)",
                             "tag": "div",
                             "id": null,
@@ -1460,33 +1594,41 @@
                               "overflowX": "visible",
                               "overflowY": "visible"
                             },
-                            "textContent": "Margin collapse (no parent padding):",
-                            "hasTextNodes": true,
-                            "textNodes": [
+                            "depth": 6,
+                            "elementIndex": 1,
+                            "children": [
                               {
+                                "nodeType": "text",
                                 "text": "Margin collapse (no parent padding):",
-                                "parentElement": "div",
-                                "rects": [
-                                  {
-                                    "x": 38,
-                                    "y": 396,
-                                    "width": 195.45,
-                                    "height": 14,
-                                    "right": 233.45,
-                                    "bottom": 410
-                                  }
-                                ],
                                 "length": 36,
                                 "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 36
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 38,
+                                      "y": 396,
+                                      "width": 195.45,
+                                      "height": 14,
+                                      "right": 233.45,
+                                      "bottom": 410,
+                                      "text": "Margin collapse (no parent padding):",
+                                      "startIndex": 0,
+                                      "endIndex": 36
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "block",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
                               }
-                            ],
-                            "childCount": 0,
-                            "depth": 6,
-                            "children": []
+                            ]
                           },
                           {
+                            "nodeType": "element",
                             "selector": "div.margin-collapse-parent:nth-of-type(2)",
                             "tag": "div",
                             "id": null,
@@ -1544,13 +1686,11 @@
                               "overflowX": "visible",
                               "overflowY": "visible"
                             },
-                            "textContent": "Child with 30px margin",
-                            "hasTextNodes": false,
-                            "textNodes": [],
-                            "childCount": 1,
                             "depth": 6,
+                            "elementIndex": 3,
                             "children": [
                               {
+                                "nodeType": "element",
                                 "selector": "div.margin-collapse-child",
                                 "tag": "div",
                                 "id": null,
@@ -1608,37 +1748,45 @@
                                   "overflowX": "visible",
                                   "overflowY": "visible"
                                 },
-                                "textContent": "Child with 30px margin",
-                                "hasTextNodes": true,
-                                "textNodes": [
+                                "depth": 7,
+                                "elementIndex": 1,
+                                "children": [
                                   {
+                                    "nodeType": "text",
                                     "text": "\n                            Child with 30px margin\n                        ",
-                                    "parentElement": "div",
-                                    "rects": [
-                                      {
-                                        "x": 107,
-                                        "y": 479,
-                                        "width": 161.86,
-                                        "height": 17,
-                                        "right": 268.86,
-                                        "bottom": 496
-                                      }
-                                    ],
                                     "length": 76,
                                     "isWhitespaceOnly": false,
-                                    "startOffset": 0,
-                                    "endOffset": 76
+                                    "layout": {
+                                      "rects": [
+                                        {
+                                          "x": 107,
+                                          "y": 479,
+                                          "width": 161.86,
+                                          "height": 17,
+                                          "right": 268.86,
+                                          "bottom": 496,
+                                          "text": "\n                            Child with 30px margin\n                        ",
+                                          "startIndex": 0,
+                                          "endIndex": 76
+                                        }
+                                      ],
+                                      "hasLayout": true,
+                                      "parentVisible": true,
+                                      "parentDisplay": "block",
+                                      "parentVisibility": "visible"
+                                    },
+                                    "depth": 8,
+                                    "nodeIndex": 0,
+                                    "children": []
                                   }
-                                ],
-                                "childCount": 0,
-                                "depth": 7,
-                                "children": []
+                                ]
                               }
                             ]
                           }
                         ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "div:nth-of-type(2)",
                         "tag": "div",
                         "id": null,
@@ -1694,13 +1842,11 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "No collapse (parent has padding):\n                    \n                        \n                            Child with 30px margin",
-                        "hasTextNodes": false,
-                        "textNodes": [],
-                        "childCount": 2,
                         "depth": 5,
+                        "elementIndex": 3,
                         "children": [
                           {
+                            "nodeType": "element",
                             "selector": "div:nth-of-type(1)",
                             "tag": "div",
                             "id": null,
@@ -1756,33 +1902,41 @@
                               "overflowX": "visible",
                               "overflowY": "visible"
                             },
-                            "textContent": "No collapse (parent has padding):",
-                            "hasTextNodes": true,
-                            "textNodes": [
+                            "depth": 6,
+                            "elementIndex": 1,
+                            "children": [
                               {
+                                "nodeType": "text",
                                 "text": "No collapse (parent has padding):",
-                                "parentElement": "div",
-                                "rects": [
-                                  {
-                                    "x": 398,
-                                    "y": 396,
-                                    "width": 180.13,
-                                    "height": 14,
-                                    "right": 578.13,
-                                    "bottom": 410
-                                  }
-                                ],
                                 "length": 33,
                                 "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 33
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 398,
+                                      "y": 396,
+                                      "width": 180.13,
+                                      "height": 14,
+                                      "right": 578.13,
+                                      "bottom": 410,
+                                      "text": "No collapse (parent has padding):",
+                                      "startIndex": 0,
+                                      "endIndex": 33
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "block",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
                               }
-                            ],
-                            "childCount": 0,
-                            "depth": 6,
-                            "children": []
+                            ]
                           },
                           {
+                            "nodeType": "element",
                             "selector": "div.margin-no-collapse-parent:nth-of-type(2)",
                             "tag": "div",
                             "id": null,
@@ -1840,13 +1994,11 @@
                               "overflowX": "visible",
                               "overflowY": "visible"
                             },
-                            "textContent": "Child with 30px margin",
-                            "hasTextNodes": false,
-                            "textNodes": [],
-                            "childCount": 1,
                             "depth": 6,
+                            "elementIndex": 3,
                             "children": [
                               {
+                                "nodeType": "element",
                                 "selector": "div.margin-no-collapse-child",
                                 "tag": "div",
                                 "id": null,
@@ -1904,31 +2056,38 @@
                                   "overflowX": "visible",
                                   "overflowY": "visible"
                                 },
-                                "textContent": "Child with 30px margin",
-                                "hasTextNodes": true,
-                                "textNodes": [
+                                "depth": 7,
+                                "elementIndex": 1,
+                                "children": [
                                   {
+                                    "nodeType": "text",
                                     "text": "\n                            Child with 30px margin\n                        ",
-                                    "parentElement": "div",
-                                    "rects": [
-                                      {
-                                        "x": 468,
-                                        "y": 480,
-                                        "width": 161.86,
-                                        "height": 17,
-                                        "right": 629.86,
-                                        "bottom": 497
-                                      }
-                                    ],
                                     "length": 76,
                                     "isWhitespaceOnly": false,
-                                    "startOffset": 0,
-                                    "endOffset": 76
+                                    "layout": {
+                                      "rects": [
+                                        {
+                                          "x": 468,
+                                          "y": 480,
+                                          "width": 161.86,
+                                          "height": 17,
+                                          "right": 629.86,
+                                          "bottom": 497,
+                                          "text": "\n                            Child with 30px margin\n                        ",
+                                          "startIndex": 0,
+                                          "endIndex": 76
+                                        }
+                                      ],
+                                      "hasLayout": true,
+                                      "parentVisible": true,
+                                      "parentDisplay": "block",
+                                      "parentVisibility": "visible"
+                                    },
+                                    "depth": 8,
+                                    "nodeIndex": 0,
+                                    "children": []
                                   }
-                                ],
-                                "childCount": 0,
-                                "depth": 7,
-                                "children": []
+                                ]
                               }
                             ]
                           }
@@ -1939,6 +2098,7 @@
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.nested-test:nth-of-type(3)",
                 "tag": "div",
                 "id": null,
@@ -1996,13 +2156,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Mixed box-sizing in nested elements\n            \n                Parent: content-box\n                \n                    Child: border-box (100% of parent's content area)",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -2060,33 +2218,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Mixed box-sizing in nested elements",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Mixed box-sizing in nested elements",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 620,
-                            "width": 277.39,
-                            "height": 17,
-                            "right": 315.39,
-                            "bottom": 637
-                          }
-                        ],
                         "length": 35,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 35
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 620,
+                              "width": 277.39,
+                              "height": 17,
+                              "right": 315.39,
+                              "bottom": 637,
+                              "text": "Mixed box-sizing in nested elements",
+                              "startIndex": 0,
+                              "endIndex": 35
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.content-box-parent:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -2144,13 +2310,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Parent: content-box\n                \n                    Child: border-box (100% of parent's content area)",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 2,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "div:nth-of-type(1)",
                         "tag": "div",
                         "id": null,
@@ -2206,33 +2370,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Parent: content-box",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Parent: content-box",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 2,
-                                "y": -13,
-                                "width": 87.28,
-                                "height": 11,
-                                "right": 89.28,
-                                "bottom": -2
-                              }
-                            ],
                             "length": 19,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 19
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 2,
+                                  "y": -13,
+                                  "width": 87.28,
+                                  "height": 11,
+                                  "right": 89.28,
+                                  "bottom": -2,
+                                  "text": "Parent: content-box",
+                                  "startIndex": 0,
+                                  "endIndex": 19
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "div.border-box-child:nth-of-type(2)",
                         "tag": "div",
                         "id": null,
@@ -2290,13 +2462,11 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Child: border-box (100% of parent's content area)",
-                        "hasTextNodes": false,
-                        "textNodes": [],
-                        "childCount": 1,
                         "depth": 5,
+                        "elementIndex": 3,
                         "children": [
                           {
+                            "nodeType": "element",
                             "selector": "div",
                             "tag": "div",
                             "id": null,
@@ -2352,39 +2522,66 @@
                               "overflowX": "visible",
                               "overflowY": "visible"
                             },
-                            "textContent": "Child: border-box (100% of parent's content area)",
-                            "hasTextNodes": true,
-                            "textNodes": [
-                              {
-                                "text": "Child: border-box (100% of parent's content area)",
-                                "parentElement": "div",
-                                "rects": [
-                                  {
-                                    "x": 85,
-                                    "y": 685,
-                                    "width": 157.56,
-                                    "height": 11,
-                                    "right": 242.56,
-                                    "bottom": 696
-                                  },
-                                  {
-                                    "x": 85,
-                                    "y": 696,
-                                    "width": 58.94,
-                                    "height": 11,
-                                    "right": 143.94,
-                                    "bottom": 707
-                                  }
-                                ],
-                                "length": 49,
-                                "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 49
-                              }
-                            ],
-                            "childCount": 0,
                             "depth": 6,
-                            "children": []
+                            "elementIndex": 1,
+                            "children": [
+                              {
+                                "nodeType": "text",
+                                "text": "Child: border-box (100% of parent's ",
+                                "length": 36,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 85,
+                                      "y": 685,
+                                      "width": 157.56,
+                                      "height": 11,
+                                      "right": 242.56,
+                                      "bottom": 696,
+                                      "text": "Child: border-box (100% of parent's ",
+                                      "startIndex": 0,
+                                      "endIndex": 36
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "block",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "content area)",
+                                "length": 13,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 85,
+                                      "y": 696,
+                                      "width": 58.94,
+                                      "height": 11,
+                                      "right": 143.94,
+                                      "bottom": 707,
+                                      "text": "content area)",
+                                      "startIndex": 0,
+                                      "endIndex": 13
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "block",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              }
+                            ]
                           }
                         ]
                       }
@@ -2393,6 +2590,7 @@
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "div.nested-test:nth-of-type(4)",
                 "tag": "div",
                 "id": null,
@@ -2450,13 +2648,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Deeply nested with different properties\n            \n                Level 1\n                \n                    Level 2\n                    \n                        Level 3\n                        \n                            Level 4 - Deepest content",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 7,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.test-title:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -2514,33 +2710,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Deeply nested with different properties",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Deeply nested with different properties",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 38,
-                            "y": 860,
-                            "width": 296.06,
-                            "height": 17,
-                            "right": 334.06,
-                            "bottom": 877
-                          }
-                        ],
                         "length": 39,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 39
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 38,
+                              "y": 860,
+                              "width": 296.06,
+                              "height": 17,
+                              "right": 334.06,
+                              "bottom": 877,
+                              "text": "Deeply nested with different properties",
+                              "startIndex": 0,
+                              "endIndex": 39
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -2596,32 +2800,39 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Level 1\n                \n                    Level 2\n                    \n                        Level 3\n                        \n                            Level 4 - Deepest content",
-                    "hasTextNodes": true,
-                    "textNodes": [
-                      {
-                        "text": "\n                Level 1\n                ",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 50,
-                            "y": 900,
-                            "width": 51.59,
-                            "height": 17,
-                            "right": 101.59,
-                            "bottom": 917
-                          }
-                        ],
-                        "length": 41,
-                        "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 41
-                      }
-                    ],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "text",
+                        "text": "\n                Level 1\n                ",
+                        "length": 41,
+                        "isWhitespaceOnly": false,
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 50,
+                              "y": 900,
+                              "width": 51.59,
+                              "height": 17,
+                              "right": 101.59,
+                              "bottom": 917,
+                              "text": "\n                Level 1\n                ",
+                              "startIndex": 0,
+                              "endIndex": 41
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "block",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
+                      },
+                      {
+                        "nodeType": "element",
                         "selector": "div",
                         "tag": "div",
                         "id": null,
@@ -2677,32 +2888,39 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Level 2\n                    \n                        Level 3\n                        \n                            Level 4 - Deepest content",
-                        "hasTextNodes": true,
-                        "textNodes": [
-                          {
-                            "text": "\n                    Level 2\n                    ",
-                            "parentElement": "div",
-                            "rects": [
-                              {
-                                "x": 70,
-                                "y": 938,
-                                "width": 51.59,
-                                "height": 17,
-                                "right": 121.59,
-                                "bottom": 955
-                              }
-                            ],
-                            "length": 49,
-                            "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 49
-                          }
-                        ],
-                        "childCount": 1,
                         "depth": 5,
+                        "elementIndex": 1,
                         "children": [
                           {
+                            "nodeType": "text",
+                            "text": "\n                    Level 2\n                    ",
+                            "length": 49,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 70,
+                                  "y": 938,
+                                  "width": 51.59,
+                                  "height": 17,
+                                  "right": 121.59,
+                                  "bottom": 955,
+                                  "text": "\n                    Level 2\n                    ",
+                                  "startIndex": 0,
+                                  "endIndex": 49
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "block",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "element",
                             "selector": "div",
                             "tag": "div",
                             "id": null,
@@ -2758,32 +2976,39 @@
                               "overflowX": "visible",
                               "overflowY": "visible"
                             },
-                            "textContent": "Level 3\n                        \n                            Level 4 - Deepest content",
-                            "hasTextNodes": true,
-                            "textNodes": [
-                              {
-                                "text": "\n                        Level 3\n                        ",
-                                "parentElement": "div",
-                                "rects": [
-                                  {
-                                    "x": 85,
-                                    "y": 971,
-                                    "width": 51.59,
-                                    "height": 17,
-                                    "right": 136.59,
-                                    "bottom": 988
-                                  }
-                                ],
-                                "length": 57,
-                                "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 57
-                              }
-                            ],
-                            "childCount": 1,
                             "depth": 6,
+                            "elementIndex": 1,
                             "children": [
                               {
+                                "nodeType": "text",
+                                "text": "\n                        Level 3\n                        ",
+                                "length": 57,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 85,
+                                      "y": 971,
+                                      "width": 51.59,
+                                      "height": 17,
+                                      "right": 136.59,
+                                      "bottom": 988,
+                                      "text": "\n                        Level 3\n                        ",
+                                      "startIndex": 0,
+                                      "endIndex": 57
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "block",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "element",
                                 "selector": "div",
                                 "tag": "div",
                                 "id": null,
@@ -2839,31 +3064,38 @@
                                   "overflowX": "visible",
                                   "overflowY": "visible"
                                 },
-                                "textContent": "Level 4 - Deepest content",
-                                "hasTextNodes": true,
-                                "textNodes": [
+                                "depth": 7,
+                                "elementIndex": 1,
+                                "children": [
                                   {
+                                    "nodeType": "text",
                                     "text": "\n                            Level 4 - Deepest content\n                        ",
-                                    "parentElement": "div",
-                                    "rects": [
-                                      {
-                                        "x": 96,
-                                        "y": 1000,
-                                        "width": 136.77,
-                                        "height": 14,
-                                        "right": 232.77,
-                                        "bottom": 1014
-                                      }
-                                    ],
                                     "length": 79,
                                     "isWhitespaceOnly": false,
-                                    "startOffset": 0,
-                                    "endOffset": 79
+                                    "layout": {
+                                      "rects": [
+                                        {
+                                          "x": 96,
+                                          "y": 1000,
+                                          "width": 136.77,
+                                          "height": 14,
+                                          "right": 232.77,
+                                          "bottom": 1014,
+                                          "text": "\n                            Level 4 - Deepest content\n                        ",
+                                          "startIndex": 0,
+                                          "endIndex": 79
+                                        }
+                                      ],
+                                      "hasLayout": true,
+                                      "parentVisible": true,
+                                      "parentDisplay": "block",
+                                      "parentVisibility": "visible"
+                                    },
+                                    "depth": 8,
+                                    "nodeIndex": 0,
+                                    "children": []
                                   }
-                                ],
-                                "childCount": 0,
-                                "depth": 7,
-                                "children": []
+                                ]
                               }
                             ]
                           }
@@ -2876,6 +3108,7 @@
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -2931,12 +3164,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"box_013_nested_boxes\",\n        \"category\": \"advanced\",\n        \"features\": [\"nested-boxes\", \"percentage-dimensions\", \"margin-collapse\", \"box-sizing-inheritance\", \"deep-nesting\"],\n        \"description\": \"Complex nested box model scenarios with percentage dimensions, margin collapse, and mixed box-sizing\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html#collapsing-margins\"],\n        \"complexity\": \"advanced\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"box_013_nested_boxes\",\n        \"category\": \"advanced\",\n        \"features\": [\"nested-boxes\", \"percentage-dimensions\", \"margin-collapse\", \"box-sizing-inheritance\", \"deep-nesting\"],\n        \"description\": \"Complex nested box model scenarios with percentage dimensions, margin collapse, and mixed box-sizing\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS22/box.html#collapsing-margins\"],\n        \"complexity\": \"advanced\"\n    }\n    ",
+                "length": 464,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }
