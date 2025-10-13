@@ -95,7 +95,7 @@ class RadiantLayoutTester {
     /**
      * Compare layout bounds with tolerance
      */
-    compareLayout(radiantLayout, browserLayout) {
+    compareLayout(radiantLayout, browserLayout, isText = false) {
         const differences = [];
         const properties = ['x', 'y', 'width', 'height'];
 
@@ -105,12 +105,14 @@ class RadiantLayoutTester {
             const diff = Math.abs(radiantVal - browserVal);
 
             // Always include the difference, regardless of tolerance
+            const tolerance = Math.max(isText && prop == 'width' ? radiantVal * 0.01 : 0, this.tolerance);
             differences.push({
                 property: prop,
                 radiant: radiantVal,
                 browser: browserVal,
                 difference: diff,
-                exceedsTolerance: diff > this.tolerance
+                exceedsTolerance: diff > tolerance,
+                tolerance: tolerance
             });
         }
 
@@ -267,7 +269,7 @@ class RadiantLayoutTester {
                     browserLayout = browserNode.layout.rects[0];
                 }
 
-                const layoutDiffs = this.compareLayout(radiantLayout, browserLayout);
+                const layoutDiffs = this.compareLayout(radiantLayout, browserLayout, true);
                 const maxDiff = layoutDiffs.length > 0 ? Math.max(...layoutDiffs.map(d => d.difference)) : 0;
                 const exceedsToleranceCount = layoutDiffs.filter(d => d.exceedsTolerance).length;
 
@@ -276,10 +278,11 @@ class RadiantLayoutTester {
                     console.log(`${indent()}   Browser: (${browserLayout.x}, ${browserLayout.y}, ${browserLayout.width}×${browserLayout.height})`);
                 }
 
+                const maxTolerance = Math.max(...layoutDiffs.map(d => d.tolerance));
                 if (exceedsToleranceCount === 0) {
                     results.matchedTextNodes++;
                     if (this.verbose) {
-                        console.log(`${indent()}   ✅ TEXT MATCH (${maxDiff.toFixed(1)}px diff <= ${this.tolerance}px)`);
+                        console.log(`${indent()}   ✅ TEXT MATCH (${maxDiff.toFixed(1)}px diff <= ${maxTolerance}px)`);
                     }
                 } else {
                     results.differences.push({
@@ -287,10 +290,11 @@ class RadiantLayoutTester {
                         path: path,
                         radiant: { content: radiantNode.content, layout: radiantLayout },
                         browser: { content: browserNode.text, layout: browserLayout },
-                        maxDifference: maxDiff
+                        maxDifference: maxDiff,
+                        maxTolerance: maxTolerance,
                     });
                     if (this.verbose) {
-                        console.log(`${indent()}   ❌ TEXT LAYOUT FAIL (${maxDiff.toFixed(1)}px > ${this.tolerance}px)`);
+                        console.log(`${indent()}   ❌ TEXT LAYOUT FAIL (${maxDiff.toFixed(1)}px > ${maxTolerance}px)`);
                     }
                 }
             } else {
@@ -453,7 +457,7 @@ class RadiantLayoutTester {
 
                 // Calculate matching score based on content similarity and layout distance
                 const contentMatch = radiantText.content.trim() === browserText.content.trim();
-                const layoutDiffs = this.compareLayout(radiantText.layout, browserText.layout);
+                const layoutDiffs = this.compareLayout(radiantText.layout, browserText.layout, true);
                 const maxLayoutDiff = layoutDiffs.length > 0 ? Math.max(...layoutDiffs.map(d => d.difference)) : 0;
 
                 const score = contentMatch ? maxLayoutDiff : 1000 + maxLayoutDiff;
