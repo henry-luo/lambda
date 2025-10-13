@@ -328,11 +328,6 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
         break;
     case LXB_CSS_VALUE_AUTO:
         log_info("length value: auto");
-        result = (property == LXB_CSS_PROPERTY_MARGIN || property == LXB_CSS_PROPERTY_MARGIN_LEFT ||
-            property == LXB_CSS_PROPERTY_MARGIN_RIGHT) ? LENGTH_AUTO : 0;
-        break;
-    case 12:  // Handle actual parsed value for 'auto'
-        log_debug("Found auto value (type 12) for property %d", property);
         if (property == LXB_CSS_PROPERTY_MARGIN || property == LXB_CSS_PROPERTY_MARGIN_LEFT ||
             property == LXB_CSS_PROPERTY_MARGIN_RIGHT) {
             result = LENGTH_AUTO;
@@ -348,35 +343,35 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
         result = 0;
     }
     log_debug("length value: type %d, val %f", value->type, result);
-    return (int)result;
+    return result;
 }
 
 // resolve property 'margin', and put result in 'spacing'
 void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
-    const lxb_css_property_margin_t *margin, uint32_t specificity, Spacing* spacing) {
+    const lxb_css_property_margin_t *margin, int32_t specificity, Spacing* spacing) {
     int value_cnt = 0;  Spacing sp;
-    log_debug("resolving margin property");
+    log_debug("resolve_spacing_prop");
     if (margin->top.type != LXB_CSS_VALUE__UNDEF) {
-        log_debug("resolving margin top");
+        log_debug("resolving spacing 1st");
         sp.top = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->top);
         value_cnt++;
     }
     if (margin->right.type != LXB_CSS_VALUE__UNDEF) {
-        log_debug("resolving margin right");
+        log_debug("resolving spacing 2nd");
         sp.right = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->right);
         value_cnt++;
     }
     if (margin->bottom.type != LXB_CSS_VALUE__UNDEF) {
-        log_debug("resolving margin bottom");
+        log_debug("resolving spacing 3rd");
         sp.bottom = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->bottom);
         value_cnt++;
     }
     if (margin->left.type != LXB_CSS_VALUE__UNDEF) {
-        log_debug("resolving margin left");
+        log_debug("resolving spacing 4th");
         sp.left = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->left);
         value_cnt++;
     }
-    log_debug("margin value count: %d", value_cnt);
+    log_debug("spacing value count: %d, value: %f, specificity: %d, top spec: %d", value_cnt, sp.top, specificity, spacing->top_specificity);
     switch (value_cnt) {
     case 1:
         sp.right = sp.left = sp.bottom = sp.top;
@@ -394,6 +389,7 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
     if (specificity > spacing->top_specificity) {
         spacing->top = sp.top == LENGTH_AUTO ? 0 : sp.top;
         spacing->top_specificity = specificity;
+        log_debug("updated top spacing to %f", spacing->top);
     }
     if (specificity > spacing->bottom_specificity) {
         spacing->bottom = sp.bottom == LENGTH_AUTO ? 0 : sp.bottom;
@@ -408,6 +404,8 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
         spacing->left = sp.left;
         spacing->left_specificity = specificity;
     }
+    log_debug("spacing value: top %f, right %f, bottom %f, left %f",
+        spacing->top, spacing->right, spacing->bottom, spacing->left);
 }
 
 DisplayValue resolve_display(lxb_html_element_t* elmt) {
@@ -498,11 +496,6 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
                         outer_display = LXB_CSS_VALUE_BLOCK;
                         inner_display = LXB_CSS_VALUE_GRID;
                         break;
-                    case 246:  // Actual parsed value for 'grid'
-                        log_debug("DEBUG: GRID case matched (value 246)! Setting inner=GRID\n");
-                        outer_display = LXB_CSS_VALUE_BLOCK;
-                        inner_display = LXB_CSS_VALUE_GRID;
-                        break;
                     case LXB_CSS_VALUE_INLINE_GRID:
                         outer_display = LXB_CSS_VALUE_INLINE;
                         inner_display = LXB_CSS_VALUE_GRID;
@@ -549,7 +542,8 @@ DisplayValue resolve_display(lxb_html_element_t* elmt) {
 lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     lexbor_avl_node_t *node, void *ctx) {
     LayoutContext* lycon = (LayoutContext*) ctx;
-    uint32_t specificity = ((lxb_style_node_t *) node)->sp;
+    // specificity for * ( ... ) is 0, for html element default style is -1
+    int32_t specificity = ((lxb_style_node_t *) node)->sp;
     lxb_css_rule_declaration_t *declr = (lxb_css_rule_declaration_t *) node->value;
     const lxb_css_entry_data_t *data = lxb_css_property_by_id(declr->type);
     if (!data) {
@@ -663,7 +657,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->margin_top_auto = span->margin_right_auto =
             span->margin_bottom_auto = span->margin_left_auto = is_auto;
         }
-
+        log_debug("margin value: top %f, right %f, bottom %f, left %f",
+            span->bound->margin.top, span->bound->margin.right, span->bound->margin.bottom, span->bound->margin.left);
         break;
     }
     case LXB_CSS_PROPERTY_PADDING: {

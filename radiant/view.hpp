@@ -45,13 +45,8 @@ extern "C" {
 
 // Additional CSS constants for flex layout
 #define LXB_CSS_VALUE_SPACE_EVENLY      (LXB_CSS_VALUE__LAST_ENTRY + 28)
-#define LXB_CSS_VALUE_AUTO              (LXB_CSS_VALUE__LAST_ENTRY + 29)
 
 // Additional CSS constants for grid layout
-#define LXB_CSS_VALUE_GRID              (LXB_CSS_VALUE__LAST_ENTRY + 30)
-#define LXB_CSS_VALUE_INLINE_GRID       (LXB_CSS_VALUE__LAST_ENTRY + 31)
-#define LXB_CSS_VALUE_MIN_CONTENT       (LXB_CSS_VALUE__LAST_ENTRY + 32)
-#define LXB_CSS_VALUE_MAX_CONTENT       (LXB_CSS_VALUE__LAST_ENTRY + 33)
 #define LXB_CSS_VALUE_FIT_CONTENT       (LXB_CSS_VALUE__LAST_ENTRY + 34)
 #define LXB_CSS_VALUE_FR                (LXB_CSS_VALUE__LAST_ENTRY + 35)
 #define LXB_CSS_VALUE_DENSE             (LXB_CSS_VALUE__LAST_ENTRY + 36)
@@ -150,14 +145,14 @@ typedef struct {
         struct { float top, right, bottom, left; };
         struct { float top_left, top_right, bottom_right, bottom_left; };
     };
-    uint32_t top_specificity, right_specificity, bottom_specificity, left_specificity;
+    int32_t top_specificity, right_specificity, bottom_specificity, left_specificity;
 } Spacing;
 
 typedef struct {
     Spacing width;
     PropValue top_style, right_style, bottom_style, left_style;
     Color top_color, right_color, bottom_color, left_color;
-    uint32_t top_color_specificity, right_color_specificity, bottom_color_specificity, left_color_specificity;
+    int32_t top_color_specificity, right_color_specificity, bottom_color_specificity, left_color_specificity;
     Spacing radius;
 } BorderProp;
 
