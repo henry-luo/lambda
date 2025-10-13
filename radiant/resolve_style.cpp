@@ -565,24 +565,30 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
     switch (declr->type) {
     case LXB_CSS_PROPERTY_LINE_HEIGHT: {
+        if (!block) { break; }
+        if (!block->blk) { block->blk = alloc_block_prop(lycon); }
         lxb_css_property_line_height_t* line_height = declr->u.line_height;
         switch (line_height->type) {
         case LXB_CSS_VALUE__NUMBER:
-            lycon->block.line_height = line_height->u.number.num * lycon->font.face.style.font_size;
+            block->blk->line_height = line_height->u.number.num * lycon->font.face.style.font_size;
+            if (block->blk->line_height < 0) block->blk->line_height = -1;  // mark as normal/default value
             log_debug("property number: %lf", line_height->u.number.num);
             break;
         case LXB_CSS_VALUE__LENGTH:
-            lycon->block.line_height = line_height->u.length.num;
+            block->blk->line_height = line_height->u.length.num;
+            if (block->blk->line_height < 0) block->blk->line_height = -1;  // mark as normal/default value
             log_debug("property unit: %d", line_height->u.length.unit);
             break;
         case LXB_CSS_VALUE__PERCENTAGE:
-            lycon->block.line_height = line_height->u.percentage.num * lycon->font.face.style.font_size;
+            block->blk->line_height = line_height->u.percentage.num * lycon->font.face.style.font_size;
+            if (block->blk->line_height < 0) block->blk->line_height = -1;  // mark as normal/default value
             log_debug("property percentage: %lf", line_height->u.percentage.num);
             break;
         case LXB_CSS_VALUE_NORMAL:
-            lycon->block.line_height = // lycon->font.face.style.font_size * 1.15;
-                calculate_chrome_line_height((float)lycon->font.face.style.font_size, lycon->ui_context->pixel_ratio);
-            log_debug("normal line-height: using font intrinsic height * 1.15 = %d", lycon->block.line_height);
+            block->blk->line_height = -1; // mark as normal/default value
+            break;
+        case LXB_CSS_VALUE_INHERIT:
+            block->blk->line_height = -2;
             break;
         }
         break;
