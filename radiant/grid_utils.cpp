@@ -1,6 +1,4 @@
 #include "grid.hpp"
-#include "view.hpp"
-#include "layout_flex_content.hpp"
 
 extern "C" {
 #include <stdlib.h>
