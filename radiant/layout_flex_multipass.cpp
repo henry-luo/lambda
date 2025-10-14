@@ -42,32 +42,7 @@ void run_enhanced_flex_algorithm(LayoutContext* lycon, ViewBlock* flex_container
     printf("DEBUG: ENHANCED FLEX ALGORITHM STARTING\n");
     log_debug("Running enhanced flex algorithm with auto margin support");
     
-    // WORKAROUND: Fix space-evenly parsing issue for ROW layouts only
-    // Lexbor doesn't parse "justify-content: space-evenly" correctly, so we need to detect it
-    FlexContainerLayout* flex_layout = lycon->flex_container;
-    if (flex_layout && flex_container->embed && flex_container->embed->flex) {
-        // Check if this is a case where space-evenly should be applied
-        // Look for specific test case pattern: ROW direction, 2 items, gap, and incorrect justify value
-        if (flex_layout->justify == JUSTIFY_START && 
-            flex_layout->column_gap > 0 && 
-            flex_layout->direction == DIR_ROW) {  // Only apply to ROW layouts
-            
-            // Count flex items
-            int item_count = 0;
-            View* child = flex_container->child;
-            while (child) {
-                if (child->type == RDT_VIEW_BLOCK) item_count++;
-                child = child->next;
-            }
-            
-            // If this matches the flex_006 pattern (2 items with gap in ROW), assume space-evenly
-            if (item_count == 2) {
-                printf("DEBUG: WORKAROUND - Detected likely space-evenly case for ROW layout, correcting justify-content\n");
-                flex_layout->justify = LXB_CSS_VALUE_SPACE_EVENLY;
-                flex_container->embed->flex->justify = LXB_CSS_VALUE_SPACE_EVENLY;
-            }
-        }
-    }
+    // Note: space-evenly workaround now handled via x-justify-content custom property in resolve_style.cpp
     
     // First, run the existing flex algorithm
     layout_flex_container(lycon, flex_container);
