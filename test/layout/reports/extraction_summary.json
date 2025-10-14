@@ -1,6 +1,6 @@
 {
-  "total_files": 4,
-  "generated": 4,
+  "total_files": 7,
+  "generated": 7,
   "skipped": 0,
   "failed": 0,
   "success_rate": 100,
@@ -14,35 +14,59 @@
   },
   "results": [
     {
-      "category": "page",
-      "file": "sample2.html",
+      "category": "table_simple",
+      "file": "table_simple_001_basic.html",
       "success": true,
       "was_skipped": false,
-      "node_count": 19,
+      "node_count": 24,
       "error": null
     },
     {
-      "category": "page",
-      "file": "sample3.html",
+      "category": "table_simple",
+      "file": "table_simple_003_border_spacing.html",
       "success": true,
       "was_skipped": false,
-      "node_count": 45,
+      "node_count": 28,
       "error": null
     },
     {
-      "category": "page",
-      "file": "sample4.html",
+      "category": "table_simple",
+      "file": "table_simple_004_fixed_layout.html",
       "success": true,
       "was_skipped": false,
-      "node_count": 30,
+      "node_count": 28,
       "error": null
     },
     {
-      "category": "page",
-      "file": "sample5.html",
+      "category": "table_simple",
+      "file": "table_simple_006_rowspan.html",
       "success": true,
       "was_skipped": false,
-      "node_count": 68,
+      "node_count": 38,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_007_percentage_width.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 28,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_008_vertical_align.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 28,
+      "error": null
+    },
+    {
+      "category": "table_simple",
+      "file": "table_simple_009_empty_cells.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 38,
       "error": null
     }
   ]

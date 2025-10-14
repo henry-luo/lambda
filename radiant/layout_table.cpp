@@ -774,12 +774,22 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
         log_debug("Border-collapse applied - table width: %d", table_width);
     } else if (table->border_spacing_h > 0) {
-        // Separate borders: add spacing between columns
+        // Separate borders: add spacing between columns AND around table edges
         if (columns > 1) {
-            table_width += (columns - 1) * table->border_spacing_h;
+            table_width += (columns - 1) * table->border_spacing_h; // Between columns
         }
-        log_debug("Border-spacing applied (%dpx) - table width: %d",
+        table_width += 2 * table->border_spacing_h; // Left and right edges
+        log_debug("Border-spacing applied (%dpx) - table width: %d (includes edge spacing)",
                table->border_spacing_h, table_width);
+    }
+
+    // Add table padding to width
+    int table_padding_horizontal = 0;
+    if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
+        table_padding_horizontal = table->bound->padding.left + table->bound->padding.right;
+        table_width += table_padding_horizontal;
+        log_debug("Added table padding horizontal: %dpx (left=%d, right=%d)",
+               table_padding_horizontal, table->bound->padding.left, table->bound->padding.right);
     }
 
     // CRITICAL FIX: For fixed layout, override calculated width with CSS width
@@ -791,12 +801,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     // Step 4: Position cells and calculate row heights with border model
     int* col_x_positions = (int*)calloc(columns + 1, sizeof(int));
 
-    // Start with left border-spacing for separate border model
+    // Start with table padding and left border-spacing for separate border model
+    int table_padding_left = 0;
+    if (table->bound && table->bound->padding.left >= 0) {
+        table_padding_left = table->bound->padding.left;
+        log_debug("Added table padding left: +%dpx", table_padding_left);
+    }
+    
+    col_x_positions[0] = table_padding_left;
     if (!table->border_collapse && table->border_spacing_h > 0) {
-        col_x_positions[0] = table->border_spacing_h;
+        col_x_positions[0] += table->border_spacing_h;
         log_debug("Added left border-spacing: +%dpx", table->border_spacing_h);
-    } else {
-        col_x_positions[0] = 0;
     }
 
     // Calculate column positions based on border model
@@ -809,8 +824,16 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
     }
 
-    // Start Y position after caption, with top border-spacing
+    // Start Y position after caption, with table padding and top border-spacing
     int current_y = caption_height;
+
+    // Add table padding (space inside table border)
+    int table_padding_top = 0;
+    if (table->bound && table->bound->padding.top >= 0) {
+        table_padding_top = table->bound->padding.top;
+        current_y += table_padding_top;
+        log_debug("Added table padding top: +%dpx", table_padding_top);
+    }
 
     // Add top border-spacing for separate border model
     if (!table->border_collapse && table->border_spacing_v > 0) {
@@ -829,10 +852,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         if (child->type == RDT_VIEW_TABLE_ROW_GROUP) {
             int group_start_y = current_y;
 
-            // Position row group
-            child->x = 0;
+            // Position row group at table content area (after padding and border-spacing)
+            child->x = col_x_positions[0]; // Start at first column position (includes padding + border-spacing)
             child->y = current_y; // Relative to table
-            child->width = table_width;
+            child->width = table_width - col_x_positions[0]; // Subtract left offset
             log_debug("Row group positioned at x=%d, y=%d, width=%d",
                    child->x, child->y, child->width);
 
@@ -841,7 +864,7 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // Position row relative to row group
                     row->x = 0;
                     row->y = current_y - group_start_y; // Relative to row group
-                    row->width = table_width;
+                    row->width = child->width; // Match tbody width
                     log_debug("Row positioned at x=%d, y=%d (relative to group), width=%d",
                            row->x, row->y, row->width);
 
@@ -852,8 +875,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         if (cell->type == RDT_VIEW_TABLE_CELL) {
                             ViewTableCell* tcell = (ViewTableCell*)cell;
 
-                            // Position cell relative to row
-                            cell->x = col_x_positions[tcell->col_index];
+                            // Position cell relative to row (adjust for row group offset)
+                            cell->x = col_x_positions[tcell->col_index] - col_x_positions[0];
                             cell->y = 0; // Relative to row
                             log_debug("Cell positioned at x=%d, y=%d (relative to row), size=%dx%d",
                                    cell->x, cell->y, cell->width, cell->height);
@@ -1074,16 +1097,23 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         }
     }
 
-    // Calculate final table height with border-spacing
+    // Calculate final table height with border-spacing and padding
     int final_table_height = current_y;
+
+    // Add table padding bottom
+    int table_padding_bottom = 0;
+    if (table->bound && table->bound->padding.bottom >= 0) {
+        table_padding_bottom = table->bound->padding.bottom;
+        final_table_height += table_padding_bottom;
+        log_debug("Added table padding bottom: +%dpx", table_padding_bottom);
+    }
 
     // Add vertical border-spacing around table edges for separate border model
     if (!table->border_collapse && table->border_spacing_v > 0) {
         // Border-spacing adds space around the entire table perimeter
-        // Top and bottom spacing around the table
-        final_table_height += 2 * table->border_spacing_v;
-        log_debug("Added table edge vertical spacing: 2 * %dpx = +%dpx",
-               table->border_spacing_v, 2 * table->border_spacing_v);
+        // Bottom spacing around the table (top was already added)
+        final_table_height += table->border_spacing_v;
+        log_debug("Added table edge bottom vertical spacing: +%dpx", table->border_spacing_v);
     }
 
     // CRITICAL FIX: Add table border to final dimensions

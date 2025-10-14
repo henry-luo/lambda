@@ -24,6 +24,11 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
             view = (ViewTable*)pool_calloc(tree->pool, sizeof(ViewTable));
             // Initialize defaults
             ((ViewTable*)view)->table_layout = ViewTable::TABLE_LAYOUT_AUTO;
+            // CRITICAL FIX: Set CSS default border-spacing to 2px
+            // CSS 2.1 spec: initial value for border-spacing is 2px
+            ((ViewTable*)view)->border_spacing_h = 2.0f;
+            ((ViewTable*)view)->border_spacing_v = 2.0f;
+            ((ViewTable*)view)->border_collapse = false; // default is separate borders
             break;
         case RDT_VIEW_TABLE_ROW_GROUP:
             view = (ViewTableRowGroup*)pool_calloc(tree->pool, sizeof(ViewTableRowGroup));

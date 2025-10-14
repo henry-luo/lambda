@@ -1455,14 +1455,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
     // CSS Grid Layout Properties
     // Note: Most grid properties are handled as custom properties since lexbor doesn't support them yet
-    // When lexbor adds support, these can be moved to proper property cases
-
     case LXB_CSS_PROPERTY__CUSTOM: { // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
         // Handle CSS Grid properties as custom properties until lexbor supports them
-        printf("DEBUG: CUSTOM_PROPERTY - name='%.*s', value='%.*s'\n",
-               (int)custom->name.length, (const char*)custom->name.data,
-               (int)custom->value.length, (const char*)custom->value.data);
+        printf("DEBUG: CUSTOM_PROPERTY - name='%.*s' (len=%d), value='%.*s'\n",
+               (int)custom->name.length, custom->name.data, (int)custom->name.length,
+               (int)custom->value.length, custom->value.data);
         log_debug("Processing custom property: %.*s = %.*s\n",
                (int)custom->name.length, (const char*)custom->name.data,
                (int)custom->value.length, (const char*)custom->value.data);
@@ -1740,7 +1738,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         else if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "table-layout", 12) == 0) {
-            ViewTable* table = lycon->view->type != RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
+            ViewTable* table = lycon->view->type == RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
             if (table) {
                 const char* value_str = (const char*)custom->value.data;
                 if (strcmp(value_str, "fixed") == 0) {
@@ -1754,7 +1752,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             }
         }
         else if (custom->name.length == 15 && strncmp((const char*)custom->name.data, "border-collapse", 15) == 0) {
-            ViewTable* table = lycon->view->type != RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
+            ViewTable* table = lycon->view->type == RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
             if (table) {
                 const char* value_str = (const char*)custom->value.data;
                 if (strcmp(value_str, "collapse") == 0) {
@@ -1768,29 +1766,46 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             }
         }
         else if (custom->name.length == 14 && strncmp((const char*)custom->name.data, "border-spacing", 14) == 0) {
+            printf("DEBUG: BORDER_SPACING condition matched!\n");
             const char* value_str = (const char*)custom->value.data;
-            ViewTable* table = lycon->view->type != RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
+            printf("DEBUG: Found border-spacing property: '%s', view type: %d\n", value_str, lycon->view->type);
+            ViewTable* table = NULL;
+            if (lycon->view->type == RDT_VIEW_TABLE) {
+                table = (ViewTable*)lycon->view;
+            } else if (lycon->view->type == RDT_VIEW_TABLE_ROW_GROUP && lycon->view->parent && lycon->view->parent->type == RDT_VIEW_TABLE) {
+                table = (ViewTable*)lycon->view->parent;
+            }
+            printf("DEBUG: Table pointer: %p\n", table);
             if (table) {
+                printf("DEBUG: Parsing border-spacing values!\n");
                 const char* q = value_str;
-                while (*q && *q != ':') q++;
-                if (*q == ':') q++;
+                // Skip any leading whitespace
                 while (*q == ' ') q++;
+                
+                // Parse first value (horizontal spacing)
                 int h = atoi(q);
                 while (*q && *q != ' ' && *q != ';' && *q != 'p') q++;
                 if (*q == 'p' && *(q+1) == 'x') q += 2;
+                
+                // Parse second value (vertical spacing) if present
                 int v = -1;
                 while (*q == ' ') q++;
-                if (*q && *q != ';') {
+                if (*q && *q != ';' && *q != '\0') {
                     v = atoi(q);
                 }
+                
+                // Apply CSS defaults: if only one value, use it for both dimensions
                 if (h < 0) h = 0;
                 if (v < 0) v = h;
+                
                 table->border_spacing_h = h;
                 table->border_spacing_v = v;
-                log_debug("Detected border-spacing: %dpx %dpx (inline)", h, v);
+                printf("DEBUG: Set border-spacing: %dpx %dpx\n", h, v);
+                log_debug("Detected border-spacing: %dpx %dpx (stylesheet)", h, v);
             }
         }
 
+        break;
     }
     default:
         printf("DEBUG: UNKNOWN_PROPERTY - type=%ld, name=%s\n", declr->type, (const char*)data->name);
