@@ -293,7 +293,7 @@ void print_inline_props(ViewSpan* span, StrBuf* buf, int indent) {
                 span->bound->border->top_color.c, span->bound->border->right_color.c,
                 span->bound->border->bottom_color.c, span->bound->border->left_color.c);
             strbuf_append_char_n(buf, ' ', indent);
-            strbuf_append_format(buf, "  t-wd:%f, r-wd:%f, b-wd:%f, l-wd:%f, "
+            strbuf_append_format(buf, "  t-wd:%.1f, r-wd:%.1f, b-wd:%.1f, l-wd:%f, "
                 "t-sty:%d, r-sty:%d, b-sty:%d, l-sty:%d\n",
                 span->bound->border->width.top, span->bound->border->width.right,
                 span->bound->border->width.bottom, span->bound->border->width.left,
@@ -431,7 +431,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                 if (!str || !(*str) || text->length <= 0) {
                     strbuf_append_format(buf, "invalid text node: len:%d\n", text->length);
                 } else {
-                    strbuf_append_str(buf, "text:'");
+                    strbuf_append_str(buf, "[text:'");
                     strbuf_append_str_n(buf, (char*)str, text->length);
                     // replace newline and '\'' with '^'
                     char* s = buf->str + buf->length - text->length;
@@ -439,7 +439,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                         if (*s == '\n' || *s == '\r' || *s == '\'') { *s = '^'; }
                         s++;
                     }
-                    strbuf_append_format(buf, "', start:%d, len:%d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
+                    strbuf_append_format(buf, "', start:%d, len:%d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f]\n",
                         text->start_index, text->length, (float)text->x, (float)text->y, (float)text->width, (float)text->height);
                 }
             }
