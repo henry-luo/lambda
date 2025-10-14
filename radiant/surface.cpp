@@ -187,6 +187,12 @@ void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, R
             // todo: support different scale mode, like SDL_SCALEMODE_LINEAR
             int src_x = src_rect->x + (j - dst_rect->x) * x_ratio;
             int src_y = src_rect->y + (i - dst_rect->y) * y_ratio;
+
+            // Bounds check for source coordinates
+            if (src_x < 0 || src_x >= src->width || src_y < 0 || src_y >= src->height) {
+                continue; // Skip pixels outside source bounds
+            }
+
             uint8_t* src_pixel = (uint8_t*)src->pixels + (src_y * src->pitch) + (src_x * 4);
             uint8_t* dst_pixel = (uint8_t*)row_pixels + (j * 4);
             *((uint32_t*)dst_pixel) = *((uint32_t*)src_pixel);
