@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Min Max Width with Flex</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 200px;
+            display: flex;
+            gap: 10px;
+            border: 2px solid #333;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            position: relative;
+        }
+        .item:nth-child(1) {
+            flex-grow: 1;
+            min-width: 100px;
+            max-width: 150px;
+            background-color: #ffcccc;
+        }
+        .item:nth-child(2) {
+            flex-grow: 2;
+            min-width: 80px;
+            background-color: #ccffcc;
+        }
+        .item:nth-child(3) {
+            flex-grow: 1;
+            max-width: 120px;
+            background-color: #ccccff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Min 100px Max 150px</div>
+        <div class="item">Min 80px</div>
+        <div class="item">Max 120px</div>
+    </div>
+    
+    <script type="application/json">
+    {
+        "test_id": "flex_018_min_max_width",
+        "category": "flex",
+        "features": ["min-width", "max-width", "flex-grow", "constraints"],
+        "description": "Flex items with min-width and max-width constraints affecting flex growth",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#min-size-auto"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

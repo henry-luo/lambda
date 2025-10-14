@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Align Self</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 300px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            border: 2px solid #333;
+        }
+        .item {
+            width: 100px;
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            position: relative;
+        }
+        .item:nth-child(1) {
+            align-self: flex-start;
+            height: 60px;
+            background-color: #ffcccc;
+        }
+        .item:nth-child(2) {
+            align-self: center;
+            height: 80px;
+            background-color: #ccffcc;
+        }
+        .item:nth-child(3) {
+            align-self: flex-end;
+            height: 100px;
+            background-color: #ccccff;
+        }
+        .item:nth-child(4) {
+            align-self: stretch;
+            background-color: #ffffcc;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Start</div>
+        <div class="item">Center</div>
+        <div class="item">End</div>
+        <div class="item">Stretch</div>
+    </div>
+    
+    <script type="application/json">
+    {
+        "test_id": "flex_012_align_self",
+        "category": "flex",
+        "features": ["align-self", "individual-alignment", "cross-axis"],
+        "description": "Individual items override container's align-items with their own align-self values",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#align-self-property"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

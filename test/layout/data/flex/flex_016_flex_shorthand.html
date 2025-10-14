@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Flex Shorthand</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 200px;
+            display: flex;
+            gap: 10px;
+            border: 2px solid #333;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            position: relative;
+        }
+        .item:nth-child(1) {
+            flex: 1 0 100px; /* grow: 1, shrink: 0, basis: 100px */
+            background-color: #ffcccc;
+        }
+        .item:nth-child(2) {
+            flex: 2 1 50px; /* grow: 2, shrink: 1, basis: 50px */
+            background-color: #ccffcc;
+        }
+        .item:nth-child(3) {
+            flex: 0 1 150px; /* grow: 0, shrink: 1, basis: 150px */
+            background-color: #ccccff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">1 0 100px</div>
+        <div class="item">2 1 50px</div>
+        <div class="item">0 1 150px</div>
+    </div>
+    
+    <script type="application/json">
+    {
+        "test_id": "flex_016_flex_shorthand",
+        "category": "flex",
+        "features": ["flex", "shorthand", "flex-grow", "flex-shrink", "flex-basis"],
+        "description": "Items use flex shorthand property combining grow, shrink, and basis values",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#flex-property"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

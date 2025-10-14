@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Zero Flex Basis</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 200px;
+            display: flex;
+            gap: 10px;
+            border: 2px solid #333;
+        }
+        .item {
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            position: relative;
+        }
+        .item:nth-child(1) {
+            flex: 1 1 0%; /* flex-basis: 0% */
+            background-color: #ffcccc;
+        }
+        .item:nth-child(2) {
+            flex: 2 1 0%; /* flex-basis: 0% */
+            background-color: #ccffcc;
+        }
+        .item:nth-child(3) {
+            flex: 1 1 0%; /* flex-basis: 0% */
+            background-color: #ccccff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Flex 1</div>
+        <div class="item">Flex 2 (wider content here)</div>
+        <div class="item">Flex 1</div>
+    </div>
+    
+    <script type="application/json">
+    {
+        "test_id": "flex_021_zero_basis",
+        "category": "flex",
+        "features": ["flex-basis", "zero-basis", "content-sizing"],
+        "description": "Items with flex-basis: 0% ignore content size and distribute space purely based on flex-grow ratios",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#flex-basis-property"],
+        "complexity": "advanced"
+    }
+    </script>
+</body>
+</html>

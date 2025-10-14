@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Gap Variants</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 300px;
+            height: 300px;
+            display: flex;
+            flex-wrap: wrap;
+            row-gap: 20px;
+            column-gap: 10px;
+            border: 2px solid #333;
+        }
+        .item {
+            width: 120px;
+            height: 80px;
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            position: relative;
+        }
+        .item:nth-child(1) { background-color: #ffcccc; }
+        .item:nth-child(2) { background-color: #ccffcc; }
+        .item:nth-child(3) { background-color: #ccccff; }
+        .item:nth-child(4) { background-color: #ffffcc; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Item 1</div>
+        <div class="item">Item 2</div>
+        <div class="item">Item 3</div>
+        <div class="item">Item 4</div>
+    </div>
+    
+    <script type="application/json">
+    {
+        "test_id": "flex_022_gap_variants",
+        "category": "flex",
+        "features": ["row-gap", "column-gap", "flex-wrap", "different-gaps"],
+        "description": "Flex container with different row-gap (20px) and column-gap (10px) values in a wrapping layout",
+        "spec_references": ["https://www.w3.org/TR/css-align-3/#gap-shorthand"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>

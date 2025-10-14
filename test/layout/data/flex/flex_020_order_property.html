@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Order Property</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; font-size: 16px; }
+        
+        /* Test-specific CSS */
+        .container {
+            width: 400px;
+            height: 200px;
+            display: flex;
+            gap: 10px;
+            border: 2px solid #333;
+        }
+        .item {
+            width: 100px;
+            height: 100px;
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            position: relative;
+        }
+        .item:nth-child(1) {
+            order: 3;
+            background-color: #ffcccc;
+        }
+        .item:nth-child(2) {
+            order: 1;
+            background-color: #ccffcc;
+        }
+        .item:nth-child(3) {
+            order: 2;
+            background-color: #ccccff;
+        }
+        .item:nth-child(4) {
+            order: 0;
+            background-color: #ffffcc;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="item">Order 3</div>
+        <div class="item">Order 1</div>
+        <div class="item">Order 2</div>
+        <div class="item">Order 0</div>
+    </div>
+    
+    <script type="application/json">
+    {
+        "test_id": "flex_020_order_property",
+        "category": "flex",
+        "features": ["order", "visual-order", "reordering"],
+        "description": "Items are visually reordered using the order property without changing HTML structure",
+        "spec_references": ["https://www.w3.org/TR/css-flexbox-1/#order-property"],
+        "complexity": "intermediate"
+    }
+    </script>
+</body>
+</html>
