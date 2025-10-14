@@ -1,6 +1,5 @@
 #include "layout.hpp"
 #include "layout_flex.hpp"
-#include "layout_flex_content.hpp"
 #include "layout_flex_measurement.hpp"
 
 #include "../lib/log.h"
@@ -126,18 +125,18 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 ViewBlock* create_temporary_view_for_measurement(LayoutContext* lycon, DomNode* child) {
     // Create truly temporary ViewBlock for measurement without affecting main layout
     log_debug("*** TEMP_VIEW TRACE: Creating temporary view for measurement of %s", child->name());
-    
+
     // Save current layout context to avoid affecting main layout
     ViewGroup* saved_parent = lycon->parent;
     View* saved_prev_view = lycon->prev_view;
-    
+
     // Temporarily disconnect from layout hierarchy
     lycon->parent = nullptr;
     lycon->prev_view = nullptr;
-    
+
     // Create View that won't be linked to layout hierarchy
     ViewBlock* temp_view = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, child);
-    
+
     // Restore layout context immediately
     lycon->parent = saved_parent;
     lycon->prev_view = saved_prev_view;
@@ -146,7 +145,7 @@ ViewBlock* create_temporary_view_for_measurement(LayoutContext* lycon, DomNode* 
         // Initialize with unconstrained dimensions for intrinsic measurement
         temp_view->width = 0;
         temp_view->height = 0;
-        
+
         // CRITICAL: Ensure this View is not linked to any parent
         temp_view->parent = nullptr;
         temp_view->next = nullptr;

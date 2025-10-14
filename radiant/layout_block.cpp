@@ -1,6 +1,5 @@
 #include "layout.hpp"
 #include "layout_flex.hpp"
-#include "layout_flex_content.hpp"
 #include "layout_flex_measurement.hpp"
 #include "layout_flex_multipass.hpp"
 #include "layout_positioned.hpp"
@@ -182,7 +181,7 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                     child_count++;
                 } while (measure_child);
 
-                // PASS 2: Run enhanced flex algorithm with nested content support  
+                // PASS 2: Run enhanced flex algorithm with nested content support
                 log_debug("FLEX MULTIPASS: Running enhanced flex algorithm (final pass)");
                 layout_flex_container_with_nested_content(lycon, block);
 

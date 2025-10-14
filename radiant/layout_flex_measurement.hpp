@@ -2,7 +2,6 @@
 
 #include "layout.hpp"
 #include "layout_flex.hpp"
-#include "layout_flex_content.hpp"
 
 // Content measurement for multi-pass flex layout
 // This header defines the functions for the first pass of multi-pass flex layout
@@ -33,7 +32,7 @@ void calculate_intrinsic_sizes(ViewBlock* view, LayoutContext* lycon);
 
 // Measurement cache functions
 void store_measured_sizes(DomNode* node, ViewBlock* measured_view, LayoutContext* lycon);
-void store_in_measurement_cache(DomNode* node, int width, int height, 
+void store_in_measurement_cache(DomNode* node, int width, int height,
                                int content_width, int content_height);
 MeasurementCacheEntry* get_from_measurement_cache(DomNode* node);
 void clear_measurement_cache();
@@ -44,7 +43,7 @@ ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNode* node);
 void create_flex_item_view_only(LayoutContext* lycon, DomNode* node);
 void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node);
 void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* node);
-void layout_block_with_measured_size(LayoutContext* lycon, DomNode* node, 
+void layout_block_with_measured_size(LayoutContext* lycon, DomNode* node,
                                     DisplayValue display, MeasurementCacheEntry* cached);
 
 // Helper functions

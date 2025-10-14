@@ -10,14 +10,17 @@ extern "C" {
 }
 #endif
 
+#include "layout.hpp"
+
 // Forward declarations
 struct ViewBlock;
 struct LayoutContext;
 
 // Include for IntrinsicSizes type
-#ifdef __cplusplus
-#include "layout_flex_content.hpp"
-#endif
+typedef struct {
+    int min_content;  // Minimum content width (longest word/element)
+    int max_content;  // Maximum content width (no wrapping)
+} IntrinsicSizes;
 
 // Grid track size types following CSS Grid specification
 typedef enum {
