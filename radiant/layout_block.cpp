@@ -716,14 +716,20 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (block->parent->child == block) { // first child
                 if (block->bound->margin.top > 0) {
                     ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
-                    // parent has top margin, but no border, no padding
-                    if (parent && parent->bound && parent->bound->margin.top > 0 && parent->bound->padding.top == 0 &&
+                    // parent has top margin, but no border, no padding;  parent->parent to exclude html
+                    if (parent && parent->parent && parent->bound && parent->bound->padding.top == 0 &&
                         (!parent->bound->border || parent->bound->border->width.top == 0)) {
                         float margin_top = max(block->bound->margin.top, parent->bound->margin.top);
                         parent->y += margin_top - parent->bound->margin.top;
                         parent->bound->margin.top = margin_top;
                         block->y = 0;  block->bound->margin.top = 0;
-                        log_debug("collapsed margin between block and first child: %f", margin_top);
+                        log_debug("collapsed margin between block and first child: %f, parent y: %f", margin_top, parent->y);
+                    }
+                    else {
+                        log_debug("no parent margin collapsing: parent->bound=%p, border-top=%f, padding-top=%f",
+                            parent ? parent->bound : NULL,
+                            parent && parent->bound && parent->bound->border ? parent->bound->border->width.top : 0,
+                            parent && parent->bound ? parent->bound->padding.top : 0);
                     }
                 }
             }
