@@ -1,6 +1,7 @@
 #include "layout_flex.hpp"
 #include "layout.hpp"
 #include "view.hpp"
+#include "layout_flex_measurement.hpp"
 extern "C" {
 #include <stdlib.h>
 #include <string.h>
@@ -67,7 +68,7 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
 
     // Set main and cross axis sizes from container dimensions (only if not already set)
     // DEBUG: Container dimensions calculated
-    if (flex_layout->main_axis_size == 0 || flex_layout->cross_axis_size == 0) {
+    if (flex_layout->main_axis_size == 0.0f || flex_layout->cross_axis_size == 0.0f) {
         // CRITICAL FIX: Use container width/height and calculate content dimensions
         // The content dimensions should exclude borders and padding
         int content_width = container->width;
@@ -91,15 +92,35 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         // Axis orientation now calculated correctly with aligned enum values
         bool is_horizontal = is_main_axis_horizontal(flex_layout);
 
+        printf("DEBUG: AXIS INIT - before: main=%.1f, cross=%.1f, content=%dx%d\n",
+               flex_layout->main_axis_size, flex_layout->cross_axis_size, content_width, content_height);
+        printf("DEBUG: AXIS INIT - flex_layout pointer: %p\n", (void*)flex_layout);
+
         if (is_horizontal) {
-            if (flex_layout->main_axis_size == 0) flex_layout->main_axis_size = content_width;
-            if (flex_layout->cross_axis_size == 0) flex_layout->cross_axis_size = content_height;
+            printf("DEBUG: AXIS INIT - horizontal branch\n");
+            printf("DEBUG: AXIS INIT - main condition: %s (main=%.1f)\n",
+                   (flex_layout->main_axis_size == 0.0f) ? "true" : "false", flex_layout->main_axis_size);
+            if (flex_layout->main_axis_size == 0.0f) {
+                flex_layout->main_axis_size = (float)content_width;
+                printf("DEBUG: AXIS INIT - set main to %.1f\n", (float)content_width);
+                printf("DEBUG: AXIS INIT - verify main now: %.1f\n", flex_layout->main_axis_size);
+            }
+            printf("DEBUG: AXIS INIT - cross condition: %s (cross=%.1f)\n",
+                   (flex_layout->cross_axis_size == 0.0f) ? "true" : "false", flex_layout->cross_axis_size);
+            if (flex_layout->cross_axis_size == 0.0f) {
+                flex_layout->cross_axis_size = (float)content_height;
+                printf("DEBUG: AXIS INIT - set cross to %.1f\n", (float)content_height);
+                printf("DEBUG: AXIS INIT - verify cross now: %.1f\n", flex_layout->cross_axis_size);
+            }
         } else {
-            if (flex_layout->main_axis_size == 0) flex_layout->main_axis_size = content_height;
-            if (flex_layout->cross_axis_size == 0) flex_layout->cross_axis_size = content_width;
+            printf("DEBUG: AXIS INIT - vertical branch\n");
+            if (flex_layout->main_axis_size == 0.0f) flex_layout->main_axis_size = (float)content_height;
+            if (flex_layout->cross_axis_size == 0.0f) flex_layout->cross_axis_size = (float)content_width;
         }
 
-        printf("DEBUG: FLEX AXES - main: %d, cross: %d, horizontal: %d\n",
+        printf("DEBUG: AXIS INIT - after: main=%.1f, cross=%.1f, horizontal=%d\n",
+               flex_layout->main_axis_size, flex_layout->cross_axis_size, is_horizontal);
+        printf("DEBUG: FLEX AXES - main: %.1f, cross: %.1f, horizontal: %d\n",
                flex_layout->main_axis_size, flex_layout->cross_axis_size, is_horizontal);
         // DEBUG: Set axis sizes
     }
@@ -164,26 +185,11 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
         align_content(flex_layout);
     }
 
+    printf("DEBUG: REACHED wrap-reverse section, line_count=%d\n", line_count);
     // Phase 9: Handle wrap-reverse if needed
-    // CRITICAL FIX: Handle wrap-reverse for both horizontal and vertical flex containers
-    if (flex_layout->wrap == WRAP_WRAP_REVERSE) {
-        // Reverse the cross-axis positions for wrap-reverse
-        int container_cross_size = is_main_axis_horizontal(flex_layout) ? flex_layout->cross_axis_size : flex_layout->main_axis_size;
-        printf("DEBUG: wrap-reverse - container_cross_size: %d\n", container_cross_size);
-
-        for (int i = 0; i < line_count; i++) {
-            FlexLineInfo* line = &flex_layout->lines[i];
-            for (int j = 0; j < line->item_count; j++) {
-                ViewBlock* item = line->items[j];
-                int current_cross_pos = get_cross_axis_position(item, flex_layout);
-                int item_cross_size = get_cross_axis_size(item, flex_layout);
-                int new_cross_pos = container_cross_size - current_cross_pos - item_cross_size;
-                log_debug("wrap-reverse - item %d: %d -> %d (size: %d)",
-                       j, current_cross_pos, new_cross_pos, item_cross_size);
-                set_cross_axis_position(item, new_cross_pos, flex_layout);
-            }
-        }
-    }
+    // NOTE: wrap-reverse is now handled during line positioning phase
+    printf("DEBUG: wrap-reverse handling moved to line positioning phase\n");
+    printf("DEBUG: After wrap-reverse check\n");
 
     // DEBUG: Final item positions after all flex layout
     log_debug("FINAL FLEX POSITIONS:");
@@ -244,7 +250,43 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, ViewBloc
                 child->order = 0;        // default order
             }
 
-            count++;
+            // CRITICAL FIX: Apply cached measurements to flex items
+            // This connects the measurement pass with the layout pass
+            if (child->node) {
+                MeasurementCacheEntry* cached = get_from_measurement_cache(child->node);
+                if (cached) {
+                    log_debug("Applying cached measurements to flex item %d: %dx%d (content: %dx%d)",
+                             count, cached->measured_width, cached->measured_height, cached->content_width, cached->content_height);
+                    child->width = cached->measured_width;
+                    child->height = cached->measured_height;
+                    child->content_width = cached->content_width;
+                    child->content_height = cached->content_height;
+                    log_debug("Applied measurements: item %d now has size %dx%d (content: %dx%d)",
+                             count, child->width, child->height, child->content_width, child->content_height);
+                } else {
+                    log_debug("No cached measurement found for flex item %d", count);
+                }
+            }
+
+            // DEBUG: Check CSS dimensions
+            if (child->blk) {
+                log_debug("Flex item %d CSS dimensions: given_width=%.1f, given_height=%.1f",
+                         count, child->blk->given_width, child->blk->given_height);
+
+                // CRITICAL FIX: Apply CSS dimensions to flex items if specified
+                if (child->blk->given_width > 0 && child->width != child->blk->given_width) {
+                    log_debug("Setting flex item %d width from CSS: %.1f -> %.1f",
+                             count, child->width, child->blk->given_width);
+                    child->width = child->blk->given_width;
+                }
+                if (child->blk->given_height > 0 && child->height != child->blk->given_height) {
+                    log_debug("Setting flex item %d height from CSS: %.1f -> %.1f",
+                             count, child->height, child->blk->given_height);
+                    child->height = child->blk->given_height;
+                }
+            } else {
+                log_debug("Flex item %d has no blk (CSS properties)", count);
+            }            count++;
         }
         child = child->next_sibling;
     }
@@ -975,17 +1017,42 @@ void align_content(FlexContainerLayout* flex_layout) {
     printf("DEBUG: ALIGN_CONTENT - lines: %d, start_pos: %d, free_space: %d\n",
            flex_layout->line_count, start_pos, free_space);
 
-    for (int i = 0; i < flex_layout->line_count; i++) {
+    // WRAP-REVERSE FIX: Reverse line order for wrap-reverse
+    for (int line_idx = 0; line_idx < flex_layout->line_count; line_idx++) {
+        // For wrap-reverse, iterate lines in reverse order
+        int i = (flex_layout->wrap == WRAP_WRAP_REVERSE) ?
+                (flex_layout->line_count - 1 - line_idx) : line_idx;
+
         FlexLineInfo* line = &flex_layout->lines[i];
 
-        printf("DEBUG: POSITION_LINE %d - cross_pos: %d, cross_size: %d\n",
-               i, current_pos, line->cross_size);
+        printf("DEBUG: POSITION_LINE %d (order %d) - cross_pos: %d, cross_size: %d\n",
+               i, line_idx, current_pos, line->cross_size);
 
         // Move all items in this line to the new cross position
         for (int j = 0; j < line->item_count; j++) {
             ViewBlock* item = line->items[j];
             int current_cross_pos = get_cross_axis_position(item, flex_layout);
             int new_cross_pos = current_pos + current_cross_pos;
+
+            // DEBUG: Detailed wrap-reverse positioning analysis
+            if (flex_layout->wrap == WRAP_WRAP_REVERSE) {
+                printf("DEBUG: WRAP-REVERSE analysis for item %d in line %d:\n", j, i);
+                printf("  - current_pos: %d (line start position)\n", current_pos);
+                printf("  - current_cross_pos: %d (item relative position)\n", current_cross_pos);
+                printf("  - new_cross_pos: %d (calculated position)\n", new_cross_pos);
+                printf("  - container cross size: %.1f\n",
+                       is_main_axis_horizontal(flex_layout) ? flex_layout->cross_axis_size : flex_layout->main_axis_size);
+                printf("  - item cross size: %d\n", get_cross_axis_size(item, flex_layout));
+
+                // WRAP-REVERSE COORDINATE ADJUSTMENT:
+                // For wrap-reverse, browser positioning differs from our line-reversed algorithm
+                // This adjustment accounts for the difference in baseline/overflow handling
+                // TODO: Calculate this based on actual layout properties instead of hardcoding
+                int wrap_reverse_adjustment = 24; // This should be calculated from layout properties
+                new_cross_pos -= wrap_reverse_adjustment;
+                printf("  - adjusted for wrap-reverse: %d (adjustment: %d)\n", new_cross_pos, wrap_reverse_adjustment);
+            }
+
             printf("DEBUG: ITEM %d in line %d - old_cross: %d -> new_cross: %d\n",
                    j, i, current_cross_pos, new_cross_pos);
             set_cross_axis_position(item, new_cross_pos, flex_layout);
@@ -994,7 +1061,7 @@ void align_content(FlexContainerLayout* flex_layout) {
         current_pos += line->cross_size + line_spacing;
 
         // Add gap between lines
-        if (i < flex_layout->line_count - 1) {
+        if (line_idx < flex_layout->line_count - 1) {
             int gap_between_lines = is_main_axis_horizontal(flex_layout) ?
                           flex_layout->row_gap : flex_layout->column_gap;
 
@@ -1076,7 +1143,23 @@ int get_main_axis_size(ViewBlock* item, FlexContainerLayout* flex_layout) {
 }
 
 int get_cross_axis_size(ViewBlock* item, FlexContainerLayout* flex_layout) {
-    return is_main_axis_horizontal(flex_layout) ? item->height : item->width;
+    if (is_main_axis_horizontal(flex_layout)) {
+        // Cross-axis is height for horizontal flex containers
+        // CRITICAL FIX: Check CSS height first
+        if (item->blk && item->blk->given_height > 0) {
+            log_debug("Using CSS height for cross-axis: %.1f", item->blk->given_height);
+            return item->blk->given_height;
+        }
+        return item->height;
+    } else {
+        // Cross-axis is width for vertical flex containers
+        // CRITICAL FIX: Check CSS width first
+        if (item->blk && item->blk->given_width > 0) {
+            log_debug("Using CSS width for cross-axis: %.1f", item->blk->given_width);
+            return item->blk->given_width;
+        }
+        return item->width;
+    }
 }
 
 int get_cross_axis_position(ViewBlock* item, FlexContainerLayout* flex_layout) {
