@@ -1,11 +1,11 @@
 {
-  "total_files": 4,
-  "generated": 4,
-  "skipped": 0,
+  "total_files": 53,
+  "generated": 1,
+  "skipped": 52,
   "failed": 0,
   "success_rate": 100,
   "browser_info": {
-    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/140.0.0.0 Safari/537.36",
+    "userAgent": "Unknown",
     "viewport": {
       "width": 1200,
       "height": 800,
@@ -14,35 +14,427 @@
   },
   "results": [
     {
-      "category": "flex",
-      "file": "flex_003_align_items.html",
+      "category": "baseline",
+      "file": "baseline_001_empty_document.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 16,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_002_single_div.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 17,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_004_two_divs.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 18,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_007_simple_flexbox.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 19,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_009_nested_divs.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 18,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_010_flex_column.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 19,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_011_basic_border.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 17,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_101_two_containers.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 18,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_102_flex_row.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 20,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_103_flex_column.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 20,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_104_nested_containers.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 19,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_105_border_variations.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 19,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_106_flex_mixed_sizes.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 20,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_201_font_sizes.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_202_font_families.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_301_simple_margin.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 19,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_302_simple_padding.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 18,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_401_fixed_size_overflow.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 18,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_501_line_breaks.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_502_text_wrapping.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_503_styled_spans.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 28,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_801_display_block.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_802_display_inline.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_803_basic_margin.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 17,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_804_basic_padding.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 18,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_805_width_height.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 17,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_807_position_absolute.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 19,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_811_basic_border.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 19,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_812_background_color.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 25,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_815_font_size.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 26,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_820_inline_block.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 28,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "block_001_margin_padding.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 12,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "box_001_basic_div.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 19,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "box_001_width_height.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 26,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "box_002_margin_padding.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 19,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "box_002_margins.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 27,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "box_003_border.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 19,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "box_003_padding.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 32,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "box_004_box_sizing.html",
       "success": true,
       "was_skipped": false,
+      "node_count": 22,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "flex_001_basic_layout.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "flex_001_row_space_between.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 11,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "flex_002_wrap.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "flex_004_column_direction.html",
+      "success": true,
+      "was_skipped": true,
       "node_count": 21,
       "error": null
     },
     {
-      "category": "flex",
-      "file": "flex_005_flex_grow.html",
+      "category": "baseline",
+      "file": "flex_006_justify_content.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "node_count": 21,
       "error": null
     },
     {
-      "category": "flex",
-      "file": "flex_007_row_reverse.html",
+      "category": "baseline",
+      "file": "flex_009_auto_margins.html",
       "success": true,
-      "was_skipped": false,
-      "node_count": 21,
+      "was_skipped": true,
+      "node_count": 19,
       "error": null
     },
     {
-      "category": "flex",
-      "file": "flex_008_flex_basis.html",
+      "category": "baseline",
+      "file": "flex_010_wrap_reverse.html",
       "success": true,
-      "was_skipped": false,
-      "node_count": 21,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "hr_001_basic_rules.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 31,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "image_001_basic_layout.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 29,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "list_001_basic_lists.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 34,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "table_001_simple_table.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "table_simple_002_border_collapse.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 28,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "table_simple_005_colspan.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 31,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "text_001_basic_typography.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 30,
       "error": null
     }
   ]
