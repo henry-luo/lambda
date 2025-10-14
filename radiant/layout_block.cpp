@@ -600,24 +600,6 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // check for margin collapsing with children
     if (block->bound) {
-        // collapse top margin with first child block
-        log_debug("check margin collapsing");
-        if ((!block->bound->border || block->bound->border->width.top == 0) &&
-            block->bound->padding.top == 0 && block->child) {
-            View* first_child = block->child;
-            if (first_child->is_block() && ((ViewBlock*)first_child)->bound) {
-                ViewBlock* first_child_block = (ViewBlock*)first_child;
-                if (first_child_block->bound->margin.top > 0) {
-                    float margin_top = max(block->bound->margin.top, first_child_block->bound->margin.top);
-                    block->y += margin_top - block->bound->margin.top;
-                    block->bound->margin.top = margin_top;
-                    block->height -= first_child_block->bound->margin.top;
-                    first_child_block->bound->margin.top = 0;
-                    first_child_block->y = 0;
-                    log_debug("collapsed top margin %d between block and first child", margin_top);
-                }
-            }
-        }
         // collapse bottom margin with last child block
         if ((!block->bound->border || block->bound->border->width.bottom == 0) &&
             block->bound->padding.bottom == 0 && block->child) {
@@ -729,16 +711,34 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     }
     else { // normal block
         if (block->bound) {
-            // check sibling margin collapsing
-            float collapse = 0;
-            View* prev_sibling = block->previous_view();
-            if (prev_sibling && prev_sibling->is_block() && ((ViewBlock*)prev_sibling)->bound) {
-                ViewBlock* prev_block = (ViewBlock*)prev_sibling;
-                if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {
-                    collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
-                    block->y -= collapse;
-                    block->bound->margin.top -= collapse;
-                    log_debug("collapsed margin %d between sibling blocks", collapse);
+            // collapse top margin with parent block
+            log_debug("check margin collapsing");
+            if (block->parent->child == block) { // first child
+                if (block->bound->margin.top > 0) {
+                    ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
+                    // parent has top margin, but no border, no padding
+                    if (parent && parent->bound && parent->bound->margin.top > 0 && parent->bound->padding.top == 0 &&
+                        (!parent->bound->border || parent->bound->border->width.top == 0)) {
+                        float margin_top = max(block->bound->margin.top, parent->bound->margin.top);
+                        parent->y += margin_top - parent->bound->margin.top;
+                        parent->bound->margin.top = margin_top;
+                        block->y = 0;  block->bound->margin.top = 0;
+                        log_debug("collapsed margin between block and first child: %f", margin_top);
+                    }
+                }
+            }
+            else {
+                // check sibling margin collapsing
+                float collapse = 0;
+                View* prev_sibling = block->previous_view();
+                if (prev_sibling && prev_sibling->is_block() && ((ViewBlock*)prev_sibling)->bound) {
+                    ViewBlock* prev_block = (ViewBlock*)prev_sibling;
+                    if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {
+                        collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
+                        block->y -= collapse;
+                        block->bound->margin.top -= collapse;
+                        log_debug("collapsed margin between sibling blocks: %f", collapse);
+                    }
                 }
             }
             lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;

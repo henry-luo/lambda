@@ -16,6 +16,8 @@ class RadiantLayoutTester {
     constructor(options = {}) {
         this.radiantExe = options.radiantExe || './radiant.exe';
         this.tolerance = options.tolerance || 5.0; // 5px tolerance for layout differences
+        this.elementThreshold = options.elementThreshold || 100.0; // 100% overall element match threshold
+        this.textThreshold = options.textThreshold || 100.0; // 100% overall text match threshold
         this.testDataDir = path.join(__dirname, 'data');
         this.referenceDir = path.join(__dirname, 'reference');
         this.outputFile = '/tmp/view_tree.json';
@@ -543,7 +545,7 @@ class RadiantLayoutTester {
         }
 
         // Overall result
-        const overallSuccess = report.elementComparison.passRate >= 80 && report.textComparison.passRate >= 70;
+        const overallSuccess = report.elementComparison.passRate >= this.elementThreshold && report.textComparison.passRate >= this.textThreshold;
         const status = overallSuccess ? '✅ PASS' : '❌ FAIL';
         console.log(`${status} Overall: Elements ${report.elementComparison.passRate.toFixed(1)}%, Text ${report.textComparison.passRate.toFixed(1)}%`);
     }
@@ -628,10 +630,10 @@ class RadiantLayoutTester {
             // Summary - properly count passed/failed tests based on pass rates
             const successful = results.filter(r => {
                 if (r.error) return false; // Tests with errors are failures
-                // Use same criteria as printReport: 80% elements, 70% text
+                // Use same criteria as printReport: configurable element/text thresholds
                 const elementPassRate = r.elementComparison ? r.elementComparison.passRate : 0;
                 const textPassRate = r.textComparison ? r.textComparison.passRate : 100;
-                return elementPassRate >= 80 && textPassRate >= 70;
+                return elementPassRate >= this.elementThreshold && textPassRate >= this.textThreshold;
             }).length;
             const failed = results.length - successful;
 
@@ -713,7 +715,7 @@ class RadiantLayoutTester {
             if (r.error) return false;
             const elementPassRate = r.elementComparison ? r.elementComparison.passRate : 0;
             const textPassRate = r.textComparison ? r.textComparison.passRate : 100;
-            return elementPassRate >= 80 && textPassRate >= 70;
+            return elementPassRate >= this.elementThreshold && textPassRate >= this.textThreshold;
         }).length;
         const failed = allResults.length - successful;
 
@@ -746,10 +748,10 @@ class RadiantLayoutTester {
         // Overall summary - properly count passed/failed tests based on pass rates
         const successful = allResults.filter(r => {
             if (r.error) return false; // Tests with errors are failures
-            // Use same criteria as printReport: 80% elements, 70% text
+            // Use same criteria as printReport: configurable element/text thresholds
             const elementPassRate = r.elementComparison ? r.elementComparison.passRate : 0;
             const textPassRate = r.textComparison ? r.textComparison.passRate : 100;
-            return elementPassRate >= 80 && textPassRate >= 70;
+            return elementPassRate >= this.elementThreshold && textPassRate >= this.textThreshold;
         }).length;
         const failed = allResults.length - successful;
 
@@ -808,6 +810,12 @@ async function main() {
             case '--radiant-exe':
                 options.radiantExe = args[++i];
                 break;
+            case '--element-threshold':
+                options.elementThreshold = parseFloat(args[++i]);
+                break;
+            case '--text-threshold':
+                options.textThreshold = parseFloat(args[++i]);
+                break;
             default:
                 console.error(`Unknown argument: ${arg}`);
                 showHelp = true;
@@ -825,6 +833,8 @@ Options:
   --test, -t <file>        Test specific HTML file
   --pattern, -p <text>     Test files containing pattern (runs in verbose mode)
   --tolerance <pixels>     Layout difference tolerance in pixels (default: 5.0)
+  --element-threshold <pct> Element match threshold percentage (default: 80.0)
+  --text-threshold <pct>   Text match threshold percentage (default: 70.0)
   --verbose, -v            Show detailed output
   --radiant-exe <path>     Path to Radiant executable (default: ./radiant.exe)
   --help, -h               Show this help message
@@ -835,6 +845,8 @@ Examples:
   node test/layout/test_radiant_layout.js -t baseline_801_display_block.html  # Test specific file
   node test/layout/test_radiant_layout.js -p float                     # Test all files containing "float"
   node test/layout/test_radiant_layout.js --tolerance 2.0              # Use 2px tolerance
+  node test/layout/test_radiant_layout.js --element-threshold 90       # Require 90% element match
+  node test/layout/test_radiant_layout.js --text-threshold 80          # Require 80% text match
   node test/layout/test_radiant_layout.js -v                           # Verbose output
 
 Note: Run this script from the project root directory.
