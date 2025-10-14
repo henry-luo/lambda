@@ -204,16 +204,27 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
 // Collect flex items from container children
 int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, ViewBlock*** items) {
     if (!flex || !container || !items) return 0;
+    
+    log_debug("*** COLLECT_FLEX_ITEMS TRACE: ENTRY - container=%p, container->first_child=%p", 
+              container, container->first_child);
     int count = 0;
 
     // Count children first - use ViewBlock hierarchy for flex items
+    log_debug("*** COLLECT_FLEX_ITEMS TRACE: Starting to count children of container %p", container);
     ViewBlock* child = container->first_child;
     while (child) {
+        log_debug("*** COLLECT_FLEX_ITEMS TRACE: Found child view %p (type=%d, node=%s)", 
+                  child, child->type, child->node ? child->node->name() : "NULL");
         // Filter out absolutely positioned and hidden items
         bool is_absolute = child->position &&
             (child->position->position == LXB_CSS_VALUE_ABSOLUTE || child->position->position == LXB_CSS_VALUE_FIXED);
         bool is_hidden = child->visibility == VIS_HIDDEN;
-        if (!is_absolute && !is_hidden) { count++; }
+        if (!is_absolute && !is_hidden) { 
+            count++; 
+            log_debug("*** COLLECT_FLEX_ITEMS TRACE: Counted child %p as flex item #%d", child, count);
+        } else {
+            log_debug("*** COLLECT_FLEX_ITEMS TRACE: Skipped child %p (absolute=%d, hidden=%d)", child, is_absolute, is_hidden);
+        }
         child = child->next_sibling;
     }
 
@@ -229,9 +240,11 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, ViewBloc
     }
 
     // Collect items - use ViewBlock hierarchy for flex items
+    log_debug("*** COLLECT_FLEX_ITEMS TRACE: Starting to collect %d flex items", count);
     count = 0;
     child = container->first_child;
     while (child) {
+        log_debug("*** COLLECT_FLEX_ITEMS TRACE: Processing child view %p for collection", child);
         // Filter out absolutely positioned and hidden items
         bool is_absolute = child->position &&
                           (child->position->position == LXB_CSS_VALUE_ABSOLUTE ||
@@ -239,6 +252,7 @@ int collect_flex_items(FlexContainerLayout* flex, ViewBlock* container, ViewBloc
         bool is_hidden = child->visibility == VIS_HIDDEN;
         if (!is_absolute && !is_hidden) {
             flex->flex_items[count] = child;
+            log_debug("*** COLLECT_FLEX_ITEMS TRACE: Added child %p as flex item [%d]", child, count);
 
             // CRITICAL FIX: Ensure flex items have proper flex properties initialized
             // If flex properties are not set, initialize them with defaults

@@ -60,11 +60,15 @@ void layout_flex_item_content(LayoutContext* lycon, ViewBlock* flex_item) {
 
     // Layout all nested content using standard flow algorithm
     // This handles: text nodes, nested blocks, inline elements, images, etc.
+    log_debug("*** PASS3 TRACE: About to layout children of flex item %p", flex_item);
     if (flex_item->node && flex_item->node->first_child()) {
         DomNode* child = flex_item->node->first_child();
         do {
+            log_debug("*** PASS3 TRACE: Layout child %s of flex item (parent=%p)", child->name(), lycon->parent);
             // Use standard layout flow - this handles all HTML content types
+            // CRITICAL: lycon->parent is set to flex_item, so text Views become children of flex_item
             layout_flow_node(lycon, child);
+            log_debug("*** PASS3 TRACE: Completed layout of child %s", child->name());
             child = child->next_sibling();
         } while (child);
 
