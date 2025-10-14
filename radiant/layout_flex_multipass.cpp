@@ -19,27 +19,23 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
 void layout_flex_container_with_nested_content(LayoutContext* lycon, ViewBlock* flex_container) {
     if (!flex_container) return;
     
-    printf("DEBUG: MULTI-PASS FLEX LAYOUT STARTING\n");
-    log_debug("Starting multi-pass flex layout for container %p", flex_container);
+    printf("DEBUG: ENHANCED FLEX LAYOUT STARTING\n");
+    log_debug("Starting enhanced flex layout for container %p", flex_container);
     
     // Clear measurement cache for this layout pass
     clear_measurement_cache();
     
-    // PASS 1: Content measurement (already done in layout_block_content integration)
-    // The measurement pass has already been completed before this function is called
-    log_debug("Pass 1: Content measurement completed");
-    
-    // PASS 2: Run enhanced flex algorithm
-    log_debug("Pass 2: Running enhanced flex algorithm");
+    // PASS 1: Run enhanced flex algorithm with measured content
+    log_debug("Pass 1: Running enhanced flex algorithm with measured content");
     
     // Use enhanced flex algorithm with auto margin support
     run_enhanced_flex_algorithm(lycon, flex_container);
     
-    // PASS 3: Final content layout with determined flex sizes
-    log_debug("Pass 3: Final content layout");
+    // PASS 2: Final content layout with determined flex sizes
+    log_debug("Pass 2: Final content layout");
     layout_final_flex_content(lycon, flex_container);
     
-    log_debug("Multi-pass flex layout completed");
+    log_debug("Enhanced flex layout completed");
 }
 // Enhanced flex algorithm with auto margin support
 void run_enhanced_flex_algorithm(LayoutContext* lycon, ViewBlock* flex_container) {
