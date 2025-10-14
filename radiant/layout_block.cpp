@@ -638,35 +638,35 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // Apply CSS positioning after normal layout
     if (block->position) {
-        log_debug("DEBUG: Found position property: type=%d (RELATIVE=334, ABSOLUTE=335, FIXED=337)", block->position->position);
-        log_debug("DEBUG: Position offsets: top=%d(%s), right=%d(%s), bottom=%d(%s), left=%d(%s)",
+        log_debug("Found position property: type=%d (RELATIVE=334, ABSOLUTE=335, FIXED=337)", block->position->position);
+        log_debug("Position offsets: top=%d(%s), right=%d(%s), bottom=%d(%s), left=%d(%s)",
             block->position->top, block->position->has_top ? "set" : "unset",
             block->position->right, block->position->has_right ? "set" : "unset",
             block->position->bottom, block->position->has_bottom ? "set" : "unset",
             block->position->left, block->position->has_left ? "set" : "unset");
 
         if (block->position->position == 334) {  // LXB_CSS_VALUE_RELATIVE
-            log_debug("DEBUG: Applying relative positioning");
+            log_debug("Applying relative positioning");
             layout_relative_positioned(lycon, block);
         } else if (block->position->position == 335 || block->position->position == 337) {  // ABSOLUTE or FIXED
-            log_debug("DEBUG: Applying absolute positioning");
+            log_debug("Applying absolute positioning");
             layout_absolute_positioned(lycon, block);
         } else {
-            log_debug("DEBUG: Position type %d not handled yet", block->position->position);
+            log_debug("Position type %d not handled yet", block->position->position);
         }
     } else {
-        log_debug("DEBUG: No position property found for element %s", elmt->name());
+        log_debug("No position property found for element %s", elmt->name());
     }
 
     // Apply CSS float layout after positioning
     if (block->position && element_has_float(block)) {
-        log_debug("DEBUG: Element has float property, applying float layout");
+        log_debug("Element has float property, applying float layout");
         layout_float_element(lycon, block);
     }
 
     // Apply CSS clear property after float layout
     if (block->position && block->position->clear != LXB_CSS_VALUE_NONE) {
-        log_debug("DEBUG: Element has clear property, applying clear layout");
+        log_debug("Element has clear property, applying clear layout");
         layout_clear_element(lycon, block);
     }
 
@@ -677,7 +677,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     // Skip normal flow positioning for absolutely positioned elements
     if (block->position && (block->position->position == LXB_CSS_VALUE_ABSOLUTE ||
         block->position->position == LXB_CSS_VALUE_FIXED)) {
-        log_debug("DEBUG: Skipping normal flow positioning for absolutely positioned element");
+        log_debug("Skipping normal flow positioning for absolutely positioned element");
         // Absolutely positioned elements don't participate in normal flow
         // Their position was already set by the positioning code above
     }
@@ -737,11 +737,11 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 if (prev_block->bound->margin.bottom > 0 && block->bound->margin.top > 0) {
                     collapse = min(prev_block->bound->margin.bottom, block->bound->margin.top);
                     block->y -= collapse;
-                    prev_block->bound->margin.bottom = 0;
+                    block->bound->margin.top -= collapse;
                     log_debug("collapsed margin %d between sibling blocks", collapse);
                 }
             }
-            lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom - collapse;
+            lycon->block.advance_y += block->height + block->bound->margin.top + block->bound->margin.bottom;
             lycon->block.max_width = max(lycon->block.max_width, block->width
                 + block->bound->margin.left + block->bound->margin.right);
         } else {
