@@ -52,6 +52,12 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
         return NULL;
     }
     view->type = type;  view->node = node;  view->parent = lycon->parent;
+    
+    // COMPREHENSIVE VIEW ALLOCATION TRACING
+    const char* node_name = node ? node->name() : "NULL";
+    const char* parent_name = lycon->parent ? "has_parent" : "no_parent";
+    log_debug("*** ALLOC_VIEW TRACE: Created view %p (type=%d) for node %s (%p), parent=%p (%s)", 
+              view, type, node_name, node, lycon->parent, parent_name);
 
     // CRITICAL FIX: Initialize flex properties for ViewBlocks
     if (type == RDT_VIEW_BLOCK || type == RDT_VIEW_INLINE_BLOCK || type == RDT_VIEW_LIST_ITEM) {

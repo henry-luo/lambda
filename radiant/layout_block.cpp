@@ -157,46 +157,33 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 FlexContainerLayout* pa_flex = lycon->flex_container;
                 init_flex_container(lycon, block);
 
-                // PASS 1: Content measurement
-                log_debug("FLEX MULTIPASS: Starting content measurement");
+                // PASS 1: Create Views with measured sizes (combined measurement + View creation)
+                log_debug("FLEX MULTIPASS: Creating Views with measurements (single pass)");
                 int child_count = 0;
                 const int MAX_CHILDREN = 100; // Safety limit
                 DomNode* measure_child = child;
                 do {
-                    log_debug("Measuring flex child %p (count: %d)", measure_child, child_count);
-                    if (child_count >= MAX_CHILDREN) {
-                        log_error("ERROR: Too many flex children, breaking to prevent infinite loop");
-                        break;
-                    }
-                    measure_flex_child_content(lycon, measure_child);
-                    measure_child = measure_child->next_sibling();
-                    child_count++;
-                } while (measure_child);
-
-                // PASS 2: Create View objects with measured sizes (lightweight)
-                log_debug("FLEX MULTIPASS: Creating lightweight Views for flex items only");
-                child_count = 0;
-                do {
-                    log_debug("Processing flex child %p (count: %d)", child, child_count);
+                    log_debug(">>> PASS1 TRACE: Processing flex child %p (count: %d)", measure_child, child_count);
                     if (child_count >= MAX_CHILDREN) {
                         log_error("ERROR: Too many flex children, breaking to prevent infinite loop");
                         break;
                     }
                     // Only create Views for element nodes, skip text nodes
-                    if (child->is_element()) {
-                        log_debug("Creating lightweight View for flex item: %s", child->name());
-                        layout_flow_node_for_flex(lycon, child);
+                    if (measure_child->is_element()) {
+                        log_debug(">>> PASS1 TRACE: Creating View with measurement for %s (node=%p)", measure_child->name(), measure_child);
+                        // CRITICAL: Keep measurement logic, then create View
+                        measure_flex_child_content(lycon, measure_child);
+                        layout_flow_node_for_flex(lycon, measure_child);
+                        log_debug(">>> PASS1 TRACE: Completed View creation for %s", measure_child->name());
                     } else {
-                        log_debug("Skipping text node in PASS 2: %s", child->name());
+                        log_debug(">>> PASS1 TRACE: Skipping text node: %s", measure_child->name());
                     }
-                    DomNode* next_child = child->next_sibling();
-                    log_debug("Got next flex sibling %p", next_child);
-                    child = next_child;
+                    measure_child = measure_child->next_sibling();
                     child_count++;
-                } while (child);
+                } while (measure_child);
 
-                // PASS 3: Run enhanced flex algorithm with nested content support
-                log_debug("FLEX MULTIPASS: Running enhanced flex algorithm");
+                // PASS 2: Run enhanced flex algorithm with nested content support  
+                log_debug("FLEX MULTIPASS: Running enhanced flex algorithm (final pass)");
                 layout_flex_container_with_nested_content(lycon, block);
 
                 // restore parent flex context

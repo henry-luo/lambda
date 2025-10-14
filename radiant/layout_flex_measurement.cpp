@@ -124,20 +124,35 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 // Helper functions for measurement
 
 ViewBlock* create_temporary_view_for_measurement(LayoutContext* lycon, DomNode* child) {
-    // Create temporary ViewBlock for measurement without affecting main layout
+    // Create truly temporary ViewBlock for measurement without affecting main layout
+    log_debug("*** TEMP_VIEW TRACE: Creating temporary view for measurement of %s", child->name());
+    
+    // Save current layout context to avoid affecting main layout
+    ViewGroup* saved_parent = lycon->parent;
+    View* saved_prev_view = lycon->prev_view;
+    
+    // Temporarily disconnect from layout hierarchy
+    lycon->parent = nullptr;
+    lycon->prev_view = nullptr;
+    
+    // Create View that won't be linked to layout hierarchy
     ViewBlock* temp_view = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, child);
+    
+    // Restore layout context immediately
+    lycon->parent = saved_parent;
+    lycon->prev_view = saved_prev_view;
 
-    // CRITICAL FIX: Try to get CSS dimensions for proper measurement
-    // For now, use a simpler approach - check if the element has CSS width/height styles
+    if (temp_view) {
+        // Initialize with unconstrained dimensions for intrinsic measurement
+        temp_view->width = 0;
+        temp_view->height = 0;
+        
+        // CRITICAL: Ensure this View is not linked to any parent
+        temp_view->parent = nullptr;
+        temp_view->next = nullptr;
 
-    // Initialize with unconstrained dimensions for intrinsic measurement
-    temp_view->width = 0;
-    temp_view->height = 0;
-
-    // TODO: Apply CSS width and height if available
-    // This is a placeholder for proper CSS dimension application
-
-    log_debug("Created temp view for measurement: %fx%f", temp_view->width, temp_view->height);
+        log_debug("*** TEMP_VIEW TRACE: Created isolated temp view %p for %s", temp_view, child->name());
+    }
 
     return temp_view;
 }
@@ -236,16 +251,18 @@ void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_con
 void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
     if (!node) return;
 
-    log_debug("Layout flow node for flex: %s", node->name());
+    log_debug("=== TRACE: layout_flow_node_for_flex ENTRY for %s (node=%p)", node->name(), node);
 
     // Skip text nodes - flex layout only processes element nodes
     if (!node->is_element()) {
-        log_debug("Skipping text node in flex container: %s", node->name());
+        log_debug("TRACE: Skipping text node in flex container: %s", node->name());
         return;
     }
 
+    log_debug("TRACE: About to call create_lightweight_flex_item_view for %s", node->name());
     // Create lightweight View for flex item element only (no child processing)
     create_lightweight_flex_item_view(lycon, node);
+    log_debug("TRACE: Completed create_lightweight_flex_item_view for %s", node->name());
 
     // Apply measured sizes if available
     MeasurementCacheEntry* cached = get_from_measurement_cache(node);
@@ -357,7 +374,8 @@ void create_flex_item_view_only(LayoutContext* lycon, DomNode* node) {
 void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!node || !node->is_element()) return;
 
-    log_debug("Creating lightweight View for flex item: %s", node->name());
+    log_debug("*** TRACE: create_lightweight_flex_item_view ENTRY for %s (node=%p)", node->name(), node);
+    log_debug("*** TRACE: Current prev_view before creation: %p", lycon->prev_view);
 
     // Get display properties for the element
     lxb_html_element_t* elmt = node->as_element();
@@ -389,5 +407,6 @@ void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node) {
     // CRITICAL FIX: Set prev_view so cached measurements can be applied
     lycon->prev_view = (View*)block;
 
-    log_debug("Created lightweight View for flex item: %s (%p)", node->name(), block);
+    log_debug("*** TRACE: create_lightweight_flex_item_view EXIT for %s (node=%p, created_view=%p)", node->name(), node, block);
+    log_debug("*** TRACE: Set lycon->prev_view = %p", lycon->prev_view);
 }
