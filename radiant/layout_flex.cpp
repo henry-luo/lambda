@@ -363,19 +363,36 @@ int calculate_flex_basis(ViewBlock* item, FlexContainerLayout* flex_layout) {
             // No explicit size - use content size + padding
             int content_size = is_main_axis_horizontal(flex_layout) ? item->content_width : item->content_height;
 
-            // CRITICAL FIX: For flex-basis auto, if content_size is too large (like full container width),
-            // calculate a more reasonable intrinsic size based on actual content
+            // ENHANCED: Calculate proper intrinsic content size for flex-basis auto
             if (is_main_axis_horizontal(flex_layout)) {
-                // Check if content_width seems unreasonably large (more than half container)
-                if (content_size > flex_layout->main_axis_size / 3) {
-                    // Use a more reasonable estimate based on typical text content
-                    // For now, use a heuristic: find the minimum reasonable size
-                    int min_content_size = 0;
-
-                    // For now, use a simple heuristic: use a reasonable minimum
-                    // This is a temporary fix - proper implementation would measure actual text content
-                    content_size = 50; // Reasonable minimum in physical pixels
-                    printf("DEBUG: calculate_flex_basis - using heuristic minimum: %d\n", content_size);
+                // For horizontal flex containers, calculate intrinsic width
+                if (content_size <= 0 || content_size > flex_layout->main_axis_size / 2) {
+                    // Calculate intrinsic width based on text content and padding
+                    int intrinsic_width = 0;
+                    
+                    // Estimate text width (this is a simplified calculation)
+                    // In a real implementation, this would measure actual text
+                    if (item->node && item->node->first_child() && item->node->first_child()->is_text()) {
+                        // Rough estimate: 8px per character for typical text
+                        const char* text = (const char*)item->node->first_child()->text_data();
+                        if (text) {
+                            int text_length = strlen(text);
+                            intrinsic_width = text_length * 8; // 8px per character estimate
+                        }
+                    }
+                    
+                    // Add some minimum width if no text or very short text
+                    if (intrinsic_width < 40) {
+                        intrinsic_width = 60; // Minimum reasonable width for flex items
+                    }
+                    
+                    content_size = intrinsic_width;
+                    printf("DEBUG: calculate_flex_basis - calculated intrinsic width: %d\n", content_size);
+                }
+            } else {
+                // For vertical flex containers, use height
+                if (content_size <= 0) {
+                    content_size = 50; // Default height for flex items
                 }
             }
 
@@ -607,15 +624,14 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
         total_basis_size += basis;
     }
 
-    // Add gap space
+    // Calculate gap space (but don't add to total_basis_size)
     int gap_space = calculate_gap_space(flex_layout, line->item_count, true);
-    total_basis_size += gap_space;
 
     printf("DEBUG: resolve_flexible_lengths - container: %d, total_basis: %d, gap_space: %d\n",
-           container_main_size, total_basis_size - gap_space, gap_space);
+           container_main_size, total_basis_size, gap_space);
 
-    // Calculate free space
-    int free_space = container_main_size - total_basis_size;
+    // Calculate free space: container size minus item basis sizes minus gap space
+    int free_space = container_main_size - total_basis_size - gap_space;
     line->free_space = free_space;
 
     printf("DEBUG: resolve_flexible_lengths - free_space: %d\n", free_space);
@@ -736,10 +752,24 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
                negative_free_space, line->total_flex_shrink);
 
         // Calculate total scaled shrink factor with double precision
+        // CRITICAL: Use explicit width/height as basis for shrink calculations when available
         for (int i = 0; i < line->item_count; i++) {
             ViewBlock* item = line->items[i];
             if (item->flex_shrink > 0) {
-                int basis = calculate_flex_basis(item, flex_layout);
+                int basis;
+                
+                // ENHANCED: For flex-shrink, prefer explicit size over calculated basis
+                if (is_main_axis_horizontal(flex_layout) && item->blk && item->blk->given_width > 0) {
+                    basis = item->blk->given_width;
+                    printf("DEBUG: ENHANCED_FLEX_SHRINK - item %d: using explicit width as basis: %d\n", i, basis);
+                } else if (!is_main_axis_horizontal(flex_layout) && item->blk && item->blk->given_height > 0) {
+                    basis = item->blk->given_height;
+                    printf("DEBUG: ENHANCED_FLEX_SHRINK - item %d: using explicit height as basis: %d\n", i, basis);
+                } else {
+                    basis = calculate_flex_basis(item, flex_layout);
+                    printf("DEBUG: ENHANCED_FLEX_SHRINK - item %d: using calculated basis: %d\n", i, basis);
+                }
+                
                 double scaled_shrink = (double)item->flex_shrink * basis;
                 total_scaled_shrink += scaled_shrink;
                 printf("DEBUG: ENHANCED_FLEX_SHRINK - item %d: basis=%d, flex_shrink=%.1f, scaled_shrink=%.2f\n", 
@@ -761,7 +791,17 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             for (int i = 0; i < line->item_count; i++) {
                 ViewBlock* item = line->items[i];
                 if (item->flex_shrink > 0) {
-                    int basis = calculate_flex_basis(item, flex_layout);
+                    int basis;
+                    
+                    // ENHANCED: Use same basis calculation as in total calculation
+                    if (is_main_axis_horizontal(flex_layout) && item->blk && item->blk->given_width > 0) {
+                        basis = item->blk->given_width;
+                    } else if (!is_main_axis_horizontal(flex_layout) && item->blk && item->blk->given_height > 0) {
+                        basis = item->blk->given_height;
+                    } else {
+                        basis = calculate_flex_basis(item, flex_layout);
+                    }
+                    
                     int current_size = get_main_axis_size(item, flex_layout);
                     int shrink_amount;
                     
