@@ -552,6 +552,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
 
     log_debug("style entry: %ld, %s, specificity: %d", declr->type, data->name, specificity);
+    printf("DEBUG: PROPERTY_TRACE - Processing property: %s (type=%ld)\n", (const char*)data->name, declr->type);
     if (!lycon->view) { log_debug("missing view");  return LXB_STATUS_ERROR_NOT_EXISTS; }
     ViewSpan* span = (ViewSpan*)lycon->view;
     ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
@@ -1459,12 +1460,23 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY__CUSTOM: { // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
         // Handle CSS Grid properties as custom properties until lexbor supports them
+        printf("DEBUG: CUSTOM_PROPERTY - name='%.*s', value='%.*s'\n",
+               (int)custom->name.length, (const char*)custom->name.data,
+               (int)custom->value.length, (const char*)custom->value.data);
         log_debug("Processing custom property: %.*s = %.*s\n",
                (int)custom->name.length, (const char*)custom->name.data,
                (int)custom->value.length, (const char*)custom->value.data);
-        log_debug("Custom property: name='%.*s', value='%.*s'",
-               (int)custom->name.length, (const char*)custom->name.data,
-               (int)custom->value.length, (const char*)custom->value.data);
+        
+        // Check if this is x-justify-content with space-evenly value (Lexbor compatibility fallback)
+        if (custom->name.length == 17 && strncmp((const char*)custom->name.data, "x-justify-content", 17) == 0) {
+            if (custom->value.length == 12 && strncmp((const char*)custom->value.data, "space-evenly", 12) == 0) {
+                printf("DEBUG: X_JUSTIFY_CONTENT_WORKAROUND - Applied space-evenly via x-justify-content custom property\n");
+                if (block) {
+                    alloc_flex_prop(lycon, block);
+                    block->embed->flex->justify = LXB_CSS_VALUE_SPACE_EVENLY;
+                }
+            }
+        }
 
         // Handle aspect-ratio as custom property until lexbor supports it
         if (custom->name.length == 12 && strncmp((const char*)custom->name.data, "aspect-ratio", 12) == 0) {
@@ -1781,6 +1793,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
     }
     default:
+        printf("DEBUG: UNKNOWN_PROPERTY - type=%ld, name=%s\n", declr->type, (const char*)data->name);
         log_debug("unknown property: %d", declr->type);
         break;
     }
