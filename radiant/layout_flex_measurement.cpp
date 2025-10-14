@@ -12,21 +12,21 @@
 static MeasurementCacheEntry measurement_cache[1000]; // Fixed size for simplicity
 static int cache_count = 0;
 
-void store_in_measurement_cache(DomNode* node, int width, int height, 
+void store_in_measurement_cache(DomNode* node, int width, int height,
                                int content_width, int content_height) {
     if (cache_count >= 1000) {
         log_error("Measurement cache overflow");
         return;
     }
-    
+
     measurement_cache[cache_count].node = node;
     measurement_cache[cache_count].measured_width = width;
     measurement_cache[cache_count].measured_height = height;
     measurement_cache[cache_count].content_width = content_width;
     measurement_cache[cache_count].content_height = content_height;
     cache_count++;
-    
-    log_debug("Cached measurement for node %p: %dx%d (content: %dx%d)", 
+
+    log_debug("Cached measurement for node %p: %dx%d (content: %dx%d)",
               node, width, height, content_width, content_height);
 }
 
@@ -47,39 +47,39 @@ void clear_measurement_cache() {
 // Measure flex child content without applying final sizing
 void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
     if (!child) return;
-    
+
     log_debug("Measuring flex child content for %s", child->name());
-    
+
     // Check if already measured
     MeasurementCacheEntry* cached = get_from_measurement_cache(child);
     if (cached) {
         log_debug("Using cached measurement for %s", child->name());
         return;
     }
-    
+
     // Save current layout context
     LayoutContext saved_context = *lycon;
-    
+
     // Create temporary measurement context
     LayoutContext measure_context = *lycon;
     measure_context.block.width = -1;  // Unconstrained width for measurement
     measure_context.block.height = -1; // Unconstrained height for measurement
     measure_context.block.advance_y = 0;
     measure_context.block.max_width = 0;
-    
+
     // Set up measurement environment
     measure_context.line.left = 0;
     measure_context.line.right = 10000; // Large but finite for measurement
     measure_context.line.vertical_align = LXB_CSS_VALUE_BASELINE;
     line_init(&measure_context);
-    
+
     // Perform layout in measurement mode to determine intrinsic sizes
     ViewBlock* temp_view = nullptr;
     int measured_width = 0;
     int measured_height = 0;
     int content_width = 0;
     int content_height = 0;
-    
+
     if (child->is_text()) {
         // Measure text content
         measure_text_content(&measure_context, child, &measured_width, &measured_height);
@@ -95,29 +95,29 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
             temp_view->height = 50;  // Default measured height
             temp_view->content_width = 80;
             temp_view->content_height = 30;
-            
+
             // Extract measurement results
             measured_width = temp_view->width;
             measured_height = temp_view->height;
             content_width = temp_view->content_width;
             content_height = temp_view->content_height;
-            
-            log_debug("Measured element %s: %dx%d (content: %dx%d)", 
-                      child->name(), measured_width, measured_height, 
+
+            log_debug("Measured element %s: %dx%d (content: %dx%d)",
+                      child->name(), measured_width, measured_height,
                       content_width, content_height);
-            
+
             // Cleanup temporary view
             cleanup_temporary_view(temp_view);
         }
     }
-    
+
     // Store measurement results
-    store_in_measurement_cache(child, measured_width, measured_height, 
+    store_in_measurement_cache(child, measured_width, measured_height,
                               content_width, content_height);
-    
+
     // Restore original context
     *lycon = saved_context;
-    
+
     log_debug("Content measurement complete for %s", child->name());
 }
 
@@ -126,30 +126,38 @@ void measure_flex_child_content(LayoutContext* lycon, DomNode* child) {
 ViewBlock* create_temporary_view_for_measurement(LayoutContext* lycon, DomNode* child) {
     // Create temporary ViewBlock for measurement without affecting main layout
     ViewBlock* temp_view = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, child);
-    
+
+    // CRITICAL FIX: Try to get CSS dimensions for proper measurement
+    // For now, use a simpler approach - check if the element has CSS width/height styles
+
     // Initialize with unconstrained dimensions for intrinsic measurement
     temp_view->width = 0;
     temp_view->height = 0;
-    
+
+    // TODO: Apply CSS width and height if available
+    // This is a placeholder for proper CSS dimension application
+
+    log_debug("Created temp view for measurement: %fx%f", temp_view->width, temp_view->height);
+
     return temp_view;
 }
 
 void measure_text_content(LayoutContext* lycon, DomNode* text_node, int* width, int* height) {
     // Measure text content dimensions
     // This would involve font metrics and text measurement
-    
+
     const unsigned char* text_data = text_node->text_data();
     size_t text_length = text_data ? strlen((const char*)text_data) : 0;
-    
+
     if (text_data && text_length > 0) {
         // Calculate text dimensions based on current font
         int text_width = estimate_text_width(lycon, text_data, text_length);
         int text_height = lycon->font.face.style.font_size;
-        
+
         *width = text_width;
         *height = text_height;
-        
-        log_debug("Measured text: %dx%d (\"%.*s\")", 
+
+        log_debug("Measured text: %dx%d (\"%.*s\")",
                   text_width, text_height, (int)min(text_length, 20), text_data);
     } else {
         *width = 0;
@@ -161,7 +169,7 @@ int estimate_text_width(LayoutContext* lycon, const unsigned char* text, size_t 
     // Simple text width estimation
     // In a full implementation, this would use proper font metrics
     (void)text; // Suppress unused parameter warning
-    
+
     float avg_char_width = lycon->font.face.style.font_size * 0.6f; // Rough estimate
     return (int)(length * avg_char_width);
 }
@@ -178,21 +186,21 @@ void cleanup_temporary_view(ViewBlock* temp_view) {
 DisplayValue resolve_display_value(DomNode* child) {
     // Resolve display value for a DOM node
     DisplayValue display = {LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_FLOW};
-    
+
     if (child && child->is_element()) {
         lxb_html_element_t* elmt = child->as_element();
         display = resolve_display(elmt);
     }
-    
+
     return display;
 }
 
 bool requires_content_measurement(ViewBlock* flex_container) {
     // Determine if content measurement is needed
     // This could be based on flex properties, content types, etc.
-    
+
     if (!flex_container || !flex_container->node) return false;
-    
+
     // Check if any children have auto flex-basis or need intrinsic sizing
     DomNode* child = flex_container->node->first_child();
     while (child) {
@@ -202,52 +210,58 @@ bool requires_content_measurement(ViewBlock* flex_container) {
         }
         child = child->next_sibling();
     }
-    
+
     return false;
 }
 
 void measure_all_flex_children_content(LayoutContext* lycon, ViewBlock* flex_container) {
     if (!flex_container || !flex_container->node) return;
-    
+
     log_debug("Measuring all flex children content");
-    
+
     DomNode* child = flex_container->node->first_child();
     int child_count = 0;
     const int MAX_CHILDREN = 100; // Safety limit
-    
+
     while (child && child_count < MAX_CHILDREN) {
         measure_flex_child_content(lycon, child);
         child = child->next_sibling();
         child_count++;
     }
-    
+
     log_debug("Content measurement complete for %d children", child_count);
 }
 
 // Lightweight View creation for flex items with measured sizes
 void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
     if (!node) return;
-    
+
     log_debug("Layout flow node for flex: %s", node->name());
-    
+
     // Skip text nodes - flex layout only processes element nodes
     if (!node->is_element()) {
         log_debug("Skipping text node in flex container: %s", node->name());
         return;
     }
-    
-    // For now, use the normal layout_flow_node but apply measured sizes afterward
-    // TODO: Replace with lightweight View creation once we resolve the timeout issue
-    layout_flow_node(lycon, node);
-    
-    // Check if we have measured sizes for this node and apply them
+
+    // Create lightweight View for flex item element only (no child processing)
+    create_lightweight_flex_item_view(lycon, node);
+
+    // Apply measured sizes if available
     MeasurementCacheEntry* cached = get_from_measurement_cache(node);
+    log_debug("DEBUG: cached = %p", cached);
+    log_debug("DEBUG: lycon->prev_view = %p", lycon->prev_view);
+    if (lycon->prev_view) {
+        log_debug("DEBUG: lycon->prev_view->type = %d", lycon->prev_view->type);
+    }
+
     if (cached && lycon->prev_view && lycon->prev_view->type == RDT_VIEW_BLOCK) {
         ViewBlock* view = (ViewBlock*)lycon->prev_view;
+        log_debug("DEBUG: view->node = %p, node = %p", view->node, node);
         if (view->node == node) {
-            log_debug("Applying cached measurements to view: %dx%d", 
+            log_debug("Applying cached measurements to flex item: %dx%d",
                       cached->measured_width, cached->measured_height);
-            
+
             // Use measured dimensions as hints (don't override explicit sizes)
             if (view->width <= 0) {
                 view->width = cached->measured_width;
@@ -255,23 +269,28 @@ void layout_flow_node_for_flex(LayoutContext* lycon, DomNode* node) {
             if (view->height <= 0) {
                 view->height = cached->measured_height;
             }
+            log_debug("Applied measurements: view size now %dx%d", view->width, view->height);
+        } else {
+            log_debug("DEBUG: Node mismatch - cached for different node");
         }
+    } else {
+        log_debug("DEBUG: Failed measurement application - cached=%p, prev_view=%p", cached, lycon->prev_view);
     }
 }
 
 // Create a ViewBlock for a flex item without full content layout
 ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNode* node) {
     if (!node || !node->is_element()) return nullptr;
-    
+
     // Create ViewBlock for the flex item
     ViewBlock* view = (ViewBlock*)alloc_view(lycon, RDT_VIEW_BLOCK, node);
     if (!view) return nullptr;
-    
+
     // Initialize basic properties
     view->node = node;
     view->parent = lycon->parent;
     view->type = RDT_VIEW_BLOCK;
-    
+
     // Add to parent's child list
     if (lycon->parent) {
         if (!lycon->parent->child) {
@@ -284,10 +303,10 @@ ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNode* node) {
             last_child->next = (View*)view;
         }
     }
-    
+
     // Update layout context
     lycon->prev_view = (View*)view;
-    
+
     return view;
 }
 
@@ -295,21 +314,80 @@ ViewBlock* create_flex_item_view(LayoutContext* lycon, DomNode* node) {
 void setup_flex_item_properties(LayoutContext* lycon, ViewBlock* view, DomNode* node) {
     (void)lycon; // Suppress unused parameter warning
     if (!view || !node) return;
-    
+
     // Resolve CSS properties for the flex item
     lxb_html_element_t* element = node->as_element();
     if (!element) return;
-    
+
     // Get display properties
     view->display = resolve_display(element);
-    
+
     // Initialize position and sizing
     view->x = 0;
     view->y = 0;
-    
-    // Note: flex-specific properties (flex_grow, flex_shrink, flex_basis) and 
+
+    // Note: flex-specific properties (flex_grow, flex_shrink, flex_basis) and
     // box model properties (margin, padding, border) will be resolved by the flex algorithm
     // during CSS property resolution. We don't need to initialize them here.
-    
+
     log_debug("Set up basic properties for flex item: %s", node->name());
+}
+
+// Create View for flex item element only (no children processing)
+void create_flex_item_view_only(LayoutContext* lycon, DomNode* node) {
+    if (!node || !node->is_element()) return;
+
+    log_debug("Creating View for flex item element only: %s", node->name());
+
+    // Create ViewBlock directly using the existing create_flex_item_view function
+    // but ensure we don't process children
+    ViewBlock* view = create_flex_item_view(lycon, node);
+    if (!view) {
+        log_error("Failed to create View for flex item: %s", node->name());
+        return;
+    }
+
+    // Set up basic properties
+    setup_flex_item_properties(lycon, view, node);
+
+    log_debug("Created View for flex item element: %s", node->name());
+}
+
+// Create lightweight View for flex item element only (no child processing)
+void create_lightweight_flex_item_view(LayoutContext* lycon, DomNode* node) {
+    if (!node || !node->is_element()) return;
+
+    log_debug("Creating lightweight View for flex item: %s", node->name());
+
+    // Get display properties for the element
+    lxb_html_element_t* elmt = node->as_element();
+    DisplayValue display = resolve_display(elmt);
+
+    // Create ViewBlock directly (similar to layout_block but without child processing)
+    ViewBlock* block = (ViewBlock*)alloc_view(lycon,
+        display.outer == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
+        display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
+        display.inner == LXB_CSS_VALUE_TABLE ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK,
+        node);
+
+    if (!block) {
+        log_error("Failed to allocate View for flex item: %s", node->name());
+        return;
+    }
+
+    block->display = display;
+
+    // Set up basic CSS properties (minimal setup for flex items)
+    dom_node_resolve_style(node, lycon);
+
+    // Initialize dimensions (will be set by flex algorithm)
+    block->width = 0;
+    block->height = 0;
+    block->content_width = 0;
+    block->content_height = 0;
+
+    // CRITICAL FIX: Set prev_view so cached measurements can be applied
+    lycon->prev_view = (View*)block;
+
+    log_debug("Created lightweight View for flex item: %s (%p)", node->name(), block);
 }

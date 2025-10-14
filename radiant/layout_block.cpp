@@ -173,8 +173,8 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                     child_count++;
                 } while (measure_child);
 
-                // PASS 2: Create View objects with measured sizes
-                log_debug("FLEX MULTIPASS: Creating View objects with measured sizes");
+                // PASS 2: Create View objects with measured sizes (lightweight)
+                log_debug("FLEX MULTIPASS: Creating lightweight Views for flex items only");
                 child_count = 0;
                 do {
                     log_debug("Processing flex child %p (count: %d)", child, child_count);
@@ -182,7 +182,13 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                         log_error("ERROR: Too many flex children, breaking to prevent infinite loop");
                         break;
                     }
-                    layout_flow_node_for_flex(lycon, child);
+                    // Only create Views for element nodes, skip text nodes
+                    if (child->is_element()) {
+                        log_debug("Creating lightweight View for flex item: %s", child->name());
+                        layout_flow_node_for_flex(lycon, child);
+                    } else {
+                        log_debug("Skipping text node in PASS 2: %s", child->name());
+                    }
                     DomNode* next_child = child->next_sibling();
                     log_debug("Got next flex sibling %p", next_child);
                     child = next_child;
