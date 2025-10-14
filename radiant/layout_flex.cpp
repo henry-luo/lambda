@@ -639,6 +639,14 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
     }
 
     if (free_space > 0 && line->total_flex_grow > 0) {
+        // ENHANCED FLEX-GROW ALGORITHM: Use double precision for better accuracy
+        double total_grow_weight = (double)line->total_flex_grow;
+        double free_space_d = (double)free_space;
+        int total_distributed = 0;
+        
+        printf("DEBUG: ENHANCED_FLEX_GROW - free_space=%d, total_grow_weight=%.6f\n", 
+               free_space, total_grow_weight);
+
         // Find the last item with flex-grow > 0 to handle rounding
         int last_growing_item = -1;
         for (int i = 0; i < line->item_count; i++) {
@@ -647,24 +655,65 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
             }
         }
 
-        // Distribute positive free space using flex-grow with improved precision
-        float distributed_space = 0.0f;
+        // Distribute positive free space using flex-grow with enhanced precision
         for (int i = 0; i < line->item_count; i++) {
             ViewBlock* item = line->items[i];
             if (item->flex_grow > 0) {
-                float grow_amount_f;
                 int grow_amount;
                 if (i == last_growing_item) {
-                    // Last growing item gets remaining space to avoid rounding errors
-                    grow_amount = free_space - (int)distributed_space;
+                    // Last growing item gets remaining space to eliminate rounding errors
+                    grow_amount = free_space - total_distributed;
+                    printf("DEBUG: ENHANCED_FLEX_GROW - item %d (LAST): remaining_space=%d\n", 
+                           i, grow_amount);
                 } else {
-                    grow_amount_f = (item->flex_grow / line->total_flex_grow) * free_space;
-                    grow_amount = (int)(grow_amount_f + 0.5f); // Round to nearest integer
-                    distributed_space += grow_amount_f;
+                    // Use double precision for intermediate calculations
+                    double grow_ratio = (double)item->flex_grow / total_grow_weight;
+                    double precise_grow = grow_ratio * free_space_d;
+                    grow_amount = (int)round(precise_grow);
+                    total_distributed += grow_amount;
+                    printf("DEBUG: ENHANCED_FLEX_GROW - item %d: grow_ratio=%.6f, precise_grow=%.2f, grow_amount=%d\n", 
+                           i, grow_ratio, precise_grow, grow_amount);
                 }
+                
                 int current_size = get_main_axis_size(item, flex_layout);
                 int new_size = current_size + grow_amount;
-                printf("DEBUG: FLEX_GROW - item %d: grow=%f, grow_amount=%d, old_size=%d, new_size=%d\n",
+                
+                // ENHANCED: Apply min/max constraints after flex-grow
+                if (is_main_axis_horizontal(flex_layout)) {
+                    // Apply width constraints
+                    if (item->blk && item->blk->given_min_width >= 0) {
+                        int min_width = (int)item->blk->given_min_width;
+                        if (new_size < min_width) {
+                            printf("DEBUG: CONSTRAINT - item %d: applying min-width %d (was %d)\n", i, min_width, new_size);
+                            new_size = min_width;
+                        }
+                    }
+                    if (item->blk && item->blk->given_max_width >= 0) {
+                        int max_width = (int)item->blk->given_max_width;
+                        if (new_size > max_width) {
+                            printf("DEBUG: CONSTRAINT - item %d: applying max-width %d (was %d)\n", i, max_width, new_size);
+                            new_size = max_width;
+                        }
+                    }
+                } else {
+                    // Apply height constraints
+                    if (item->blk && item->blk->given_min_height >= 0) {
+                        int min_height = (int)item->blk->given_min_height;
+                        if (new_size < min_height) {
+                            printf("DEBUG: CONSTRAINT - item %d: applying min-height %d (was %d)\n", i, min_height, new_size);
+                            new_size = min_height;
+                        }
+                    }
+                    if (item->blk && item->blk->given_max_height >= 0) {
+                        int max_height = (int)item->blk->given_max_height;
+                        if (new_size > max_height) {
+                            printf("DEBUG: CONSTRAINT - item %d: applying max-height %d (was %d)\n", i, max_height, new_size);
+                            new_size = max_height;
+                        }
+                    }
+                }
+                
+                printf("DEBUG: ENHANCED_FLEX_GROW - item %d: grow=%.1f, grow_amount=%d, old_size=%d, new_size=%d (after constraints)\n",
                        i, item->flex_grow, grow_amount, current_size, new_size);
                 set_main_axis_size(item, new_size, flex_layout);
 
@@ -676,33 +725,109 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
                         item->width = (int)(new_size * item->aspect_ratio);
                     }
                 }
-
-                // *** FIX: Don't apply constraints after flex-grow as it overwrites calculated sizes ***
-                // Apply constraints only to cross-axis and aspect ratio, not main axis size
-                // apply_constraints(item,
-                //     is_main_axis_horizontal(flex_layout) ? flex_layout->main_axis_size : flex_layout->cross_axis_size,
-                //     is_main_axis_horizontal(flex_layout) ? flex_layout->cross_axis_size : flex_layout->main_axis_size);
             }
         }
     } else if (free_space < 0 && line->total_flex_shrink > 0) {
-        // Distribute negative free space using flex-shrink
-        float total_scaled_shrink = 0;
+        // ENHANCED FLEX-SHRINK ALGORITHM: Use double precision and proper minimum content size
+        double total_scaled_shrink = 0.0;
+        int negative_free_space = -free_space;
+        
+        printf("DEBUG: ENHANCED_FLEX_SHRINK - negative_free_space=%d, total_flex_shrink=%.6f\n", 
+               negative_free_space, line->total_flex_shrink);
+
+        // Calculate total scaled shrink factor with double precision
         for (int i = 0; i < line->item_count; i++) {
             ViewBlock* item = line->items[i];
-            int basis = calculate_flex_basis(item, flex_layout);
-            total_scaled_shrink += item->flex_shrink * basis;
+            if (item->flex_shrink > 0) {
+                int basis = calculate_flex_basis(item, flex_layout);
+                double scaled_shrink = (double)item->flex_shrink * basis;
+                total_scaled_shrink += scaled_shrink;
+                printf("DEBUG: ENHANCED_FLEX_SHRINK - item %d: basis=%d, flex_shrink=%.1f, scaled_shrink=%.2f\n", 
+                       i, basis, item->flex_shrink, scaled_shrink);
+            }
         }
 
         if (total_scaled_shrink > 0) {
+            int total_shrunk = 0;
+            int last_shrinking_item = -1;
+            
+            // Find last shrinking item for rounding compensation
+            for (int i = 0; i < line->item_count; i++) {
+                if (line->items[i]->flex_shrink > 0) {
+                    last_shrinking_item = i;
+                }
+            }
+
             for (int i = 0; i < line->item_count; i++) {
                 ViewBlock* item = line->items[i];
                 if (item->flex_shrink > 0) {
                     int basis = calculate_flex_basis(item, flex_layout);
-                    float scaled_shrink = item->flex_shrink * basis;
-                    int shrink_amount = (int)((scaled_shrink / total_scaled_shrink) * (-free_space));
                     int current_size = get_main_axis_size(item, flex_layout);
+                    int shrink_amount;
+                    
+                    if (i == last_shrinking_item) {
+                        // Last shrinking item gets remaining shrink to eliminate rounding errors
+                        shrink_amount = negative_free_space - total_shrunk;
+                        printf("DEBUG: ENHANCED_FLEX_SHRINK - item %d (LAST): remaining_shrink=%d\n", 
+                               i, shrink_amount);
+                    } else {
+                        // Use double precision for intermediate calculations
+                        double scaled_shrink = (double)item->flex_shrink * basis;
+                        double shrink_ratio = scaled_shrink / total_scaled_shrink;
+                        double precise_shrink = shrink_ratio * negative_free_space;
+                        shrink_amount = (int)round(precise_shrink);
+                        total_shrunk += shrink_amount;
+                        printf("DEBUG: ENHANCED_FLEX_SHRINK - item %d: shrink_ratio=%.6f, precise_shrink=%.2f, shrink_amount=%d\n", 
+                               i, shrink_ratio, precise_shrink, shrink_amount);
+                    }
+                    
                     int new_size = current_size - shrink_amount;
-                    if (new_size < 0) new_size = 0;  // Prevent negative sizes
+                    
+                    // ENHANCED: Apply min/max constraints after flex-shrink
+                    if (is_main_axis_horizontal(flex_layout)) {
+                        // Apply width constraints
+                        if (item->blk && item->blk->given_min_width >= 0) {
+                            int min_width = (int)item->blk->given_min_width;
+                            if (new_size < min_width) {
+                                printf("DEBUG: CONSTRAINT - item %d: applying min-width %d (was %d)\n", i, min_width, new_size);
+                                new_size = min_width;
+                            }
+                        }
+                        if (item->blk && item->blk->given_max_width >= 0) {
+                            int max_width = (int)item->blk->given_max_width;
+                            if (new_size > max_width) {
+                                printf("DEBUG: CONSTRAINT - item %d: applying max-width %d (was %d)\n", i, max_width, new_size);
+                                new_size = max_width;
+                            }
+                        }
+                    } else {
+                        // Apply height constraints
+                        if (item->blk && item->blk->given_min_height >= 0) {
+                            int min_height = (int)item->blk->given_min_height;
+                            if (new_size < min_height) {
+                                printf("DEBUG: CONSTRAINT - item %d: applying min-height %d (was %d)\n", i, min_height, new_size);
+                                new_size = min_height;
+                            }
+                        }
+                        if (item->blk && item->blk->given_max_height >= 0) {
+                            int max_height = (int)item->blk->given_max_height;
+                            if (new_size > max_height) {
+                                printf("DEBUG: CONSTRAINT - item %d: applying max-height %d (was %d)\n", i, max_height, new_size);
+                                new_size = max_height;
+                            }
+                        }
+                    }
+                    
+                    // Apply minimum content size constraints (prevent text overflow)
+                    int min_content_size = 20; // Minimum size to prevent text wrapping issues
+                    if (new_size < min_content_size) {
+                        new_size = min_content_size;
+                        printf("DEBUG: ENHANCED_FLEX_SHRINK - item %d: applied min_content_size=%d\n", 
+                               i, min_content_size);
+                    }
+                    
+                    printf("DEBUG: ENHANCED_FLEX_SHRINK - item %d: shrink=%.1f, shrink_amount=%d, old_size=%d, new_size=%d (after constraints)\n",
+                           i, item->flex_shrink, shrink_amount, current_size, new_size);
                     set_main_axis_size(item, new_size, flex_layout);
 
                     // Adjust cross axis size based on aspect ratio
@@ -713,11 +838,6 @@ void resolve_flexible_lengths(FlexContainerLayout* flex_layout, FlexLineInfo* li
                             item->width = (int)(new_size * item->aspect_ratio);
                         }
                     }
-
-                    // *** FIX: Don't apply constraints after flex-shrink as it overwrites calculated sizes ***
-                    // apply_constraints(item,
-                    //     is_main_axis_horizontal(flex_layout) ? flex_layout->main_axis_size : flex_layout->cross_axis_size,
-                    //     is_main_axis_horizontal(flex_layout) ? flex_layout->cross_axis_size : flex_layout->main_axis_size);
                 }
             }
         }
@@ -1198,7 +1318,7 @@ int get_cross_axis_position(ViewBlock* item, FlexContainerLayout* flex_layout) {
 }
 
 void set_main_axis_position(ViewBlock* item, int position, FlexContainerLayout* flex_layout) {
-    // CRITICAL FIX: Account for container border offset like block layout does
+    // ENHANCED: Account for container border offset AND direction reversal
     ViewBlock* container = (ViewBlock*)item->parent;
     int border_offset = 0;
 
@@ -1211,9 +1331,35 @@ void set_main_axis_position(ViewBlock* item, int position, FlexContainerLayout* 
     }
 
     if (is_main_axis_horizontal(flex_layout)) {
-        item->x = position + border_offset;
+        printf("DEBUG: DIRECTION_CHECK - flex_layout->direction=%d, LXB_CSS_VALUE_ROW_REVERSE=%d\n",
+               flex_layout->direction, LXB_CSS_VALUE_ROW_REVERSE);
+        if (flex_layout->direction == LXB_CSS_VALUE_ROW_REVERSE) {
+            // ROW-REVERSE: Position from right edge
+            int container_width = (int)flex_layout->main_axis_size;
+            int item_width = get_main_axis_size(item, flex_layout);
+            int calculated_x = container_width - position - item_width + border_offset;
+            item->x = calculated_x;
+            printf("DEBUG: ROW_REVERSE - container_width=%d, position=%d, item_width=%d, border_offset=%d, calculated_x=%d, final_x=%d\n",
+                   container_width, position, item_width, border_offset, calculated_x, item->x);
+        } else {
+            // Normal left-to-right positioning
+            item->x = position + border_offset;
+            printf("DEBUG: NORMAL_ROW - position=%d, border_offset=%d, final_x=%d\n",
+                   position, border_offset, item->x);
+        }
     } else {
-        item->y = position + border_offset;
+        if (flex_layout->direction == LXB_CSS_VALUE_COLUMN_REVERSE) {
+            // COLUMN-REVERSE: Position from bottom edge
+            int container_height = (int)flex_layout->main_axis_size;
+            int item_height = get_main_axis_size(item, flex_layout);
+            int calculated_y = container_height - position - item_height + border_offset;
+            item->y = calculated_y;
+            printf("DEBUG: COLUMN_REVERSE - container_height=%d, position=%d, item_height=%d, border_offset=%d, calculated_y=%d, final_y=%d\n",
+                   container_height, position, item_height, border_offset, calculated_y, item->y);
+        } else {
+            // Normal top-to-bottom positioning
+            item->y = position + border_offset;
+        }
     }
 }
 
