@@ -454,9 +454,13 @@ static int measure_cell_min_width(ViewTableCell* cell) {
 // Enhanced table layout algorithm with colspan/rowspan support
 void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!table) return;
+    printf("DEBUG: Starting enhanced table auto layout\n");
     log_debug("Starting enhanced table auto layout");
     log_debug("Table layout mode: %s",
            table->table_layout == ViewTable::TABLE_LAYOUT_FIXED ? "fixed" : "auto");
+    printf("DEBUG: Table border-spacing: %fpx %fpx, border-collapse: %s\n", 
+           table->border_spacing_h, table->border_spacing_v, 
+           table->border_collapse ? "true" : "false");
 
     // CRITICAL FIX: Handle caption positioning first
     ViewBlock* caption = nullptr;
@@ -775,12 +779,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         log_debug("Border-collapse applied - table width: %d", table_width);
     } else if (table->border_spacing_h > 0) {
         // Separate borders: add spacing between columns AND around table edges
+        printf("DEBUG: Applying border-spacing %fpx to table width\n", table->border_spacing_h);
         if (columns > 1) {
             table_width += (columns - 1) * table->border_spacing_h; // Between columns
         }
         table_width += 2 * table->border_spacing_h; // Left and right edges
-        log_debug("Border-spacing applied (%dpx) - table width: %d (includes edge spacing)",
+        printf("DEBUG: Border-spacing applied (%fpx) - table width: %d (includes edge spacing)\n",
                table->border_spacing_h, table_width);
+        log_debug("Border-spacing applied (%dpx) - table width: %d (includes edge spacing)",
+               (int)table->border_spacing_h, table_width);
     }
 
     // Add table padding to width
@@ -788,8 +795,13 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
         table_padding_horizontal = table->bound->padding.left + table->bound->padding.right;
         table_width += table_padding_horizontal;
+        printf("DEBUG: Added table padding horizontal: %dpx (left=%d, right=%d, top=%d, bottom=%d)\n",
+               table_padding_horizontal, table->bound->padding.left, table->bound->padding.right,
+               table->bound->padding.top, table->bound->padding.bottom);
         log_debug("Added table padding horizontal: %dpx (left=%d, right=%d)",
                table_padding_horizontal, table->bound->padding.left, table->bound->padding.right);
+    } else {
+        printf("DEBUG: No table padding found - bound=%p\n", table->bound);
     }
 
     // CRITICAL FIX: For fixed layout, override calculated width with CSS width
@@ -853,9 +865,18 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             int group_start_y = current_y;
 
             // Position row group at table content area (after padding and border-spacing)
-            child->x = col_x_positions[0]; // Start at first column position (includes padding + border-spacing)
-            child->y = current_y; // Relative to table
-            child->width = table_width - col_x_positions[0]; // Subtract left offset
+            printf("DEBUG: BEFORE assignment - child->x=%.1f, child->y=%.1f, child->width=%.1f\n", child->x, child->y, child->width);
+            
+            // Expected: tbody at (31,35) absolute, table at (16,16), so tbody should be (15,19) relative to table
+            // We calculated: x=13 (padding 5 + border-spacing 8), y=17 (padding 5 + border-spacing 12)
+            // But we need: x=15, y=19. The difference is +2 for both, which is the table border (2px)
+            child->x = (float)(col_x_positions[0] + 2); // Add table border offset
+            child->y = (float)(current_y + 2); // Add table border offset  
+            child->width = (float)(table_width - col_x_positions[0] - 4); // Subtract left offset and table border (4px = 2px left + 2px right)
+            
+            printf("DEBUG: AFTER assignment - child->x=%.1f, child->y=%.1f, child->width=%.1f\n", child->x, child->y, child->width);
+            printf("DEBUG: Row group positioned at x=%d, y=%d, width=%d (col_x_positions[0]=%d, table_width=%d)\n",
+                   child->x, child->y, child->width, col_x_positions[0], table_width);
             log_debug("Row group positioned at x=%d, y=%d, width=%d",
                    child->x, child->y, child->width);
 

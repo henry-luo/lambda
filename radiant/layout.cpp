@@ -261,6 +261,11 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
 
         // Debug: print display values for all elements to diagnose grid issue
         log_debug("DEBUG: Element %s - outer=%d, inner=%d", node->name(), display.outer, display.inner);
+        if (strcmp(node->name(), "tbody") == 0) {
+            printf("DEBUG: TBODY in layout_flow_node - outer=%d, inner=%d\n", display.outer, display.inner);
+            printf("DEBUG: TBODY current position before layout_block: x=%.1f, y=%.1f\n", 
+                   ((View*)lycon->view)->x, ((View*)lycon->view)->y);
+        }
         switch (display.outer) {
         case LXB_CSS_VALUE_BLOCK:  case LXB_CSS_VALUE_INLINE_BLOCK:
         case LXB_CSS_VALUE_LIST_ITEM:
