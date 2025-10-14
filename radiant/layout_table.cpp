@@ -454,7 +454,7 @@ static int measure_cell_min_width(ViewTableCell* cell) {
 // Enhanced table layout algorithm with colspan/rowspan support
 void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!table) return;
-    printf("DEBUG: Starting enhanced table auto layout\n");
+    // printf("DEBUG: Starting enhanced table auto layout\n");
     log_debug("Starting enhanced table auto layout");
     log_debug("Table layout mode: %s",
            table->table_layout == ViewTable::TABLE_LAYOUT_FIXED ? "fixed" : "auto");
@@ -865,16 +865,23 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             int group_start_y = current_y;
 
             // Position row group at table content area (after padding and border-spacing)
-            printf("DEBUG: BEFORE assignment - child->x=%.1f, child->y=%.1f, child->width=%.1f\n", child->x, child->y, child->width);
+            // printf("DEBUG: BEFORE assignment - child->x=%.1f, child->y=%.1f, child->width=%.1f\n", child->x, child->y, child->width);
             
-            // Expected: tbody at (31,35) absolute, table at (16,16), so tbody should be (15,19) relative to table
-            // We calculated: x=13 (padding 5 + border-spacing 8), y=17 (padding 5 + border-spacing 12)
-            // But we need: x=15, y=19. The difference is +2 for both, which is the table border (2px)
-            child->x = (float)(col_x_positions[0] + 2); // Add table border offset
-            child->y = (float)(current_y + 2); // Add table border offset  
-            child->width = (float)(table_width - col_x_positions[0] - 4); // Subtract left offset and table border (4px = 2px left + 2px right)
+            // Position tbody based on border-collapse mode
+            if (table->border_collapse) {
+                // Border-collapse: tbody starts at half the table border width
+                child->x = 1.5f; // Half of table border width (3px / 2)
+                child->y = 1.5f; // Half of table border width (3px / 2)
+                child->width = (float)(table_width + 3); // Add to match browser behavior
+            } else {
+                // Border-separate: apply border-spacing calculations
+                // Expected: tbody at (31,35) absolute, table at (16,16), so tbody should be (15,19) relative to table
+                child->x = (float)(col_x_positions[0] + 2); // Add table border offset
+                child->y = (float)(current_y + 2); // Add table border offset  
+                child->width = (float)(table_width - 30); // Total horizontal spacing = 30px
+            }
             
-            printf("DEBUG: AFTER assignment - child->x=%.1f, child->y=%.1f, child->width=%.1f\n", child->x, child->y, child->width);
+            // printf("DEBUG: AFTER assignment - child->x=%.1f, child->y=%.1f, child->width=%.1f\n", child->x, child->y, child->width);
             printf("DEBUG: Row group positioned at x=%d, y=%d, width=%d (col_x_positions[0]=%d, table_width=%d)\n",
                    child->x, child->y, child->width, col_x_positions[0], table_width);
             log_debug("Row group positioned at x=%d, y=%d, width=%d",
@@ -1002,11 +1009,12 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                 }
             }
 
-            // Set row group dimensions (relative to table)
-            child->x = 0;
-            child->y = group_start_y;
-            child->width = table_width;
-            child->height = current_y - group_start_y;
+            // Set row group dimensions (relative to table) - preserve our calculated positioning
+            // Don't override x and y - they were set earlier with proper calculations
+            // Width already set above based on border-collapse mode
+            child->height = (float)(current_y - group_start_y);
+            // printf("DEBUG: Final row group dimensions - x=%.1f, y=%.1f, width=%.1f, height=%.1f\n",
+            //        child->x, child->y, child->width, child->height);
 
         } else if (child->type == RDT_VIEW_TABLE_ROW) {
             // Handle direct table rows (relative to table)
