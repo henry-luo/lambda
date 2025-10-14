@@ -316,3 +316,38 @@ void layout_final_flex_content(LayoutContext* lycon, ViewBlock* flex_container) 
     }
     log_debug("Final flex content layout completed");
 }
+
+// Enhanced multi-pass flex layout
+void layout_flex_content(LayoutContext* lycon, ViewBlock* block) {
+    log_debug("Starting multi-pass flex layout for container %p", block);
+    FlexContainerLayout* pa_flex = lycon->flex_container;
+    init_flex_container(lycon, block);
+
+    // PASS 1: Create Views with measured sizes (combined measurement + View creation)
+    log_debug("FLEX MULTIPASS: Creating Views with measurements (single pass)");
+    int child_count = 0;
+    DomNode* measure_child = block->node->first_child();
+    do {
+        log_debug(">>> PASS1 TRACE: Processing flex child %p (count: %d)", measure_child, child_count);
+        // Only create Views for element nodes, skip text nodes
+        if (measure_child->is_element()) {
+            log_debug(">>> PASS1 TRACE: Creating View with measurement for %s (node=%p)", measure_child->name(), measure_child);
+            // CRITICAL: Keep measurement logic, then create View
+            measure_flex_child_content(lycon, measure_child);
+            layout_flow_node_for_flex(lycon, measure_child);
+            log_debug(">>> PASS1 TRACE: Completed View creation for %s", measure_child->name());
+        } else {
+            log_debug(">>> PASS1 TRACE: Skipping text node: %s", measure_child->name());
+        }
+        measure_child = measure_child->next_sibling();
+        child_count++;
+    } while (measure_child);
+
+    // PASS 2: Run enhanced flex algorithm with nested content support
+    log_debug("FLEX MULTIPASS: Running enhanced flex algorithm (final pass)");
+    layout_flex_container_with_nested_content(lycon, block);
+
+    // restore parent flex context
+    cleanup_flex_container(lycon);
+    lycon->flex_container = pa_flex;
+}
