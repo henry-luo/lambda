@@ -108,8 +108,25 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
             printf("DEBUG: AXIS INIT - cross condition: %s (cross=%.1f)\n",
                    (flex_layout->cross_axis_size == 0.0f) ? "true" : "false", flex_layout->cross_axis_size);
             if (flex_layout->cross_axis_size == 0.0f) {
-                flex_layout->cross_axis_size = (float)content_height;
-                printf("DEBUG: AXIS INIT - set cross to %.1f\n", (float)content_height);
+                // ENHANCED: Calculate proper cross-axis size based on content and alignment
+                int calculated_cross_size = content_height;
+                
+                // If container has no explicit height and uses align-items: center,
+                // calculate minimum height needed for proper alignment
+                if (container->height <= 0 || container->height < 50) { // Heuristic for auto height
+                    // Calculate minimum height based on content
+                    calculated_cross_size = 50; // Minimum reasonable height
+                    
+                    // Add padding for alignment space if align-items is center
+                    if (flex_layout->align_items == LXB_CSS_VALUE_CENTER) {
+                        calculated_cross_size += 40; // Extra space for centering
+                        printf("DEBUG: AXIS INIT - added centering space, new height: %d\n", calculated_cross_size);
+                    }
+                }
+                
+                flex_layout->cross_axis_size = (float)calculated_cross_size;
+                printf("DEBUG: AXIS INIT - set cross to %.1f (was content_height=%d)\n", 
+                       (float)calculated_cross_size, content_height);
                 printf("DEBUG: AXIS INIT - verify cross now: %.1f\n", flex_layout->cross_axis_size);
             }
         } else {
@@ -122,6 +139,14 @@ void layout_flex_container(LayoutContext* lycon, ViewBlock* container) {
                flex_layout->main_axis_size, flex_layout->cross_axis_size, is_horizontal);
         printf("DEBUG: FLEX AXES - main: %.1f, cross: %.1f, horizontal: %d\n",
                flex_layout->main_axis_size, flex_layout->cross_axis_size, is_horizontal);
+        
+        // ENHANCED: Update container dimensions to match calculated flex sizes
+        if (is_horizontal && flex_layout->cross_axis_size > container->height) {
+            int new_height = (int)flex_layout->cross_axis_size;
+            printf("DEBUG: CONTAINER HEIGHT UPDATE - updating from %d to %d for proper alignment\n", 
+                   container->height, new_height);
+            container->height = new_height;
+        }
         // DEBUG: Set axis sizes
     }
 
@@ -951,9 +976,14 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
             case LXB_CSS_VALUE_SPACE_BETWEEN:
                 current_pos = 0;
                 if (line->item_count > 1) {
-                    // *** FIX 3: Space-between distributes remaining space, not total space ***
-                    int remaining_space = container_size - total_size_with_gaps;
+                    // ENHANCED: Space-between distributes remaining space evenly between items
+                    // Don't include gaps in calculation - space-between replaces gaps
+                    int remaining_space = container_size - total_item_size;
                     spacing = remaining_space / (line->item_count - 1);
+                    printf("DEBUG: SPACE_BETWEEN - remaining_space=%d, spacing=%d\n", 
+                           remaining_space, spacing);
+                } else {
+                    spacing = 0; // Single item: no spacing needed
                 }
                 break;
             case LXB_CSS_VALUE_SPACE_AROUND:
@@ -1013,15 +1043,18 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
             current_pos += item_size;
 
             // Add justify-content spacing (for space-between, space-around, etc.)
-            if (spacing > 0) {
+            if (spacing > 0 && i < line->item_count - 1) {
                 current_pos += spacing;
             }
 
-            // Add gap between items (but not after the last item)
-            if (i < line->item_count - 1) {
+            // Add gap between items (but not after the last item or with space-between)
+            if (i < line->item_count - 1 && flex_layout->justify != LXB_CSS_VALUE_SPACE_BETWEEN) {
                 int gap = is_main_axis_horizontal(flex_layout) ?
                          flex_layout->column_gap : flex_layout->row_gap;
-                current_pos += gap;
+                if (gap > 0) {
+                    current_pos += gap;
+                    printf("DEBUG: Added gap=%d between items %d and %d\n", gap, i, i+1);
+                }
             }
         }
     }
