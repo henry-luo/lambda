@@ -20,6 +20,7 @@ void layout_flex_nodes(LayoutContext* lycon, lxb_dom_node_t *first_child);
 void resolve_inline_default(LayoutContext* lycon, ViewSpan* span);
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon);
 void layout_table(LayoutContext* lycon, DomNode* elmt, DisplayValue display);
+void layout_flex_content(LayoutContext* lycon, ViewBlock* block);
 
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display) {
     // finalize the block size
@@ -152,42 +153,9 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
                 if (!lycon->line.is_line_start) { line_break(lycon); }
             }
             else if (display.inner == LXB_CSS_VALUE_FLEX) {
-                // Enhanced multi-pass flex layout
-                FlexContainerLayout* pa_flex = lycon->flex_container;
-                init_flex_container(lycon, block);
-
-                // PASS 1: Create Views with measured sizes (combined measurement + View creation)
-                log_debug("FLEX MULTIPASS: Creating Views with measurements (single pass)");
-                int child_count = 0;
-                const int MAX_CHILDREN = 100; // Safety limit
-                DomNode* measure_child = child;
-                do {
-                    log_debug(">>> PASS1 TRACE: Processing flex child %p (count: %d)", measure_child, child_count);
-                    if (child_count >= MAX_CHILDREN) {
-                        log_error("ERROR: Too many flex children, breaking to prevent infinite loop");
-                        break;
-                    }
-                    // Only create Views for element nodes, skip text nodes
-                    if (measure_child->is_element()) {
-                        log_debug(">>> PASS1 TRACE: Creating View with measurement for %s (node=%p)", measure_child->name(), measure_child);
-                        // CRITICAL: Keep measurement logic, then create View
-                        measure_flex_child_content(lycon, measure_child);
-                        layout_flow_node_for_flex(lycon, measure_child);
-                        log_debug(">>> PASS1 TRACE: Completed View creation for %s", measure_child->name());
-                    } else {
-                        log_debug(">>> PASS1 TRACE: Skipping text node: %s", measure_child->name());
-                    }
-                    measure_child = measure_child->next_sibling();
-                    child_count++;
-                } while (measure_child);
-
-                // PASS 2: Run enhanced flex algorithm with nested content support
-                log_debug("FLEX MULTIPASS: Running enhanced flex algorithm (final pass)");
-                layout_flex_container_with_nested_content(lycon, block);
-
-                // restore parent flex context
-                cleanup_flex_container(lycon);
-                lycon->flex_container = pa_flex;
+                log_debug("Setting up flex container for %s", block->node->name());
+                layout_flex_content(lycon, block);
+                log_debug("Finished flex container layout for %s", block->node->name());
             }
             else if (display.inner == LXB_CSS_VALUE_GRID) {
                 log_debug("Setting up grid container for %s", block->node->name());
@@ -288,36 +256,10 @@ float adjust_border_padding_height(ViewBlock* block, float height) {
     return height;
 }
 
-void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
-    log_enter();
-    // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
-    log_debug("layout block %s (display.inner=%d)", elmt->name(), display.inner);
-
-    // Check if this block is a flex item
-    ViewBlock* parent_block = (ViewBlock*)lycon->parent;
-    bool is_flex_item = (parent_block && parent_block->display.inner == LXB_CSS_VALUE_FLEX);
-
-    if (display.outer != LXB_CSS_VALUE_INLINE_BLOCK) {
-        if (!lycon->line.is_line_start) { line_break(lycon); }
-    }
-    // save parent context
-    Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;
-    FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // -1 as unresolved
-    lycon->block.pa_block = &pa_block;  lycon->elmt = elmt;
-    lycon->block.width = lycon->block.height = 0;
-    lycon->block.given_width = -1;  lycon->block.given_height = -1;
-
-    uintptr_t elmt_name = elmt->tag();
-    ViewBlock* block = (ViewBlock*)alloc_view(lycon,
-        display.outer == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
-        display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
-        display.inner == LXB_CSS_VALUE_TABLE ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK,
-        elmt);
-    block->display = display;
-
-    // handle element default styles
+void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock* block) {
     float em_size = 0;  size_t value_len;  const lxb_char_t *value;
     resolve_inline_default(lycon, (ViewSpan*)block);
+    uintptr_t elmt_name = elmt->tag();
     switch (elmt_name) {
     case LXB_TAG_BODY: {
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
@@ -418,6 +360,37 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
         break;
     }
+}
+
+void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
+    log_enter();
+    // display: LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_INLINE_BLOCK, LXB_CSS_VALUE_LIST_ITEM
+    log_debug("layout block %s (display.inner=%d)", elmt->name(), display.inner);
+
+    // Check if this block is a flex item
+    ViewBlock* parent_block = (ViewBlock*)lycon->parent;
+    bool is_flex_item = (parent_block && parent_block->display.inner == LXB_CSS_VALUE_FLEX);
+
+    if (display.outer != LXB_CSS_VALUE_INLINE_BLOCK) {
+        if (!lycon->line.is_line_start) { line_break(lycon); }
+    }
+    // save parent context
+    Blockbox pa_block = lycon->block;  Linebox pa_line = lycon->line;
+    FontBox pa_font = lycon->font;  lycon->font.current_font_size = -1;  // -1 as unresolved
+    lycon->block.pa_block = &pa_block;  lycon->elmt = elmt;
+    lycon->block.width = lycon->block.height = 0;
+    lycon->block.given_width = -1;  lycon->block.given_height = -1;
+
+    uintptr_t elmt_name = elmt->tag();
+    ViewBlock* block = (ViewBlock*)alloc_view(lycon,
+        display.outer == LXB_CSS_VALUE_INLINE_BLOCK ? RDT_VIEW_INLINE_BLOCK :
+        display.outer == LXB_CSS_VALUE_LIST_ITEM ? RDT_VIEW_LIST_ITEM :
+        display.inner == LXB_CSS_VALUE_TABLE ? RDT_VIEW_TABLE : RDT_VIEW_BLOCK,
+        elmt);
+    block->display = display;
+
+    // handle element default styles
+    apply_element_default_style(lycon, elmt, block);
 
     // resolve CSS styles
     dom_node_resolve_style(elmt, lycon);
@@ -431,6 +404,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("block init position: %f, %f", block->x, block->y);
 
     if (elmt_name == LXB_TAG_IMG) { // load image intrinsic width and height
+        size_t value_len;  const lxb_char_t *value;
         value = elmt->get_attribute("src", &value_len);
         if (value && value_len) {
             StrBuf* src = strbuf_new_cap(value_len);
