@@ -1,5 +1,5 @@
 {
-  "test_file": "flex_006_justify_content.html",
+  "test_file": "flex_003_align_items.html",
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -358,8 +358,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "Test: Justify Content Space Evenly",
-                "length": 34,
+                "text": "Test: Align Items Center",
+                "length": 24,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -452,8 +452,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: flex;\n            justify-content: space-evenly;\n            x-justify-content: space-evenly; /* Fallback for Lexbor compatibility */\n            gap: 10px;\n            border: 2px solid #333;\n        }\n        .item {\n            width: 120px;\n            height: 100px;\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            position: relative;\n        }\n        .item:nth-child(1) { background-color: #ffcccc; }\n        .item:nth-child(2) { background-color: #ccffcc; }\n    ",
-                "length": 831,
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: flex;\n            align-items: center;\n            gap: 10px;\n            border: 2px solid #333;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            position: relative;\n        }\n        .item:nth-child(1) {\n            width: 150px;\n            height: 100px;\n            background-color: #ffcccc;\n        }\n        .item:nth-child(2) {\n            width: 150px;\n            height: 150px;\n            background-color: #ccffcc;\n        }\n    ",
+                "length": 829,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -581,8 +581,8 @@
               "borderLeftWidth": 2,
               "flexDirection": "row",
               "flexWrap": "nowrap",
-              "justifyContent": "space-evenly",
-              "alignItems": "normal",
+              "justifyContent": "normal",
+              "alignItems": "center",
               "alignContent": "normal",
               "flexGrow": 0,
               "flexShrink": 1,
@@ -617,13 +617,13 @@
                   "item"
                 ],
                 "layout": {
-                  "x": 50.66,
-                  "y": 2,
-                  "width": 120,
+                  "x": 2,
+                  "y": 100,
+                  "width": 150,
                   "height": 100,
-                  "contentWidth": 120,
+                  "contentWidth": 150,
                   "contentHeight": 100,
-                  "scrollWidth": 120,
+                  "scrollWidth": 150,
                   "scrollHeight": 100
                 },
                 "computed": {
@@ -678,12 +678,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 88.42,
-                          "y": 12,
+                          "x": 54.77,
+                          "y": 110,
                           "width": 44.47,
                           "height": 17,
-                          "right": 132.89,
-                          "bottom": 29,
+                          "right": 99.23,
+                          "bottom": 127,
                           "text": "Item 1",
                           "startIndex": 0,
                           "endIndex": 6
@@ -709,14 +709,14 @@
                   "item"
                 ],
                 "layout": {
-                  "x": 229.31,
-                  "y": 2,
-                  "width": 120,
-                  "height": 100,
-                  "contentWidth": 120,
-                  "contentHeight": 100,
-                  "scrollWidth": 120,
-                  "scrollHeight": 100
+                  "x": 162,
+                  "y": 75,
+                  "width": 150,
+                  "height": 150,
+                  "contentWidth": 150,
+                  "contentHeight": 150,
+                  "scrollWidth": 150,
+                  "scrollHeight": 150
                 },
                 "computed": {
                   "display": "block",
@@ -770,12 +770,12 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 267.08,
-                          "y": 12,
+                          "x": 214.77,
+                          "y": 85,
                           "width": 44.47,
                           "height": 17,
-                          "right": 311.55,
-                          "bottom": 29,
+                          "right": 259.23,
+                          "bottom": 102,
                           "text": "Item 2",
                           "startIndex": 0,
                           "endIndex": 6
@@ -856,8 +856,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n    {\n        \"test_id\": \"flex_006_justify_content\",\n        \"category\": \"basic\",\n        \"features\": [\"justify-content\", \"space-evenly\", \"main-axis\"],\n        \"description\": \"Items are evenly distributed along the main axis with equal spacing\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-flexbox-1/#justify-content-property\"],\n        \"complexity\": \"basic\"\n    }\n    ",
-                "length": 381,
+                "text": "\n    {\n        \"test_id\": \"flex_003_align_items\",\n        \"category\": \"basic\",\n        \"features\": [\"align-items\", \"center\", \"cross-axis\"],\n        \"description\": \"Items are aligned to the center of the container's cross axis\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-flexbox-1/#align-items-property\"],\n        \"complexity\": \"basic\"\n    }\n    ",
+                "length": 358,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -880,16 +880,16 @@
       "height": 800
     },
     "metadata": {
-      "test_id": "flex_006_justify_content",
+      "test_id": "flex_003_align_items",
       "category": "basic",
       "features": [
-        "justify-content",
-        "space-evenly",
-        "main-axis"
+        "align-items",
+        "center",
+        "cross-axis"
       ],
-      "description": "Items are evenly distributed along the main axis with equal spacing",
+      "description": "Items are aligned to the center of the container's cross axis",
       "spec_references": [
-        "https://www.w3.org/TR/css-flexbox-1/#justify-content-property"
+        "https://www.w3.org/TR/css-flexbox-1/#align-items-property"
       ],
       "complexity": "basic"
     }

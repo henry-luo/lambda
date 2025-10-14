@@ -1,5 +1,5 @@
 {
-  "test_file": "flex_006_justify_content.html",
+  "test_file": "flex_008_flex_basis.html",
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -358,8 +358,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "Test: Justify Content Space Evenly",
-                "length": 34,
+                "text": "Test: Flex Basis",
+                "length": 16,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -452,8 +452,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: flex;\n            justify-content: space-evenly;\n            x-justify-content: space-evenly; /* Fallback for Lexbor compatibility */\n            gap: 10px;\n            border: 2px solid #333;\n        }\n        .item {\n            width: 120px;\n            height: 100px;\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            position: relative;\n        }\n        .item:nth-child(1) { background-color: #ffcccc; }\n        .item:nth-child(2) { background-color: #ccffcc; }\n    ",
-                "length": 831,
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: flex;\n            gap: 10px;\n            border: 2px solid #333;\n        }\n        .item {\n            padding: 10px;\n            box-sizing: border-box;\n            text-align: center;\n            position: relative;\n        }\n        .item:nth-child(1) {\n            flex-basis: 150px;\n            height: 100px;\n            background-color: #ffcccc;\n        }\n        .item:nth-child(2) {\n            flex-basis: 200px;\n            height: 100px;\n            background-color: #ccffcc;\n        }\n    ",
+                "length": 806,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -581,7 +581,7 @@
               "borderLeftWidth": 2,
               "flexDirection": "row",
               "flexWrap": "nowrap",
-              "justifyContent": "space-evenly",
+              "justifyContent": "normal",
               "alignItems": "normal",
               "alignContent": "normal",
               "flexGrow": 0,
@@ -617,13 +617,13 @@
                   "item"
                 ],
                 "layout": {
-                  "x": 50.66,
+                  "x": 2,
                   "y": 2,
-                  "width": 120,
+                  "width": 150,
                   "height": 100,
-                  "contentWidth": 120,
+                  "contentWidth": 150,
                   "contentHeight": 100,
-                  "scrollWidth": 120,
+                  "scrollWidth": 150,
                   "scrollHeight": 100
                 },
                 "computed": {
@@ -648,7 +648,7 @@
                   "alignContent": "normal",
                   "flexGrow": 0,
                   "flexShrink": 1,
-                  "flexBasis": "auto",
+                  "flexBasis": "150px",
                   "alignSelf": "auto",
                   "order": 0,
                   "gap": "normal",
@@ -678,11 +678,11 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 88.42,
+                          "x": 54.77,
                           "y": 12,
                           "width": 44.47,
                           "height": 17,
-                          "right": 132.89,
+                          "right": 99.23,
                           "bottom": 29,
                           "text": "Item 1",
                           "startIndex": 0,
@@ -709,13 +709,13 @@
                   "item"
                 ],
                 "layout": {
-                  "x": 229.31,
+                  "x": 162,
                   "y": 2,
-                  "width": 120,
+                  "width": 200,
                   "height": 100,
-                  "contentWidth": 120,
+                  "contentWidth": 200,
                   "contentHeight": 100,
-                  "scrollWidth": 120,
+                  "scrollWidth": 200,
                   "scrollHeight": 100
                 },
                 "computed": {
@@ -740,7 +740,7 @@
                   "alignContent": "normal",
                   "flexGrow": 0,
                   "flexShrink": 1,
-                  "flexBasis": "auto",
+                  "flexBasis": "200px",
                   "alignSelf": "auto",
                   "order": 0,
                   "gap": "normal",
@@ -770,11 +770,11 @@
                     "layout": {
                       "rects": [
                         {
-                          "x": 267.08,
+                          "x": 239.77,
                           "y": 12,
                           "width": 44.47,
                           "height": 17,
-                          "right": 311.55,
+                          "right": 284.23,
                           "bottom": 29,
                           "text": "Item 2",
                           "startIndex": 0,
@@ -856,8 +856,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n    {\n        \"test_id\": \"flex_006_justify_content\",\n        \"category\": \"basic\",\n        \"features\": [\"justify-content\", \"space-evenly\", \"main-axis\"],\n        \"description\": \"Items are evenly distributed along the main axis with equal spacing\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-flexbox-1/#justify-content-property\"],\n        \"complexity\": \"basic\"\n    }\n    ",
-                "length": 381,
+                "text": "\n    {\n        \"test_id\": \"flex_008_flex_basis\",\n        \"category\": \"basic\",\n        \"features\": [\"flex-basis\", \"initial-size\", \"main-axis\"],\n        \"description\": \"Items have specific flex-basis values that determine their initial size\",\n        \"spec_references\": [\"https://www.w3.org/TR/css-flexbox-1/#flex-basis-property\"],\n        \"complexity\": \"basic\"\n    }\n    ",
+                "length": 370,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -880,16 +880,16 @@
       "height": 800
     },
     "metadata": {
-      "test_id": "flex_006_justify_content",
+      "test_id": "flex_008_flex_basis",
       "category": "basic",
       "features": [
-        "justify-content",
-        "space-evenly",
+        "flex-basis",
+        "initial-size",
         "main-axis"
       ],
-      "description": "Items are evenly distributed along the main axis with equal spacing",
+      "description": "Items have specific flex-basis values that determine their initial size",
       "spec_references": [
-        "https://www.w3.org/TR/css-flexbox-1/#justify-content-property"
+        "https://www.w3.org/TR/css-flexbox-1/#flex-basis-property"
       ],
       "complexity": "basic"
     }
