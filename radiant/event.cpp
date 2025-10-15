@@ -52,20 +52,20 @@ void target_text_view(EventContext* evcon, ViewText* text) {
             if (has_space) continue;  // skip consecutive spaces
             else has_space = true;
             // printf("target_space: %c, x:%f, end:%f\n", *p, x, x + evcon->font.space_width);
-            wd = evcon->font.face.space_width;
+            wd = evcon->font.style->space_width;
         }
         else {
             has_space = false;
             FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
-            if (FT_Load_Char(evcon->font.face.ft_face, *p, load_flags)) {
+            if (FT_Load_Char(evcon->font.ft_face, *p, load_flags)) {
                 log_error("Could not load character '%c'", *p);
                 continue;
             }
             // draw the glyph to the image buffer
             // printf("target_glyph: %c, x:%f, end:%f, y:%f\n", *p, x, x + (evcon->font.face->glyph->advance.x / 64.0), y);
-            wd = evcon->font.face.ft_face->glyph->advance.x / 64.0;  // changed from rdcon to evcon
+            wd = evcon->font.ft_face->glyph->advance.x / 64.0;  // changed from rdcon to evcon
         }
-        float char_right = x + wd;  float char_bottom = y + (evcon->font.face.ft_face->height / 64.0);
+        float char_right = x + wd;  float char_bottom = y + (evcon->font.ft_face->height / 64.0);
         MousePositionEvent* event = &evcon->event.mouse_position;
         if (x <= event->x && event->x < char_right && y <= event->y && event->y < char_bottom) {
             log_debug("hit on text: %c", *p);
@@ -81,7 +81,7 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
     View* view = view_span->child;
     if (view) {
         if (view_span->font) {
-            setup_font(evcon->ui_context, &evcon->font, pa_font.face.ft_face->family_name, view_span->font);
+            setup_font(evcon->ui_context, &evcon->font, pa_font.ft_face->family_name, view_span->font);
         }
         target_children(evcon, view);
     }
@@ -118,7 +118,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     view = block->child;
     if (view) {
         if (block->font) {
-            setup_font(evcon->ui_context, &evcon->font, pa_font.face.ft_face->family_name, block->font);
+            setup_font(evcon->ui_context, &evcon->font, pa_font.ft_face->family_name, block->font);
         }
         target_children(evcon, view);
         if (!evcon->target) { // check the block itself

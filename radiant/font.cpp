@@ -173,37 +173,39 @@ FT_GlyphSlot load_glyph(UiContext* uicon, FT_Face face, FontProp* font_style, ui
 }
 
 void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp *fprop) {
-    fbox->face.style = *fprop;
+    fbox->style = fprop;
     fbox->current_font_size = fprop->font_size;
 
     // Try @font-face descriptors first, then fall back to system fonts
     const char* family_to_load = fprop->family ? fprop->family : font_name;
     bool is_fallback = false;
-    fbox->face.ft_face = load_font_with_descriptors(uicon, family_to_load, fprop, &is_fallback);
+    fbox->ft_face = load_font_with_descriptors(uicon, family_to_load, fprop, &is_fallback);
 
     // If @font-face loading failed, fall back to original method
-    if (!fbox->face.ft_face) {
-        fbox->face.ft_face = load_styled_font(uicon, family_to_load, fprop);
+    if (!fbox->ft_face) {
+        fbox->ft_face = load_styled_font(uicon, family_to_load, fprop);
     }
-
-    if (!fbox->face.ft_face) {
+    if (!fbox->ft_face) {
         log_error("Failed to setup font: %s", font_name);
         return;
     }
 
     // Use sub-pixel rendering flags for better quality
     FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING;
-    if (FT_Load_Char(fbox->face.ft_face, ' ', load_flags)) {
+    if (FT_Load_Char(fbox->ft_face, ' ', load_flags)) {
         log_warn("Could not load space character for font: %s", font_name);
-        fbox->face.space_width = fbox->face.ft_face->size->metrics.y_ppem / 64.0;
+        fbox->style->space_width = fbox->ft_face->size->metrics.y_ppem / 64.0;
     } else {
         // Use float precision for space width calculation
-        fbox->face.space_width = fbox->face.ft_face->glyph->advance.x / 64.0;
+        fbox->style->space_width = fbox->ft_face->glyph->advance.x / 64.0;
     }
-    FT_Bool use_kerning = FT_HAS_KERNING(fbox->face.ft_face);
-    fbox->face.has_kerning = use_kerning;
+    FT_Bool use_kerning = FT_HAS_KERNING(fbox->ft_face);
+    fbox->style->has_kerning = use_kerning;
+    fbox->style->ascender = fbox->ft_face->size->metrics.ascender / 64.0;
+    fbox->style->descender = -fbox->ft_face->size->metrics.descender / 64.0;
+    fbox->style->font_height = fbox->ft_face->size->metrics.height / 64.0;
     log_debug("Font setup complete: %s (space_width: %.1f, has_kerning: %s)",
-        font_name, fbox->face.space_width, fbox->face.has_kerning ? "yes" : "no");
+        font_name, fbox->style->space_width, fbox->style->has_kerning ? "yes" : "no");
 }
 
 bool fontface_entry_free(const void *item, void *udata) {

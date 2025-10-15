@@ -58,7 +58,7 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
 }
 
 void render_text_view(RenderContext* rdcon, ViewText* text) {
-    if (!rdcon->font.face.ft_face) {
+    if (!rdcon->font.ft_face) {
         log_debug("font face is null");
         return;
     }
@@ -74,7 +74,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             if (!has_space) {  // add whitespace
                 has_space = true;
                 // printf("draw_space: %c, x:%f, end:%f\n", *p, x, x + rdcon->font.space_width);
-                x += rdcon->font.face.space_width;
+                x += rdcon->font.style->space_width;
             }
             // else  // skip consecutive spaces
             p++;
@@ -85,16 +85,16 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             if (bytes <= 0) { p++;  codepoint = 0; }
             else { p += bytes; }
 
-            FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.face.ft_face, &rdcon->font.face.style, codepoint, true);
+            FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.ft_face, rdcon->font.style, codepoint, true);
             if (!glyph) {
                 // draw a square box for missing glyph
-                Rect rect = {x + 1, y, (float)(rdcon->font.face.space_width - 2), (float)(rdcon->font.face.ft_face->size->metrics.y_ppem / 64.0)};
+                Rect rect = {x + 1, y, (float)(rdcon->font.style->space_width - 2), (float)(rdcon->font.ft_face->size->metrics.y_ppem / 64.0)};
                 fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip);
-                x += rdcon->font.face.space_width;
+                x += rdcon->font.style->space_width;
             }
             else {
                 // draw the glyph to the image buffer
-                float ascend = rdcon->font.face.ft_face->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
+                float ascend = rdcon->font.ft_face->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
                 draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap_left, y + ascend - glyph->bitmap_top);
                 // advance to the next position
                 x += glyph->advance.x / 64.0;
@@ -102,23 +102,23 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         }
     }
     // render text deco
-    if (rdcon->font.face.style.text_deco != LXB_CSS_VALUE_NONE) {
-        float thinkness = max(rdcon->font.face.ft_face->underline_thickness / 64.0, 1);
+    if (rdcon->font.style->text_deco != LXB_CSS_VALUE_NONE) {
+        float thinkness = max(rdcon->font.ft_face->underline_thickness / 64.0, 1);
         Rect rect;
         // todo: underline probably shoul draw below/before the text, and leaves a gap where text has descender
-        if (rdcon->font.face.style.text_deco == LXB_CSS_VALUE_UNDERLINE) {
+        if (rdcon->font.style->text_deco == LXB_CSS_VALUE_UNDERLINE) {
             // underline drawn at baseline, with a gap of thickness
             rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y +
-                (rdcon->font.face.ft_face->size->metrics.ascender / 64.0) + thinkness;
+                (rdcon->font.ft_face->size->metrics.ascender / 64.0) + thinkness;
         }
-        else if (rdcon->font.face.style.text_deco == LXB_CSS_VALUE_OVERLINE) {
+        else if (rdcon->font.style->text_deco == LXB_CSS_VALUE_OVERLINE) {
             rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y;
         }
-        else if (rdcon->font.face.style.text_deco == LXB_CSS_VALUE_LINE_THROUGH) {
+        else if (rdcon->font.style->text_deco == LXB_CSS_VALUE_LINE_THROUGH) {
             rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y + text->height / 2;
         }
         rect.width = text->width;  rect.height = thinkness; // corrected the variable name from h to height
-        printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font.face.style.text_deco,
+        printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font.style->text_deco,
             rect.x, rect.y, rect.width, rect.height); // corrected w to width
         fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
     }
@@ -207,7 +207,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         dom_wrapper.type = LEXBOR_NODE;
         dom_wrapper.lxb_node = (lxb_dom_node_t*)&lxb_node;
         text.node = &dom_wrapper;
-        float font_size = rdcon->font.face.ft_face->size->metrics.y_ppem / 64.0;
+        float font_size = rdcon->font.ft_face->size->metrics.y_ppem / 64.0;
         text.x = list_item->x - 20 * ratio;
         text.y = list_item->y;  // align at top the list item
         text.width = text.length * font_size;  text.height = font_size;
@@ -349,7 +349,7 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
 void render_block_view(RenderContext* rdcon, ViewBlock* block) {
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     if (block->font) {
-        setup_font(rdcon->ui_context, &rdcon->font, pa_font.face.ft_face->family_name, block->font);
+        setup_font(rdcon->ui_context, &rdcon->font, pa_font.ft_face->family_name, block->font);
     }
     // render bullet after setting the font, as bullet is rendered using the same font as the list item
     if (block->type == RDT_VIEW_LIST_ITEM) {
@@ -518,7 +518,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     View* view = view_span->child;
     if (view) {
         if (view_span->font) {
-            setup_font(rdcon->ui_context, &rdcon->font, pa_font.face.ft_face->family_name, view_span->font);
+            setup_font(rdcon->ui_context, &rdcon->font, pa_font.ft_face->family_name, view_span->font);
         }
         if (view_span->in_line && view_span->in_line->color.c) {
             rdcon->color = view_span->in_line->color;

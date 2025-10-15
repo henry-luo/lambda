@@ -103,7 +103,7 @@ void pdf_render_text(PdfRenderContext* ctx, const char* text, float x, float y, 
     // Get font height for proper baseline positioning
     float font_size = 16.0f;
     if (ctx->current_font) {
-        font_size = ctx->font.face.style.font_size ? ctx->font.face.style.font_size : 16.0f;
+        font_size = ctx->font.style->font_size ? ctx->font.style->font_size : 16.0f;
     }
 
     // Convert coordinates (PDF origin is bottom-left, we use top-left)
@@ -139,7 +139,7 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
 
     // Set font if available
     if (ctx->current_font) {
-        float font_size = ctx->font.face.style.font_size ? ctx->font.face.style.font_size : 16.0f;
+        float font_size = ctx->font.style->font_size ? ctx->font.style->font_size : 16.0f;
         HPDF_Page_SetFontAndSize(ctx->current_page, ctx->current_font, font_size);
     }
 
@@ -321,7 +321,7 @@ HPDF_Doc render_view_tree_to_pdf(UiContext* uicon, View* root_view, float width,
     ctx.block.y = 0;
 
     // Initialize font from default
-    ctx.font.face.style = uicon->default_font;
+    ctx.font.style = &uicon->default_font;
 
     // Set default font
     ctx.current_font = HPDF_GetFont(ctx.pdf_doc, "Helvetica", NULL);

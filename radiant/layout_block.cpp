@@ -289,13 +289,13 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
         em_size = 0.67;  // 0.67em
         HEADING_PROP:
         if (!block->font) { block->font = alloc_font_prop(lycon); }
-        block->font->font_size = lycon->font.face.style.font_size * em_size;
+        block->font->font_size = lycon->font.style->font_size * em_size;
         block->font->font_weight = LXB_CSS_VALUE_BOLD;
         break;
     case LXB_TAG_P:
         if (!block->bound) { block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp)); }
         // margin: 1em 0;
-        block->bound->margin.top = block->bound->margin.bottom = lycon->font.face.style.font_size;
+        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
         break;
     case LXB_TAG_UL:  case LXB_TAG_OL:
@@ -305,7 +305,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
             block->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
         }
         // margin: 1em 0; padding: 0 0 0 40px;
-        block->bound->margin.top = block->bound->margin.bottom = lycon->font.face.style.font_size;
+        block->bound->margin.top = block->bound->margin.bottom = lycon->font.style->font_size;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity = -1;
         block->bound->padding.left = 40 * lycon->ui_context->pixel_ratio;
         block->bound->padding.left_specificity = -1;
@@ -355,7 +355,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
             block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
         // 0.5em margin
         block->bound->margin.top = block->bound->margin.bottom =
-            block->bound->margin.left = block->bound->margin.right = 0.5 * lycon->font.face.style.font_size;
+            block->bound->margin.left = block->bound->margin.right = 0.5 * lycon->font.style->font_size;
         block->bound->margin.top_specificity = block->bound->margin.bottom_specificity =
             block->bound->margin.left_specificity = block->bound->margin.right_specificity = -1;
         break;
@@ -459,7 +459,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     log_debug("setting up block");
     if (block->font) {
-        setup_font(lycon->ui_context, &lycon->font, pa_font.face.ft_face->family_name, block->font);
+        setup_font(lycon->ui_context, &lycon->font, pa_font.ft_face->family_name, block->font);
     }
     // setup line height
     if (!block->blk || !block->blk->line_height || block->blk->line_height->type== LXB_CSS_VALUE_INHERIT) {  // inherit from parent
@@ -469,10 +469,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->block.line_height = calc_line_height(&lycon->font, block->blk->line_height);
     }
     // setup initial ascender and descender
-    lycon->block.init_ascender = lycon->font.face.ft_face->size->metrics.ascender / 64.0;
-    lycon->block.init_descender = (-lycon->font.face.ft_face->size->metrics.descender) / 64.0;
+    lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
+    lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
     lycon->block.lead_y = max(0.0f, (lycon->block.line_height - (lycon->block.init_ascender + lycon->block.init_descender)) / 2);
-    log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, lycon->font.face.ft_face->size->metrics.height / 64.0,
+    log_debug("block line_height: %f, font height: %f, asc+desc: %f, lead_y: %f", lycon->block.line_height, lycon->font.ft_face->size->metrics.height / 64.0,
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 
     // determine block width and height

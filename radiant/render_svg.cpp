@@ -82,36 +82,36 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     char color_str[32];
     svg_color_to_string(ctx->color, color_str);
 
-    float font_size = ctx->font.face.ft_face ? (ctx->font.face.ft_face->size->metrics.y_ppem / 64.0) : 16;
-    float baseline_y = y + (ctx->font.face.ft_face ? (ctx->font.face.ft_face->size->metrics.ascender / 64.0) : font_size * 0.8f);
+    float font_size = ctx->font.ft_face ? (ctx->font.ft_face->size->metrics.y_ppem / 64.0) : 16;
+    float baseline_y = y + (ctx->font.ft_face ? (ctx->font.ft_face->size->metrics.ascender / 64.0) : font_size * 0.8f);
 
     strbuf_append_format(ctx->svg_content,
         "<text x=\"%.2f\" y=\"%.2f\" font-family=\"%s\" font-size=\"%d\" fill=\"%s\"",
         x, baseline_y,
-        ctx->font.face.ft_face ? ctx->font.face.ft_face->family_name : "Arial",
+        ctx->font.ft_face ? ctx->font.ft_face->family_name : "Arial",
         font_size,
         color_str);
 
     // Add font style attributes
-    if (ctx->font.face.style.font_weight != LXB_CSS_VALUE_NORMAL && ctx->font.face.style.font_weight != 400) {
-        if (ctx->font.face.style.font_weight >= 700) {
+    if (ctx->font.style->font_weight != LXB_CSS_VALUE_NORMAL && ctx->font.style->font_weight != 400) {
+        if (ctx->font.style->font_weight >= 700) {
             strbuf_append_str(ctx->svg_content, " font-weight=\"bold\"");
         } else {
-            strbuf_append_format(ctx->svg_content, " font-weight=\"%d\"", ctx->font.face.style.font_weight);
+            strbuf_append_format(ctx->svg_content, " font-weight=\"%d\"", ctx->font.style->font_weight);
         }
     }
 
-    if (ctx->font.face.style.font_style == LXB_CSS_VALUE_ITALIC) {
+    if (ctx->font.style->font_style == LXB_CSS_VALUE_ITALIC) {
         strbuf_append_str(ctx->svg_content, " font-style=\"italic\"");
     }
 
     // Add text decoration
-    if (ctx->font.face.style.text_deco != LXB_CSS_VALUE_NONE) {
-        if (ctx->font.face.style.text_deco == LXB_CSS_VALUE_UNDERLINE) {
+    if (ctx->font.style->text_deco != LXB_CSS_VALUE_NONE) {
+        if (ctx->font.style->text_deco == LXB_CSS_VALUE_UNDERLINE) {
             strbuf_append_str(ctx->svg_content, " text-decoration=\"underline\"");
-        } else if (ctx->font.face.style.text_deco == LXB_CSS_VALUE_OVERLINE) {
+        } else if (ctx->font.style->text_deco == LXB_CSS_VALUE_OVERLINE) {
             strbuf_append_str(ctx->svg_content, " text-decoration=\"overline\"");
-        } else if (ctx->font.face.style.text_deco == LXB_CSS_VALUE_LINE_THROUGH) {
+        } else if (ctx->font.style->text_deco == LXB_CSS_VALUE_LINE_THROUGH) {
             strbuf_append_str(ctx->svg_content, " text-decoration=\"line-through\"");
         }
     }
@@ -359,8 +359,8 @@ char* render_view_tree_to_svg(UiContext* uicon, View* root_view, int width, int 
     ctx.block.x = 0; ctx.block.y = 0;
 
     // Initialize font from default
-    ctx.font.face.style = uicon->default_font;
-    ctx.font.face.ft_face = NULL; // Will be set if needed
+    ctx.font.style = &uicon->default_font;
+    ctx.font.ft_face = NULL; // Will be set if needed
 
     // SVG header
     strbuf_append_format(ctx.svg_content,

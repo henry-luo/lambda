@@ -44,7 +44,7 @@ float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_heigh
     if (line_height) {
         switch (line_height->type) {
         case LXB_CSS_VALUE__NUMBER:
-            height = line_height->u.number.num * fbox->face.style.font_size;
+            height = line_height->u.number.num * fbox->style->font_size;
             log_debug("property number: %lf", line_height->u.number.num);
             return height;
         case LXB_CSS_VALUE__LENGTH:
@@ -52,14 +52,14 @@ float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_heigh
             log_debug("property unit: %d", line_height->u.length.unit);
             return height;
         case LXB_CSS_VALUE__PERCENTAGE:
-            height = line_height->u.percentage.num * fbox->face.style.font_size;
+            height = line_height->u.percentage.num * fbox->style->font_size;
             log_debug("property percentage: %lf", line_height->u.percentage.num);
             return height;
         }
     }
     // default as 'normal'
-    FT_Pos asc  = fbox->face.ft_face->size->metrics.ascender;  // 26.6 fixed-point pixels
-    FT_Pos desc = fbox->face.ft_face->size->metrics.descender; // 26.6 fixed-point pixels
+    FT_Pos asc  = fbox->ft_face->size->metrics.ascender;  // 26.6 fixed-point pixels
+    FT_Pos desc = fbox->ft_face->size->metrics.descender; // 26.6 fixed-point pixels
     FT_Pos gap, lineHeight;
 
     // Chrome seems to just use font height, not asc+desc, for line-height
@@ -71,7 +71,7 @@ float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_heigh
     //     log_debug("Using scaled OS/2 sTypoLineGap: %f", gap / 64.0f);
     //     lineHeight = asc - desc + gap;
     // } else {
-        lineHeight = fbox->face.ft_face->size->metrics.height;
+        lineHeight = fbox->ft_face->size->metrics.height;
     // }
     log_debug("got lineHeight: %f", lineHeight / 64.0f);
     return lineHeight / 64.0f;
@@ -143,7 +143,7 @@ void span_vertical_align(LayoutContext* lycon, ViewSpan* span) {
     View* child = span->child;
     if (child) {
         if (span->font) {
-            setup_font(lycon->ui_context, &lycon->font, pa_font.face.ft_face->family_name, span->font);
+            setup_font(lycon->ui_context, &lycon->font, pa_font.ft_face->family_name, span->font);
         }
         if (span->in_line && span->in_line->vertical_align) {
             lycon->line.vertical_align = span->in_line->vertical_align;
@@ -164,7 +164,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         ViewText* text_view = (ViewText*)view;
         float item_height = text_view->height;
         // for text, baseline is at font.ascender
-        float item_baseline = (float)(text_view->font->ft_face->size->metrics.ascender / 64.0);
+        float item_baseline = text_view->font->ascender;
         float vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
         log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*s'",
@@ -263,7 +263,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
         log_debug("DEBUG: Element %s - outer=%d, inner=%d", node->name(), display.outer, display.inner);
         if (strcmp(node->name(), "tbody") == 0) {
             printf("DEBUG: TBODY in layout_flow_node - outer=%d, inner=%d\n", display.outer, display.inner);
-            printf("DEBUG: TBODY current position before layout_block: x=%.1f, y=%.1f\n", 
+            printf("DEBUG: TBODY current position before layout_block: x=%.1f, y=%.1f\n",
                    ((View*)lycon->view)->x, ((View*)lycon->view)->y);
         }
         switch (display.outer) {
@@ -387,7 +387,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
 
     // init context
     lycon->elmt = elmt;
-    lycon->font.face.style = lycon->ui_context->default_font;
+    lycon->font.style = &lycon->ui_context->default_font;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
     lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;
     // CRITICAL FIX: Let HTML element auto-size to content instead of forcing viewport height
@@ -415,14 +415,14 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     dom_node_resolve_style(elmt, lycon);
 
     if (html->font) {
-        setup_font(lycon->ui_context, &lycon->font, lycon->font.face.ft_face->family_name, html->font);
+        setup_font(lycon->ui_context, &lycon->font, lycon->font.ft_face->family_name, html->font);
     }
     if (lycon->root_font_size < 0) {
         lycon->root_font_size = lycon->font.current_font_size < 0 ?
             lycon->ui_context->default_font.font_size : lycon->font.current_font_size;
     }
-    lycon->block.init_ascender = lycon->font.face.ft_face->size->metrics.ascender / 64.0;
-    lycon->block.init_descender = (-lycon->font.face.ft_face->size->metrics.descender) / 64.0;
+    lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
+    lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
 
     // layout body content
     lxb_dom_element_t *lexbor_body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);
