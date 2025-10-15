@@ -323,27 +323,25 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
     if (block->blk) {
         strbuf_append_char_n(buf, ' ', indent);
         strbuf_append_str(buf, "{");
-        strbuf_append_format(buf, "line-hg:%f ", block->blk->line_height);
-        strbuf_append_format(buf, "txt-align:%s ", lxb_css_value_by_id(block->blk->text_align)->name);
-        strbuf_append_format(buf, "txt-indent:%f ", block->blk->text_indent);
-        strbuf_append_format(buf, "ls-sty-type:%d\n", block->blk->list_style_type);
+        strbuf_append_format(buf, "line-hg:%.1f, ", block->blk->line_height);
+        strbuf_append_format(buf, "txt-align:%s, ", lxb_css_value_by_id(block->blk->text_align)->name);
+        strbuf_append_format(buf, "txt-indent:%.1f, ", block->blk->text_indent);
+        strbuf_append_format(buf, "ls-sty-type:%d,\n", block->blk->list_style_type);
         strbuf_append_char_n(buf, ' ', indent);
-        strbuf_append_format(buf, "min-wd:%f ", block->blk->given_min_width);
-        strbuf_append_format(buf, "max-wd:%f ", block->blk->given_max_width);
-        strbuf_append_format(buf, "min-hg:%f ", block->blk->given_min_height);
-        strbuf_append_format(buf, "max-hg:%f ", block->blk->given_max_height);
-
-        // Add box-sizing and given dimensions debugging
-        if (block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
-            strbuf_append_str(buf, "box-sizing:border-box ");
-        } else {
-            strbuf_append_str(buf, "box-sizing:content-box ");
-        }
+        strbuf_append_format(buf, "min-wd:%.1f, ", block->blk->given_min_width);
+        strbuf_append_format(buf, "max-wd:%.1f, ", block->blk->given_max_width);
+        strbuf_append_format(buf, "min-hg:%.1f, ", block->blk->given_min_height);
+        strbuf_append_format(buf, "max-hg:%.1f, ", block->blk->given_max_height);
         if (block->blk->given_width >= 0) {
-            strbuf_append_format(buf, "given-wd:%f ", block->blk->given_width);
+            strbuf_append_format(buf, "given-wd:%.1f, ", block->blk->given_width);
         }
         if (block->blk->given_height >= 0) {
-            strbuf_append_format(buf, "given-hg:%f ", block->blk->given_height);
+            strbuf_append_format(buf, "given-hg:%.1f, ", block->blk->given_height);
+        }
+        if (block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
+            strbuf_append_str(buf, "box-sizing:border-box");
+        } else {
+            strbuf_append_str(buf, "box-sizing:content-box");
         }
         strbuf_append_str(buf, "}\n");
     }
