@@ -941,12 +941,15 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
     strbuf_append_str(buf, "\"content\": ");
 
     // Extract text content with better error handling (matching text output)
+    bool is_last_char_space = false;
     if (text->node) {
         unsigned char* text_data = text->node->text_data();
         if (text_data && text->length > 0) {
             char* content = (char*)malloc(text->length + 1);
             strncpy(content, (char*)(text_data + text->start_index), text->length);
             content[text->length] = '\0';
+            unsigned char last_char = content[text->length - 1];  // todo: this is not unicode-safe
+            is_last_char_space = is_space(last_char);
             append_json_string(buf, content);
             free(content);
         } else {
@@ -969,7 +972,16 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    print_bounds_json(text, buf, indent, pixel_ratio);
+    // reduce width if last char is space
+    // if (is_last_char_space && text->width >= 1) {
+    //     ViewText temp_text = *text;
+    //     temp_text.width -= text->font->space_width;  // reduce width of trailing space
+    //     log_debug("Adjusting text width for trailing space: original %.1f -> adjusted %.1f", (float)text->width, (float)temp_text.width);
+    //     print_bounds_json(&temp_text, buf, indent, pixel_ratio);
+    // } else {
+        print_bounds_json(text, buf, indent, pixel_ratio);
+    //}
+
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}\n");
 

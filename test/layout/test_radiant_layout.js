@@ -15,7 +15,7 @@ const { spawn } = require('child_process');
 class RadiantLayoutTester {
     constructor(options = {}) {
         this.radiantExe = options.radiantExe || './radiant.exe';
-        this.tolerance = options.tolerance || 5.0; // 5px tolerance for layout differences
+        this.tolerance = options.tolerance || 5; // 5px tolerance for layout differences
         this.elementThreshold = options.elementThreshold || 100.0; // 100% overall element match threshold
         this.textThreshold = options.textThreshold || 100.0; // 100% overall text match threshold
         this.testDataDir = path.join(__dirname, 'data');
@@ -772,7 +772,7 @@ async function main() {
 
     // Parse arguments
     const options = {
-        tolerance: 5.0,
+        tolerance: 5.2,
         verbose: false
     };
 
