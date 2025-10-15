@@ -19,14 +19,13 @@ void target_children(EventContext* evcon, View* view) {
         if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
             view->type == RDT_VIEW_LIST_ITEM) {
             ViewBlock* block = (ViewBlock*)view;
-            printf("target view block:%s, x:%d, y:%d, wd:%d, hg:%d\n",
-                block->node->name(),
-                block->x, block->y, block->width, block->height);
+            log_debug("target view block:%s, x:%d, y:%d, wd:%d, hg:%d",
+                block->node->name(), block->x, block->y, block->width, block->height);
             target_block_view(evcon, block);
         }
         else if (view->type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
-            printf("target view inline:%s\n", span->node->name());
+            log_debug("target view inline:%s", span->node->name());
             target_inline_view(evcon, span);
         }
         else if (view->type == RDT_VIEW_TEXT) {
@@ -34,7 +33,7 @@ void target_children(EventContext* evcon, View* view) {
             target_text_view(evcon, text);
         }
         else {
-            printf("Invalid target view type: %d\n", view->type);
+            log_debug("Invalid target view type: %d", view->type);
         }
         view = view->next;
     } while (view && !evcon->target);
@@ -44,7 +43,7 @@ void target_text_view(EventContext* evcon, ViewText* text) {
     float x = evcon->block.x + text->x, y = evcon->block.y + text->y;
     unsigned char* str = text->node->text_data();
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    printf("target text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d\n",
+    log_debug("target text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d",
         str, text->start_index, text->length, text->x, text->y, text->width, text->height, evcon->block.x);
     bool has_space = false;
     for (; p < end; p++) {
@@ -59,7 +58,7 @@ void target_text_view(EventContext* evcon, ViewText* text) {
             has_space = false;
             FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
             if (FT_Load_Char(evcon->font.face.ft_face, *p, load_flags)) {
-                fprintf(stderr, "Could not load character '%c'\n", *p);
+                log_error("Could not load character '%c'", *p);
                 continue;
             }
             // draw the glyph to the image buffer
@@ -69,7 +68,7 @@ void target_text_view(EventContext* evcon, ViewText* text) {
         float char_right = x + wd;  float char_bottom = y + (evcon->font.face.ft_face->height / 64.0);
         MousePositionEvent* event = &evcon->event.mouse_position;
         if (x <= event->x && event->x < char_right && y <= event->y && event->y < char_bottom) {
-            printf("hit on text: %c\n", *p);
+            log_debug("hit on text: %c", *p);
             evcon->target = (View*)text;  return;
         }
         // advance to the next position
@@ -87,13 +86,13 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
         target_children(evcon, view);
     }
     else {
-        printf("view has no child\n");
+        log_debug("view has no child");
     }
     evcon->font = pa_font;
 }
 
 void target_block_view(EventContext* evcon, ViewBlock* block) {
-    printf("targetting block: %s\n", block->node->name());
+    log_debug("targetting block: %s", block->node->name());
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
     evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
     MousePositionEvent* event = &evcon->event.mouse_position;
@@ -103,14 +102,14 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     if (block->scroller && block->scroller->pane) {
         hover = scrollpane_target(evcon, block);
         if (hover) {
-            printf("hit on block scroll: %s\n", block->node->name());
+            log_debug("hit on block scroll: %s", block->node->name());
             evcon->target = (View*)block;
             evcon->offset_x = event->x - evcon->block.x;
             evcon->offset_y = event->y - evcon->block.y;
             goto RETURN;
         }
         else {
-            printf("no hit on block scroll\n");
+            log_debug("no hit on block scroll");
         }
         // setup scrolling offset
         evcon->block.x -= block->scroller->pane->h_scroll_position;
@@ -126,7 +125,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             int x = evcon->block.x, y = evcon->block.y;
             if (x <= event->x && event->x < x + block->width &&
                 y <= event->y && event->y < y + block->height) {
-                printf("hit on block: %s\n", block->node->name());
+                log_debug("hit on block: %s", block->node->name());
                 evcon->target = (View*)block;
                 evcon->offset_x = event->x - evcon->block.x;
                 evcon->offset_y = event->y - evcon->block.y;
@@ -134,20 +133,20 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
         }
     }
     else {
-        printf("view has no child\n");
+        log_debug("view has no child");
     }
     RETURN:
     evcon->block = pa_block;  evcon->font = pa_font;
 }
 
 void target_html_doc(EventContext* evcon, View* root_view) {
-    printf("target root view\n");
+    log_debug("target root view");
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
-        printf("fire root view:\n");
+        log_debug("fire root view");
         target_block_view(evcon, (ViewBlock*)root_view);
     }
     else {
-        fprintf(stderr, "Invalid root view\n");
+        log_error("Invalid root view: %d", root_view ? root_view->type : -1);
     }
 }
 
@@ -161,30 +160,30 @@ ArrayList* build_view_stack(EventContext* evcon, View* view) {
 }
 
 void fire_text_event(EventContext* evcon, ViewText* text) {
-    printf("fire text event\n");
+    log_debug("fire text event");
     if (evcon->new_cursor == LXB_CSS_VALUE_AUTO) {
-        printf("set text cursor\n");
+        log_debug("set text cursor");
         evcon->new_cursor = LXB_CSS_VALUE_TEXT;
     }
     else {
-        printf("cursor already set as %d\n", evcon->new_cursor);
+        log_debug("cursor already set as %d", evcon->new_cursor);
     }
 }
 
 void fire_inline_event(EventContext* evcon, ViewSpan* span) {
-    printf("fire inline event\n");
+    log_debug("fire inline event");
     if (span->in_line && span->in_line->cursor) {
         evcon->new_cursor = span->in_line->cursor;
     }
     uintptr_t name = span->node->tag();
-    printf("fired at view %s\n", span->node->name());
+    log_debug("fired at view %s", span->node->name());
     if (name == LXB_TAG_A) {
-        printf("fired at anchor tag\n");
+        log_debug("fired at anchor tag");
         if (evcon->event.type == RDT_EVENT_MOUSE_DOWN) {
             log_debug("mouse down at anchor tag");
             const lxb_char_t *href = span->node->get_attribute("href");
             if (href) {
-                printf("got anchor href: %s\n", href);
+                log_debug("got anchor href: %s", href);
                 evcon->new_url = (char*)href;
                 const lxb_char_t *target = span->node->get_attribute("target");
                 if (target) {
@@ -200,7 +199,7 @@ void fire_inline_event(EventContext* evcon, ViewSpan* span) {
 }
 
 void fire_block_event(EventContext* evcon, ViewBlock* block) {
-    printf("fire block event\n");
+    log_debug("fire block event");
     // fire as inline view first
     fire_inline_event(evcon, (ViewSpan*)block);
     if (block->scroller && block->scroller->pane) {
@@ -224,7 +223,7 @@ void fire_block_event(EventContext* evcon, ViewBlock* block) {
 void fire_events(EventContext* evcon, ArrayList* target_list) {
     int stack_size = target_list->length;
     for (int i = 0; i < stack_size; i++) {
-        printf("fire event to view no. %d\n", i);
+        log_debug("fire event to view no. %d", i);
         View* view = (View*)target_list->data[i];
         if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
             view->type == RDT_VIEW_LIST_ITEM) {
@@ -237,7 +236,7 @@ void fire_events(EventContext* evcon, ArrayList* target_list) {
             fire_text_event(evcon, (ViewText*)view);
         }
         else {
-            printf("Invalid fire view type: %d\n", view->type);
+            log_error("Invalid fire view type: %d", view->type);
         }
     }
 }
@@ -363,9 +362,9 @@ void update_scroller(ViewBlock* block, int content_width, int content_height) {
 
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     EventContext evcon;
-    printf("Handling event %d\n", event->type);
+    log_debug("Handling event %d", event->type);
     if (!doc || !doc->dom_tree) {
-        printf("No document to handle event\n");
+        log_error("No document to handle event");
         return;
     }
     event_context_init(&evcon, uicon, event);
@@ -375,11 +374,11 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     switch (event->type) {
     case RDT_EVENT_MOUSE_MOVE: {
         MousePositionEvent* motion = &event->mouse_position;
-        printf("Mouse event at (%d, %d)\n", motion->x, motion->y);
+        log_debug("Mouse event at (%d, %d)", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
         target_html_doc(&evcon, doc->view_tree->root);
         if (evcon.target) {
-            printf("Target view found at position (%d, %d)\n", mouse_x, mouse_y);
+            log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
             // build stack of views from root to target view
             ArrayList* target_list = build_view_stack(&evcon, evcon.target);
 
@@ -387,12 +386,12 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
         } else {
-            printf("No target view found at position (%d, %d)\n", mouse_x, mouse_y);
+            log_debug("No target view found at position (%d, %d)", mouse_x, mouse_y);
         }
 
         // fire drag event if dragging in progress
         if (evcon.ui_context->document->state->is_dragging) {
-            printf("Dragging in progress\n");
+            log_debug("Dragging in progress");
             ArrayList* target_list = build_view_stack(&evcon, evcon.ui_context->document->state->drag_target);
             evcon.event.type = RDT_EVENT_MOUSE_DRAG;  // deliver as drag event
             fire_events(&evcon, target_list);
@@ -400,7 +399,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
         }
 
         if (uicon->mouse_state.cursor != evcon.new_cursor) {
-            printf("Change cursor to %d\n", evcon.new_cursor);
+            log_debug("Change cursor to %d", evcon.new_cursor);
             uicon->mouse_state.cursor = evcon.new_cursor; // update the mouse state
             int cursor_type;
             switch (evcon.new_cursor) {
@@ -421,11 +420,11 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     }
     case RDT_EVENT_MOUSE_DOWN:   case RDT_EVENT_MOUSE_UP: {
         MouseButtonEvent* btn_event = &event->mouse_button;
-        printf("Mouse button event (%d, %d)\n", btn_event->x, btn_event->y);
+        log_debug("Mouse button event (%d, %d)", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
         target_html_doc(&evcon, doc->view_tree->root);
         if (evcon.target) {
-            printf("Target view found at position (%d, %d)\n", mouse_x, mouse_y);
+            log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
             // build stack of views from root to target view
             ArrayList* target_list = build_view_stack(&evcon, evcon.target);
 
@@ -433,12 +432,12 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
         } else {
-            printf("No target view found at position (%d, %d)\n", mouse_x, mouse_y);
+            log_debug("No target view found at position (%d, %d)", mouse_x, mouse_y);
         }
 
         // fire drag event if dragging in progress
         if (evcon.event.type == RDT_EVENT_MOUSE_UP && evcon.ui_context->document->state->is_dragging) {
-            printf("mouse up in dragging\n");
+            log_debug("mouse up in dragging");
             ArrayList* target_list = build_view_stack(&evcon, evcon.ui_context->document->state->drag_target);
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
@@ -492,11 +491,11 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     }
     case RDT_EVENT_SCROLL: {
         ScrollEvent* scroll = &event->scroll;
-        printf("Mouse scroll event\n");
+        log_debug("Mouse scroll event");
         mouse_x = scroll->x;  mouse_y = scroll->y; // updated to use scroll's x and y
         target_html_doc(&evcon, doc->view_tree->root);
         if (evcon.target) {
-            printf("Target view found at position (%d, %d)\n", mouse_x, mouse_y);
+            log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
             // build stack of views from root to target view
             ArrayList* target_list = build_view_stack(&evcon, evcon.target);
 
@@ -504,19 +503,19 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
             fire_events(&evcon, target_list);
             arraylist_free(target_list);
         } else {
-            printf("No target view found at position (%d, %d)\n", mouse_x, mouse_y);
+            log_debug("No target view found at position (%d, %d)", mouse_x, mouse_y);
         }
         break;
     }
     default:
-        printf("Unhandled event type: %d\n", event->type);
+        log_debug("Unhandled event type: %d", event->type);
         break;
     }
     if (evcon.need_repaint) {
         uicon->document->state->is_dirty = true;
         to_repaint();
     }
-    printf("end of event %d\n", event->type);
+    log_debug("end of event %d", event->type);
 
     event_context_cleanup(&evcon);
 }

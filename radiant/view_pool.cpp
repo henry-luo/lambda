@@ -57,11 +57,11 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
         return NULL;
     }
     view->type = type;  view->node = node;  view->parent = lycon->parent;
-    
+
     // COMPREHENSIVE VIEW ALLOCATION TRACING
     const char* node_name = node ? node->name() : "NULL";
     const char* parent_name = lycon->parent ? "has_parent" : "no_parent";
-    log_debug("*** ALLOC_VIEW TRACE: Created view %p (type=%d) for node %s (%p), parent=%p (%s)", 
+    log_debug("*** ALLOC_VIEW TRACE: Created view %p (type=%d) for node %s (%p), parent=%p (%s)",
               view, type, node_name, node, lycon->parent, parent_name);
 
     // CRITICAL FIX: Initialize flex properties for ViewBlocks
@@ -532,16 +532,13 @@ void append_json_string(StrBuf* buf, const char* str) {
 
 void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio) {
     // calculate absolute position for view
-    float abs_x = view->x;
-    float abs_y = view->y;
+    float abs_x = view->x, abs_y = view->y;
     // Calculate absolute position by traversing up the parent chain
     ViewGroup* parent = view->parent;
-    while (parent && (parent->type == RDT_VIEW_BLOCK || parent->type == RDT_VIEW_INLINE_BLOCK ||
-        parent->type == RDT_VIEW_LIST_ITEM || parent->type == RDT_VIEW_TABLE ||
-        parent->type == RDT_VIEW_TABLE_ROW_GROUP || parent->type == RDT_VIEW_TABLE_ROW ||
-        parent->type == RDT_VIEW_TABLE_CELL)) {
-        abs_x += parent->x;
-        abs_y += parent->y;
+    while (parent) {
+        if (parent->is_block()) {
+            abs_x += parent->x;  abs_y += parent->y;
+        }
         parent = parent->parent;
     }
 
@@ -949,15 +946,6 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
             char* content = (char*)malloc(text->length + 1);
             strncpy(content, (char*)(text_data + text->start_index), text->length);
             content[text->length] = '\0';
-
-            // // Clean up whitespace for better readability
-            // char* cleaned = content;
-            // while (*cleaned && (*cleaned == ' ' || *cleaned == '\n' || *cleaned == '\t')) cleaned++;
-            // if (strlen(cleaned) > 0) {
-            //     append_json_string(buf, cleaned);
-            // } else {
-            //     append_json_string(buf, "[whitespace]");
-            // }
             append_json_string(buf, content);
             free(content);
         } else {
