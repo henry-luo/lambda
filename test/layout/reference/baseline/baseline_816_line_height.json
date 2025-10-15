@@ -611,8 +611,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        This paragraph has normal line height. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    ",
-                "length": 143,
+                "text": "\n        This paragraph has normal line height. ",
+                "length": 48,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
@@ -626,7 +626,24 @@
                       "text": "\n        This paragraph has normal line height. ",
                       "startIndex": 0,
                       "endIndex": 48
-                    },
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "Lorem ipsum dolor sit amet, consectetur ",
+                "length": 40,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 51,
                       "y": 69,
@@ -635,9 +652,26 @@
                       "right": 335.56,
                       "bottom": 86,
                       "text": "Lorem ipsum dolor sit amet, consectetur ",
-                      "startIndex": 48,
-                      "endIndex": 88
-                    },
+                      "startIndex": 0,
+                      "endIndex": 40
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "adipiscing elit. Sed do eiusmod tempor ",
+                "length": 39,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 51,
                       "y": 87,
@@ -646,9 +680,26 @@
                       "right": 325.83,
                       "bottom": 104,
                       "text": "adipiscing elit. Sed do eiusmod tempor ",
-                      "startIndex": 88,
-                      "endIndex": 127
-                    },
+                      "startIndex": 0,
+                      "endIndex": 39
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "incididunt.\n    ",
+                "length": 16,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 51,
                       "y": 105,
@@ -657,8 +708,8 @@
                       "right": 123.05,
                       "bottom": 122,
                       "text": "incididunt.\n    ",
-                      "startIndex": 127,
-                      "endIndex": 143
+                      "startIndex": 0,
+                      "endIndex": 16
                     }
                   ],
                   "hasLayout": true,
@@ -737,8 +788,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        This paragraph has line-height: 1.5. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    ",
-                "length": 141,
+                "text": "\n        This paragraph has line-height: 1.5. ",
+                "length": 46,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
@@ -752,7 +803,24 @@
                       "text": "\n        This paragraph has line-height: 1.5. ",
                       "startIndex": 0,
                       "endIndex": 46
-                    },
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "Lorem ipsum dolor sit amet, consectetur ",
+                "length": 40,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 51,
                       "y": 192,
@@ -761,9 +829,26 @@
                       "right": 335.56,
                       "bottom": 209,
                       "text": "Lorem ipsum dolor sit amet, consectetur ",
-                      "startIndex": 46,
-                      "endIndex": 86
-                    },
+                      "startIndex": 0,
+                      "endIndex": 40
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "adipiscing elit. Sed do eiusmod tempor ",
+                "length": 39,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 51,
                       "y": 216,
@@ -772,9 +857,26 @@
                       "right": 325.83,
                       "bottom": 233,
                       "text": "adipiscing elit. Sed do eiusmod tempor ",
-                      "startIndex": 86,
-                      "endIndex": 125
-                    },
+                      "startIndex": 0,
+                      "endIndex": 39
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "incididunt.\n    ",
+                "length": 16,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 51,
                       "y": 240,
@@ -783,8 +885,8 @@
                       "right": 123.05,
                       "bottom": 257,
                       "text": "incididunt.\n    ",
-                      "startIndex": 125,
-                      "endIndex": 141
+                      "startIndex": 0,
+                      "endIndex": 16
                     }
                   ],
                   "hasLayout": true,
@@ -863,8 +965,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        This paragraph has line-height: 24px. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    ",
-                "length": 142,
+                "text": "\n        This paragraph has line-height: 24px. ",
+                "length": 47,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
@@ -878,7 +980,24 @@
                       "text": "\n        This paragraph has line-height: 24px. ",
                       "startIndex": 0,
                       "endIndex": 47
-                    },
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "Lorem ipsum dolor sit amet, consectetur ",
+                "length": 40,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 51,
                       "y": 330,
@@ -887,9 +1006,26 @@
                       "right": 335.56,
                       "bottom": 347,
                       "text": "Lorem ipsum dolor sit amet, consectetur ",
-                      "startIndex": 47,
-                      "endIndex": 87
-                    },
+                      "startIndex": 0,
+                      "endIndex": 40
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "adipiscing elit. Sed do eiusmod tempor ",
+                "length": 39,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 51,
                       "y": 354,
@@ -898,9 +1034,26 @@
                       "right": 325.83,
                       "bottom": 371,
                       "text": "adipiscing elit. Sed do eiusmod tempor ",
-                      "startIndex": 87,
-                      "endIndex": 126
-                    },
+                      "startIndex": 0,
+                      "endIndex": 39
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "incididunt.\n    ",
+                "length": 16,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 51,
                       "y": 378,
@@ -909,8 +1062,8 @@
                       "right": 123.05,
                       "bottom": 395,
                       "text": "incididunt.\n    ",
-                      "startIndex": 126,
-                      "endIndex": 142
+                      "startIndex": 0,
+                      "endIndex": 16
                     }
                   ],
                   "hasLayout": true,
@@ -989,8 +1142,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n        This paragraph has line-height: 200%. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt.\n    ",
-                "length": 142,
+                "text": "\n        This paragraph has line-height: 200%. ",
+                "length": 47,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
@@ -1004,7 +1157,24 @@
                       "text": "\n        This paragraph has line-height: 200%. ",
                       "startIndex": 0,
                       "endIndex": 47
-                    },
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "Lorem ipsum dolor sit amet, consectetur ",
+                "length": 40,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 51,
                       "y": 480,
@@ -1013,9 +1183,26 @@
                       "right": 335.56,
                       "bottom": 497,
                       "text": "Lorem ipsum dolor sit amet, consectetur ",
-                      "startIndex": 47,
-                      "endIndex": 87
-                    },
+                      "startIndex": 0,
+                      "endIndex": 40
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "adipiscing elit. Sed do eiusmod tempor ",
+                "length": 39,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 51,
                       "y": 512,
@@ -1024,9 +1211,26 @@
                       "right": 325.83,
                       "bottom": 529,
                       "text": "adipiscing elit. Sed do eiusmod tempor ",
-                      "startIndex": 87,
-                      "endIndex": 126
-                    },
+                      "startIndex": 0,
+                      "endIndex": 39
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              },
+              {
+                "nodeType": "text",
+                "text": "incididunt.\n    ",
+                "length": 16,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
                     {
                       "x": 51,
                       "y": 544,
@@ -1035,8 +1239,8 @@
                       "right": 123.05,
                       "bottom": 561,
                       "text": "incididunt.\n    ",
-                      "startIndex": 126,
-                      "endIndex": 142
+                      "startIndex": 0,
+                      "endIndex": 16
                     }
                   ],
                   "hasLayout": true,

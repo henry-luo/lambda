@@ -1,6 +1,6 @@
 {
-  "total_files": 56,
-  "generated": 56,
+  "total_files": 57,
+  "generated": 57,
   "skipped": 0,
   "failed": 0,
   "success_rate": 100,
@@ -275,6 +275,14 @@
       "success": true,
       "was_skipped": false,
       "node_count": 26,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "baseline_816_line_height.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 36,
       "error": null
     },
     {

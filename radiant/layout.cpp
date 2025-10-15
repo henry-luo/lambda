@@ -52,7 +52,7 @@ float calc_line_height(FontBox *fbox, lxb_css_property_line_height_t *line_heigh
             log_debug("property unit: %d", line_height->u.length.unit);
             return height;
         case LXB_CSS_VALUE__PERCENTAGE:
-            height = line_height->u.percentage.num * fbox->style->font_size;
+            height = line_height->u.percentage.num / 100.0 * fbox->style->font_size;
             log_debug("property percentage: %lf", line_height->u.percentage.num);
             return height;
         }
