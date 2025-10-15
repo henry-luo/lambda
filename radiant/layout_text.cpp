@@ -94,11 +94,11 @@ LineFillStatus text_has_line_filled(LayoutContext* lycon, DomNode *text_node) {
         if (is_space(*str)) return RDT_LINE_NOT_FILLED;
         // Use sub-pixel rendering flags for better quality
         FT_Int32 load_flags = (FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING);
-        if (FT_Load_Char(lycon->font.face.ft_face, *str, load_flags)) {
+        if (FT_Load_Char(lycon->font.ft_face, *str, load_flags)) {
             fprintf(stderr, "Could not load character '%c'\n", *str);
             return RDT_LINE_NOT_FILLED;
         }
-        FT_GlyphSlot slot = lycon->font.face.ft_face->glyph;
+        FT_GlyphSlot slot = lycon->font.ft_face->glyph;
         // Use precise float calculation for advance
         text_width += (float)(slot->advance.x) / 64.0f;
         if (lycon->line.advance_x + text_width > lycon->line.right) { // line filled up
@@ -159,12 +159,12 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNode* n
 
 void output_text(LayoutContext* lycon, ViewText* text, int text_length, float text_width) {
     text->length = text_length;  assert(text->length > 0);
-    text->width = text_width;  text->font = &lycon->font.face;
+    text->width = text_width;  text->font = lycon->font.style;
     lycon->line.advance_x += text_width;
-    lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.face.ft_face->size->metrics.ascender / 64.0);
-    lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.face.ft_face->size->metrics.descender) / 64.0);
+    lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.ft_face->size->metrics.ascender / 64.0);
+    lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.ft_face->size->metrics.descender) / 64.0);
     log_debug("text view: '%.*s', x %f, y %f, width %f, height %f, font size %f",
-        text_length,text->node->text_data() + text->start_index, text->x, text->y, text->width, text->height, lycon->font.face.style.font_size);
+        text_length,text->node->text_data() + text->start_index, text->x, text->y, text->width, text->height, lycon->font.style->font_size);
 }
 
 void layout_text(LayoutContext* lycon, DomNode *text_node) {
@@ -185,7 +185,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     ViewText* text = (ViewText*)alloc_view(lycon, RDT_VIEW_TEXT, text_node);
     lycon->prev_view = (View*)text;
     text->start_index = str - text_start;
-    float font_height = lycon->font.face.ft_face->size->metrics.height / 64.0;
+    float font_height = lycon->font.ft_face->size->metrics.height / 64.0;
     text->x = lycon->line.advance_x;
     text->height = font_height;  // should text->height be lycon->block.line_height or font_height?
 
@@ -213,7 +213,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
         float wd;
         uint32_t codepoint = *str;
         if (is_space(codepoint)) {
-            wd = lycon->font.face.space_width;
+            wd = lycon->font.style->space_width;
         }
         else {
             if (codepoint >= 128) { // unicode char
@@ -224,16 +224,16 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
                 else { next_ch = str + bytes; }
             }
             else { next_ch = str + 1; }
-            FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.face.ft_face, &lycon->font.face.style, codepoint, false);
-            wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.face.space_width;
+            FT_GlyphSlot glyph = load_glyph(lycon->ui_context, lycon->font.ft_face, lycon->font.style, codepoint, false);
+            wd = glyph ? ((float)glyph->advance.x / 64.0) : lycon->font.style->space_width;
             // log_debug("char width: '%c', width %f", *str, wd);
         }
         // handle kerning
-        if (lycon->font.face.has_kerning) {
-            FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.face.ft_face, codepoint);
+        if (lycon->font.style->has_kerning) {
+            FT_UInt glyph_index = FT_Get_Char_Index(lycon->font.ft_face, codepoint);
             if (lycon->line.prev_glyph_index) {
                 FT_Vector kerning;
-                FT_Get_Kerning(lycon->font.face.ft_face, lycon->line.prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
+                FT_Get_Kerning(lycon->font.ft_face, lycon->line.prev_glyph_index, glyph_index, FT_KERNING_DEFAULT, &kerning);
                 if (kerning.x) {
                     if (str == text_start + text->start_index) {
                         text->x += ((float)kerning.x / 64.0);

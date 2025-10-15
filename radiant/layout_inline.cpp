@@ -108,7 +108,7 @@ void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     dom_node_resolve_style(elmt, lycon);
 
     if (span->font) {
-        setup_font(lycon->ui_context, &lycon->font, pa_font.face.ft_face->family_name, span->font);
+        setup_font(lycon->ui_context, &lycon->font, pa_font.ft_face->family_name, span->font);
     }
     if (span->in_line && span->in_line->vertical_align) {
         lycon->line.vertical_align = span->in_line->vertical_align;

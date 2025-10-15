@@ -246,7 +246,7 @@ void resolve_font_size(LayoutContext* lycon, const lxb_css_rule_declaration_t* d
         return;
     }
     // use font size from context
-    lycon->font.current_font_size = lycon->font.face.style.font_size;
+    lycon->font.current_font_size = lycon->font.style->font_size;
     log_debug("resolved font size");
 }
 
@@ -301,7 +301,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
             break;
         case LXB_CSS_UNIT_EM:
             if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
-                result = value->u.length.num * lycon->font.face.style.font_size;
+                result = value->u.length.num * lycon->font.style->font_size;
             } else {
                 if (lycon->font.current_font_size < 0) {
                     log_debug("resolving font size for em value");
@@ -317,7 +317,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
         break;
     case LXB_CSS_VALUE__PERCENTAGE:
         if (property == LXB_CSS_PROPERTY_FONT_SIZE) {
-            result = value->u.percentage.num * lycon->font.face.style.font_size / 100;
+            result = value->u.percentage.num * lycon->font.style->font_size / 100;
         } else {
             // todo: handle % based on property
             log_debug("Percentage calculation: %.2f%% of parent width %d = %.2f",
@@ -1464,7 +1464,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         log_debug("Processing custom property: %.*s = %.*s\n",
                (int)custom->name.length, (const char*)custom->name.data,
                (int)custom->value.length, (const char*)custom->value.data);
-        
+
         // Check if this is x-justify-content with space-evenly value (Lexbor compatibility fallback)
         if (custom->name.length == 17 && strncmp((const char*)custom->name.data, "x-justify-content", 17) == 0) {
             if (custom->value.length == 12 && strncmp((const char*)custom->value.data, "space-evenly", 12) == 0) {
@@ -1781,23 +1781,23 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 const char* q = value_str;
                 // Skip any leading whitespace
                 while (*q == ' ') q++;
-                
+
                 // Parse first value (horizontal spacing)
                 int h = atoi(q);
                 while (*q && *q != ' ' && *q != ';' && *q != 'p') q++;
                 if (*q == 'p' && *(q+1) == 'x') q += 2;
-                
+
                 // Parse second value (vertical spacing) if present
                 int v = -1;
                 while (*q == ' ') q++;
                 if (*q && *q != ';' && *q != '\0') {
                     v = atoi(q);
                 }
-                
+
                 // Apply CSS defaults: if only one value, use it for both dimensions
                 if (h < 0) h = 0;
                 if (v < 0) v = h;
-                
+
                 table->border_spacing_h = h;
                 table->border_spacing_v = v;
                 printf("DEBUG: Set border-spacing: %dpx %dpx\n", h, v);

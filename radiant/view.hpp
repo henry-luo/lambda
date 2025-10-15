@@ -131,7 +131,12 @@ typedef struct {
     PropValue font_style;
     PropValue font_weight;
     PropValue text_deco; // CSS text decoration
-    bool use_no_hinting;  // Enable no-hinting mode for sub-pixel precision
+    // derived font properties
+    float space_width;  // width of a space character of the current font
+    float ascender;    // font ascender in pixels
+    float descender;   // font descender in pixels
+    float font_height; // font height in pixels
+    bool has_kerning;  // whether the font has kerning
 } FontProp;
 
 typedef struct {
@@ -211,20 +216,15 @@ struct View {
     View* previous_view();
 };
 
-typedef struct FontFace {
-    FontProp style;  // current font style
-    FT_Face ft_face;  // FreeType font face
-    float space_width;  // width of a space character of the current font
-    bool has_kerning;  // whether the font has kerning
-} FontFace;
 typedef struct FontBox {
-    FontFace face;  // current font face
+    FontProp *style;  // current font style
+    FT_Face ft_face;  // FreeType font face
     int current_font_size;  // font size of current element
 } FontBox;
 
 typedef struct ViewText : View {
     int start_index, length;  // start and length of the text in the style node
-    FontFace *font;  // font for this text
+    FontProp *font;  // font for this text
 } ViewText;
 
 struct ViewGroup : View {

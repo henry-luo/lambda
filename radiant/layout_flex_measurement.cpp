@@ -166,7 +166,7 @@ void measure_text_content(LayoutContext* lycon, DomNode* text_node, int* width, 
     if (text_data && text_length > 0) {
         // Calculate text dimensions based on current font
         int text_width = estimate_text_width(lycon, text_data, text_length);
-        int text_height = lycon->font.face.style.font_size;
+        int text_height = lycon->font.style->font_size;
 
         *width = text_width;
         *height = text_height;
@@ -184,7 +184,7 @@ int estimate_text_width(LayoutContext* lycon, const unsigned char* text, size_t 
     // In a full implementation, this would use proper font metrics
     (void)text; // Suppress unused parameter warning
 
-    float avg_char_width = lycon->font.face.style.font_size * 0.6f; // Rough estimate
+    float avg_char_width = lycon->font.style->font_size * 0.6f; // Rough estimate
     return (int)(length * avg_char_width);
 }
 
