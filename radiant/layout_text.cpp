@@ -205,6 +205,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     else { // baseline
         text->y = lycon->block.advance_y + lycon->block.lead_y;
     }
+    log_debug("layout text: '%s', start_index %d, x: %f, y: %f, advance_y: %f, lead_y: %f",
+        str, text->start_index, text->x, text->y, lycon->block.advance_y, lycon->block.lead_y);
 
     // layout the text glyphs
     do {

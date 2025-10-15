@@ -59,14 +59,14 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
 
 void render_text_view(RenderContext* rdcon, ViewText* text) {
     if (!rdcon->font.face.ft_face) {
-        printf("font face is null\n");
+        log_debug("font face is null");
         return;
     }
     float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
     unsigned char* str = text->node->text_data();
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    // printf("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)\n",
-    //     str, text->start_index, text->length, text->x, text->y, text->width, text->height, x, y);
+    log_debug("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)",
+        str, text->start_index, text->length, text->x, text->y, text->width, text->height, x, y);
     bool has_space = false;  uint32_t codepoint;
     while (p < end) {
         // printf("draw character '%c'\n", *p);
@@ -558,7 +558,6 @@ void render_children(RenderContext* rdcon, View* view) {
         else if (view->type == RDT_VIEW_LIST_ITEM) {
             render_litem_view(rdcon, (ViewBlock*)view);
         }
-
         else if (view->type == RDT_VIEW_INLINE) {
             ViewSpan* span = (ViewSpan*)view;
             render_inline_view(rdcon, span);
