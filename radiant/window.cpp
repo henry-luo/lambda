@@ -12,7 +12,7 @@
 
 lxb_url_t* get_current_dir_lexbor();
 void render(GLFWwindow* window);
-void render_html_doc(UiContext* uicon, View* root_view, const char* output_file);
+void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);
 Document* load_html_doc(lxb_url_t *base, char* doc_filename);
 View* layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event);
@@ -34,8 +34,9 @@ Document* show_html_doc(lxb_url_t *base, char* doc_url) {
         layout_html_doc(&ui_context, doc, false);
     }
     // render html doc
-    if (doc && doc->view_tree && doc->view_tree->root) {
-        render_html_doc(&ui_context, doc->view_tree->root, NULL);
+    if (doc && doc->view_tree) {
+        log_debug("html version: %d", doc->view_tree->html_version);
+        render_html_doc(&ui_context, doc->view_tree, NULL);
     }
     return doc;
 }
@@ -47,8 +48,8 @@ void reflow_html_doc(Document* doc) {
     }
     layout_html_doc(&ui_context, doc, true);
     // render html doc
-    if (doc->view_tree->root) {
-        render_html_doc(&ui_context, doc->view_tree->root, NULL);
+    if (doc->view_tree) {
+        render_html_doc(&ui_context, doc->view_tree, NULL);
     }
 }
 
@@ -69,7 +70,7 @@ void character_callback(GLFWwindow* window, unsigned int codepoint) {
 
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
     RdtEvent event;
-    printf("Cursor position: (%.2f, %.2f)\n", xpos, ypos);
+    // printf("Cursor position: (%.2f, %.2f)\n", xpos, ypos);
     event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
     event.mouse_position.timestamp = glfwGetTime();
     event.mouse_position.x = xpos * ui_context.pixel_ratio;
@@ -190,7 +191,7 @@ void render(GLFWwindow* window) {
     }
     // rerender if the document is dirty
     if (ui_context.document->state && ui_context.document->state->is_dirty) {
-        render_html_doc(&ui_context, ui_context.document->view_tree->root, NULL);
+        render_html_doc(&ui_context, ui_context.document->view_tree, NULL);
     }
 
     // repaint to screen
