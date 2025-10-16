@@ -1,5 +1,5 @@
 {
-  "test_file": "background-001.html",
+  "test_file": "margin-shorthand-001.html",
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 108,
+      "height": 268,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -204,8 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "CSS Test: Background with color",
-                "length": 31,
+                "text": "CSS Test: Margin shorthand - One value application to all sides",
+                "length": 63,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                background: green;\n                height: 50px;\n                width: 260px;\n            }\n        ",
-                "length": 148,
+                "text": "\n            #div1\n            {\n                background: url('support/shorthand-001.png') -5px;\n                border: 5px green solid;\n                width: 200px;\n            }\n            div div\n            {\n                background: green;\n                margin: 20px;\n                height: 160px;\n            }\n        ",
+                "length": 337,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -727,11 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 84,
+          "height": 244,
           "contentWidth": 1184,
-          "contentHeight": 84,
+          "contentHeight": 244,
           "scrollWidth": 1184,
-          "scrollHeight": 84
+          "scrollHeight": 244
         },
         "computed": {
           "display": "block",
@@ -839,21 +839,21 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "Test passes if there is a green box below.",
-                "length": 42,
+                "text": "Test passes if there is a single solid green box below and there is no red visible on the page.",
+                "length": 95,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
-                      "width": 260.44,
+                      "width": 585.41,
                       "height": 18,
-                      "right": 268.44,
+                      "right": 593.41,
                       "bottom": 34,
-                      "text": "Test passes if there is a green box below.",
+                      "text": "Test passes if there is a single solid green box below and there is no red visible on the page.",
                       "startIndex": 0,
-                      "endIndex": 42
+                      "endIndex": 95
                     }
                   ],
                   "hasLayout": true,
@@ -869,19 +869,19 @@
           },
           {
             "nodeType": "element",
-            "selector": "div",
+            "selector": "#div1",
             "tag": "div",
-            "id": null,
+            "id": "div1",
             "classes": [],
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 260,
-              "height": 50,
-              "contentWidth": 260,
-              "contentHeight": 50,
-              "scrollWidth": 260,
-              "scrollHeight": 50
+              "width": 210,
+              "height": 210,
+              "contentWidth": 200,
+              "contentHeight": 200,
+              "scrollWidth": 200,
+              "scrollHeight": 200
             },
             "computed": {
               "display": "block",
@@ -894,10 +894,10 @@
               "paddingRight": 0,
               "paddingBottom": 0,
               "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
+              "borderTopWidth": 5,
+              "borderRightWidth": 5,
+              "borderBottomWidth": 5,
+              "borderLeftWidth": 5,
               "flexDirection": "row",
               "flexWrap": "nowrap",
               "justifyContent": "normal",
@@ -926,7 +926,69 @@
             },
             "depth": 2,
             "elementIndex": 3,
-            "children": []
+            "children": [
+              {
+                "nodeType": "element",
+                "selector": "div",
+                "tag": "div",
+                "id": null,
+                "classes": [],
+                "layout": {
+                  "x": 33,
+                  "y": 75,
+                  "width": 160,
+                  "height": 160,
+                  "contentWidth": 160,
+                  "contentHeight": 160,
+                  "scrollWidth": 160,
+                  "scrollHeight": 160
+                },
+                "computed": {
+                  "display": "block",
+                  "position": "static",
+                  "marginTop": 20,
+                  "marginRight": 20,
+                  "marginBottom": 20,
+                  "marginLeft": 20,
+                  "paddingTop": 0,
+                  "paddingRight": 0,
+                  "paddingBottom": 0,
+                  "paddingLeft": 0,
+                  "borderTopWidth": 0,
+                  "borderRightWidth": 0,
+                  "borderBottomWidth": 0,
+                  "borderLeftWidth": 0,
+                  "flexDirection": "row",
+                  "flexWrap": "nowrap",
+                  "justifyContent": "normal",
+                  "alignItems": "normal",
+                  "alignContent": "normal",
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "gap": "normal",
+                  "fontSize": 16,
+                  "lineHeight": "normal",
+                  "fontFamily": "Times",
+                  "fontWeight": "400",
+                  "textAlign": "start",
+                  "verticalAlign": "baseline",
+                  "top": "auto",
+                  "right": "auto",
+                  "bottom": "auto",
+                  "left": "auto",
+                  "zIndex": "auto",
+                  "overflow": "visible",
+                  "overflowX": "visible",
+                  "overflowY": "visible"
+                },
+                "depth": 3,
+                "elementIndex": 1,
+                "children": []
+              }
+            ]
           }
         ]
       }

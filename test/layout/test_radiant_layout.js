@@ -281,7 +281,7 @@ class RadiantLayoutTester {
                     console.log(`${indent()}   Browser: (${browserLayout.x}, ${browserLayout.y}, ${browserLayout.width}×${browserLayout.height})`);
                 }
 
-                const maxTolerance = Math.max(...layoutDiffs.map(d => d.tolerance));
+                const maxTolerance = Math.max(...layoutDiffs.map(d => d.tolerance)).toFixed(1);
                 if (exceedsToleranceCount === 0) {
                     results.matchedTextNodes++;
                     if (this.verbose) {

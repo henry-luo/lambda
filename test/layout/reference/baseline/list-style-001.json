@@ -1,5 +1,5 @@
 {
-  "test_file": "background-001.html",
+  "test_file": "list-style-001.html",
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 108,
+      "height": 152,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -204,8 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "CSS Test: Background with color",
-                "length": 31,
+                "text": "CSS Test: List-style with only list-style-type as a value",
+                "length": 57,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                background: green;\n                height: 50px;\n                width: 260px;\n            }\n        ",
-                "length": 148,
+                "text": "\n            body\n            {\n                margin: 50px;\n            }\n            div\n            {\n                display: list-item;\n                list-style: square;\n            }\n        ",
+                "length": 200,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -724,22 +724,22 @@
         "id": null,
         "classes": [],
         "layout": {
-          "x": 8,
-          "y": 16,
-          "width": 1184,
-          "height": 84,
-          "contentWidth": 1184,
-          "contentHeight": 84,
-          "scrollWidth": 1184,
-          "scrollHeight": 84
+          "x": 50,
+          "y": 50,
+          "width": 1100,
+          "height": 52,
+          "contentWidth": 1100,
+          "contentHeight": 52,
+          "scrollWidth": 1100,
+          "scrollHeight": 52
         },
         "computed": {
           "display": "block",
           "position": "static",
-          "marginTop": 8,
-          "marginRight": 8,
-          "marginBottom": 8,
-          "marginLeft": 8,
+          "marginTop": 50,
+          "marginRight": 50,
+          "marginBottom": 50,
+          "marginLeft": 50,
           "paddingTop": 0,
           "paddingRight": 0,
           "paddingBottom": 0,
@@ -784,13 +784,13 @@
             "id": null,
             "classes": [],
             "layout": {
-              "x": 8,
-              "y": 16,
-              "width": 1184,
+              "x": 50,
+              "y": 50,
+              "width": 1100,
               "height": 18,
-              "contentWidth": 1184,
+              "contentWidth": 1100,
               "contentHeight": 18,
-              "scrollWidth": 1184,
+              "scrollWidth": 1100,
               "scrollHeight": 18
             },
             "computed": {
@@ -839,21 +839,21 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "Test passes if there is a green box below.",
-                "length": 42,
+                "text": "Test passes if the text below has a square bullet.",
+                "length": 50,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
-                      "x": 8,
-                      "y": 16,
-                      "width": 260.44,
+                      "x": 50,
+                      "y": 50,
+                      "width": 306.36,
                       "height": 18,
-                      "right": 268.44,
-                      "bottom": 34,
-                      "text": "Test passes if there is a green box below.",
+                      "right": 356.36,
+                      "bottom": 68,
+                      "text": "Test passes if the text below has a square bullet.",
                       "startIndex": 0,
-                      "endIndex": 42
+                      "endIndex": 50
                     }
                   ],
                   "hasLayout": true,
@@ -874,17 +874,17 @@
             "id": null,
             "classes": [],
             "layout": {
-              "x": 8,
-              "y": 50,
-              "width": 260,
-              "height": 50,
-              "contentWidth": 260,
-              "contentHeight": 50,
-              "scrollWidth": 260,
-              "scrollHeight": 50
+              "x": 50,
+              "y": 84,
+              "width": 1100,
+              "height": 18,
+              "contentWidth": 1100,
+              "contentHeight": 18,
+              "scrollWidth": 1100,
+              "scrollHeight": 18
             },
             "computed": {
-              "display": "block",
+              "display": "list-item",
               "position": "static",
               "marginTop": 0,
               "marginRight": 0,
@@ -926,7 +926,36 @@
             },
             "depth": 2,
             "elementIndex": 3,
-            "children": []
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Filler text",
+                "length": 11,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 50,
+                      "y": 84,
+                      "width": 62.66,
+                      "height": 18,
+                      "right": 112.66,
+                      "bottom": 102,
+                      "text": "Filler text",
+                      "startIndex": 0,
+                      "endIndex": 11
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "list-item",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

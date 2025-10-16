@@ -1,5 +1,5 @@
 {
-  "test_file": "background-001.html",
+  "test_file": "overflow-001.html",
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 108,
+      "height": 160,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -204,8 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "CSS Test: Background with color",
-                "length": 31,
+                "text": "CSS Test: Overflow set to 'visible'",
+                "length": 35,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                background: green;\n                height: 50px;\n                width: 260px;\n            }\n        ",
-                "length": 148,
+                "text": "\n            #div1\n            {\n                border: 3px solid orange;\n                height: 1in;\n                overflow: visible;\n                width: 1in;\n            }\n            div div\n            {\n                background: blue;\n                height: 2in;\n                width: 2in;\n            }\n        ",
+                "length": 328,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -727,11 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 84,
+          "height": 136,
           "contentWidth": 1184,
-          "contentHeight": 84,
+          "contentHeight": 136,
           "scrollWidth": 1184,
-          "scrollHeight": 84
+          "scrollHeight": 229
         },
         "computed": {
           "display": "block",
@@ -839,21 +839,21 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "Test passes if there is a green box below.",
-                "length": 42,
+                "text": "Test passes if the blue background overlaps the orange border on the bottom and right sides.",
+                "length": 92,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
-                      "width": 260.44,
+                      "width": 588.95,
                       "height": 18,
-                      "right": 268.44,
+                      "right": 596.95,
                       "bottom": 34,
-                      "text": "Test passes if there is a green box below.",
+                      "text": "Test passes if the blue background overlaps the orange border on the bottom and right sides.",
                       "startIndex": 0,
-                      "endIndex": 42
+                      "endIndex": 92
                     }
                   ],
                   "hasLayout": true,
@@ -869,19 +869,19 @@
           },
           {
             "nodeType": "element",
-            "selector": "div",
+            "selector": "#div1",
             "tag": "div",
-            "id": null,
+            "id": "div1",
             "classes": [],
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 260,
-              "height": 50,
-              "contentWidth": 260,
-              "contentHeight": 50,
-              "scrollWidth": 260,
-              "scrollHeight": 50
+              "width": 102,
+              "height": 102,
+              "contentWidth": 96,
+              "contentHeight": 96,
+              "scrollWidth": 192,
+              "scrollHeight": 192
             },
             "computed": {
               "display": "block",
@@ -894,10 +894,10 @@
               "paddingRight": 0,
               "paddingBottom": 0,
               "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
+              "borderTopWidth": 3,
+              "borderRightWidth": 3,
+              "borderBottomWidth": 3,
+              "borderLeftWidth": 3,
               "flexDirection": "row",
               "flexWrap": "nowrap",
               "justifyContent": "normal",
@@ -926,7 +926,69 @@
             },
             "depth": 2,
             "elementIndex": 3,
-            "children": []
+            "children": [
+              {
+                "nodeType": "element",
+                "selector": "div",
+                "tag": "div",
+                "id": null,
+                "classes": [],
+                "layout": {
+                  "x": 11,
+                  "y": 53,
+                  "width": 192,
+                  "height": 192,
+                  "contentWidth": 192,
+                  "contentHeight": 192,
+                  "scrollWidth": 192,
+                  "scrollHeight": 192
+                },
+                "computed": {
+                  "display": "block",
+                  "position": "static",
+                  "marginTop": 0,
+                  "marginRight": 0,
+                  "marginBottom": 0,
+                  "marginLeft": 0,
+                  "paddingTop": 0,
+                  "paddingRight": 0,
+                  "paddingBottom": 0,
+                  "paddingLeft": 0,
+                  "borderTopWidth": 0,
+                  "borderRightWidth": 0,
+                  "borderBottomWidth": 0,
+                  "borderLeftWidth": 0,
+                  "flexDirection": "row",
+                  "flexWrap": "nowrap",
+                  "justifyContent": "normal",
+                  "alignItems": "normal",
+                  "alignContent": "normal",
+                  "flexGrow": 0,
+                  "flexShrink": 1,
+                  "flexBasis": "auto",
+                  "alignSelf": "auto",
+                  "order": 0,
+                  "gap": "normal",
+                  "fontSize": 16,
+                  "lineHeight": "normal",
+                  "fontFamily": "Times",
+                  "fontWeight": "400",
+                  "textAlign": "start",
+                  "verticalAlign": "baseline",
+                  "top": "auto",
+                  "right": "auto",
+                  "bottom": "auto",
+                  "left": "auto",
+                  "zIndex": "auto",
+                  "overflow": "visible",
+                  "overflowX": "visible",
+                  "overflowY": "visible"
+                },
+                "depth": 3,
+                "elementIndex": 1,
+                "children": []
+              }
+            ]
           }
         ]
       }

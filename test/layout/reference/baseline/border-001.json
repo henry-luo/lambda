@@ -1,5 +1,5 @@
 {
-  "test_file": "background-001.html",
+  "test_file": "border-001.html",
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 108,
+      "height": 202,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -204,8 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "CSS Test: Background with color",
-                "length": 31,
+                "text": "CSS Test: Border set using border-width",
+                "length": 39,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                background: green;\n                height: 50px;\n                width: 260px;\n            }\n        ",
-                "length": 148,
+                "text": "\n            div\n            {\n                border: 0.25in;\n                border-style: solid;\n                height: 1in;\n                width: 1in;\n            }\n        ",
+                "length": 179,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -727,11 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 84,
+          "height": 178,
           "contentWidth": 1184,
-          "contentHeight": 84,
+          "contentHeight": 178,
           "scrollWidth": 1184,
-          "scrollHeight": 84
+          "scrollHeight": 178
         },
         "computed": {
           "display": "block",
@@ -839,21 +839,21 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "Test passes if there is a green box below.",
-                "length": 42,
+                "text": "Test passes if there is a box below.",
+                "length": 36,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
-                      "width": 260.44,
+                      "width": 220.91,
                       "height": 18,
-                      "right": 268.44,
+                      "right": 228.91,
                       "bottom": 34,
-                      "text": "Test passes if there is a green box below.",
+                      "text": "Test passes if there is a box below.",
                       "startIndex": 0,
-                      "endIndex": 42
+                      "endIndex": 36
                     }
                   ],
                   "hasLayout": true,
@@ -876,12 +876,12 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 260,
-              "height": 50,
-              "contentWidth": 260,
-              "contentHeight": 50,
-              "scrollWidth": 260,
-              "scrollHeight": 50
+              "width": 144,
+              "height": 144,
+              "contentWidth": 96,
+              "contentHeight": 96,
+              "scrollWidth": 96,
+              "scrollHeight": 96
             },
             "computed": {
               "display": "block",
@@ -894,10 +894,10 @@
               "paddingRight": 0,
               "paddingBottom": 0,
               "paddingLeft": 0,
-              "borderTopWidth": 0,
-              "borderRightWidth": 0,
-              "borderBottomWidth": 0,
-              "borderLeftWidth": 0,
+              "borderTopWidth": 24,
+              "borderRightWidth": 24,
+              "borderBottomWidth": 24,
+              "borderLeftWidth": 24,
               "flexDirection": "row",
               "flexWrap": "nowrap",
               "justifyContent": "normal",

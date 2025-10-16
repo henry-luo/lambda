@@ -1,5 +1,5 @@
 {
-  "test_file": "background-001.html",
+  "test_file": "width-002.html",
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 108,
+      "height": 154,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -204,8 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "CSS Test: Background with color",
-                "length": 31,
+                "text": "CSS Test: Width using pixels with a minimum value, 0px",
+                "length": 54,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                background: green;\n                height: 50px;\n                width: 260px;\n            }\n        ",
-                "length": 148,
+                "text": "\n            div\n            {\n                background: red;\n                height: 1in;\n                width: 0px;\n            }\n        ",
+                "length": 143,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -727,11 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 84,
+          "height": 130,
           "contentWidth": 1184,
-          "contentHeight": 84,
+          "contentHeight": 130,
           "scrollWidth": 1184,
-          "scrollHeight": 84
+          "scrollHeight": 130
         },
         "computed": {
           "display": "block",
@@ -839,21 +839,21 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "Test passes if there is a green box below.",
-                "length": 42,
+                "text": "Test passes if there is no red visible on the page.",
+                "length": 51,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
-                      "width": 260.44,
+                      "width": 308.58,
                       "height": 18,
-                      "right": 268.44,
+                      "right": 316.58,
                       "bottom": 34,
-                      "text": "Test passes if there is a green box below.",
+                      "text": "Test passes if there is no red visible on the page.",
                       "startIndex": 0,
-                      "endIndex": 42
+                      "endIndex": 51
                     }
                   ],
                   "hasLayout": true,
@@ -876,12 +876,12 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 260,
-              "height": 50,
-              "contentWidth": 260,
-              "contentHeight": 50,
-              "scrollWidth": 260,
-              "scrollHeight": 50
+              "width": 0,
+              "height": 96,
+              "contentWidth": 0,
+              "contentHeight": 96,
+              "scrollWidth": 0,
+              "scrollHeight": 96
             },
             "computed": {
               "display": "block",

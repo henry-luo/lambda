@@ -1,5 +1,5 @@
 {
-  "test_file": "background-001.html",
+  "test_file": "font-size-001.html",
   "browser_info": {
     "viewport": {
       "width": 1200,
@@ -16,7 +16,7 @@
       "x": 0,
       "y": 0,
       "width": 1200,
-      "height": 108,
+      "height": 58,
       "contentWidth": 1200,
       "contentHeight": 800,
       "scrollWidth": 1200,
@@ -204,8 +204,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "CSS Test: Background with color",
-                "length": 31,
+                "text": "CSS Test: Font-size using pixels with a minimum minus one value, -1px",
+                "length": 69,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -683,8 +683,8 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "\n            div\n            {\n                background: green;\n                height: 50px;\n                width: 260px;\n            }\n        ",
-                "length": 148,
+                "text": "\n            div\n            {\n                color: red;\n                font-family: ahem;\n                font-size: 0;\n                font-size: -1px;\n            }\n        ",
+                "length": 179,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [],
@@ -727,11 +727,11 @@
           "x": 8,
           "y": 16,
           "width": 1184,
-          "height": 84,
+          "height": 34,
           "contentWidth": 1184,
-          "contentHeight": 84,
+          "contentHeight": 34,
           "scrollWidth": 1184,
-          "scrollHeight": 84
+          "scrollHeight": 34
         },
         "computed": {
           "display": "block",
@@ -839,21 +839,21 @@
             "children": [
               {
                 "nodeType": "text",
-                "text": "Test passes if there is a green box below.",
-                "length": 42,
+                "text": "Test passes if there is no red visible on the page.",
+                "length": 51,
                 "isWhitespaceOnly": false,
                 "layout": {
                   "rects": [
                     {
                       "x": 8,
                       "y": 16,
-                      "width": 260.44,
+                      "width": 308.58,
                       "height": 18,
-                      "right": 268.44,
+                      "right": 316.58,
                       "bottom": 34,
-                      "text": "Test passes if there is a green box below.",
+                      "text": "Test passes if there is no red visible on the page.",
                       "startIndex": 0,
-                      "endIndex": 42
+                      "endIndex": 51
                     }
                   ],
                   "hasLayout": true,
@@ -876,12 +876,12 @@
             "layout": {
               "x": 8,
               "y": 50,
-              "width": 260,
-              "height": 50,
-              "contentWidth": 260,
-              "contentHeight": 50,
-              "scrollWidth": 260,
-              "scrollHeight": 50
+              "width": 1184,
+              "height": 0,
+              "contentWidth": 1184,
+              "contentHeight": 0,
+              "scrollWidth": 1184,
+              "scrollHeight": 0
             },
             "computed": {
               "display": "block",
@@ -911,7 +911,7 @@
               "gap": "normal",
               "fontSize": 16,
               "lineHeight": "normal",
-              "fontFamily": "Times",
+              "fontFamily": "ahem",
               "fontWeight": "400",
               "textAlign": "start",
               "verticalAlign": "baseline",
@@ -926,7 +926,36 @@
             },
             "depth": 2,
             "elementIndex": 3,
-            "children": []
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Filler Text",
+                "length": 11,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 8,
+                      "y": 50,
+                      "width": 0,
+                      "height": 0,
+                      "right": 8,
+                      "bottom": 50,
+                      "text": "Filler Text",
+                      "startIndex": 0,
+                      "endIndex": 11
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

@@ -1,7 +1,7 @@
 {
-  "total_files": 57,
-  "generated": 0,
-  "skipped": 57,
+  "total_files": 70,
+  "generated": 12,
+  "skipped": 58,
   "failed": 0,
   "success_rate": 100,
   "browser_info": {
@@ -13,6 +13,14 @@
     }
   },
   "results": [
+    {
+      "category": "baseline",
+      "file": "background-001.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
     {
       "category": "baseline",
       "file": "baseline_001_empty_document.html",
@@ -303,6 +311,14 @@
     },
     {
       "category": "baseline",
+      "file": "border-001.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "baseline",
       "file": "box_001_basic_div.html",
       "success": true,
       "was_skipped": true,
@@ -363,6 +379,14 @@
       "success": true,
       "was_skipped": true,
       "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "display-001.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 27,
       "error": null
     },
     {
@@ -439,10 +463,42 @@
     },
     {
       "category": "baseline",
+      "file": "font-family-001.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "font-size-001.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "height-002.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "baseline",
       "file": "hr_001_basic_rules.html",
       "success": true,
       "was_skipped": true,
       "node_count": 31,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "list-style-001.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 24,
       "error": null
     },
     {
@@ -455,6 +511,38 @@
     },
     {
       "category": "baseline",
+      "file": "margin-shorthand-001.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "overflow-001.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "padding-shorthand-001.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "position-001.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 25,
+      "error": null
+    },
+    {
+      "category": "baseline",
       "file": "table_simple_002_border_collapse.html",
       "success": true,
       "was_skipped": true,
@@ -463,10 +551,26 @@
     },
     {
       "category": "baseline",
+      "file": "text-align-001.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 24,
+      "error": null
+    },
+    {
+      "category": "baseline",
       "file": "text_001_basic_typography.html",
       "success": true,
       "was_skipped": true,
       "node_count": 30,
+      "error": null
+    },
+    {
+      "category": "baseline",
+      "file": "width-002.html",
+      "success": true,
+      "was_skipped": false,
+      "node_count": 23,
       "error": null
     }
   ]
