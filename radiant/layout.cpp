@@ -605,5 +605,12 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
 
     log_debug("end layout");
     layout_cleanup(&lycon);
-    log_debug("end layout DOM tree: html version %d", doc->view_tree->html_version);
+
+    // Print view tree (existing functionality)
+    if (doc->view_tree && doc->view_tree->root) {
+        log_debug("DOM tree: html version %d", doc->view_tree->html_version);
+        print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, uicon->pixel_ratio);
+    } else {
+        log_debug("Warning: No view tree generated");
+    }
 }

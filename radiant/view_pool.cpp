@@ -49,11 +49,11 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
             view = (View*)pool_calloc(tree->pool, sizeof(View));
             break;
         default:
-            printf("Unknown view type\n");
+            log_debug("Unknown view type: %d", type);
             return NULL;
     }
     if (!view) {
-        printf("Failed to allocate view: %d\n", type);
+        log_debug("Failed to allocate view: %d", type);
         return NULL;
     }
     view->type = type;  view->node = node;  view->parent = lycon->parent;
@@ -116,7 +116,7 @@ void free_view(ViewTree* tree, View* view) {
         // free blk
         ViewSpan* span = (ViewSpan*)view;
         if (span->font) {
-            printf("free font prop\n");
+            log_debug("free font prop");
             // font-family could be static and not from the pool
             if (span->font->family) {
                 pool_free(tree->pool, span->font->family);
@@ -124,11 +124,11 @@ void free_view(ViewTree* tree, View* view) {
             pool_free(tree->pool, span->font);
         }
         if (span->in_line) {
-            printf("free inline prop\n");
+            log_debug("free inline prop");
             pool_free(tree->pool, span->in_line);
         }
         if (span->bound) {
-            printf("free bound prop\n");
+            log_debug("free bound prop");
             if (span->bound->background) pool_free(tree->pool, span->bound->background);
             if (span->bound->border) pool_free(tree->pool, span->bound->border);
             pool_free(tree->pool, span->bound);
@@ -139,11 +139,11 @@ void free_view(ViewTree* tree, View* view) {
             view->type == RDT_VIEW_TABLE_CELL) {
             ViewBlock* block = (ViewBlock*)view;
             if (block->blk) {
-                printf("free block prop\n");
+                log_debug("free block prop");
                 pool_free(tree->pool, block->blk);
             }
             if (block->scroller) {
-                printf("free scroller\n");
+                log_debug("free scroller");
                 if (block->scroller->pane) pool_free(tree->pool, block->scroller->pane);
                 pool_free(tree->pool, block->scroller);
             }
@@ -158,7 +158,7 @@ void* alloc_prop(LayoutContext* lycon, size_t size) {
         return prop;
     }
     else {
-        printf("Failed to allocate property\n");
+        log_debug("Failed to allocate property");
         return NULL;
     }
 }
@@ -697,53 +697,62 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
 
     // Display property
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"display\": ");
+
     const char* display = "block";
     if (block->type == RDT_VIEW_INLINE_BLOCK) display = "inline-block";
     else if (block->type == RDT_VIEW_LIST_ITEM) display = "list-item";
     else if (block->type == RDT_VIEW_TABLE) display = "table";
     // CRITICAL FIX: Check for flex container
     else if (block->embed && block->embed->flex) display = "flex";
-    append_json_string(buf, display);
+    strbuf_append_format(buf, "\"display\": \"%s\",\n", display);
 
-    // Add required CSS properties that test framework expects
-    strbuf_append_str(buf, ",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"position\": \"static\",\n");
+    // Add block properties if available
+    if (block->blk) {
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"line_height\": %.1f,\n", block->blk->line_height);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"text_align\": \"%s\",\n", lxb_css_value_by_id(block->blk->text_align)->name);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"text_indent\": %.1f,\n", block->blk->text_indent);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"min_width\": %.1f,\n", block->blk->given_min_width);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"max_width\": %.1f,\n", block->blk->given_max_width);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"min_height\": %.1f,\n", block->blk->given_min_height);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"max_height\": %.1f,\n", block->blk->given_max_height);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_format(buf, "\"box_sizing\": \"%s\",\n",
+            block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX ? "border-box" : "content-box");
 
-    // Box model properties (margins, padding, borders)
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"marginTop\": 0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"marginRight\": 0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"marginBottom\": 0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"marginLeft\": 0,\n");
+        if (block->blk->given_width >= 0) {
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"given_width\": %.1f,\n", block->blk->given_width);
+        }
+        if (block->blk->given_height >= 0) {
+            strbuf_append_char_n(buf, ' ', indent + 4);
+            strbuf_append_format(buf, "\"given_height\": %.1f,\n", block->blk->given_height);
+        }
+    }
 
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"paddingTop\": 0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"paddingRight\": 0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"paddingBottom\": 0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"paddingLeft\": 0,\n");
-
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"borderTopWidth\": 0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"borderRightWidth\": 0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"borderBottomWidth\": 0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"borderLeftWidth\": 0,\n");
+    // Add flex container properties if available
+    if (block->embed && block->embed->flex) {
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "\"flex_container\": {\n");
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"row_gap\": %.1f,\n", block->embed->flex->row_gap);
+        strbuf_append_char_n(buf, ' ', indent + 6);
+        strbuf_append_format(buf, "\"column_gap\": %.1f\n", block->embed->flex->column_gap);
+        // strbuf_append_char_n(buf, ' ', indent + 6);
+        // strbuf_append_format(buf, "\"main_axis_size\": %d,\n", block->embed->flex->main_axis_size);
+        // strbuf_append_char_n(buf, ' ', indent + 6);
+        // strbuf_append_format(buf, "\"cross_axis_size\": %d\n", block->embed->flex->cross_axis_size);
+        strbuf_append_char_n(buf, ' ', indent + 4);
+        strbuf_append_str(buf, "},\n");
+    }
 
     // Flexbox properties
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"flexDirection\": \"row\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-
     // Get actual flex-wrap value from the block
     const char* flex_wrap_str = "nowrap";  // default
     if (block->embed && block->embed->flex) {
@@ -760,111 +769,9 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
                 break;
         }
     }
-    strbuf_append_format(buf, "\"flexWrap\": \"%s\",\n", flex_wrap_str);
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"justifyContent\": \"normal\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"alignItems\": \"normal\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"alignContent\": \"normal\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"flexGrow\": 0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"flexShrink\": 1,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"flexBasis\": \"auto\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"alignSelf\": \"auto\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"order\": 0,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"gap\": \"normal\",\n");
+    strbuf_append_format(buf, "\"flexWrap\": \"%s\"\n", flex_wrap_str);
 
-    // Typography
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"fontSize\": 16,\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"lineHeight\": \"normal\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"fontFamily\": \"Times\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"fontWeight\": \"400\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"textAlign\": \"start\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"verticalAlign\": \"baseline\",\n");
-
-    // Positioning
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"top\": \"auto\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"right\": \"auto\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"bottom\": \"auto\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"left\": \"auto\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"zIndex\": \"auto\",\n");
-
-    // Overflow
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"overflow\": \"visible\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"overflowX\": \"visible\",\n");
-    strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_str(buf, "\"overflowY\": \"visible\"");
-
-    // Add block properties if available
-    if (block->blk) {
-        strbuf_append_str(buf, ",\n");
-        strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"line_height\": %.2f,\n", block->blk->line_height);
-        strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"text_align\": \"%s\",\n", lxb_css_value_by_id(block->blk->text_align)->name);
-        strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"text_indent\": %.2f,\n", block->blk->text_indent);
-        strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"min_width\": %.2f,\n", block->blk->given_min_width);
-        strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"max_width\": %.2f,\n", block->blk->given_max_width);
-        strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"min_height\": %.2f,\n", block->blk->given_min_height);
-        strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"max_height\": %.2f,\n", block->blk->given_max_height);
-        strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_format(buf, "\"box_sizing\": \"%s\"",
-            block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX ? "border-box" : "content-box");
-
-        if (block->blk->given_width >= 0) {
-            strbuf_append_str(buf, ",\n");
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_format(buf, "\"given_width\": %d", block->blk->given_width);
-        }
-        if (block->blk->given_height >= 0) {
-            strbuf_append_str(buf, ",\n");
-            strbuf_append_char_n(buf, ' ', indent + 4);
-            strbuf_append_format(buf, "\"given_height\": %d", block->blk->given_height);
-        }
-    }
-
-    // Add flex container properties if available
-    if (block->embed && block->embed->flex) {
-        strbuf_append_str(buf, ",\n");
-        strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_str(buf, "\"flex_container\": {\n");
-        strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"row_gap\": %d,\n", block->embed->flex->row_gap);
-        strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"column_gap\": %d\n", block->embed->flex->column_gap);
-        // strbuf_append_char_n(buf, ' ', indent + 6);
-        // strbuf_append_format(buf, "\"main_axis_size\": %d,\n", block->embed->flex->main_axis_size);
-        // strbuf_append_char_n(buf, ' ', indent + 6);
-        // strbuf_append_format(buf, "\"cross_axis_size\": %d\n", block->embed->flex->cross_axis_size);
-        strbuf_append_char_n(buf, ' ', indent + 4);
-        strbuf_append_str(buf, "}");
-    }
-
-    strbuf_append_str(buf, "\n");
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
 
@@ -1101,7 +1008,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 
     // CSS properties (enhanced to match text output)
     strbuf_append_char_n(buf, ' ', indent + 2);
-    strbuf_append_str(buf, "\"css_properties\": {\n");
+    strbuf_append_str(buf, "\"computed\": {\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_str(buf, "\"display\": \"inline\"");
 
@@ -1138,7 +1045,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
         strbuf_append_char_n(buf, ' ', indent + 6);
         strbuf_append_format(buf, "\"family\": \"%s\",\n", span->font->family);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"size\": %d,\n", span->font->font_size);
+        strbuf_append_format(buf, "\"size\": %f,\n", span->font->font_size);
         strbuf_append_char_n(buf, ' ', indent + 6);
         strbuf_append_format(buf, "\"style\": \"%s\",\n", lxb_css_value_by_id(span->font->font_style)->name);
         strbuf_append_char_n(buf, ' ', indent + 6);
@@ -1199,6 +1106,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
 
 // Main JSON generation function
 void print_view_tree_json(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio) {
+    log_debug("Generating JSON layout data...");
     StrBuf* json_buf = strbuf_new_cap(2048);
 
     strbuf_append_str(json_buf, "{\n");
@@ -1231,9 +1139,8 @@ void print_view_tree_json(ViewGroup* view_root, lxb_url_t* url, float pixel_rati
     char buf[1024];  const char *last_slash;
     last_slash = strrchr((const char*)url->path.str.data, '/');
     snprintf(buf, sizeof(buf), "./test_output/view_tree_%s.json", last_slash + 1);
+    log_debug("Writing JSON layout data to: %s", buf);
     write_string_to_file(buf, json_buf->str);
-    log_debug("JSON layout data written to: %s\n", buf);
     write_string_to_file("/tmp/view_tree.json", json_buf->str);
-    log_debug("JSON layout data written to: /tmp/view_tree.json\n");
     strbuf_free(json_buf);
 }

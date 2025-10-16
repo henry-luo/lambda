@@ -299,15 +299,7 @@ int run_layout(const char* html_file) {
     // Layout the document
     printf("Performing layout...\n");
     layout_html_doc(&ui_context, doc, false);
-
     printf("Layout completed successfully!\n\n");
-
-    // Print view tree (existing functionality)
-    if (doc->view_tree && doc->view_tree->root) {
-        print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, ui_context.pixel_ratio);
-    } else {
-        printf("Warning: No view tree generated\n");
-    }
 
     // Cleanup
     lxb_url_destroy(cwd);
