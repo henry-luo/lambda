@@ -69,13 +69,59 @@ class RadiantLayoutTester {
     /**
      * Load Radiant output from /tmp/view_tree.json
      */
-    async loadRadiantOutput() {
+    async loadRadiantOutput(testContext = '') {
         try {
             const content = await fs.readFile(this.outputFile, 'utf8');
             return JSON.parse(content);
         } catch (error) {
-            throw new Error(`Failed to load Radiant output: ${error.message}`);
+            if (error instanceof SyntaxError) {
+                // JSON parsing error - provide more detailed information
+                const contextInfo = testContext ? ` for test file: ${testContext}` : '';
+                const lines = error.message.includes('line') ? '' : this.getJsonErrorContext(content, error);
+                throw new Error(`Failed to parse Radiant JSON output${contextInfo}: ${error.message}${lines}`);
+            } else {
+                // File reading error
+                const contextInfo = testContext ? ` for test file: ${testContext}` : '';
+                throw new Error(`Failed to load Radiant output${contextInfo}: ${error.message}`);
+            }
         }
+    }
+
+    /**
+     * Helper method to provide context around JSON parsing errors
+     */
+    getJsonErrorContext(content, error) {
+        try {
+            // Try to extract line/column information from error message
+            const match = error.message.match(/position (\d+)/);
+            if (match) {
+                const position = parseInt(match[1]);
+                const lines = content.split('\n');
+                let currentPos = 0;
+                let lineNum = 1;
+
+                for (const line of lines) {
+                    if (currentPos + line.length >= position) {
+                        const columnNum = position - currentPos + 1;
+                        const startLine = Math.max(1, lineNum - 2);
+                        const endLine = Math.min(lines.length, lineNum + 2);
+
+                        let context = '\nJSON context:\n';
+                        for (let i = startLine; i <= endLine; i++) {
+                            const prefix = i === lineNum ? '>>> ' : '    ';
+                            context += `${prefix}${i}: ${lines[i - 1]}\n`;
+                        }
+                        context += `     ${' '.repeat(columnNum + 2)}^ Error here`;
+                        return context;
+                    }
+                    currentPos += line.length + 1; // +1 for newline
+                    lineNum++;
+                }
+            }
+        } catch (e) {
+            // If context extraction fails, just return empty string
+        }
+        return '';
     }
 
     /**
@@ -120,6 +166,122 @@ class RadiantLayoutTester {
         }
 
         return differences;
+    }
+
+    /**
+     * Compare computed properties for span elements specifically
+     */
+    compareComputedProperties(radiantComputed, browserComputed) {
+        const differences = [];
+        const matches = [];
+
+        // Map Radiant properties to browser properties for comparison
+        const propertyMappings = {
+            // Display and positioning
+            'display': 'display',
+
+            // Font properties (Radiant nested under 'font', browser flat)
+            'font.family': 'fontFamily',
+            'font.size': 'fontSize',
+            'font.weight': 'fontWeight',
+            // Note: fontStyle not included as browser reference doesn't capture it
+
+            // Flexbox properties (only if both systems have them)
+            // 'flexWrap': 'flexWrap',  // Commented out as not available in span computed properties
+
+            // Text properties (only if both systems have them)
+            // 'text_align': 'textAlign'  // Commented out as not available in span computed properties
+        };
+
+        // Helper function to get nested property value
+        const getNestedValue = (obj, path) => {
+            return path.split('.').reduce((current, key) => {
+                return current && current[key] !== undefined ? current[key] : undefined;
+            }, obj);
+        };
+
+        // Helper function to normalize values for comparison
+        const normalizeValue = (value, property) => {
+            if (value === undefined || value === null) return null;
+
+            // Convert numeric values to strings for comparison
+            if (typeof value === 'number') {
+                if (property === 'fontSize') {
+                    return value.toString();
+                }
+                return value.toString();
+            }
+
+            // Normalize font family (remove quotes and extra whitespace)
+            if (property === 'fontFamily') {
+                return value.replace(/["']/g, '').replace(/,\s*/g, ', ').trim();
+            }
+
+            // Normalize font weight (convert numeric to descriptive)
+            if (property === 'fontWeight') {
+                const weightMap = {
+                    '400': 'normal',
+                    '700': 'bold',
+                    'normal': 'normal',
+                    'bold': 'bold'
+                };
+                return weightMap[value.toString()] || value.toString();
+            }
+
+            // Normalize text align values
+            if (property === 'textAlign') {
+                const alignMap = {
+                    'left': 'start',
+                    'start': 'start'
+                };
+                return alignMap[value] || value;
+            }
+
+            return value.toString();
+        };
+
+        // Compare each mapped property
+        for (const [radiantPath, browserProperty] of Object.entries(propertyMappings)) {
+            const radiantValue = getNestedValue(radiantComputed, radiantPath);
+            const browserValue = browserComputed ? browserComputed[browserProperty] : undefined;
+
+            const normalizedRadiant = normalizeValue(radiantValue, browserProperty);
+            const normalizedBrowser = normalizeValue(browserValue, browserProperty);
+
+            // Special comparison for font family - check if browser font family starts with radiant font family
+            let match;
+            if (browserProperty === 'fontFamily' && normalizedRadiant && normalizedBrowser) {
+                // For font family, consider it a match if browser font family starts with radiant font family
+                const radiantFamily = normalizedRadiant.toLowerCase();
+                const browserFamily = normalizedBrowser.toLowerCase();
+                match = browserFamily.startsWith(radiantFamily) || normalizedRadiant === normalizedBrowser;
+            } else {
+                match = normalizedRadiant === normalizedBrowser;
+            }
+
+            const comparison = {
+                property: browserProperty,
+                radiantPath: radiantPath,
+                radiant: radiantValue,
+                browser: browserValue,
+                normalizedRadiant: normalizedRadiant,
+                normalizedBrowser: normalizedBrowser,
+                match: match
+            };
+
+            if (match) {
+                matches.push(comparison);
+            } else {
+                differences.push(comparison);
+            }
+        }
+
+        return {
+            totalProperties: Object.keys(propertyMappings).length,
+            matches: matches.length,
+            differences: differences,
+            matchedProperties: matches
+        };
     }
 
     /**
@@ -195,6 +357,13 @@ class RadiantLayoutTester {
                 matchedElements: 0,
                 totalTextNodes: 0,
                 matchedTextNodes: 0,
+                totalSpanElements: 0,
+                matchedSpanElements: 0,
+                spanComputedProperties: {
+                    totalComparisons: 0,
+                    totalMatches: 0,
+                    differences: []
+                },
                 differences: []
             };
         }
@@ -334,6 +503,7 @@ class RadiantLayoutTester {
                 }
             } else {
                 // Tags match, compare layout if both have layout info
+                let layoutMatches = true;
                 if (radiantNode.layout && browserNode.layout) {
                     const layoutDiffs = this.compareLayout(radiantNode.layout, browserNode.layout);
                     const maxDiff = layoutDiffs.length > 0 ? Math.max(...layoutDiffs.map(d => d.difference)) : 0;
@@ -346,11 +516,11 @@ class RadiantLayoutTester {
 
                     const maxTolerance = Math.max(...layoutDiffs.map(d => d.tolerance)).toFixed(1);
                     if (exceedsToleranceCount === 0) {
-                        results.matchedElements++;
                         if (this.verbose) {
-                            console.log(`${indent()}   ✅ ELEMENT MATCH (${maxDiff.toFixed(1)}px diff <= ${maxTolerance}px)`);
+                            console.log(`${indent()}   ✅ LAYOUT MATCH (${maxDiff.toFixed(1)}px diff <= ${maxTolerance}px)`);
                         }
                     } else {
+                        layoutMatches = false;
                         results.differences.push({
                             type: 'layout_difference',
                             path: path,
@@ -361,13 +531,79 @@ class RadiantLayoutTester {
                             maxDifference: maxDiff
                         });
                         if (this.verbose) {
-                            console.log(`${indent()}   ❌ ELEMENT LAYOUT FAIL (${maxDiff.toFixed(1)}px > ${maxTolerance}px)`);
+                            console.log(`${indent()}   ❌ LAYOUT FAIL (${maxDiff.toFixed(1)}px > ${maxTolerance}px)`);
                         }
                     }
-                } else {
-                    results.matchedElements++; // Count as match if no layout to compare
+                }
+
+                // Special handling for span elements: compare computed properties
+                if (radiantTag === 'span') {
+                    results.totalSpanElements++;
+
+                    if (radiantNode.computed && browserNode.computed) {
+                        const computedComparison = this.compareComputedProperties(radiantNode.computed, browserNode.computed);
+
+                        results.spanComputedProperties.totalComparisons += computedComparison.totalProperties;
+                        results.spanComputedProperties.totalMatches += computedComparison.matches;
+
+                        if (this.verbose) {
+                            console.log(`${indent()}   🎨 Computed properties: ${computedComparison.matches}/${computedComparison.totalProperties} matches`);
+
+                            // Show property matches in verbose mode
+                            for (const match of computedComparison.matchedProperties) {
+                                console.log(`${indent()}     ✅ ${match.property}: ${match.normalizedRadiant}`);
+                            }
+
+                            // Show property mismatches
+                            for (const diff of computedComparison.differences) {
+                                const radiantDisplay = diff.normalizedRadiant === null ? 'undefined' : diff.normalizedRadiant;
+                                const browserDisplay = diff.normalizedBrowser === null ? 'undefined' : diff.normalizedBrowser;
+                                console.log(`${indent()}     ❌ ${diff.property}: "${radiantDisplay}" vs "${browserDisplay}"`);
+                            }
+                        }
+
+                        // Store differences for detailed reporting
+                        if (computedComparison.differences.length > 0) {
+                            results.spanComputedProperties.differences.push({
+                                path: path,
+                                selector: radiantNode.selector,
+                                differences: computedComparison.differences,
+                                matches: computedComparison.matches,
+                                total: computedComparison.totalProperties
+                            });
+                        }
+
+                        // Consider span as matched if layout and most computed properties match
+                        const computedPassRate = computedComparison.matches / computedComparison.totalProperties;
+                        if (layoutMatches && computedPassRate >= 0.8) { // 80% computed property match threshold
+                            results.matchedSpanElements++;
+                            results.matchedElements++; // Also count toward general element matches
+                            if (this.verbose) {
+                                console.log(`${indent()}   ✅ SPAN MATCH (layout + ${(computedPassRate * 100).toFixed(1)}% computed)`);
+                            }
+                        } else {
+                            if (this.verbose) {
+                                const reason = !layoutMatches ? 'layout' : `computed ${(computedPassRate * 100).toFixed(1)}%`;
+                                console.log(`${indent()}   ❌ SPAN FAIL (${reason})`);
+                            }
+                        }
+                    } else {
+                        // No computed properties to compare, use layout result only
+                        if (layoutMatches) {
+                            results.matchedSpanElements++;
+                            results.matchedElements++; // Also count toward general element matches
+                        }
+                        if (this.verbose) {
+                            console.log(`${indent()}   ⚠️  SPAN (no computed properties to compare)`);
+                        }
+                    }
+                }
+
+                // Count general element match (for non-span elements or when we can't do computed comparison)
+                if (radiantTag !== 'span' && layoutMatches) {
+                    results.matchedElements++;
                     if (this.verbose) {
-                        console.log(`${indent()}   ✅ ELEMENT MATCH (no layout)`);
+                        console.log(`${indent()}   ✅ ELEMENT MATCH`);
                     }
                 }
             }
@@ -516,6 +752,19 @@ class RadiantLayoutTester {
                 failed: (results.totalTextNodes || 0) - (results.matchedTextNodes || 0),
                 passRate: results.totalTextNodes > 0 ? (results.matchedTextNodes / results.totalTextNodes * 100) : 100
             },
+            spanComparison: {
+                total: results.totalSpanElements || 0,
+                matched: results.matchedSpanElements || 0,
+                failed: (results.totalSpanElements || 0) - (results.matchedSpanElements || 0),
+                passRate: results.totalSpanElements > 0 ? (results.matchedSpanElements / results.totalSpanElements * 100) : 100,
+                computedProperties: {
+                    totalComparisons: results.spanComputedProperties.totalComparisons || 0,
+                    totalMatches: results.spanComputedProperties.totalMatches || 0,
+                    passRate: results.spanComputedProperties.totalComparisons > 0 ?
+                        (results.spanComputedProperties.totalMatches / results.spanComputedProperties.totalComparisons * 100) : 100,
+                    differences: results.spanComputedProperties.differences || []
+                }
+            },
             differences: results.differences,
             tolerance: this.tolerance
         };
@@ -536,6 +785,19 @@ class RadiantLayoutTester {
             console.log(`   ✅ Matched: ${report.elementComparison.matched} (${report.elementComparison.passRate.toFixed(1)}%)`);
             if (report.elementComparison.failed > 0) console.log(`   ❌ Failed: ${report.elementComparison.failed}`);
 
+            // Span comparison results
+            if (report.spanComparison.total > 0) {
+                console.log(`🎨 Span Element Comparison:`);
+                console.log(`   Total Spans: ${report.spanComparison.total}`);
+                console.log(`   ✅ Matched: ${report.spanComparison.matched} (${report.spanComparison.passRate.toFixed(1)}%)`);
+                if (report.spanComparison.failed > 0) console.log(`   ❌ Failed: ${report.spanComparison.failed}`);
+
+                // Computed properties details
+                if (report.spanComparison.computedProperties.totalComparisons > 0) {
+                    console.log(`   📐 Computed Properties: ${report.spanComparison.computedProperties.totalMatches}/${report.spanComparison.computedProperties.totalComparisons} (${report.spanComparison.computedProperties.passRate.toFixed(1)}%)`);
+                }
+            }
+
             // Text comparison results
             if (report.textComparison.total > 0) {
                 console.log(`📝 Text Node Comparison:`);
@@ -546,10 +808,18 @@ class RadiantLayoutTester {
             console.log('');
         }
 
-        // Overall result
-        const overallSuccess = report.elementComparison.passRate >= this.elementThreshold && report.textComparison.passRate >= this.textThreshold;
+        // Overall result - include span information in summary
+        const overallSuccess = report.elementComparison.passRate >= this.elementThreshold &&
+                              report.textComparison.passRate >= this.textThreshold;
         const status = overallSuccess ? '✅ PASS' : '❌ FAIL';
-        console.log(`${status} Overall: Elements ${report.elementComparison.passRate.toFixed(1)}%, Text ${report.textComparison.passRate.toFixed(1)}%`);
+
+        let summaryText = `${status} Overall: Elements ${report.elementComparison.passRate.toFixed(1)}%`;
+        if (report.spanComparison.total > 0) {
+            summaryText += `, Spans ${report.spanComparison.passRate.toFixed(1)}%`;
+        }
+        summaryText += `, Text ${report.textComparison.passRate.toFixed(1)}%`;
+
+        console.log(summaryText);
     }
 
     /**
@@ -557,12 +827,13 @@ class RadiantLayoutTester {
      */
     async testSingleFile(htmlFile, category) {
         const testName = path.basename(htmlFile, '.html');
+        const testFileName = path.basename(htmlFile);
         // console.log(`\n🧪 Testing: ${testName}`);
 
         try {
             // Run Radiant layout
             await this.runRadiantLayout(htmlFile);
-            const radiantData = await this.loadRadiantOutput();
+            const radiantData = await this.loadRadiantOutput(testFileName);
 
             // Load browser reference
             const browserData = await this.loadBrowserReference(testName, category);
@@ -588,9 +859,36 @@ class RadiantLayoutTester {
             return report;
 
         } catch (error) {
-            console.log(`   ❌ ERROR: ${error.message}`);
+            // Enhanced error reporting with test file context
+            const testFileInfo = `${testFileName} (${category}/${testName})`;
+            console.log(`   ❌ ERROR in ${testFileInfo}: ${error.message}`);
+
+            // If it's a JSON parsing error, also check if the output file exists and show its size
+            if (false) { // Removed verbose output section
+                try {
+                    const stats = await fs.stat(this.outputFile);
+                    console.log(`   📄 Output file size: ${stats.size} bytes`);
+
+                    // Show first few lines of the problematic JSON for debugging
+                    if (stats.size > 0 && stats.size < 10000) { // Only for small files
+                        const content = await fs.readFile(this.outputFile, 'utf8');
+                        const lines = content.split('\n').slice(0, 5);
+                        console.log(`   📝 First few lines of output:`);
+                        lines.forEach((line, i) => {
+                            console.log(`      ${i + 1}: ${line}`);
+                        });
+                        if (content.split('\n').length > 5) {
+                            console.log(`      ... (truncated)`);
+                        }
+                    }
+                } catch (statError) {
+                    console.log(`   ⚠️  Could not read output file info: ${statError.message}`);
+                }
+            }
+
             return {
                 testName,
+                testFile: testFileInfo,
                 error: error.message,
                 timestamp: new Date().toISOString()
             };
@@ -622,10 +920,17 @@ class RadiantLayoutTester {
             }
 
             const results = [];
+            let errorCount = 0;
+            const errorFiles = [];
+
             for (const htmlFile of htmlFiles) {
                 const result = await this.testSingleFile(path.join(categoryDir, htmlFile), category);
                 if (result) {
                     results.push(result);
+                    if (result.error) {
+                        errorCount++;
+                        errorFiles.push(result.testFile || result.testName);
+                    }
                 }
             }
 
@@ -643,6 +948,11 @@ class RadiantLayoutTester {
             console.log(`   Total Tests: ${results.length}`);
             console.log(`   ✅ Successful: ${successful}`);
             if (failed > 0) console.log(`   ❌ Failed: ${failed}`);
+            if (errorCount > 0) {
+                console.log(`   💥 Errors: ${errorCount}`);
+                console.log(`   📄 Files with errors:`);
+                errorFiles.forEach(file => console.log(`      - ${file}`));
+            }
 
             return results;
 
