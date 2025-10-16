@@ -74,8 +74,6 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
         block->align_self = ALIGN_AUTO; // FIXED: Use ALIGN_AUTO as per CSS spec
         block->order = 0;
         block->flex_basis_is_percent = false;
-        printf("DEBUG: ALLOC_VIEW - align_self set to %d (ALIGN_AUTO=%d) for block %p\n",
-               block->align_self, ALIGN_AUTO, block);
     }
 
     // link the view

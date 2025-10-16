@@ -327,7 +327,7 @@ void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
 }
 
 void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block) {
-    printf("render scrollbars\n");
+    log_debug("render scrollbars");
     // need to reset block.x and y, which was changed by the scroller
     rdcon->block.x = pa_block->x + block->x;  rdcon->block.y = pa_block->y + block->y;
     if (block->scroller->has_hz_scroll || block->scroller->has_vt_scroll) {
@@ -522,7 +522,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
 
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
     FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
-    printf("render inline view\n");
+    log_debug("render inline view");
     View* view = view_span->child;
     if (view) {
         if (view_span->font) {
@@ -601,7 +601,7 @@ void render_clean_up(RenderContext* rdcon) {
 
 void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
     RenderContext rdcon;
-    printf("Render HTML doc\n");
+    log_debug("Render HTML doc");
     render_init(&rdcon, uicon, view_tree);
 
     // fill the surface with a white background
@@ -609,11 +609,11 @@ void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_f
 
     View* root_view = view_tree->root;
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
-        printf("Render root view:\n");
+        log_debug("Render root view");
         render_block_view(&rdcon, (ViewBlock*)root_view);
     }
     else {
-        fprintf(stderr, "Invalid root view\n");
+        log_error("Invalid root view");
     }
 
     // all shapes should already have been drawn to the canvas
