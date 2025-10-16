@@ -1109,6 +1109,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_FONT_STYLE: {
         const lxb_css_property_font_style_t *font_style = declr->u.font_style;
         log_debug("font style property: %d", font_style->type);
+        if (!span->font) { span->font = alloc_font_prop(lycon); }
+        span->font->font_style = font_style->type;
         break;
     }
     case LXB_CSS_PROPERTY_FONT_WEIGHT: {
