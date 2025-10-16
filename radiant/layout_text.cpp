@@ -47,11 +47,19 @@ void line_break(LayoutContext* lycon) {
         if (view) {
             FontBox pa_font = lycon->font;
             lycon->font = lycon->line.line_start_font;
+            bool end_of_line = false;
+            NEXT_VIEW:
+            View * vw = view;
             do {
-                view_vertical_align(lycon, view);
-                view = view->next;
-            } while (view);
-            // todo: handle more views after the start span
+                view_vertical_align(lycon, vw);
+                if (vw == lycon->prev_view) { break; } // reached the last view in the line
+                vw = vw->next;
+            } while (vw);
+            if (vw != lycon->prev_view) { // need to go parent level
+                view = view->parent;
+                if (view) { view = view->next; }
+                if (view) goto NEXT_VIEW;
+            }
             lycon->font = pa_font;
         }
     }
