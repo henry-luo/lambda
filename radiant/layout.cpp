@@ -387,7 +387,6 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
 
     // init context
     lycon->elmt = elmt;
-    lycon->font.style = &lycon->ui_context->default_font;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
     lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;
     // CRITICAL FIX: Let HTML element auto-size to content instead of forcing viewport height
@@ -443,6 +442,96 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     finalize_block_flow(lycon, html, LXB_CSS_VALUE_BLOCK);
 }
 
+// Function to determine HTML version from DOCTYPE and compat mode
+HtmlVersion detect_html_version(lxb_html_document_t* html_doc) {
+    lxb_dom_document_t* dom_doc = lxb_html_document_original_ref(html_doc);
+    if (!dom_doc) {
+        return HTML_QUIRKS;
+    }
+
+    // Check compatibility mode first - this is the most reliable indicator
+    switch (dom_doc->compat_mode) {
+        case LXB_DOM_DOCUMENT_CMODE_NO_QUIRKS:
+            // Modern HTML5 or strict XHTML/HTML4.01
+            break;  // continue below
+        case LXB_DOM_DOCUMENT_CMODE_QUIRKS:
+            // Legacy HTML or missing DOCTYPE - likely HTML4 or older
+            log_debug("Document in quirks mode");
+            return HTML_QUIRKS;
+        case LXB_DOM_DOCUMENT_CMODE_LIMITED_QUIRKS:
+            // Transitional HTML4.01 or some HTML5 edge cases
+            log_debug("Document in limited quirks mode");
+            return HTML4_01_TRANSITIONAL;
+    }
+
+    // For no-quirks mode, examine the DOCTYPE more carefully
+    lxb_dom_document_type_t* doctype = dom_doc->doctype;
+    if (!doctype) {
+        log_debug("Document has no DOCTYPE");
+        return HTML5;  // "HTML5 (No DOCTYPE)";
+    }
+
+    // Get DOCTYPE name
+    size_t name_len;
+    const lxb_char_t* name = lxb_dom_document_type_name(doctype, &name_len);
+
+    // Get public ID
+    size_t public_len;
+    const lxb_char_t* public_id = lxb_dom_document_type_public_id(doctype, &public_len);
+
+    // Get system ID
+    size_t system_len;
+    const lxb_char_t* system_id = lxb_dom_document_type_system_id(doctype, &system_len);
+    log_debug("DOCTYPE name: '%.*s', public ID: '%.*s', system ID: '%.*s'",
+        (int)name_len, name ? (const char*)name : "",
+        (int)public_len, public_id ? (const char*)public_id : "",
+        (int)system_len, system_id ? (const char*)system_id : "");
+
+    // HTML5 DOCTYPE: "<!DOCTYPE html>" (no public/system ID)
+    if (name_len == 4 && strncasecmp((char*)name, "html", 4) == 0 &&
+        public_len == 0 && system_len == 0) {
+        return HTML5;  // "HTML5";
+    }
+
+    // Check for HTML 4.01 DOCTYPE patterns
+    if (public_len > 0 && public_id) {
+        const char* pub_str = (const char*)public_id;
+
+        // HTML 4.01 Strict
+        if (strstr(pub_str, "-//W3C//DTD HTML 4.01//EN")) {
+            return HTML4_01_STRICT;
+        }
+
+        // HTML 4.01 Transitional
+        if (strstr(pub_str, "-//W3C//DTD HTML 4.01 Transitional//EN")) {
+            return HTML4_01_TRANSITIONAL;
+        }
+
+        // HTML 4.01 Frameset
+        if (strstr(pub_str, "-//W3C//DTD HTML 4.01 Frameset//EN")) {
+            return HTML4_01_FRAMESET;
+        }
+
+        // XHTML 1.0 variants
+        if (strstr(pub_str, "-//W3C//DTD XHTML 1.0")) {
+            if (strstr(pub_str, "Strict")) return HTML4_01_STRICT; // "XHTML 1.0 Strict";
+            if (strstr(pub_str, "Transitional")) return HTML4_01_TRANSITIONAL; // "XHTML 1.0 Transitional";
+            if (strstr(pub_str, "Frameset")) return HTML4_01_FRAMESET; // "XHTML 1.0 Frameset";
+            return HTML4_01_TRANSITIONAL;  // "XHTML 1.0";
+        }
+
+        // XHTML 1.1
+        if (strstr(pub_str, "-//W3C//DTD XHTML 1.1//EN")) {
+            return HTML4_01_TRANSITIONAL;  // "XHTML 1.1";
+        }
+    }
+    // If we have a DOCTYPE but don't recognize it
+    // if (name_len > 0) {
+    //     return HTML5;  // "HTML (Unknown DOCTYPE)";
+    // }
+    return HTML5;  // "HTML5 (Standards Mode)";
+}
+
 void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
     memset(lycon, 0, sizeof(LayoutContext));
     lycon->doc = doc;  lycon->ui_context = uicon;
@@ -453,16 +542,20 @@ void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
     // Process @font-face rules before layout begins
     // This is a simplified implementation - in a full system, this would be done during CSS parsing
     if (doc && doc->dom_tree) {
+        doc->view_tree->html_version = detect_html_version(doc->dom_tree);
+
         clog_info(font_log, "Processing @font-face rules for document");
         // For now, we'll create a hardcoded @font-face descriptor for Liberation Sans
         // This should be replaced with actual CSS parsing
         parse_font_face_rule(lycon, NULL); // NULL rule for hardcoded implementation
+    } else {
+        doc->view_tree->html_version = HTML5;
     }
+    log_debug("Detected HTML version: %d", doc->view_tree->html_version);
 
-    // most browsers use a generic sans-serif font as the default
-    // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
-    // default font size in HTML is 16 px for most browsers
-    setup_font(uicon, &lycon->font, uicon->default_font.family, &lycon->ui_context->default_font);
+    // setup default font
+    FontProp* default_font = doc->view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
+    setup_font(uicon, &lycon->font, default_font->family, default_font);
 
     // Initialize float context to NULL - will be created when needed
     lycon->current_float_context = NULL;
@@ -497,8 +590,10 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     root_node.type = LEXBOR_ELEMENT;
     root_node.lxb_node = (lxb_dom_node_t*)lexbor_root;
     log_debug("layout html root %s", root_node.name());
+
     layout_html_root(&lycon, &root_node);
 
     log_debug("end layout");
     layout_cleanup(&lycon);
+    log_debug("end layout DOM tree: html version %d", doc->view_tree->html_version);
 }

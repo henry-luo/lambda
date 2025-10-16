@@ -497,7 +497,15 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
             View* root_view = doc->view_tree->root;
             if (root_view && root_view->type == RDT_VIEW_BLOCK) {
                 printf("render doc root view:\n");
+                // load default font
+                FontBox pa_font = rdcon->font;
+                FontProp* default_font = doc->view_tree->html_version == HTML5 ? &rdcon->ui_context->default_font : &rdcon->ui_context->legacy_default_font;
+                log_debug("render_init default font: %s, html version: %d", default_font->family, doc->view_tree->html_version);
+                setup_font(rdcon->ui_context, &rdcon->font, default_font->family, default_font);
+
                 render_block_view(rdcon, (ViewBlock*)root_view);
+
+                rdcon->font = pa_font;
             }
             else {
                 printf("Invalid root view\n");
@@ -573,15 +581,17 @@ void render_children(RenderContext* rdcon, View* view) {
     } while (view);
 }
 
-void render_init(RenderContext* rdcon, UiContext* uicon) {
+void render_init(RenderContext* rdcon, UiContext* uicon, ViewTree* view_tree) {
     memset(rdcon, 0, sizeof(RenderContext));
     rdcon->ui_context = uicon;
     rdcon->canvas = tvg_swcanvas_create();
     tvg_swcanvas_set_target(rdcon->canvas, (uint32_t*)uicon->surface->pixels, uicon->surface->width,
         uicon->surface->width, uicon->surface->height, TVG_COLORSPACE_ABGR8888);
 
-    // load default font Arial, size 16 px
-    setup_font(uicon, &rdcon->font, uicon->default_font.family, &rdcon->ui_context->default_font);
+    // load default font
+    FontProp* default_font = view_tree->html_version == HTML5 ? &uicon->default_font : &uicon->legacy_default_font;
+    log_debug("render_init default font: %s, html version: %d", default_font->family, view_tree->html_version);
+    setup_font(uicon, &rdcon->font, default_font->family, default_font);
     rdcon->block.clip = (Bound){0, 0, (float)uicon->surface->width, (float)uicon->surface->height};
 }
 
@@ -589,14 +599,15 @@ void render_clean_up(RenderContext* rdcon) {
     tvg_canvas_destroy(rdcon->canvas);
 }
 
-void render_html_doc(UiContext* uicon, View* root_view, const char* output_file) {
+void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file) {
     RenderContext rdcon;
     printf("Render HTML doc\n");
-    render_init(&rdcon, uicon);
+    render_init(&rdcon, uicon, view_tree);
 
     // fill the surface with a white background
     fill_surface_rect(rdcon.ui_context->surface, NULL, 0xFFFFFFFF, &rdcon.block.clip);
 
+    View* root_view = view_tree->root;
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
         printf("Render root view:\n");
         render_block_view(&rdcon, (ViewBlock*)root_view);

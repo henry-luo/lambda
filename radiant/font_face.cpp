@@ -259,10 +259,7 @@ bool resolve_font_path_from_descriptor(FontFaceDescriptor* descriptor, char** re
 
 FT_Face load_font_with_descriptors(UiContext* uicon, const char* family_name,
                                    FontProp* style, bool* is_fallback) {
-    if (!uicon || !family_name) {
-        return NULL;
-    }
-
+    if (!uicon || !family_name) { return NULL; }
     clog_debug(font_log, "Loading font with descriptors: %s", family_name);
 
     // Search registered @font-face descriptors first

@@ -88,8 +88,13 @@ int ui_context_init(UiContext* uicon, bool headless) {
         uicon->window_width = pixel_w;  uicon->window_height = pixel_h;
     }
 
-    // load default fonts
-    uicon->default_font = (FontProp){"Arial", (float)(16 * uicon->pixel_ratio),
+    // set default fonts
+    // most browsers use a generic sans-serif font as the default
+    // Google Chrome default fonts: Times New Roman (Serif), Arial (Sans-serif), and Courier New (Monospace)
+    // default font size in HTML is 16 px for most browsers
+    uicon->default_font = (FontProp){"Arial", (float)(16 * uicon->pixel_ratio), // 16px
+        LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NONE};
+    uicon->legacy_default_font = (FontProp){"Times", (float)(16 * uicon->pixel_ratio), // 16px
         LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NONE};
     uicon->fallback_fonts = fallback_fonts;
 

@@ -422,9 +422,18 @@ typedef struct ViewTableCell : ViewBlock {
     } vertical_align;
 } ViewTableCell;
 
+typedef enum HtmlVersion {
+    HTML5 = 1,              // HTML5
+    HTML4_01_STRICT,        // HTML4.01 Strict
+    HTML4_01_TRANSITIONAL,  // HTML4.01 Transitional
+    HTML4_01_FRAMESET,      // HTML4.01 Frameset
+    HTML_QUIRKS,            // Legacy HTML or missing DOCTYPE
+} HtmlVersion;
+
 struct ViewTree {
     Pool *pool;
     View* root;
+    HtmlVersion html_version;
 };
 
 typedef struct CursorState {
@@ -466,7 +475,8 @@ typedef struct {
     FcConfig *font_config;
     FT_Library ft_library;
     struct hashmap* fontface_map;  // cache of font faces loaded
-    FontProp default_font;  // default font style
+    FontProp default_font;  // default font style for HTML5
+    FontProp legacy_default_font;  // default font style for legacy HTML before HTML5
     char** fallback_fonts;  // fallback fonts
 
     // @font-face support

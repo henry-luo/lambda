@@ -14,4 +14,4 @@ typedef struct {
 } RenderContext;
 
 // Function declarations
-void render_html_doc(UiContext* uicon, View* root_view, const char* output_file);
+void render_html_doc(UiContext* uicon, ViewTree* view_tree, const char* output_file);

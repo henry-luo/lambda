@@ -179,6 +179,8 @@ void setup_font(UiContext* uicon, FontBox *fbox, const char* font_name, FontProp
     // Try @font-face descriptors first, then fall back to system fonts
     const char* family_to_load = fprop->family ? fprop->family : font_name;
     bool is_fallback = false;
+    log_debug("Setting up font: requested '%s', family_to_load '%s', size %.1f",
+        font_name, family_to_load, fprop->font_size);
     fbox->ft_face = load_font_with_descriptors(uicon, family_to_load, fprop, &is_fallback);
 
     // If @font-face loading failed, fall back to original method

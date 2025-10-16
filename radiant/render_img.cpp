@@ -182,8 +182,8 @@ int render_html_to_png(const char* html_file, const char* png_file) {
     }
 
     // Render the document
-    if (doc && doc->view_tree && doc->view_tree->root) {
-        render_html_doc(&ui_context, doc->view_tree->root, png_file);
+    if (doc && doc->view_tree) {
+        render_html_doc(&ui_context, doc->view_tree, png_file);
     } else {
         log_debug("No view tree to render");
         ui_context_cleanup(&ui_context);
@@ -235,8 +235,8 @@ int render_html_to_jpeg(const char* html_file, const char* jpeg_file, int qualit
     }
 
     // Render the document
-    if (doc && doc->view_tree && doc->view_tree->root) {
-        render_html_doc(&ui_context, doc->view_tree->root, jpeg_file);
+    if (doc && doc->view_tree) {
+        render_html_doc(&ui_context, doc->view_tree, jpeg_file);
     } else {
         log_debug("No view tree to render");
         ui_context_cleanup(&ui_context);

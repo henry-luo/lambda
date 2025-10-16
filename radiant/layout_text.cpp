@@ -163,8 +163,8 @@ void output_text(LayoutContext* lycon, ViewText* text, int text_length, float te
     lycon->line.advance_x += text_width;
     lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.ft_face->size->metrics.ascender / 64.0);
     lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.ft_face->size->metrics.descender) / 64.0);
-    log_debug("text view: '%.*s', x %f, y %f, width %f, height %f, font size %f",
-        text_length,text->node->text_data() + text->start_index, text->x, text->y, text->width, text->height, lycon->font.style->font_size);
+    log_debug("text view: '%.*s', x %f, y %f, width %f, height %f, font size %f, font family '%s'",
+        text_length,text->node->text_data() + text->start_index, text->x, text->y, text->width, text->height, text->font->font_size, text->font->family);
 }
 
 void layout_text(LayoutContext* lycon, DomNode *text_node) {
