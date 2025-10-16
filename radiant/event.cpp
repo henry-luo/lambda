@@ -139,11 +139,16 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
     evcon->block = pa_block;  evcon->font = pa_font;
 }
 
-void target_html_doc(EventContext* evcon, View* root_view) {
-    log_debug("target root view");
+void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
+    View* root_view = view_tree->root;
     if (root_view && root_view->type == RDT_VIEW_BLOCK) {
-        log_debug("fire root view");
+        log_debug("target root view");
+        FontBox pa_font = evcon->font;
+        FontProp* default_font = view_tree->html_version == HTML5 ? &evcon->ui_context->default_font : &evcon->ui_context->legacy_default_font;
+        log_debug("target_html_doc default font: %s, html version: %d", default_font->family, view_tree->html_version);
+        setup_font(evcon->ui_context, &evcon->font, default_font->family, default_font);
         target_block_view(evcon, (ViewBlock*)root_view);
+        evcon->font = pa_font;
     }
     else {
         log_error("Invalid root view: %d", root_view ? root_view->type : -1);
@@ -376,7 +381,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
         MousePositionEvent* motion = &event->mouse_position;
         log_debug("Mouse event at (%d, %d)", motion->x, motion->y);
         mouse_x = motion->x;  mouse_y = motion->y;
-        target_html_doc(&evcon, doc->view_tree->root);
+        target_html_doc(&evcon, doc->view_tree);
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
             // build stack of views from root to target view
@@ -422,7 +427,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
         MouseButtonEvent* btn_event = &event->mouse_button;
         log_debug("Mouse button event (%d, %d)", btn_event->x, btn_event->y);
         mouse_x = btn_event->x;  mouse_y = btn_event->y; // changed to use btn_event's y
-        target_html_doc(&evcon, doc->view_tree->root);
+        target_html_doc(&evcon, doc->view_tree);
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
             // build stack of views from root to target view
@@ -493,7 +498,7 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
         ScrollEvent* scroll = &event->scroll;
         log_debug("Mouse scroll event");
         mouse_x = scroll->x;  mouse_y = scroll->y; // updated to use scroll's x and y
-        target_html_doc(&evcon, doc->view_tree->root);
+        target_html_doc(&evcon, doc->view_tree);
         if (evcon.target) {
             log_debug("Target view found at position (%d, %d)", mouse_x, mouse_y);
             // build stack of views from root to target view
