@@ -551,8 +551,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         return LXB_STATUS_ERROR_NOT_EXISTS;
     }
 
-    log_debug("style entry: %ld, %s, specificity: %d", declr->type, data->name, specificity);
-    printf("DEBUG: PROPERTY_TRACE - Processing property: %s (type=%ld)\n", (const char*)data->name, declr->type);
+    log_debug("style property: %s (type=%ld), specificity: %d", data->name, declr->type, specificity);
     if (!lycon->view) { log_debug("missing view");  return LXB_STATUS_ERROR_NOT_EXISTS; }
     ViewSpan* span = (ViewSpan*)lycon->view;
     ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
