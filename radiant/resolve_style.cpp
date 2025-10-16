@@ -1138,7 +1138,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_WIDTH: {
         const lxb_css_property_width_t *width = declr->u.width;
-        lycon->block.given_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_WIDTH, width);
+        // width cannot be negative
+        lycon->block.given_width = max(resolve_length_value(lycon, LXB_CSS_PROPERTY_WIDTH, width), 0);
         log_debug("width property: %d", lycon->block.given_width);
         // Store the raw width value for box-sizing calculations
         if (block) {
@@ -1149,7 +1150,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_HEIGHT: {
         const lxb_css_property_height_t *height = declr->u.height;
-        lycon->block.given_height = resolve_length_value(lycon, LXB_CSS_PROPERTY_HEIGHT, height);
+        // height cannot be negative
+        lycon->block.given_height = max(resolve_length_value(lycon, LXB_CSS_PROPERTY_HEIGHT, height), 0);
         log_debug("height property: %d", lycon->block.given_height);
         // Store the raw height value for box-sizing calculations
         if (block) {
