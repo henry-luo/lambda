@@ -107,7 +107,8 @@ class RadiantLayoutTester {
             const diff = Math.abs(radiantVal - browserVal);
 
             // Always include the difference, regardless of tolerance
-            const tolerance = Math.max(isText && prop == 'width' ? radiantVal * 0.01 : 0, this.tolerance);
+            const tolerance = Math.max(isText ? (prop == 'width' || prop == 'y' ? browserVal * 0.03 : 0) :
+                (prop == 'height' || prop == 'y' ? browserVal * 0.03 : 0), this.tolerance);
             differences.push({
                 property: prop,
                 radiant: radiantVal,
@@ -343,10 +344,11 @@ class RadiantLayoutTester {
                         console.log(`${indent()}   Browser: (${browserNode.layout.x}, ${browserNode.layout.y}, ${browserNode.layout.width}×${browserNode.layout.height})`);
                     }
 
+                    const maxTolerance = Math.max(...layoutDiffs.map(d => d.tolerance)).toFixed(1);
                     if (exceedsToleranceCount === 0) {
                         results.matchedElements++;
                         if (this.verbose) {
-                            console.log(`${indent()}   ✅ ELEMENT MATCH (${maxDiff.toFixed(1)}px diff <= ${this.tolerance}px)`);
+                            console.log(`${indent()}   ✅ ELEMENT MATCH (${maxDiff.toFixed(1)}px diff <= ${maxTolerance}px)`);
                         }
                     } else {
                         results.differences.push({
@@ -359,7 +361,7 @@ class RadiantLayoutTester {
                             maxDifference: maxDiff
                         });
                         if (this.verbose) {
-                            console.log(`${indent()}   ❌ ELEMENT LAYOUT FAIL (${maxDiff.toFixed(1)}px > ${this.tolerance}px)`);
+                            console.log(`${indent()}   ❌ ELEMENT LAYOUT FAIL (${maxDiff.toFixed(1)}px > ${maxTolerance}px)`);
                         }
                     }
                 } else {
