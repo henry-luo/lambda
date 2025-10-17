@@ -303,6 +303,7 @@ typedef struct {
     bool v_is_dragging, h_is_dragging;
     float drag_start_x, drag_start_y;
     float v_drag_start_scroll, h_drag_start_scroll;
+    void reset();
 } ScrollPane;
 
 typedef struct {

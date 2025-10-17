@@ -13,6 +13,7 @@ bool scrollpane_target(EventContext* evcon, ViewBlock* block);
 void scrollpane_mouse_up(EventContext* evcon, ViewBlock* block);
 void scrollpane_mouse_down(EventContext* evcon, ViewBlock* block);
 void scrollpane_drag(EventContext* evcon, ViewBlock* block);
+void update_scroller(ViewBlock* block, float content_width, float content_height);
 
 void target_children(EventContext* evcon, View* view) {
     do {
@@ -328,49 +329,6 @@ View* find_view(View* view, lxb_dom_node_t *node) {
     return NULL;
 }
 
-void update_scroller(ViewBlock* block, int content_width, int content_height) {
-    if (!block->scroller) { return; }
-    // handle horizontal overflow
-    if (content_width > block->width) { // hz overflow
-        block->scroller->has_hz_overflow = true;
-        if (block->scroller->overflow_x == LXB_CSS_VALUE_VISIBLE) {}
-        else if (block->scroller->overflow_x == LXB_CSS_VALUE_SCROLL ||
-            block->scroller->overflow_x == LXB_CSS_VALUE_AUTO) {
-            block->scroller->has_hz_scroll = true;
-        }
-        if (block->scroller->has_hz_scroll ||
-            block->scroller->overflow_x == LXB_CSS_VALUE_CLIP ||
-            block->scroller->overflow_x == LXB_CSS_VALUE_HIDDEN) {
-            block->scroller->has_clip = true;
-            block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
-            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
-        }
-    }
-    else {
-        block->scroller->has_hz_overflow = false;
-        block->scroller->has_clip = false;
-    }
-    // handle vertical overflow and determine block->height
-    if (content_height > block->height) { // vt overflow
-        block->scroller->has_vt_overflow = true;
-        if (block->scroller->overflow_y == LXB_CSS_VALUE_VISIBLE) { }
-        else if (block->scroller->overflow_y == LXB_CSS_VALUE_SCROLL || block->scroller->overflow_y == LXB_CSS_VALUE_AUTO) {
-            block->scroller->has_vt_scroll = true;
-        }
-        if (block->scroller->has_hz_scroll ||
-            block->scroller->overflow_y == LXB_CSS_VALUE_CLIP ||
-            block->scroller->overflow_y == LXB_CSS_VALUE_HIDDEN) {
-            block->scroller->has_clip = true;
-            block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
-            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
-        }
-    }
-    else {
-        block->scroller->has_vt_overflow = false;
-        block->scroller->has_clip = false;
-    }
-}
-
 void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
     EventContext evcon;
     log_debug("Handling event %d", event->type);
@@ -462,13 +420,13 @@ void handle_event(UiContext* uicon, Document* doc, RdtEvent* event) {
                 lxb_dom_element_t *elmt = set_iframe_src_by_name(doc->dom_tree, evcon.new_target, evcon.new_url);
                 View* iframe = find_view(doc->view_tree->root, (lxb_dom_node_t*)elmt);
                 if (iframe) {
-                    if ((iframe->type == RDT_VIEW_BLOCK || iframe->type == RDT_VIEW_INLINE_BLOCK) &&
-                        ((ViewBlock*)iframe)->embed) {
+                    if ((iframe->type == RDT_VIEW_BLOCK || iframe->type == RDT_VIEW_INLINE_BLOCK) && ((ViewBlock*)iframe)->embed) {
                         log_debug("updating doc of iframe view");
                         ViewBlock* block = (ViewBlock*)iframe;
+                        // reset scroll position
                         if (block->scroller && block->scroller->pane) {
-                            block->scroller->pane->h_scroll_position = 0;
-                            block->scroller->pane->v_scroll_position = 0;
+                            block->scroller->pane->reset();
+                            block->content_width = 0;  block->content_height = 0;
                         }
                         // load the new document
                         Document* old_doc = block->embed->doc;
