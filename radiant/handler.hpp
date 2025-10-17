@@ -4,7 +4,7 @@
 typedef struct EventContext {
     RdtEvent event;
     View* target;
-    int offset_x, offset_y;  // mouse offset from target view
+    float offset_x, offset_y;  // mouse offset from target view
 
     // style context
     BlockBlot block;
@@ -15,6 +15,6 @@ typedef struct EventContext {
     char* new_url;
     char* new_target;
     bool need_repaint;
-    
+
     UiContext* ui_context;
 } EventContext;
