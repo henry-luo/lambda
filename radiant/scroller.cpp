@@ -47,12 +47,11 @@ float tvg_shape_get_h(Tvg_Paint* shape) {
 }
 
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
-    int content_width, int content_height, Bound* clip) {
-    printf("rendering scroller\n");
-    log_debug("render scroller content size: %d x %d\n", content_width, content_height);
+    float content_width, float content_height, Bound* clip) {
+    log_debug("render scroller content size: %f x %f", content_width, content_height);
 
-    int view_x = block_bound->x, view_y = block_bound->y;
-    int view_width = block_bound->width, view_height = block_bound->height;
+    float view_x = block_bound->x, view_y = block_bound->y;
+    float view_width = block_bound->width, view_height = block_bound->height;
 
     tvg_canvas_remove(canvas, NULL);  // clear any existing shapes
     // clip shape
@@ -64,6 +63,8 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     Tvg_Paint* v_scrollbar = tvg_shape_new();
     tvg_shape_append_rect(v_scrollbar, view_x + view_width - sc.SCROLLBAR_SIZE,
         view_y, sc.SCROLLBAR_SIZE, view_height, 0, 0);
+    log_debug("v_scrollbar rect: %f, %f, %f, %f",
+        view_x + view_width - sc.SCROLLBAR_SIZE, view_y, sc.SCROLLBAR_SIZE, view_height);
     tvg_shape_set_fill_color(v_scrollbar, sc.BAR_COLOR, sc.BAR_COLOR, sc.BAR_COLOR, 255);
     tvg_paint_set_mask_method(v_scrollbar, clip_rect, TVG_MASK_METHOD_ALPHA);
 
@@ -71,13 +72,14 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     if (content_height > 0) {
         tvg_shape_set_fill_color(v_scroll_handle, sc.HANDLE_COLOR, sc.HANDLE_COLOR, sc.HANDLE_COLOR, 255);
         sp->v_max_scroll = content_height > view_height ? content_height - view_height : 0;
-        int bar_height = view_height - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
-        int v_ratio = view_height * 100 / content_height;
+        float bar_height = view_height - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
+        log_debug("bar height: %f", bar_height);
+        float v_ratio = view_height * 100 / content_height;
         sp->v_handle_height = (v_ratio * bar_height) / 100;
         sp->v_handle_height = max(sc.MIN_HANDLE_SIZE, sp->v_handle_height);
         sp->v_handle_y = sc.SCROLL_BORDER_MAIN + (sp->v_max_scroll > 0 ?
             (sp->v_scroll_position * (bar_height - sp->v_handle_height)) / sp->v_max_scroll : 0);
-        int v_scroll_x = view_x + view_width - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
+        float v_scroll_x = view_x + view_width - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
         tvg_shape_append_rect(v_scroll_handle, v_scroll_x, view_y + sp->v_handle_y,
             sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sp->v_handle_height, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS);
         tvg_paint_set_mask_method(v_scroll_handle, clip_rect, TVG_MASK_METHOD_ALPHA);
@@ -87,6 +89,8 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     Tvg_Paint* h_scrollbar = tvg_shape_new();
     tvg_shape_append_rect(h_scrollbar, view_x,
         view_y + view_height - sc.SCROLLBAR_SIZE, view_width, sc.SCROLLBAR_SIZE, 0, 0);
+    log_debug("h_scrollbar rect: %f, %f, %f, %f",
+        view_x, view_y + view_height - sc.SCROLLBAR_SIZE, view_width, sc.SCROLLBAR_SIZE);
     tvg_shape_set_fill_color(h_scrollbar, sc.BAR_COLOR, sc.BAR_COLOR, sc.BAR_COLOR, 255);
     tvg_paint_set_mask_method(h_scrollbar, clip_rect, TVG_MASK_METHOD_ALPHA);
 
@@ -94,8 +98,9 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     if (content_width > 0) {
         tvg_shape_set_fill_color(h_scroll_handle, sc.HANDLE_COLOR, sc.HANDLE_COLOR, sc.HANDLE_COLOR, 255);
         sp->h_max_scroll = content_width > view_width ? content_width - view_width : 0;
-        int bar_width = view_width - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
-        int h_ratio = view_width * 100 / content_width;
+        float bar_width = view_width - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
+        log_debug("bar width: %f", bar_width);
+        float h_ratio = view_width * 100 / content_width;
         sp->h_handle_width = (h_ratio * bar_width) / 100;
         sp->h_handle_width = max(sc.MIN_HANDLE_SIZE, sp->h_handle_width);
         sp->h_handle_x = sc.SCROLL_BORDER_MAIN + (sp->h_max_scroll > 0 ?
@@ -114,24 +119,26 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
 
     tvg_canvas_draw(canvas, false);
     tvg_canvas_sync(canvas);
-    printf("finished rendering scroller\n");
+    log_debug("finished rendering scroller");
 }
 
 void scrollpane_scroll(EventContext* evcon, ScrollPane* sp) {
     ScrollEvent* event = &evcon->event.scroll;
-    printf("firing scroll event: %f, %f\n", event->xoffset, event->yoffset);
-    int scroll_amount = 50;  // pixels to scroll per offset
+    // GLFW gives scroll deltas that are pre-adjusted to match the user's OS scrolling preference
+    // yoffset > 0 = Scroll up, yoffset < 0 = Scroll down
+    log_debug("firing scroll event: %f, %f", event->xoffset, event->yoffset);
+    float scroll_amount = 50;  // pixels to scroll per offset
     if (event->yoffset != 0 && sp->v_max_scroll > 0) {
-        sp->v_scroll_position += event->yoffset * scroll_amount;
+        sp->v_scroll_position += -event->yoffset * scroll_amount;
         sp->v_scroll_position = sp->v_scroll_position < 0 ? 0 :
             sp->v_scroll_position > sp->v_max_scroll ? sp->v_max_scroll : sp->v_scroll_position;
     }
     if (event->xoffset != 0 && sp->h_max_scroll > 0) {
-        sp->h_scroll_position += event->xoffset * scroll_amount;
+        sp->h_scroll_position += -event->xoffset * scroll_amount;
         sp->h_scroll_position = sp->h_scroll_position < 0 ? 0 :
             sp->h_scroll_position > sp->h_max_scroll ? sp->h_max_scroll : sp->h_scroll_position;
     }
-    log_debug("updated scroll position: %d, %d\n", sp->h_scroll_position, sp->v_scroll_position);
+    log_debug("updated scroll position: %f, %f", sp->h_scroll_position, sp->v_scroll_position);
     evcon->need_repaint = true;
     // todo: set invalidate_rect
 }
@@ -139,7 +146,7 @@ void scrollpane_scroll(EventContext* evcon, ScrollPane* sp) {
 bool scrollpane_target(EventContext* evcon, ViewBlock* block) {
     MousePositionEvent *event = &evcon->event.mouse_position;
     ScrollPane* sp = block->scroller->pane;
-    int bottom = evcon->block.y + block->height;  int right = evcon->block.x + block->width;
+    float bottom = evcon->block.y + block->height;  float right = evcon->block.x + block->width;
     if (block->scroller->has_hz_scroll) {
         if (evcon->block.x <= event->x && event->x < right &&
             bottom - sc.SCROLLBAR_SIZE <= event->y && event->y < bottom) {
@@ -220,14 +227,13 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
 
     // Vertical dragging
     if (sp->v_is_dragging) {
-        int handle_h = sp->v_handle_height;
-        int delta_y = event->y - sp->drag_start_y;
-        int scroll_range = block->height - handle_h;
-        int scroll_per_pixel = scroll_range > 0 ? sp->v_max_scroll / scroll_range : 0;
-        int v_scroll_position = sp->v_drag_start_scroll + (delta_y * scroll_per_pixel);
+        float handle_h = sp->v_handle_height;
+        float delta_y = event->y - sp->drag_start_y;
+        float scroll_range = block->height - handle_h;
+        float scroll_per_pixel = scroll_range > 0 ? sp->v_max_scroll / scroll_range : 0;
+        float v_scroll_position = sp->v_drag_start_scroll + (delta_y * scroll_per_pixel);
         v_scroll_position = v_scroll_position < 0 ? 0 :
-                               v_scroll_position > sp->v_max_scroll ? sp->v_max_scroll :
-                               v_scroll_position;
+            v_scroll_position > sp->v_max_scroll ? sp->v_max_scroll : v_scroll_position;
         if (v_scroll_position != sp->v_scroll_position) {
             sp->v_scroll_position = v_scroll_position;
             evcon->need_repaint = true;
@@ -236,14 +242,13 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
 
     // Horizontal dragging
     if (sp->h_is_dragging) {
-        int handle_w = sp->h_handle_width;
-        int delta_x = event->x - sp->drag_start_x;
-        int scroll_range = block->width - handle_w;
-        int scroll_per_pixel = scroll_range > 0 ? sp->h_max_scroll / scroll_range : 0;
-        int h_scroll_position = sp->h_drag_start_scroll + (delta_x * scroll_per_pixel);
+        float handle_w = sp->h_handle_width;
+        float delta_x = event->x - sp->drag_start_x;
+        float scroll_range = block->width - handle_w;
+        float scroll_per_pixel = scroll_range > 0 ? sp->h_max_scroll / scroll_range : 0;
+        float h_scroll_position = sp->h_drag_start_scroll + (delta_x * scroll_per_pixel);
         h_scroll_position = h_scroll_position < 0 ? 0 :
-                               h_scroll_position > sp->h_max_scroll ? sp->h_max_scroll :
-                               h_scroll_position;
+            h_scroll_position > sp->h_max_scroll ? sp->h_max_scroll : h_scroll_position;
         if (h_scroll_position != sp->h_scroll_position) {
             sp->h_scroll_position = h_scroll_position;
             evcon->need_repaint = true;
