@@ -288,6 +288,14 @@ class PremakeGenerator:
         elif base_compiler == 'clang':
             build_opts.extend(['-fms-extensions', '-fcolor-diagnostics'])
 
+        # Add global flags from configuration
+        global_flags = self.config.get('flags', [])
+        for flag in global_flags:
+            if flag.startswith('D'):  # Define flags like DRPMALLOC_FIRST_CLASS_HEAPS=1
+                build_opts.append(f'-{flag}')
+            elif flag not in ['pedantic', 'fdiagnostics-color=auto', 'fms-extensions']:  # Avoid duplicates
+                build_opts.append(f'-{flag}')
+
         return build_opts
 
     def _get_consolidated_includes(self) -> List[str]:
@@ -639,7 +647,6 @@ class PremakeGenerator:
         defines = self.config.get('defines', [])
         if defines:
             self.premake_content.extend([
-                '    filter {}',
                 '    defines {'
             ])
             for define in defines:

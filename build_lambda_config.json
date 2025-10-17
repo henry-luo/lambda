@@ -102,7 +102,7 @@
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include"
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include"
     ],
     "libraries": [
         {
@@ -181,10 +181,10 @@
             "link": "static"
         },
         {
-            "name": "jemalloc",
-            "description": "High-performance memory allocator (jemalloc with je_ prefix)",
-            "include": "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
-            "lib": "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+            "name": "rpmalloc",
+            "description": "High-performance memory allocator (rpmalloc with first-class heaps, no malloc override)",
+            "include": "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+            "lib": "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
             "link": "static"
         },
         {
@@ -279,7 +279,7 @@
             "lang": "c17",
             "includes": [
                 "/opt/homebrew/include",
-                "/opt/homebrew/opt/jemalloc/include"
+                "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include"
             ],
             "sources": [
                 "lib/mempool.c",
@@ -299,7 +299,7 @@
             ],
             "libraries": [
                 "utf8proc",
-                "jemalloc"
+                "rpmalloc"
             ],
             "special_flags": "-DUTF8PROC_STATIC",
             "cpp_flags": "-I/opt/homebrew/include -DUTF8PROC_STATIC",
@@ -349,7 +349,7 @@
                 "ssl",
                 "crypto",
                 "zlib",
-                "jemalloc"
+                "rpmalloc"
             ],
             "defines": [
                 "SIMPLE_SCHEMA_PARSER"
@@ -445,7 +445,7 @@
                 "bzip2",
                 "png",
                 "expat",
-                "jemalloc"
+                "rpmalloc"
             ],
             "lib_dirs": [
                 "/opt/homebrew/lib",
@@ -987,7 +987,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_stringbuf_gtest.exe"
                     },
@@ -1024,7 +1024,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_datetime_gtest.exe"
                     },
@@ -1083,7 +1083,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "additional_sources": [
                             "lib/mempool.c"
@@ -1097,7 +1097,7 @@
                         "_DISABLED_libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "_DISABLED_additional_sources": [
                             "lib/mempool.c"
@@ -1110,7 +1110,7 @@
                         "_DISABLED_name": "🧪 Standalone Mempool Test (C)",
                         "_DISABLED_dependencies": [],
                         "_DISABLED_libraries": [
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "_DISABLED_additional_sources": [
                             "lib/mempool.c"
@@ -1125,7 +1125,7 @@
                         "_DISABLED_libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "_DISABLED_additional_sources": [
                             "lib/mempool.c"
@@ -1142,7 +1142,7 @@
                         "_DISABLED_libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "_DISABLED_binary": "test_mempool_gtest.exe",
                         "_comment": "DISABLED - old complex mempool API"
@@ -1175,7 +1175,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_math_gtest.exe"
                     },
@@ -1188,7 +1188,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_math_ascii_gtest.exe"
                     },
@@ -1201,7 +1201,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_markup_roundtrip_gtest.exe"
                     },
@@ -1214,7 +1214,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_input_roundtrip_gtest.exe"
                     },
@@ -1251,7 +1251,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_sysinfo_gtest.exe"
                     },
@@ -1264,7 +1264,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_jsx_roundtrip_new_gtest.exe"
                     },
@@ -1289,7 +1289,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_css_tokenizer_gtest.exe"
                     },
@@ -1302,7 +1302,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_css_parser_gtest.exe"
                     },
@@ -1315,7 +1315,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_css_integration_gtest.exe"
                     },
@@ -1328,7 +1328,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_css_files_safe_gtest.exe"
                     },
@@ -1341,7 +1341,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_css_frameworks_gtest.exe"
                     },
@@ -1378,7 +1378,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test_latex_html_fixtures_gtest.exe",
                         "additional_sources": [
@@ -1421,7 +1421,7 @@
                         "libraries": [
                             "gtest",
                             "gtest_main",
-                            "jemalloc"
+                            "rpmalloc"
                         ],
                         "binary": "test/test_ast_validator_gtest.exe"
                     }
