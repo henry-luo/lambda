@@ -286,7 +286,6 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
     }
     else {
         block->scroller->has_hz_overflow = false;
-        block->scroller->has_clip = false;
     }
     // handle vertical overflow and determine block->height
     if (content_height > block->height) { // vt overflow
@@ -305,8 +304,8 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
     }
     else {
         block->scroller->has_vt_overflow = false;
-        block->scroller->has_clip = false;
     }
+    block->scroller->has_clip = block->scroller->has_vt_overflow || block->scroller->has_hz_overflow;
 }
 
 void scrollpane_destroy(ScrollPane* sp) {
