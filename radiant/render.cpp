@@ -69,11 +69,11 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
         str, text->start_index, text->length, text->x, text->y, text->width, text->height, x, y);
     bool has_space = false;  uint32_t codepoint;
     while (p < end) {
-        // printf("draw character '%c'\n", *p);
+        // log_debug("draw character '%c'", *p);
         if (is_space(*p)) {
             if (!has_space) {  // add whitespace
                 has_space = true;
-                // printf("draw_space: %c, x:%f, end:%f\n", *p, x, x + rdcon->font.space_width);
+                // log_debug("draw_space: %c, x:%f, end:%f", *p, x, x + rdcon->font.space_width);
                 x += rdcon->font.style->space_width;
             }
             // else  // skip consecutive spaces
@@ -118,7 +118,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
             rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y + text->height / 2;
         }
         rect.width = text->width;  rect.height = thinkness; // corrected the variable name from h to height
-        printf("text deco: %d, x:%d, y:%d, wd:%d, hg:%d\n", rdcon->font.style->text_deco,
+        log_debug("text deco: %d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f", rdcon->font.style->text_deco,
             rect.x, rect.y, rect.width, rect.height); // corrected w to width
         fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
     }
@@ -186,7 +186,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
     }
     else if (rdcon->list.list_style_type == LXB_CSS_VALUE_DECIMAL) {
-        printf("render list decimal\n");
+        log_debug("render list decimal");
         StrBuf* num = strbuf_new_cap(10);
         strbuf_append_format(num, "%d.", rdcon->list.item_index);
         // output the number as VIEW_TEXT
@@ -215,19 +215,19 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         strbuf_free(num);
     }
     else {
-        printf("unknown list style type\n");
+        log_debug("unknown list style type");
     }
 }
 
 void render_litem_view(RenderContext* rdcon, ViewBlock* list_item) {
-    printf("view list item:%s\n", list_item->node->name());
+    log_debug("view list item:%s", list_item->node->name());
     rdcon->list.item_index++;
     render_block_view(rdcon, list_item);
 }
 
 void render_list_view(RenderContext* rdcon, ViewBlock* view) {
     ViewBlock* list = (ViewBlock*)view;
-    printf("view list:%s\n", list->node->name());
+    log_debug("view list:%s", list->node->name());
     ListBlot pa_list = rdcon->list;
     rdcon->list.item_index = 0;  rdcon->list.list_style_type = list->blk->list_style_type;
     render_block_view(rdcon, list);
@@ -398,8 +398,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
 
 void render_svg(ImageSurface* surface) {
     if (!surface->pic) {
-        printf("no picture to render\n");
-        return;
+        log_debug("no picture to render");  return;
     }
     // Step 1: Create an offscreen canvas to render the original Picture
     Tvg_Canvas* canvas = tvg_swcanvas_create();
@@ -416,7 +415,7 @@ void render_svg(ImageSurface* surface) {
     // Set the canvas target to the buffer
     if (tvg_swcanvas_set_target(canvas, (uint32_t*)surface->pixels, width, width, height,
         TVG_COLORSPACE_ABGR8888) != TVG_RESULT_SUCCESS) {
-        printf("Failed to set canvas target\n");
+        log_debug("Failed to set canvas target");
         free(surface->pixels);  surface->pixels = NULL;
         tvg_canvas_destroy(canvas);
         return;
@@ -442,7 +441,7 @@ Tvg_Paint* load_picture(ImageSurface* surface) {
     // Load the raw pixel data into the new Picture
     if (tvg_picture_load_raw(pic, (uint32_t*)surface->pixels, surface->width, surface->height,
         TVG_COLORSPACE_ABGR8888, false) != TVG_RESULT_SUCCESS) {
-        printf("Failed to load raw pixel data\n");
+        log_debug("Failed to load raw pixel data");
         tvg_paint_del(pic);
         return NULL;
     }
@@ -450,17 +449,20 @@ Tvg_Paint* load_picture(ImageSurface* surface) {
 }
 
 void render_image_view(RenderContext* rdcon, ViewBlock* view) {
-    printf("render image view\n");
+    log_debug("render image view");
+    log_enter();
     // render border and background, etc.
     render_block_view(rdcon, (ViewBlock*)view);
     // render the image
     if (view->embed && view->embed->img) {
+        log_debug("image view has embed image");
         ImageSurface* img = view->embed->img;
         Rect rect;
         rect.x = rdcon->block.x + view->x;  rect.y = rdcon->block.y + view->y;
         rect.width = view->width;  rect.height = view->height;
         if (img->format == IMAGE_FORMAT_SVG) {
             // render the SVG image
+            log_debug("render svg image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
             if (!img->pixels) {
                 render_svg(img);
             }
@@ -478,13 +480,18 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
                 tvg_canvas_draw(rdcon->canvas, false);
                 tvg_canvas_sync(rdcon->canvas);
             } else {
-                printf("Failed to load svg picture\n");
+                log_debug("failed to load svg picture");
             }
         } else {
+            log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
             blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip);
         }
     }
-    printf("end of image render\n");
+    else {
+        log_debug("image view has no embed image");
+    }
+    log_debug("end of image render");
+    log_leave();
 }
 
 void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
@@ -501,7 +508,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
         if (doc && doc->view_tree && doc->view_tree->root) {
             View* root_view = doc->view_tree->root;
             if (root_view && root_view->type == RDT_VIEW_BLOCK) {
-                printf("render doc root view:\n");
+                log_debug("render doc root view:");
                 // load default font
                 FontBox pa_font = rdcon->font;
                 FontProp* default_font = doc->view_tree->html_version == HTML5 ? &rdcon->ui_context->default_font : &rdcon->ui_context->legacy_default_font;
@@ -513,7 +520,7 @@ void render_embed_doc(RenderContext* rdcon, ViewBlock* block) {
                 rdcon->font = pa_font;
             }
             else {
-                printf("Invalid root view\n");
+                log_debug("Invalid root view");
             }
         }
     }
@@ -539,7 +546,7 @@ void render_inline_view(RenderContext* rdcon, ViewSpan* view_span) {
         render_children(rdcon, view);
     }
     else {
-        printf("view has no child\n");
+        log_debug("view has no child");
     }
     rdcon->font = pa_font;  rdcon->color = pa_color;
 }
