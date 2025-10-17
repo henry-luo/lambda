@@ -19,7 +19,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* view_block);
 void render_inline_view(RenderContext* rdcon, ViewSpan* view_span);
 void render_children(RenderContext* rdcon, View* view);
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
-    int content_width, int content_height, Bound* clip);
+    float content_width, float content_height, Bound* clip);
 
 // draw a glyph bitmap into the doc surface
 void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
