@@ -165,37 +165,86 @@ void fill_surface_rect(ImageSurface* surface, Rect* rect, uint32_t color, Bound*
     }
 }
 
-// a primitive blit function to copy pixels from src to dst
-void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip) {
+// Bilinear interpolation helper function
+static uint32_t bilinear_interpolate(ImageSurface* src, float src_x, float src_y) {
+    int x1 = (int)src_x;
+    int y1 = (int)src_y;
+    int x2 = x1 + 1;
+    int y2 = y1 + 1;
+
+    // clamp coordinates to source bounds
+    x1 = max(0, min(x1, src->width - 1));
+    y1 = max(0, min(y1, src->height - 1));
+    x2 = max(0, min(x2, src->width - 1));
+    y2 = max(0, min(y2, src->height - 1));
+
+    float fx = src_x - (int)src_x;
+    float fy = src_y - (int)src_y;
+
+    // get the four surrounding pixels
+    uint32_t* p11 = (uint32_t*)((uint8_t*)src->pixels + y1 * src->pitch + x1 * 4);
+    uint32_t* p21 = (uint32_t*)((uint8_t*)src->pixels + y1 * src->pitch + x2 * 4);
+    uint32_t* p12 = (uint32_t*)((uint8_t*)src->pixels + y2 * src->pitch + x1 * 4);
+    uint32_t* p22 = (uint32_t*)((uint8_t*)src->pixels + y2 * src->pitch + x2 * 4);
+
+    // extract RGBA components for each pixel
+    uint8_t r11 = (*p11 >> 24) & 0xFF, g11 = (*p11 >> 16) & 0xFF, b11 = (*p11 >> 8) & 0xFF, a11 = *p11 & 0xFF;
+    uint8_t r21 = (*p21 >> 24) & 0xFF, g21 = (*p21 >> 16) & 0xFF, b21 = (*p21 >> 8) & 0xFF, a21 = *p21 & 0xFF;
+    uint8_t r12 = (*p12 >> 24) & 0xFF, g12 = (*p12 >> 16) & 0xFF, b12 = (*p12 >> 8) & 0xFF, a12 = *p12 & 0xFF;
+    uint8_t r22 = (*p22 >> 24) & 0xFF, g22 = (*p22 >> 16) & 0xFF, b22 = (*p22 >> 8) & 0xFF, a22 = *p22 & 0xFF;
+
+    // bilinear interpolation for each component
+    uint8_t r = (uint8_t)(r11 * (1 - fx) * (1 - fy) + r21 * fx * (1 - fy) + r12 * (1 - fx) * fy + r22 * fx * fy);
+    uint8_t g = (uint8_t)(g11 * (1 - fx) * (1 - fy) + g21 * fx * (1 - fy) + g12 * (1 - fx) * fy + g22 * fx * fy);
+    uint8_t b = (uint8_t)(b11 * (1 - fx) * (1 - fy) + b21 * fx * (1 - fy) + b12 * (1 - fx) * fy + b22 * fx * fy);
+    uint8_t a = (uint8_t)(a11 * (1 - fx) * (1 - fy) + a21 * fx * (1 - fy) + a12 * (1 - fx) * fy + a22 * fx * fy);
+
+    return (r << 24) | (g << 16) | (b << 8) | a;
+}
+
+// Enhanced blit function with support for different scaling modes
+void blit_surface_scaled(ImageSurface* src, Rect* src_rect, ImageSurface* dst, Rect* dst_rect, Bound* clip, ScaleMode scale_mode) {
     Rect rect;
     if (!src || !dst || !dst_rect || !clip) return;
     if (!src_rect) { // use the entire source image
         rect = (Rect){0, 0, (float)src->width, (float)src->height};
         src_rect = &rect;
     }
-    printf("blit surface: src(%f, %f, %f, %f) to dst(%f, %f, %f, %f)\n",
+    log_debug("blit surface: src(%f, %f, %f, %f) to dst(%f, %f, %f, %f), scale_mode=%d",
         src_rect->x, src_rect->y, src_rect->width, src_rect->height,
-        dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height);
+        dst_rect->x, dst_rect->y, dst_rect->width, dst_rect->height, scale_mode);
+
     float x_ratio = (float)src_rect->width / dst_rect->width;
     float y_ratio = (float)src_rect->height / dst_rect->height;
     int left = max(clip->left, dst_rect->x), right = min(clip->right, dst_rect->x + dst_rect->width);
     int top = max(clip->top, dst_rect->y), bottom = min(clip->bottom, dst_rect->y + dst_rect->height);
     if (left >= right || top >= bottom) return; // dst_rect outside the dst surface
+
     for (int i = top; i < bottom; i++) {
         uint8_t* row_pixels = (uint8_t*)dst->pixels + i * dst->pitch;
         for (int j = left; j < right; j++) {
-            // todo: support different scale mode, like SDL_SCALEMODE_LINEAR
-            int src_x = src_rect->x + (j - dst_rect->x) * x_ratio;
-            int src_y = src_rect->y + (i - dst_rect->y) * y_ratio;
+            float src_x = src_rect->x + (j - dst_rect->x) * x_ratio;
+            float src_y = src_rect->y + (i - dst_rect->y) * y_ratio;
 
-            // Bounds check for source coordinates
-            if (src_x < 0 || src_x >= src->width || src_y < 0 || src_y >= src->height) {
-                continue; // Skip pixels outside source bounds
-            }
-
-            uint8_t* src_pixel = (uint8_t*)src->pixels + (src_y * src->pitch) + (src_x * 4);
             uint8_t* dst_pixel = (uint8_t*)row_pixels + (j * 4);
-            *((uint32_t*)dst_pixel) = *((uint32_t*)src_pixel);
+
+            if (scale_mode == SCALE_MODE_LINEAR) {
+                // Bilinear interpolation
+                uint32_t interpolated_color = bilinear_interpolate(src, src_x, src_y);
+                *((uint32_t*)dst_pixel) = interpolated_color;
+            }
+            else { // Nearest neighbor scaling (default)
+                int int_src_x = (int)(src_x + 0.5f);  // round to nearest
+                int int_src_y = (int)(src_y + 0.5f);
+
+                // bounds check for source coordinates
+                if (int_src_x < 0 || int_src_x >= src->width || int_src_y < 0 || int_src_y >= src->height) {
+                    continue; // skip pixels outside source bounds
+                }
+
+                uint8_t* src_pixel = (uint8_t*)src->pixels + (int_src_y * src->pitch) + (int_src_x * 4);
+                *((uint32_t*)dst_pixel) = *((uint32_t*)src_pixel);
+            }
         }
     }
 }
