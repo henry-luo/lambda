@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Mac native compilation dependency setup script
-# Enhanced with intelligent dependency detection to skip rebuilding ThorVG and jemalloc
+# Enhanced with intelligent dependency detection to skip rebuilding ThorVG and rpmalloc
 # when they're already properly downloaded, built, and verified
 set -e
 
@@ -58,10 +58,10 @@ if [ "$1" = "clean" ] || [ "$1" = "--clean" ]; then
         cd - > /dev/null
     fi
 
-    # Clean jemalloc build files
-    if [ -d "mac-deps/jemalloc-5.3.0" ]; then
-        cd mac-deps/jemalloc-5.3.0
-        make clean 2>/dev/null || true
+    # Clean rpmalloc build files
+    if [ -d "mac-deps/rpmalloc-src" ]; then
+        cd mac-deps/rpmalloc-src
+        rm -f *.o *.a 2>/dev/null || true
         cd - > /dev/null
     fi
 
@@ -355,20 +355,20 @@ build_mir_for_mac() {
     return 1
 }
 
-# Function to build jemalloc with je_ prefix for Mac
-build_jemalloc_with_je_prefix_for_mac() {
-    echo "Building jemalloc with je_ prefix for Mac..."
+# Function to build rpmalloc for Mac
+build_rpmalloc_for_mac() {
+    echo "Building rpmalloc for Mac..."
 
     # Enhanced check if already built in mac-deps with proper verification
-    if [ -f "mac-deps/jemalloc-install/lib/libjemalloc.a" ] && [ -f "mac-deps/jemalloc-install/include/jemalloc/jemalloc.h" ]; then
-        # Verify the je_ prefix functions are available
-        if nm "mac-deps/jemalloc-install/lib/libjemalloc.a" 2>/dev/null | grep -q "je_malloc"; then
-            echo "✅ jemalloc with je_ prefix already built and verified"
+    if [ -f "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" ] && [ -f "mac-deps/rpmalloc-install/include/rpmalloc/rpmalloc.h" ]; then
+        # Verify the library has the expected symbols
+        if nm "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" 2>/dev/null | grep -q "rpmalloc_initialize"; then
+            echo "✅ rpmalloc already built and verified"
             return 0
         else
-            echo "jemalloc found but je_ prefix functions missing, rebuilding..."
+            echo "rpmalloc found but missing expected symbols, rebuilding..."
             # Clean the incomplete installation
-            rm -rf mac-deps/jemalloc-install 2>/dev/null || true
+            rm -rf mac-deps/rpmalloc-install 2>/dev/null || true
         fi
     fi
 
@@ -376,75 +376,64 @@ build_jemalloc_with_je_prefix_for_mac() {
     mkdir -p mac-deps
 
     # Check if source exists, if not clone it
-    if [ ! -d "mac-deps/jemalloc" ]; then
-        echo "Cloning jemalloc repository..."
+    if [ ! -d "mac-deps/rpmalloc-src" ]; then
+        echo "Cloning rpmalloc repository..."
         cd mac-deps
-        git clone https://github.com/jemalloc/jemalloc.git || {
-            echo "Warning: Could not clone jemalloc repository"
+        git clone https://github.com/mjansson/rpmalloc.git rpmalloc-src || {
+            echo "Warning: Could not clone rpmalloc repository"
             cd - > /dev/null
             return 1
         }
         cd - > /dev/null
     else
-        echo "jemalloc source already downloaded"
+        echo "rpmalloc source already downloaded"
     fi
 
-    cd mac-deps/jemalloc
+    cd mac-deps/rpmalloc-src
 
     # Clean any previous builds
-    make clean 2>/dev/null || true
-    rm -rf ../jemalloc-install 2>/dev/null || true
+    rm -f *.o *.a 2>/dev/null || true
+    rm -rf ../rpmalloc-install 2>/dev/null || true
 
-    # Generate configure script if needed
-    if [ ! -f "configure" ]; then
-        echo "Generating configure script for jemalloc..."
-        if command -v autoconf >/dev/null 2>&1; then
-            ./autogen.sh || {
-                echo "❌ Failed to generate configure script"
+    # Create install directories
+    mkdir -p ../rpmalloc-install/lib
+    mkdir -p ../rpmalloc-install/include/rpmalloc
+
+    # Build rpmalloc with ENABLE_OVERRIDE=0 (no malloc override)
+    # This allows us to use rpmalloc only for explicit pool allocations
+    echo "Compiling rpmalloc with ENABLE_OVERRIDE=0..."
+    if gcc -c -O2 \
+        -DRPMALLOC_FIRST_CLASS_HEAPS=1 \
+        -DENABLE_OVERRIDE=0 \
+        -I. \
+        rpmalloc/rpmalloc.c \
+        -o rpmalloc_no_override.o; then
+
+        echo "Creating static library..."
+        if ar rcs librpmalloc_no_override.a rpmalloc_no_override.o; then
+            # Install the library and headers
+            echo "Installing rpmalloc to mac-deps..."
+            cp librpmalloc_no_override.a ../rpmalloc-install/lib/
+            cp rpmalloc/rpmalloc.h ../rpmalloc-install/include/rpmalloc/
+
+            # Verify the library has expected symbols
+            if nm "../rpmalloc-install/lib/librpmalloc_no_override.a" | grep -q "rpmalloc_initialize"; then
+                echo "✅ rpmalloc built successfully"
+                echo "   - rpmalloc_initialize: ✓ Available"
+                echo "   - rpmalloc_heap_acquire: ✓ Available"
+                echo "   - rpmalloc_heap_alloc: ✓ Available"
+                echo "   - ENABLE_OVERRIDE=0: ✓ No malloc override"
+                cd - > /dev/null
+                return 0
+            else
+                echo "❌ Required functions not found in built library"
                 cd - > /dev/null
                 return 1
-            }
-        else
-            echo "❌ autoconf not found - needed to generate configure script"
-            cd - > /dev/null
-            return 1
-        fi
-    fi
-
-    # Configure jemalloc with je_ prefix for standalone use
-    echo "Configuring jemalloc with je_ prefix..."
-    if ./configure \
-        --with-jemalloc-prefix=je_ \
-        --prefix="$SCRIPT_DIR/mac-deps/jemalloc-install" \
-        --enable-static \
-        --disable-shared \
-        --disable-debug \
-        --enable-stats \
-        --disable-prof \
-        --disable-fill; then
-
-        echo "Building jemalloc..."
-        if make -j$(sysctl -n hw.ncpu); then
-            echo "Installing jemalloc to mac-deps..."
-            if make install; then
-                # Verify the je_ prefix functions are available
-                if nm "../jemalloc-install/lib/libjemalloc.a" | grep -q "je_malloc"; then
-                    echo "✅ jemalloc with je_ prefix built successfully"
-                    echo "   - je_malloc: ✓ Available"
-                    echo "   - je_calloc: ✓ Available"
-                    echo "   - je_free: ✓ Available"
-                    cd - > /dev/null
-                    return 0
-                else
-                    echo "❌ je_ prefix functions not found in built library"
-                    cd - > /dev/null
-                    return 1
-                fi
             fi
         fi
     fi
 
-    echo "❌ jemalloc build failed"
+    echo "❌ rpmalloc build failed"
     cd - > /dev/null
     return 1
 }
@@ -974,7 +963,7 @@ if [ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg
             sudo rm -rf "$SYSTEM_PREFIX/include/thorvg" 2>/dev/null || true
             sudo rm -f "$SYSTEM_PREFIX/lib/pkgconfig/thorvg.pc" 2>/dev/null || true
             rm -rf "build_temp/thorvg" 2>/dev/null || true
-            
+
             if ! build_thorvg_v1_0_pre11_for_mac; then
                 echo "❌ ThorVG v1.0-pre11 build failed - required for Radiant project"
                 exit 1
@@ -1021,30 +1010,30 @@ else
     fi
 fi
 
-# Build jemalloc with je_ prefix for Mac (Lambda dependency)
-echo "Setting up jemalloc with je_ prefix..."
+# Build rpmalloc for Mac (Lambda dependency)
+echo "Setting up rpmalloc..."
 
-# Enhanced check for jemalloc - verify both library and headers exist and are functional
-if [ -f "mac-deps/jemalloc-install/lib/libjemalloc.a" ] && [ -f "mac-deps/jemalloc-install/include/jemalloc/jemalloc.h" ]; then
-    # Verify the je_ prefix functions are available in the built library
-    if nm "mac-deps/jemalloc-install/lib/libjemalloc.a" 2>/dev/null | grep -q "je_malloc"; then
-        echo "✅ jemalloc with je_ prefix already available and verified"
+# Enhanced check for rpmalloc - verify both library and headers exist and are functional
+if [ -f "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" ] && [ -f "mac-deps/rpmalloc-install/include/rpmalloc/rpmalloc.h" ]; then
+    # Verify the required functions are available in the built library
+    if nm "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" 2>/dev/null | grep -q "rpmalloc_initialize"; then
+        echo "✅ rpmalloc already available and verified"
     else
-        echo "jemalloc library found but je_ prefix functions missing, rebuilding..."
-        if ! build_jemalloc_with_je_prefix_for_mac; then
-            echo "❌ jemalloc with je_ prefix build failed - required for Lambda memory pool"
+        echo "rpmalloc library found but required functions missing, rebuilding..."
+        if ! build_rpmalloc_for_mac; then
+            echo "❌ rpmalloc build failed - required for Lambda memory pool"
             exit 1
         else
-            echo "✅ jemalloc with je_ prefix built successfully"
+            echo "✅ rpmalloc built successfully"
         fi
     fi
 else
-    echo "jemalloc not found or incomplete, building..."
-    if ! build_jemalloc_with_je_prefix_for_mac; then
-        echo "❌ jemalloc with je_ prefix build failed - required for Lambda memory pool"
+    echo "rpmalloc not found or incomplete, building..."
+    if ! build_rpmalloc_for_mac; then
+        echo "❌ rpmalloc build failed - required for Lambda memory pool"
         exit 1
     else
-        echo "✅ jemalloc with je_ prefix built successfully"
+        echo "✅ rpmalloc built successfully"
     fi
 fi
 
@@ -1092,7 +1081,6 @@ HOMEBREW_DEPS=(
     "utf8proc"   # For Unicode processing - referenced in build config
     "coreutils"  # For timeout command needed by test suite
     "openssl@3"  # For SSL/TLS support - required for libcurl
-    "ginac"      # For mathematical expression equivalence testing
     "libharu"    # For PDF generation - referenced in build config
 )
 
@@ -1196,7 +1184,6 @@ if command -v brew >/dev/null 2>&1; then
     BREW_PREFIX=$(brew --prefix)
     echo "- mpdecimal: $([ -f "$BREW_PREFIX/lib/libmpdec.a" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- utf8proc: $([ -f "$BREW_PREFIX/lib/libutf8proc.a" ] && echo "✓ Available" || echo "✗ Missing")"
-    echo "- criterion: $([ -d "$BREW_PREFIX/Cellar/criterion" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- coreutils: $([ -f "$BREW_PREFIX/bin/gtimeout" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- timeout: $([ -f "$BREW_PREFIX/bin/timeout" ] && command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo ""
@@ -1215,7 +1202,7 @@ else
 fi
 
 echo "- MIR: $([ -f "$SYSTEM_PREFIX/lib/libmir.a" ] && echo "✓ Built" || echo "✗ Missing")"
-echo "- jemalloc with je_ prefix: $([ -f "mac-deps/jemalloc-install/lib/libjemalloc.a" ] && echo "✓ Built" || echo "✗ Missing")"
+echo "- rpmalloc: $([ -f "mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- Google Test: $([ -f "$SYSTEM_PREFIX/lib/libgtest.a" ] && [ -f "$SYSTEM_PREFIX/lib/libgtest_main.a" ] && echo "✓ Built" || echo "✗ Missing")"
 echo "- nghttp2: $([ -f "mac-deps/nghttp2/lib/libnghttp2.a" ] && echo "✓ Built" || echo "✗ Missing")"
