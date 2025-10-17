@@ -2104,7 +2104,19 @@ class PremakeGenerator:
                             self.premake_content.append('        "stdc++fs",')
                         # On macOS, we don't need to link anything for filesystem
                     else:
-                        self.premake_content.append(f'        "{lib}",')
+                        # Check if this library is defined in external_libraries first
+                        if lib in self.external_libraries:
+                            lib_info = self.external_libraries[lib]
+                            # Skip libraries with link type "none"
+                            if lib_info.get('link') != 'none':
+                                # If it's a static library, it will be handled in linkoptions later
+                                # If it's dynamic, add it to links
+                                if lib_info.get('link') == 'dynamic':
+                                    self.premake_content.append(f'        "{lib}",')
+                                # Static libraries are handled in the linkoptions section below
+                        else:
+                            # Library not found in external definitions, assume it's a system library
+                            self.premake_content.append(f'        "{lib}",')
 
             # Special handling for lambda tests that use Catch2
             if (test_name and 'lambda' in test_name.lower() and 'catch2' in test_name.lower() and
