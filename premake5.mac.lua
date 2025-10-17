@@ -810,7 +810,6 @@ project "test_stringbuf_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -989,7 +988,6 @@ project "test_datetime_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -1168,7 +1166,6 @@ project "test_cmdedit_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "utf8proc",
     }
     
     linkoptions {
@@ -1232,7 +1229,6 @@ project "test_mempool_gtest"
     links {
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -1398,7 +1394,6 @@ project "test_math_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -1503,7 +1498,6 @@ project "test_math_ascii_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -1608,7 +1602,6 @@ project "test_markup_roundtrip_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -1713,7 +1706,6 @@ project "test_input_roundtrip_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -2024,7 +2016,6 @@ project "test_sysinfo_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -2129,7 +2120,6 @@ project "test_jsx_roundtrip_new_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -2337,7 +2327,6 @@ project "test_css_tokenizer_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -2442,7 +2431,6 @@ project "test_css_parser_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -2547,7 +2535,6 @@ project "test_css_integration_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -2652,7 +2639,6 @@ project "test_css_files_safe_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -2757,7 +2743,6 @@ project "test_css_frameworks_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -3071,7 +3056,6 @@ project "test_latex_html_fixtures_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
@@ -3279,7 +3263,6 @@ project "test_ast_validator_gtest"
         "lambda-lib",
         "gtest",
         "gtest_main",
-        "jemalloc",
     }
     
     linkoptions {
