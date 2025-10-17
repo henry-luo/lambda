@@ -280,8 +280,6 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
             block->scroller->overflow_x == LXB_CSS_VALUE_CLIP ||
             block->scroller->overflow_x == LXB_CSS_VALUE_HIDDEN) {
             block->scroller->has_clip = true;
-            block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
-            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
         }
     }
     else {
@@ -298,14 +296,18 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
             block->scroller->overflow_y == LXB_CSS_VALUE_CLIP ||
             block->scroller->overflow_y == LXB_CSS_VALUE_HIDDEN) {
             block->scroller->has_clip = true;
-            block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
-            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
         }
     }
     else {
         block->scroller->has_vt_overflow = false;
     }
     block->scroller->has_clip = block->scroller->has_vt_overflow || block->scroller->has_hz_overflow;
+    if (block->scroller->has_clip) {
+        block->scroller->clip.left = block->bound->border ? block->bound->border->width.left : 0;
+        block->scroller->clip.top = block->bound->border ? block->bound->border->width.top : 0;
+        block->scroller->clip.right = block->width - (block->bound->border ? block->bound->border->width.right : 0);
+        block->scroller->clip.bottom = block->height - (block->bound->border ? block->bound->border->width.bottom : 0);
+    }
 }
 
 void scrollpane_destroy(ScrollPane* sp) {
