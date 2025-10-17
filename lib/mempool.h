@@ -8,11 +8,11 @@ extern "C" {
 #include <stdlib.h>
 
 /**
- * Arena-based Memory Pool - jemalloc wrapper with arena support
+ * Arena-based Memory Pool - rpmalloc wrapper with heap support
  */
 
 /**
- * Opaque pool structure representing a jemalloc arena
+ * Opaque pool structure representing an rpmalloc heap
  */
 typedef struct Pool Pool;
 
@@ -59,6 +59,12 @@ void pool_free(Pool* pool, void* ptr);
  * @return Pointer to reallocated memory, or NULL on failure
  */
 void* pool_realloc(Pool* pool, void* ptr, size_t size);
+
+/**
+ * Clean up mempool system (optional - called automatically at process exit)
+ * This can be called to explicitly shut down rpmalloc if needed
+ */
+void mempool_cleanup(void);
 
 #ifdef __cplusplus
 }

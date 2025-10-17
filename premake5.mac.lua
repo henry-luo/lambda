@@ -61,7 +61,7 @@ project "lambda-lib"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -76,12 +76,15 @@ project "lambda-lib"
     
     links {
         "utf8proc",
-        "jemalloc",
+        "rpmalloc",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     defines {
@@ -113,7 +116,7 @@ project "lambda-input-full-c"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -125,6 +128,9 @@ project "lambda-input-full-c"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-std=c17"
     }
     
@@ -144,7 +150,7 @@ project "lambda-input-full-c"
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     links {
@@ -214,7 +220,7 @@ project "lambda-input-full-cpp"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -227,6 +233,9 @@ project "lambda-input-full-cpp"
         buildoptions {
             "-pedantic",
             "-fdiagnostics-color=auto",
+            "-fno-omit-frame-pointer",
+            "-g",
+            "-O2",
             "-std=c17",
         }
     
@@ -234,6 +243,9 @@ project "lambda-input-full-cpp"
         buildoptions {
             "-pedantic",
             "-fdiagnostics-color=auto",
+            "-fno-omit-frame-pointer",
+            "-g",
+            "-O2",
             "-std=c++17",
         }
     
@@ -255,7 +267,7 @@ project "lambda-input-full-cpp"
         "/opt/homebrew/lib/libssl.a",
         "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     links {
@@ -371,7 +383,7 @@ project "radiant"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -403,7 +415,7 @@ project "radiant"
         "/opt/homebrew/opt/bzip2/lib/libbz2.a",
         "/opt/homebrew/lib/libpng.a",
         "/opt/homebrew/opt/expat/lib/libexpat.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     links {
@@ -619,7 +631,7 @@ project "lambda"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -649,7 +661,7 @@ project "lambda"
         "/opt/homebrew/lib/libhpdf.a",
         "/opt/homebrew/lib/libnghttp2.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
         "/Users/henryluo/Projects/Jubily/lexbor/liblexbor_static.a",
         "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
         "/opt/homebrew/lib/libpng.a",
@@ -695,6 +707,9 @@ project "lambda"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- C++ specific options
@@ -729,7 +744,7 @@ project "test_strbuf_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -761,6 +776,9 @@ project "test_strbuf_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- AddressSanitizer for test projects only
@@ -788,7 +806,7 @@ project "test_stringbuf_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -815,12 +833,15 @@ project "test_stringbuf_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- AddressSanitizer for test projects only
@@ -848,7 +869,7 @@ project "test_strview_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -880,6 +901,9 @@ project "test_strview_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- AddressSanitizer for test projects only
@@ -907,7 +931,7 @@ project "test_num_stack_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -939,6 +963,9 @@ project "test_num_stack_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- AddressSanitizer for test projects only
@@ -966,7 +993,7 @@ project "test_datetime_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -993,12 +1020,15 @@ project "test_datetime_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- AddressSanitizer for test projects only
@@ -1026,7 +1056,7 @@ project "test_url_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1058,6 +1088,9 @@ project "test_url_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- AddressSanitizer for test projects only
@@ -1085,7 +1118,7 @@ project "test_url_extra_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1117,6 +1150,9 @@ project "test_url_extra_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- AddressSanitizer for test projects only
@@ -1144,7 +1180,7 @@ project "test_cmdedit_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1177,6 +1213,9 @@ project "test_cmdedit_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-DCMDEDIT_TESTING",
         "-Wno-implicit-function-declaration",
         "-DUTF8PROC_STATIC",
@@ -1208,7 +1247,7 @@ project "test_mempool_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1234,12 +1273,15 @@ project "test_mempool_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- AddressSanitizer for test projects only
@@ -1267,7 +1309,7 @@ project "test_mime_detect_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1336,6 +1378,9 @@ project "test_mime_detect_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -1370,7 +1415,7 @@ project "test_math_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1399,7 +1444,7 @@ project "test_math_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -1440,6 +1485,9 @@ project "test_math_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -1474,7 +1522,7 @@ project "test_math_ascii_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1503,7 +1551,7 @@ project "test_math_ascii_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -1544,6 +1592,9 @@ project "test_math_ascii_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -1578,7 +1629,7 @@ project "test_markup_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1607,7 +1658,7 @@ project "test_markup_roundtrip_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -1648,6 +1699,9 @@ project "test_markup_roundtrip_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -1682,7 +1736,7 @@ project "test_input_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1711,7 +1765,7 @@ project "test_input_roundtrip_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -1752,6 +1806,9 @@ project "test_input_roundtrip_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -1786,7 +1843,7 @@ project "test_dir_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1855,6 +1912,9 @@ project "test_dir_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -1889,7 +1949,7 @@ project "test_http_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -1958,6 +2018,9 @@ project "test_http_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -1992,7 +2055,7 @@ project "test_sysinfo_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2021,7 +2084,7 @@ project "test_sysinfo_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -2062,6 +2125,9 @@ project "test_sysinfo_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -2096,7 +2162,7 @@ project "test_jsx_roundtrip_new_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2125,7 +2191,7 @@ project "test_jsx_roundtrip_new_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -2166,6 +2232,9 @@ project "test_jsx_roundtrip_new_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -2200,7 +2269,7 @@ project "test_mdx_roundtrip_new_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2269,6 +2338,9 @@ project "test_mdx_roundtrip_new_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -2303,7 +2375,7 @@ project "test_css_tokenizer_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2332,7 +2404,7 @@ project "test_css_tokenizer_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -2373,6 +2445,9 @@ project "test_css_tokenizer_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -2407,7 +2482,7 @@ project "test_css_parser_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2436,7 +2511,7 @@ project "test_css_parser_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -2477,6 +2552,9 @@ project "test_css_parser_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -2511,7 +2589,7 @@ project "test_css_integration_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2540,7 +2618,7 @@ project "test_css_integration_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -2581,6 +2659,9 @@ project "test_css_integration_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -2615,7 +2696,7 @@ project "test_css_files_safe_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2644,7 +2725,7 @@ project "test_css_files_safe_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -2685,6 +2766,9 @@ project "test_css_files_safe_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -2719,7 +2803,7 @@ project "test_css_frameworks_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2748,7 +2832,7 @@ project "test_css_frameworks_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -2789,6 +2873,9 @@ project "test_css_frameworks_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -2823,7 +2910,7 @@ project "test_mdx_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2892,6 +2979,9 @@ project "test_mdx_roundtrip_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -2926,7 +3016,7 @@ project "test_jsx_roundtrip_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -2995,6 +3085,9 @@ project "test_jsx_roundtrip_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-fms-extensions",
     }
     
@@ -3032,7 +3125,7 @@ project "test_latex_html_fixtures_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3061,7 +3154,7 @@ project "test_latex_html_fixtures_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -3102,6 +3195,9 @@ project "test_latex_html_fixtures_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-std=c++17",
         "-I/opt/homebrew/include",
     }
@@ -3137,7 +3233,7 @@ project "test_validator_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3206,6 +3302,9 @@ project "test_validator_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     filter {}
@@ -3239,7 +3338,7 @@ project "test_ast_validator_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3268,7 +3367,7 @@ project "test_ast_validator_gtest"
     linkoptions {
         "/opt/homebrew/lib/libgtest.a",
         "/opt/homebrew/lib/libgtest_main.a",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/lib/libjemalloc.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
     
     linkoptions {
@@ -3309,6 +3408,9 @@ project "test_ast_validator_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     filter {}
@@ -3342,7 +3444,7 @@ project "test_lambda_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3373,6 +3475,9 @@ project "test_lambda_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- AddressSanitizer for test projects only
@@ -3400,7 +3505,7 @@ project "test_lambda_repl_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3431,6 +3536,9 @@ project "test_lambda_repl_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- AddressSanitizer for test projects only
@@ -3458,7 +3566,7 @@ project "test_lambda_proc_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3489,6 +3597,9 @@ project "test_lambda_proc_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- AddressSanitizer for test projects only
@@ -3516,7 +3627,7 @@ project "test_js_gtest"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3547,6 +3658,9 @@ project "test_js_gtest"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
     }
     
     -- AddressSanitizer for test projects only
@@ -3574,7 +3688,7 @@ project "test_lambda_runner"
         "lambda/tree-sitter-lambda/bindings/c",
         "lambda/tree-sitter-javascript/bindings/c",
         "lexbor/source",
-        "/Users/henryluo/Projects/Jubily/mac-deps/jemalloc-install/include",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
         "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
         "/opt/homebrew/include/fontconfig",
         "/opt/homebrew/include",
@@ -3601,6 +3715,9 @@ project "test_lambda_runner"
     buildoptions {
         "-pedantic",
         "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
         "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES",
         "-D_LIBCPP_ENABLE_CXX17_REMOVED_FEATURES_WARNING=0",
     }
