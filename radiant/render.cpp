@@ -315,6 +315,8 @@ void draw_debug_rect(Tvg_Canvas* canvas, Rect rect, Bound* clip) {
 
 void setup_scroller(RenderContext* rdcon, ViewBlock* block) {
     if (block->scroller->has_clip) {
+        log_debug("setup scroller clip: left:%f, top:%f, right:%f, bottom:%f",
+            block->scroller->clip.left, block->scroller->clip.top, block->scroller->clip.right, block->scroller->clip.bottom);
         rdcon->block.clip.left = max(rdcon->block.clip.left, rdcon->block.x + block->scroller->clip.left);
         rdcon->block.clip.top = max(rdcon->block.clip.top, rdcon->block.y + block->scroller->clip.top);
         rdcon->block.clip.right = min(rdcon->block.clip.right, rdcon->block.x + block->scroller->clip.right);
@@ -347,6 +349,8 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
 }
 
 void render_block_view(RenderContext* rdcon, ViewBlock* block) {
+    log_debug("render block view:%s", block->node->name());
+    log_enter();
     BlockBlot pa_block = rdcon->block;  FontBox pa_font = rdcon->font;  Color pa_color = rdcon->color;
     if (block->font) {
         setup_font(rdcon->ui_context, &rdcon->font, pa_font.ft_face->family_name, block->font);
@@ -381,7 +385,7 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         render_children(rdcon, view);
     }
     else {
-        printf("view has no child\n");
+        log_debug("view has no child");
     }
 
     // render scrollbars
@@ -389,9 +393,10 @@ void render_block_view(RenderContext* rdcon, ViewBlock* block) {
         render_scroller(rdcon, block, &pa_block);
     }
     rdcon->block = pa_block;  rdcon->font = pa_font;  rdcon->color = pa_color;
+    log_leave();
 }
 
-void renderSvg(ImageSurface* surface) {
+void render_svg(ImageSurface* surface) {
     if (!surface->pic) {
         printf("no picture to render\n");
         return;
@@ -457,7 +462,7 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
         if (img->format == IMAGE_FORMAT_SVG) {
             // render the SVG image
             if (!img->pixels) {
-                renderSvg(img);
+                render_svg(img);
             }
             Tvg_Paint* pic = load_picture(img);
             if (pic) {

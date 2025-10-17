@@ -1,14 +1,15 @@
 #include "render.hpp"
 #include "handler.hpp"
+#include "../lib/log.h"
 
 struct ScrollConfig {
-    int SCROLLBAR_SIZE;
-    int MIN_HANDLE_SIZE;
-    int HANDLE_RADIUS;
-    int SCROLL_BORDER_MAIN;
-    int SCROLL_BORDER_CROSS;
-    int BAR_COLOR = 0xF6;
-    int HANDLE_COLOR = 0xC0;
+    float SCROLLBAR_SIZE;
+    float MIN_HANDLE_SIZE;
+    float HANDLE_RADIUS;
+    float SCROLL_BORDER_MAIN;
+    float SCROLL_BORDER_CROSS;
+    float BAR_COLOR = 0xF6;
+    float HANDLE_COLOR = 0xC0;
 };
 ScrollConfig sc;
 
@@ -20,7 +21,7 @@ void scroll_config_init(int pixel_ratio) {
     sc.SCROLL_BORDER_CROSS = 2 * pixel_ratio;
 }
 
-#include "../lib/log.h"
+
 void tvg_shape_get_bounds(Tvg_Paint* shape, int* x, int* y, int* width, int* height) {
     Tvg_Matrix m;
     tvg_paint_get_transform(shape, &m);
@@ -46,9 +47,14 @@ float tvg_shape_get_h(Tvg_Paint* shape) {
     return p[2].y - p[0].y;
 }
 
+void ScrollPane::reset() {
+    memset(this, 0, sizeof(ScrollPane));
+}
+
 void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     float content_width, float content_height, Bound* clip) {
-    log_debug("render scroller content size: %f x %f", content_width, content_height);
+    log_debug("render scroller content size: %f x %f, blk bounds: %f x %f",
+        content_width, content_height, block_bound->width, block_bound->height);
 
     float view_x = block_bound->x, view_y = block_bound->y;
     float view_width = block_bound->width, view_height = block_bound->height;
@@ -63,7 +69,7 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
     Tvg_Paint* v_scrollbar = tvg_shape_new();
     tvg_shape_append_rect(v_scrollbar, view_x + view_width - sc.SCROLLBAR_SIZE,
         view_y, sc.SCROLLBAR_SIZE, view_height, 0, 0);
-    log_debug("v_scrollbar rect: %f, %f, %f, %f",
+    log_debug("v_scrollbar rect: x %f, y %f, wd %f, hg %f",
         view_x + view_width - sc.SCROLLBAR_SIZE, view_y, sc.SCROLLBAR_SIZE, view_height);
     tvg_shape_set_fill_color(v_scrollbar, sc.BAR_COLOR, sc.BAR_COLOR, sc.BAR_COLOR, 255);
     tvg_paint_set_mask_method(v_scrollbar, clip_rect, TVG_MASK_METHOD_ALPHA);
@@ -74,7 +80,7 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
         sp->v_max_scroll = content_height > view_height ? content_height - view_height : 0;
         float bar_height = view_height - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
         log_debug("bar height: %f", bar_height);
-        float v_ratio = view_height * 100 / content_height;
+        float v_ratio = min(view_height * 100 / content_height, 100.0f);
         sp->v_handle_height = (v_ratio * bar_height) / 100;
         sp->v_handle_height = max(sc.MIN_HANDLE_SIZE, sp->v_handle_height);
         sp->v_handle_y = sc.SCROLL_BORDER_MAIN + (sp->v_max_scroll > 0 ?
@@ -82,6 +88,8 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
         float v_scroll_x = view_x + view_width - sc.SCROLLBAR_SIZE + sc.SCROLL_BORDER_CROSS;
         tvg_shape_append_rect(v_scroll_handle, v_scroll_x, view_y + sp->v_handle_y,
             sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sp->v_handle_height, sc.HANDLE_RADIUS, sc.HANDLE_RADIUS);
+        log_debug("v_scroll_handle rect: x %f, y %f, wd %f, hg %f",
+            v_scroll_x, view_y + sp->v_handle_y, sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_CROSS * 2, sp->v_handle_height);
         tvg_paint_set_mask_method(v_scroll_handle, clip_rect, TVG_MASK_METHOD_ALPHA);
     }
 
@@ -100,7 +108,7 @@ void scrollpane_render(Tvg_Canvas* canvas, ScrollPane* sp, Rect* block_bound,
         sp->h_max_scroll = content_width > view_width ? content_width - view_width : 0;
         float bar_width = view_width - sc.SCROLLBAR_SIZE - sc.SCROLL_BORDER_MAIN * 2;
         log_debug("bar width: %f", bar_width);
-        float h_ratio = view_width * 100 / content_width;
+        float h_ratio = min(view_width * 100 / content_width, 100.0f);
         sp->h_handle_width = (h_ratio * bar_width) / 100;
         sp->h_handle_width = max(sc.MIN_HANDLE_SIZE, sp->h_handle_width);
         sp->h_handle_x = sc.SCROLL_BORDER_MAIN + (sp->h_max_scroll > 0 ?
@@ -253,6 +261,51 @@ void scrollpane_drag(EventContext* evcon, ViewBlock* block) {
             sp->h_scroll_position = h_scroll_position;
             evcon->need_repaint = true;
         }
+    }
+}
+
+void update_scroller(ViewBlock* block, float content_width, float content_height) {
+    if (!block->scroller) { return; }
+    // handle horizontal overflow
+    log_debug("update scroller for block:%s, content_width:%.1f, content_height:%.1f, block_width:%.1f, block_height:%.1f",
+        block->node->name(), content_width, content_height, block->width, block->height);
+    if (content_width > block->width) { // hz overflow
+        block->scroller->has_hz_overflow = true;
+        if (block->scroller->overflow_x == LXB_CSS_VALUE_VISIBLE) {}
+        else if (block->scroller->overflow_x == LXB_CSS_VALUE_SCROLL ||
+            block->scroller->overflow_x == LXB_CSS_VALUE_AUTO) {
+            block->scroller->has_hz_scroll = true;
+        }
+        if (block->scroller->has_hz_scroll ||
+            block->scroller->overflow_x == LXB_CSS_VALUE_CLIP ||
+            block->scroller->overflow_x == LXB_CSS_VALUE_HIDDEN) {
+            block->scroller->has_clip = true;
+            block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
+            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
+        }
+    }
+    else {
+        block->scroller->has_hz_overflow = false;
+        block->scroller->has_clip = false;
+    }
+    // handle vertical overflow and determine block->height
+    if (content_height > block->height) { // vt overflow
+        block->scroller->has_vt_overflow = true;
+        if (block->scroller->overflow_y == LXB_CSS_VALUE_VISIBLE) { }
+        else if (block->scroller->overflow_y == LXB_CSS_VALUE_SCROLL || block->scroller->overflow_y == LXB_CSS_VALUE_AUTO) {
+            block->scroller->has_vt_scroll = true;
+        }
+        if (block->scroller->has_hz_scroll ||
+            block->scroller->overflow_y == LXB_CSS_VALUE_CLIP ||
+            block->scroller->overflow_y == LXB_CSS_VALUE_HIDDEN) {
+            block->scroller->has_clip = true;
+            block->scroller->clip.left = 0;  block->scroller->clip.top = 0;
+            block->scroller->clip.right = block->width;  block->scroller->clip.bottom = block->height;
+        }
+    }
+    else {
+        block->scroller->has_vt_overflow = false;
+        block->scroller->has_clip = false;
     }
 }
 
