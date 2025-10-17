@@ -26,7 +26,7 @@ bool do_redraw = false;
 UiContext ui_context;
 
 Document* show_html_doc(lxb_url_t *base, char* doc_url) {
-    printf("Showing HTML document %s\n", doc_url);
+    log_debug("Showing HTML document %s", doc_url);
     Document* doc = load_html_doc(base, doc_url);
     ui_context.document = doc;
     // layout html doc
@@ -43,7 +43,7 @@ Document* show_html_doc(lxb_url_t *base, char* doc_url) {
 
 void reflow_html_doc(Document* doc) {
     if (!doc || !doc->dom_tree) {
-        printf("No document to reflow\n");
+        log_debug("No document to reflow");
         return;
     }
     layout_html_doc(&ui_context, doc, true);
@@ -62,15 +62,16 @@ void character_callback(GLFWwindow* window, unsigned int codepoint) {
     // codepoint in UFT32
     if (codepoint > 127) {
         // wchar_t unicodeChar = codepoint;
-        wprintf(L"Unicode codepoint: %u, %lc\n", codepoint, codepoint);
+        // wprintf(L"Unicode codepoint: %u, %lc\n", codepoint, codepoint);
+        log_debug("Unicode character entered: %u", codepoint);
     } else {
-        printf("Character entered: %u, %c\n", codepoint, codepoint);
+        log_debug("Character entered: %u, %c", codepoint, codepoint);
     }
 }
 
 static void cursor_position_callback(GLFWwindow* window, double xpos, double ypos) {
     RdtEvent event;
-    // printf("Cursor position: (%.2f, %.2f)\n", xpos, ypos);
+    log_debug("Cursor position: (%.1f, %.1f)", xpos, ypos);
     event.mouse_position.type = RDT_EVENT_MOUSE_MOVE;
     event.mouse_position.timestamp = glfwGetTime();
     event.mouse_position.x = xpos * ui_context.pixel_ratio;
@@ -84,21 +85,23 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
     event.mouse_button.timestamp = glfwGetTime();
     event.mouse_button.button = button;
 
-    if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS)
-        printf("Right mouse button pressed\n");
-    else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE)
-        printf("Right mouse button released\n");
+    if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS) {
+        log_debug("Right mouse button pressed");
+    }
+    else if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_RELEASE) {
+        log_debug("Right mouse button released");
+    }
     else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
-        printf("Left mouse button pressed\n");
+        log_debug("Left mouse button pressed");
         double xpos, ypos;
         glfwGetCursorPos(window, &xpos, &ypos);
-        printf("Mouse position: (%.2f, %.2f)\n", xpos, ypos);
+        log_debug("Mouse position: (%.2f, %.2f)", xpos, ypos);
         ui_context.mouse_state.is_mouse_down = 1;
         ui_context.mouse_state.down_x = event.mouse_button.x = xpos * ui_context.pixel_ratio;
         ui_context.mouse_state.down_y = event.mouse_button.y = ypos * ui_context.pixel_ratio;
     }
     else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
-        printf("Left mouse button released\n");
+        log_debug("Left mouse button released");
 
     if (button == GLFW_MOUSE_BUTTON_LEFT) {
         handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
@@ -108,23 +111,26 @@ void mouse_button_callback(GLFWwindow* window, int button, int action, int mods)
 // handles mouse/touchpad scroll input
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset) {
     RdtEvent event;
+    log_debug("Scroll_callback");
+    log_enter();
     event.scroll.type = RDT_EVENT_SCROLL;
     event.scroll.timestamp = glfwGetTime();
     event.scroll.xoffset = xoffset * ui_context.pixel_ratio;
     event.scroll.yoffset = yoffset * ui_context.pixel_ratio;
-    printf("Scroll offset: (%.2f, %.2f)\n", xoffset, yoffset);
+    log_debug("Scroll offset: (%.1f, %.1f)", xoffset, yoffset);
     assert(xoffset != 0 || yoffset != 0);
     double xpos, ypos;
     glfwGetCursorPos(window, &xpos, &ypos);
-    printf("Mouse position: (%.2f, %.2f)\n", xpos, ypos);
+    log_debug("Mouse position: (%.1f, %.1f)", xpos, ypos);
     event.scroll.x = xpos * ui_context.pixel_ratio;
     event.scroll.y = ypos * ui_context.pixel_ratio;
     handle_event(&ui_context, ui_context.document, (RdtEvent*)&event);
+    log_leave();
 }
 
 // Callback function to handle window resize
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
-    printf("Window resized to: %d x %d\n", width, height);
+    log_debug("Window resized to: %d x %d", width, height);
     do_redraw = 1;
 }
 
@@ -134,7 +140,7 @@ void window_refresh_callback(GLFWwindow *window) {
 }
 
 void to_repaint() {
-    printf("Requesting repaint\n");
+    log_debug("Requesting repaint");
     do_redraw = 1;
 }
 
@@ -143,7 +149,7 @@ void repaint_window() {
     // render_rectangles(ui_context.surface->pixels, ui_context.surface->width);
 
     // generate a texture from the bitmap
-    printf("creating rendering texture\n");
+    log_debug("creating rendering texture");
     GLuint texture;
     glGenTextures(1, &texture);
     glBindTexture(GL_TEXTURE_2D, texture);
@@ -155,7 +161,7 @@ void repaint_window() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // render the texture as a quad
-    printf("rendering texture\n");
+    log_debug("rendering texture");
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture);
     glBegin(GL_QUADS);
@@ -187,7 +193,7 @@ void render(GLFWwindow* window) {
         if (ui_context.document) {
             reflow_html_doc(ui_context.document);
         }
-        printf("Reflow time: %.2f ms\n", (glfwGetTime() - start_time) * 1000);
+        log_debug("Reflow time: %.2f ms", (glfwGetTime() - start_time) * 1000);
     }
     // rerender if the document is dirty
     if (ui_context.document->state && ui_context.document->state->is_dirty) {
@@ -198,7 +204,7 @@ void render(GLFWwindow* window) {
     repaint_window();
 
     double end = glfwGetTime();
-    // printf("Render time: %.4f ms\n", (end - start) * 1000);
+    // log_debug("Render time: %.4f ms", (end - start) * 1000);
 
     // Swap front and back buffers
     glfwSwapBuffers(window);
@@ -260,16 +266,15 @@ lxb_url_t* get_current_dir_lexbor() {
 
 // Layout test function for headless testing
 int run_layout(const char* html_file) {
-    printf("Radiant Layout Test Mode\n");
-    printf("========================\n");
-    printf("Testing file: %s\n\n", html_file);
+    log_debug("Radiant Layout Test Mode");
+    log_debug("Testing file: %s", html_file);
 
     // Initialize without GUI
     log_init_wrapper();
 
     // Initialize UI context properly in headless mode
     if (ui_context_init(&ui_context, true) != 0) {
-        fprintf(stderr, "Error: Failed to initialize UI context\n");
+        log_error("Error: Failed to initialize UI context");
         return 1;
     }
 
@@ -279,16 +284,16 @@ int run_layout(const char* html_file) {
     // Get current directory for relative path resolution
     lxb_url_t* cwd = get_current_dir_lexbor();
     if (!cwd) {
-        fprintf(stderr, "Error: Could not get current directory\n");
+        log_error("Error: Could not get current directory");
         ui_context_cleanup(&ui_context);
         return 1;
     }
 
     // Load HTML document
-    printf("Loading HTML document...\n");
+    log_debug("Loading HTML document...");
     Document* doc = load_html_doc(cwd, (char*)html_file);
     if (!doc) {
-        fprintf(stderr, "Error: Could not load HTML file: %s\n", html_file);
+        log_error("Error: Could not load HTML file: %s", html_file);
         lxb_url_destroy(cwd);
         ui_context_cleanup(&ui_context);
         return 1;
@@ -297,16 +302,14 @@ int run_layout(const char* html_file) {
     ui_context.document = doc;
 
     // Layout the document
-    printf("Performing layout...\n");
+    log_debug("Performing layout...");
     layout_html_doc(&ui_context, doc, false);
-    printf("Layout completed successfully!\n\n");
+    log_debug("Layout completed successfully!");
 
     // Cleanup
     lxb_url_destroy(cwd);
     ui_context_cleanup(&ui_context);
     log_cleanup();
-
-    printf("\nLayout test completed successfully!\n");
     return 0;
 }
 

@@ -19,7 +19,7 @@ void target_children(EventContext* evcon, View* view) {
         if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
             view->type == RDT_VIEW_LIST_ITEM) {
             ViewBlock* block = (ViewBlock*)view;
-            log_debug("target view block:%s, x:%d, y:%d, wd:%d, hg:%d",
+            log_debug("target view block:%s, x:%f, y:%f, wd:%f, hg:%f",
                 block->node->name(), block->x, block->y, block->width, block->height);
             target_block_view(evcon, block);
         }
@@ -92,6 +92,7 @@ void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
 }
 
 void target_block_view(EventContext* evcon, ViewBlock* block) {
+    log_enter();
     log_debug("targetting block: %s", block->node->name());
     BlockBlot pa_block = evcon->block;  FontBox pa_font = evcon->font;
     evcon->block.x = pa_block.x + block->x;  evcon->block.y = pa_block.y + block->y;
@@ -109,7 +110,7 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             goto RETURN;
         }
         else {
-            log_debug("no hit on block scroll");
+            log_debug("hit not on block scroll");
         }
         // setup scrolling offset
         evcon->block.x -= block->scroller->pane->h_scroll_position;
@@ -121,22 +122,27 @@ void target_block_view(EventContext* evcon, ViewBlock* block) {
             setup_font(evcon->ui_context, &evcon->font, pa_font.ft_face->family_name, block->font);
         }
         target_children(evcon, view);
-        if (!evcon->target) { // check the block itself
-            int x = evcon->block.x, y = evcon->block.y;
-            if (x <= event->x && event->x < x + block->width &&
-                y <= event->y && event->y < y + block->height) {
-                log_debug("hit on block: %s", block->node->name());
-                evcon->target = (View*)block;
-                evcon->offset_x = event->x - evcon->block.x;
-                evcon->offset_y = event->y - evcon->block.y;
-            }
-        }
     }
     else {
         log_debug("view has no child");
     }
     RETURN:
     evcon->block = pa_block;  evcon->font = pa_font;
+    if (!evcon->target) { // check the block itself
+        float x = evcon->block.x, y = evcon->block.y;
+        if (x <= event->x && event->x < x + block->width &&
+            y <= event->y && event->y < y + block->height) {
+            log_debug("hit on block: %s", block->node->name());
+            evcon->target = (View*)block;
+            evcon->offset_x = event->x - evcon->block.x;
+            evcon->offset_y = event->y - evcon->block.y;
+        }
+        else {
+            log_debug("hit not on block: %s, x: %.1f, y: %.1f, ex: %.1f, ey: %.1f, right: %.1f, bottom: %.1f",
+                block->node->name(), x, y, event->x, event->y, x + block->width, y + block->height);
+        }
+    }
+    log_leave();
 }
 
 void target_html_doc(EventContext* evcon, ViewTree* view_tree) {
