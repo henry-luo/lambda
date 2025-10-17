@@ -484,7 +484,7 @@ void render_image_view(RenderContext* rdcon, ViewBlock* view) {
             }
         } else {
             log_debug("blit image at x:%f, y:%f, wd:%f, hg:%f", rect.x, rect.y, rect.width, rect.height);
-            blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip);
+            blit_surface_scaled(img, NULL, rdcon->ui_context->surface, &rect, &rdcon->block.clip, SCALE_MODE_LINEAR);
         }
     }
     else {
