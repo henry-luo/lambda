@@ -65,6 +65,12 @@ static inline float pack_as_nan(int value) {
 // CSS auto packed as special NaN float value
 inline const float LENGTH_AUTO = pack_as_nan(LXB_CSS_VALUE_AUTO);
 
+inline bool is_length_auto(float a) {
+    uint32_t ia;
+    memcpy(&ia, &a, sizeof(a));
+    return (ia & 0x003FFFFF) == LXB_CSS_VALUE_AUTO;
+}
+
 typedef union {
     uint32_t c;  // 32-bit ABGR color format,
     struct {

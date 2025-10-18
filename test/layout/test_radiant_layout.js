@@ -70,8 +70,9 @@ class RadiantLayoutTester {
      * Load Radiant output from /tmp/view_tree.json
      */
     async loadRadiantOutput(testContext = '') {
+        let content = '';
         try {
-            const content = await fs.readFile(this.outputFile, 'utf8');
+            content = await fs.readFile(this.outputFile, 'utf8');
             return JSON.parse(content);
         } catch (error) {
             if (error instanceof SyntaxError) {
@@ -663,13 +664,13 @@ class RadiantLayoutTester {
                 path: path,
                 radiant: {
                     type: radiantIsText ? 'text' : 'element',
-                    tag: radiantNode.tag,
-                    content: radiantNode.content
+                    tag: radiantNode.tag || undefined,
+                    content: radiantIsText ? (radiantNode.content || radiantNode.text) : undefined
                 },
                 browser: {
                     type: browserIsText ? 'text' : 'element',
-                    tag: browserNode.tag,
-                    content: browserNode.text
+                    tag: browserNode.tag || undefined,
+                    content: browserIsText ? browserNode.text : undefined
                 }
             });
 
@@ -704,7 +705,28 @@ class RadiantLayoutTester {
             const childType = radiantChildren[i]?.type || browserChildren[i]?.type || 'unknown';
             const childPath = path ? `${path} > ${childType}[${i}]` : `${childType}[${i}]`;
 
-            this.compareNodes(radiantChild, browserChild, childPath, results, depth + 1);
+            try {
+                this.compareNodes(radiantChild, browserChild, childPath, results, depth + 1);
+            } catch (childError) {
+                // Log child comparison error but continue with other children
+                results.differences.push({
+                    type: 'comparison_error',
+                    path: childPath,
+                    error: childError.message,
+                    radiant: radiantChild ? {
+                        tag: radiantChild.tag,
+                        type: radiantChild.type
+                    } : null,
+                    browser: browserChild ? {
+                        tag: browserChild.tag,
+                        type: browserChild.nodeType
+                    } : null
+                });
+
+                if (this.verbose) {
+                    console.log(`${indent()}⚠️  Error comparing child at ${childPath}: ${childError.message}`);
+                }
+            }
         }
 
         return results;
@@ -888,7 +910,27 @@ class RadiantLayoutTester {
                 console.log(`\n🔍 Starting hierarchical comparison:`);
             }
 
-            const results = this.compareNodes(radiantTree, browserTree, 'root', null, 0);
+            let results;
+            try {
+                results = this.compareNodes(radiantTree, browserTree, 'root', null, 0);
+            } catch (compareError) {
+                // Handle comparison errors gracefully - still report what we can
+                console.log(`\n📊 Test Case: ${testName}`);
+                console.log(`❌ FAIL Overall: Error during hierarchical comparison`);
+                console.log(`   💥 COMPARISON ERROR: ${compareError.message}`);
+                if (this.verbose && compareError.stack) {
+                    console.log(`   📍 Stack trace:`);
+                    const stackLines = compareError.stack.split('\n').slice(1, 6);
+                    stackLines.forEach(line => console.log(`      ${line.trim()}`));
+                }
+
+                return {
+                    testName,
+                    testFile: testFileName,
+                    error: `Comparison error: ${compareError.message}`,
+                    timestamp: new Date().toISOString()
+                };
+            }
 
             // Generate and print report (no separate text results needed)
             const report = this.generateReport(results, null, testName);
@@ -904,6 +946,13 @@ class RadiantLayoutTester {
             console.log(`\n📊 Test Case: ${testName}`);
             console.log(`❌ FAIL Overall: Error during test execution`);
             console.log(`   💥 ERROR: ${error.message}`);
+
+            // Show stack trace in verbose mode for better debugging
+            if (this.verbose && error.stack) {
+                console.log(`   📍 Stack trace:`);
+                const stackLines = error.stack.split('\n').slice(1, 8);
+                stackLines.forEach(line => console.log(`      ${line.trim()}`));
+            }
 
             // If it's a JSON parsing error and in verbose mode, show more context
             if (this.verbose && error instanceof SyntaxError) {
