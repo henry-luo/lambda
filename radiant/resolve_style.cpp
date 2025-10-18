@@ -328,15 +328,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
         break;
     case LXB_CSS_VALUE_AUTO:
         log_info("length value: auto");
-        if (property == LXB_CSS_PROPERTY_MARGIN || property == LXB_CSS_PROPERTY_MARGIN_LEFT ||
-            property == LXB_CSS_PROPERTY_MARGIN_RIGHT) {
-            result = LENGTH_AUTO;
-        } else if (property == LXB_CSS_PROPERTY_WIDTH || property == LXB_CSS_PROPERTY_HEIGHT) {
-            log_debug("Setting width/height auto to -1 (special marker)");
-            result = -1;  // Use -1 as a special marker for width/height auto
-        } else {
-            result = 0;
-        }
+        result = LENGTH_AUTO;
         break;
     default:
         log_warn("unknown length type: %d (LXB_CSS_VALUE_AUTO=%d)", value->type, LXB_CSS_VALUE_AUTO);
@@ -555,7 +547,6 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     if (!lycon->view) { log_debug("missing view");  return LXB_STATUS_ERROR_NOT_EXISTS; }
     ViewSpan* span = (ViewSpan*)lycon->view;
     ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
-    Color c;  int length;
 
     switch (declr->type) {
     case LXB_CSS_PROPERTY_LINE_HEIGHT: {
@@ -631,16 +622,16 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_MARGIN, margin, specificity, &span->bound->margin);
 
         // Also set auto flags for shorthand margin property
-        if (margin->top.type == LXB_CSS_VALUE_AUTO || margin->top.type == 12) {
+        if (margin->top.type == LXB_CSS_VALUE_AUTO) {
             span->margin_top_auto = true;
         }
-        if (margin->right.type == LXB_CSS_VALUE_AUTO || margin->right.type == 12) {
+        if (margin->right.type == LXB_CSS_VALUE_AUTO) {
             span->margin_right_auto = true;
         }
-        if (margin->bottom.type == LXB_CSS_VALUE_AUTO || margin->bottom.type == 12) {
+        if (margin->bottom.type == LXB_CSS_VALUE_AUTO) {
             span->margin_bottom_auto = true;
         }
-        if (margin->left.type == LXB_CSS_VALUE_AUTO || margin->left.type == 12) {
+        if (margin->left.type == LXB_CSS_VALUE_AUTO) {
             span->margin_left_auto = true;
         }
 
@@ -653,7 +644,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
 
         if (value_cnt == 1) {
             // margin: auto -> all sides auto
-            bool is_auto = (margin->top.type == LXB_CSS_VALUE_AUTO || margin->top.type == 12);
+            bool is_auto = (margin->top.type == LXB_CSS_VALUE_AUTO);
             span->margin_top_auto = span->margin_right_auto =
             span->margin_bottom_auto = span->margin_left_auto = is_auto;
         }
@@ -748,7 +739,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        c = resolve_color_value(&border_top->color);
+        Color c = resolve_color_value(&border_top->color);
         if (declr->type == LXB_CSS_PROPERTY_BORDER_TOP) {
             if (specificity > span->bound->border->top_color_specificity) {
                 span->bound->border->top_color = c;
@@ -773,7 +764,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
                 span->bound->border->right_color_specificity = specificity;
             }
         }
-        length = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER,
+        float length = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER,
             (lxb_css_value_length_percentage_t*)&border_top->width);
         if (declr->type == LXB_CSS_PROPERTY_BORDER_TOP) {
             if (specificity > span->bound->border->width.top_specificity) {
@@ -812,7 +803,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        c = resolve_color_value(&border->color);
+        Color c = resolve_color_value(&border->color);
         if (specificity > span->bound->border->top_color_specificity) {
             span->bound->border->top_color = c;
             span->bound->border->top_color_specificity = specificity;
@@ -829,7 +820,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             span->bound->border->right_color = c;
             span->bound->border->right_color_specificity = specificity;
         }
-        length = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER,
+        float length = resolve_length_value(lycon, LXB_CSS_PROPERTY_BORDER,
             (lxb_css_value_length_percentage_t*)&border->width);
         if (specificity > span->bound->border->width.top_specificity) {
             span->bound->border->width.top = length;
@@ -861,7 +852,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!span->bound->border) {
             span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
         }
-        c = resolve_color_value(border_color);
+        Color c = resolve_color_value(border_color);
         switch (declr->type) {
         case LXB_CSS_PROPERTY_BORDER_TOP_COLOR:
             if (specificity > span->bound->border->top_color_specificity) {
@@ -1140,8 +1131,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_WIDTH: {
         const lxb_css_property_width_t *width = declr->u.width;
-        // width cannot be negative
-        lycon->block.given_width = max(resolve_length_value(lycon, LXB_CSS_PROPERTY_WIDTH, width), 0);
+        float value = resolve_length_value(lycon, LXB_CSS_PROPERTY_WIDTH, width);
+        lycon->block.given_width = isnan(value) ? value : max(value, 0);  // width cannot be negative
         log_debug("width property: %d", lycon->block.given_width);
         // Store the raw width value for box-sizing calculations
         if (block) {
@@ -1152,8 +1143,8 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     }
     case LXB_CSS_PROPERTY_HEIGHT: {
         const lxb_css_property_height_t *height = declr->u.height;
-        // height cannot be negative
-        lycon->block.given_height = max(resolve_length_value(lycon, LXB_CSS_PROPERTY_HEIGHT, height), 0);
+        float value = resolve_length_value(lycon, LXB_CSS_PROPERTY_HEIGHT, height);
+        lycon->block.given_height = isnan(value) ? value : max(value, 0);  // height cannot be negative
         log_debug("height property: %d", lycon->block.given_height);
         // Store the raw height value for box-sizing calculations
         if (block) {
