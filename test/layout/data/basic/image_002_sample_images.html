@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test: Sample Images Display</title>
+    <style>
+        /* Reset for consistency */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Arial', sans-serif;
+            font-size: 16px;
+            line-height: 1.5;
+            padding: 20px;
+            max-width: 800px;
+        }
+
+        /* Image container styles */
+        .image-container {
+            margin: 20px 0;
+        }
+
+        /* Image styles */
+        img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 12px 0;
+            border: 1px solid #ddd;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        h2 {
+            font-size: 20px;
+            margin-top: 24px;
+            margin-bottom: 12px;
+            font-weight: bold;
+            color: #555;
+        }
+
+        p {
+            margin-bottom: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>Sample Images Test</h1>
+
+    <p>This page displays two sample images from the resource directory.</p>
+
+    <div class="image-container">
+        <h2>Sample JPEG Image</h2>
+        <p>Displaying sample1.jpg:</p>
+        <img src="../../res/sample1.jpg" alt="Sample JPEG image">
+    </div>
+
+    <div class="image-container">
+        <h2>Sample PNG Image</h2>
+        <p>Displaying sample1.png:</p>
+        <img src="../../res/sample1.png" alt="Sample PNG image">
+    </div>
+
+    <div class="image-container">
+        <h2>Both Images Together</h2>
+        <p>Displaying both images in sequence:</p>
+        <img src="../../res/sample1.jpg" alt="Sample JPEG image">
+        <img src="../../res/sample1.png" alt="Sample PNG image">
+    </div>
+</body>
+</html>
