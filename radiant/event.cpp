@@ -44,7 +44,7 @@ void target_text_view(EventContext* evcon, ViewText* text) {
     float x = evcon->block.x + text->x, y = evcon->block.y + text->y;
     unsigned char* str = text->node->text_data();
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    log_debug("target text:%s start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d",
+    log_debug("target text:'%t' start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d",
         str, text->start_index, text->length, text->x, text->y, text->width, text->height, evcon->block.x);
     bool has_space = false;
     for (; p < end; p++) {

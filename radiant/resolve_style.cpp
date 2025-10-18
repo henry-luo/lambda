@@ -1090,10 +1090,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_FONT_FAMILY: {
         const lxb_css_property_font_family_t *font_family = declr->u.font_family;
         if (!span->font) { span->font = alloc_font_prop(lycon); }
-        span->font->family = (char*)alloc_prop(lycon, font_family->first->u.str.length + 1);
-        strncpy(span->font->family, (char*)font_family->first->u.str.data, font_family->first->u.str.length);
-        span->font->family[font_family->first->u.str.length] = '\0';
-        log_debug("font family property: %s", span->font->family);
+        if (font_family->first && font_family->first->u.str.length > 0) {
+            span->font->family = (char*)alloc_prop(lycon, font_family->first->u.str.length + 1);
+            strncpy(span->font->family, (char*)font_family->first->u.str.data, font_family->first->u.str.length);
+            span->font->family[font_family->first->u.str.length] = '\0';
+            log_debug("font family property: %s", span->font->family);
+        }
         break;
     }
     case LXB_CSS_PROPERTY_FONT_SIZE: {
