@@ -56,7 +56,8 @@ extern "C" {
 // LXB_CSS_VALUE_ABSOLUTE = 0x014f, LXB_CSS_VALUE_FIXED = 0x0151, LXB_CSS_VALUE_STICKY = 0x0150
 
 
-#define LENGTH_AUTO                 (INT_MAX - 1)
+// CSS auto packed as special NaN float value
+#define LENGTH_AUTO            (0x7FC00000 | (LXB_CSS_VALUE_AUTO & 0x003FFFFF))
 
 typedef union {
     uint32_t c;  // 32-bit ABGR color format,
