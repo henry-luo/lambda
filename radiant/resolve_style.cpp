@@ -621,33 +621,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
         resolve_spacing_prop(lycon, LXB_CSS_PROPERTY_MARGIN, margin, specificity, &span->bound->margin);
 
-        // Also set auto flags for shorthand margin property
-        if (margin->top.type == LXB_CSS_VALUE_AUTO) {
-            span->margin_top_auto = true;
-        }
-        if (margin->right.type == LXB_CSS_VALUE_AUTO) {
-            span->margin_right_auto = true;
-        }
-        if (margin->bottom.type == LXB_CSS_VALUE_AUTO) {
-            span->margin_bottom_auto = true;
-        }
-        if (margin->left.type == LXB_CSS_VALUE_AUTO) {
-            span->margin_left_auto = true;
-        }
-
         // Handle shorthand expansion (1-4 values)
         int value_cnt = 0;
         if (margin->top.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
         if (margin->right.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
         if (margin->bottom.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
         if (margin->left.type != LXB_CSS_VALUE__UNDEF) value_cnt++;
-
-        if (value_cnt == 1) {
-            // margin: auto -> all sides auto
-            bool is_auto = (margin->top.type == LXB_CSS_VALUE_AUTO);
-            span->margin_top_auto = span->margin_right_auto =
-            span->margin_bottom_auto = span->margin_left_auto = is_auto;
-        }
         log_debug("margin value: top %f, right %f, bottom %f, left %f",
             span->bound->margin.top, span->bound->margin.right, span->bound->margin.bottom, span->bound->margin.left);
         break;
@@ -671,36 +650,31 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         }
 
         // Check for auto margins (important for flexbox)
-        bool is_auto = (space->type == LXB_CSS_VALUE_AUTO);
-        int space_length = is_auto ? 0 : resolve_length_value(lycon, declr->type, (lxb_css_value_length_percentage_t *)space);
+        float space_length = resolve_length_value(lycon, declr->type, (lxb_css_value_length_percentage_t *)space);
 
         switch (declr->type) {
         case LXB_CSS_PROPERTY_MARGIN_LEFT:
             if (specificity > span->bound->margin.left_specificity) {
                 span->bound->margin.left = space_length;
                 span->bound->margin.left_specificity = specificity;
-                span->margin_left_auto = is_auto;
             }
             break;
         case LXB_CSS_PROPERTY_MARGIN_RIGHT:
             if (specificity > span->bound->margin.right_specificity) {
                 span->bound->margin.right = space_length;
                 span->bound->margin.right_specificity = specificity;
-                span->margin_right_auto = is_auto;
             }
             break;
         case LXB_CSS_PROPERTY_MARGIN_TOP:
             if (specificity > span->bound->margin.top_specificity) {
                 span->bound->margin.top = space_length;
                 span->bound->margin.top_specificity = specificity;
-                span->margin_top_auto = is_auto;
             }
             break;
         case LXB_CSS_PROPERTY_MARGIN_BOTTOM:
             if (specificity > span->bound->margin.bottom_specificity) {
                 span->bound->margin.bottom = space_length;
                 span->bound->margin.bottom_specificity = specificity;
-                span->margin_bottom_auto = is_auto;
             }
             break;
         case LXB_CSS_PROPERTY_PADDING_LEFT:
@@ -1133,7 +1107,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         const lxb_css_property_width_t *width = declr->u.width;
         float value = resolve_length_value(lycon, LXB_CSS_PROPERTY_WIDTH, width);
         lycon->block.given_width = isnan(value) ? value : max(value, 0);  // width cannot be negative
-        log_debug("width property: %d", lycon->block.given_width);
+        log_debug("width property: %f, isnan: %d", lycon->block.given_width, isnan(lycon->block.given_width));
         // Store the raw width value for box-sizing calculations
         if (block) {
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }

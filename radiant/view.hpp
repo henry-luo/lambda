@@ -55,9 +55,15 @@ extern "C" {
 // LXB_CSS_VALUE_STATIC = 0x014d, LXB_CSS_VALUE_RELATIVE = 0x014e,
 // LXB_CSS_VALUE_ABSOLUTE = 0x014f, LXB_CSS_VALUE_FIXED = 0x0151, LXB_CSS_VALUE_STICKY = 0x0150
 
+static inline float pack_as_nan(int value) {
+    uint32_t bits = 0x7FC00000u | ((uint32_t)value & 0x003FFFFF);       // quiet NaN + payload
+    float f;
+    memcpy(&f, &bits, sizeof(f));                           // avoid aliasing UB
+    return f;
+}
 
 // CSS auto packed as special NaN float value
-#define LENGTH_AUTO            (0x7FC00000 | (LXB_CSS_VALUE_AUTO & 0x003FFFFF))
+inline const float LENGTH_AUTO = pack_as_nan(LXB_CSS_VALUE_AUTO);
 
 typedef union {
     uint32_t c;  // 32-bit ABGR color format,
@@ -153,8 +159,8 @@ typedef struct {
 
 typedef struct {
     union {
-        struct { float top, right, bottom, left; };
-        struct { float top_left, top_right, bottom_right, bottom_left; };
+        struct { float top, right, bottom, left; };  // for margin and padding
+        struct { float top_left, top_right, bottom_right, bottom_left; };  // for border radius
     };
     int32_t top_specificity, right_specificity, bottom_specificity, left_specificity;
 } Spacing;
@@ -253,12 +259,6 @@ typedef struct ViewSpan : ViewGroup {
     // Additional flex item properties from old implementation
     float aspect_ratio;
     float baseline_offset;
-
-    // Auto margin flags
-    bool margin_top_auto;
-    bool margin_right_auto;
-    bool margin_bottom_auto;
-    bool margin_left_auto;
 
     // Percentage flags for constraints
     bool width_is_percent;
