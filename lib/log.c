@@ -450,23 +450,41 @@ static void format_user_message_with_sanitize(char *output, size_t output_size, 
 
                 const char *str = va_arg(args_copy, const char*);
                 if (str) {
-                    int char_count = 0;
+                    int input_char_count = 0;
                     const char *s = str;
 
                     // Sanitize and output, respecting precision
+                    // Note: precision limits INPUT characters, not OUTPUT characters
                     while (*s && out_remaining > 0) {
-                        if (precision >= 0 && char_count >= precision) {
+                        // Check precision limit (counts input characters)
+                        if (precision >= 0 && input_char_count >= precision) {
                             break;  // Stop at precision limit
                         }
 
-                        if (*s == '\n' || *s == '\r') {
-                            *out++ = '^';
+                        if (*s == '\n') {
+                            // Output literal \n (2 characters)
+                            if (out_remaining >= 2) {
+                                *out++ = '\\';
+                                *out++ = 'n';
+                                out_remaining -= 2;
+                            } else {
+                                break;  // Not enough space
+                            }
+                        } else if (*s == '\r') {
+                            // Output literal \r (2 characters)
+                            if (out_remaining >= 2) {
+                                *out++ = '\\';
+                                *out++ = 'r';
+                                out_remaining -= 2;
+                            } else {
+                                break;  // Not enough space
+                            }
                         } else {
                             *out++ = *s;
+                            out_remaining--;
                         }
                         s++;
-                        char_count++;
-                        out_remaining--;
+                        input_char_count++;
                     }
                 }
                 p = check_p + 1;  // Skip past the 't'
