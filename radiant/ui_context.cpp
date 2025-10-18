@@ -11,7 +11,8 @@ char* load_font_path(FcConfig *font_config, const char* font_name);
 void scroll_config_init(int pixel_ratio);
 
 char *fallback_fonts[] = {
-    "PingFang SC", // Chinese, partial Japanese and Korean
+    "PingFang SC", // Chinese (Simplified), partial Japanese and Korean - macOS native
+    "Heiti SC", // Chinese (Simplified) additional fallback
     "Helvetica Neue", // Latin, Cyrillic, Greek, Vietnamese, Turkish
     "Times New Roman", // for Arabic
     NULL
