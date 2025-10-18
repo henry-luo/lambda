@@ -171,7 +171,7 @@ void output_text(LayoutContext* lycon, ViewText* text, int text_length, float te
     lycon->line.advance_x += text_width;
     lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.ft_face->size->metrics.ascender / 64.0);
     lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.ft_face->size->metrics.descender) / 64.0);
-    log_debug("text view: '%.*s', x %f, y %f, width %f, height %f, font size %f, font family '%s'",
+    log_debug("text view: '%.*t', x %f, y %f, width %f, height %f, font size %f, font family '%s'",
         text_length,text->node->text_data() + text->start_index, text->x, text->y, text->width, text->height, text->font->font_size, text->font->family);
 }
 
@@ -213,7 +213,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     else { // baseline
         text->y = lycon->block.advance_y + lycon->block.lead_y;
     }
-    log_debug("layout text: '%s', start_index %d, x: %f, y: %f, advance_y: %f, lead_y: %f",
+    log_debug("layout text: '%t', start_index %d, x: %f, y: %f, advance_y: %f, lead_y: %f",
         str, text->start_index, text->x, text->y, lycon->block.advance_y, lycon->block.lead_y);
 
     // layout the text glyphs
@@ -254,7 +254,8 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
             }
             lycon->line.prev_glyph_index = glyph_index;
         }
-        log_debug("layout char: %c, x: %f, width: %f, wd: %f, line right: %f", *str, text->x, text->width, wd, lycon->line.right);
+        log_debug("layout char: '%c', x: %f, width: %f, wd: %f, line right: %f",
+            *str == '\n' || *str == '\r' ? '^' : *str, text->x, text->width, wd, lycon->line.right);
         text->width += wd;
         if (text->x + text->width > lycon->line.right) { // line filled up
             log_debug("line filled up");

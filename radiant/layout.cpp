@@ -177,7 +177,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         float item_baseline = text_view->font->ascender;
         float vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
-        log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*s'",
+        log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*t'",
             text_view->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
             text_view->length, text_view->node->text_data() + text_view->start_index);
         text_view->y = lycon->block.advance_y + max(vertical_offset, 0);
@@ -294,7 +294,7 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     }
     else if (node->is_text()) {
         const unsigned char* str = node->text_data();
-        log_debug("layout_text: '%s'", str);
+        log_debug("layout_text: '%t'", str);
         // skip whitespace at end of block
         if (!node->next_sibling() && lycon->parent->is_block() && is_only_whitespace((const char*)str)) {
             log_debug("skipping whitespace text at end of block");

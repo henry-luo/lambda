@@ -65,7 +65,7 @@ void render_text_view(RenderContext* rdcon, ViewText* text) {
     float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
     unsigned char* str = text->node->text_data();
     unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    log_debug("draw text:%s start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)",
+    log_debug("draw text:'%t', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)",
         str, text->start_index, text->length, text->x, text->y, text->width, text->height, x, y);
     bool has_space = false;  uint32_t codepoint;
     while (p < end) {

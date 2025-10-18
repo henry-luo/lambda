@@ -444,7 +444,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                     // replace newline and '\'' with '^'
                     char* s = buf->str + buf->length - text->length;
                     while (*s) {
-                        if (*s == '\n' || *s == '\r' || *s == '\'') { *s = '^'; }
+                        if (*s == '\n' || *s == '\r') { *s = '^'; }
                         s++;
                     }
                     strbuf_append_format(buf, "', start:%d, len:%d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f]\n",
