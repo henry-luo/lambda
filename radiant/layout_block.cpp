@@ -532,12 +532,14 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         block->height = content_height + block->bound->padding.top + block->bound->padding.bottom +
             (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
         // todo: we should keep LENGTH_AUTO (may be in flags) for reflow
-        if (block->bound->margin.left == LENGTH_AUTO && block->bound->margin.right == LENGTH_AUTO)  {
+        log_debug("block margins: left=%f, right=%f, LENGTH_AUTO: %f", block->bound->margin.left, block->bound->margin.right, LENGTH_AUTO);
+        if (is_length_auto(block->bound->margin.left) && is_length_auto(block->bound->margin.right))  {
             block->bound->margin.left = block->bound->margin.right = max((pa_block.width - block->width) / 2, 0);
         } else {
-            if (block->bound->margin.left == LENGTH_AUTO) block->bound->margin.left = 0;
-            if (block->bound->margin.right == LENGTH_AUTO) block->bound->margin.right = 0;
+            if (is_length_auto(block->bound->margin.left)) block->bound->margin.left = 0;
+            if (is_length_auto(block->bound->margin.right)) block->bound->margin.right = 0;
         }
+        log_debug("finalize block margins: left=%f, right=%f", block->bound->margin.left, block->bound->margin.right);
         block->x += block->bound->margin.left;
         block->y += block->bound->margin.top;
         if (block->bound->border) {
@@ -593,10 +595,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             block->position->bottom, block->position->has_bottom ? "set" : "unset",
             block->position->left, block->position->has_left ? "set" : "unset");
 
-        if (block->position->position == 334) {  // LXB_CSS_VALUE_RELATIVE
+        if (block->position->position == LXB_CSS_VALUE_RELATIVE) {
             log_debug("Applying relative positioning");
             layout_relative_positioned(lycon, block);
-        } else if (block->position->position == 335 || block->position->position == 337) {  // ABSOLUTE or FIXED
+        } else if (block->position->position == LXB_CSS_VALUE_ABSOLUTE || block->position->position == LXB_CSS_VALUE_FIXED) {
             log_debug("Applying absolute positioning");
             layout_absolute_positioned(lycon, block);
         } else {
@@ -679,7 +681,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         if (block->bound) {
             // collapse top margin with parent block
             log_debug("check margin collapsing");
-            if (block->parent->child == block) { // first child
+            if (block->parent->child == block) {  // first child
                 if (block->bound->margin.top > 0) {
                     ViewBlock* parent = block->parent->is_block() ? (ViewBlock*)block->parent : NULL;
                     // parent has top margin, but no border, no padding;  parent->parent to exclude html
