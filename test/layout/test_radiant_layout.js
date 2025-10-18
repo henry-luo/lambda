@@ -460,8 +460,10 @@ class RadiantLayoutTester {
             results.totalTextNodes++;
 
             if (this.verbose) {
-                const radiantContent = (radiantNode.content || '').substring(0, 20) + (radiantNode.content.length > 20 ? '...' : '');
-                const browserContent = (browserNode.text || '').substring(0, 20) + (browserNode.text.length > 20 ? '...' : '');
+                const radiantContentStr = radiantNode.content || '';
+                const browserContentStr = browserNode.text || '';
+                const radiantContent = radiantContentStr.substring(0, 20) + (radiantContentStr.length > 20 ? '...' : '');
+                const browserContent = browserContentStr.substring(0, 20) + (browserContentStr.length > 20 ? '...' : '');
                 // console.log("browser text:", browserNode.text);
                 console.log(`${indent()}📝 Comparing text: "${radiantContent}" vs. "${browserContent}"`);
             }
@@ -897,10 +899,14 @@ class RadiantLayoutTester {
         } catch (error) {
             // Enhanced error reporting with test file context
             const testFileInfo = `${testFileName} (${category}/${testName})`;
-            console.log(`   ❌ ERROR in ${testFileInfo}: ${error.message}`);
 
-            // If it's a JSON parsing error, also check if the output file exists and show its size
-            if (false) { // Removed verbose output section
+            // Print error in FAIL format for consistency
+            console.log(`\n📊 Test Case: ${testName}`);
+            console.log(`❌ FAIL Overall: Error during test execution`);
+            console.log(`   💥 ERROR: ${error.message}`);
+
+            // If it's a JSON parsing error and in verbose mode, show more context
+            if (this.verbose && error instanceof SyntaxError) {
                 try {
                     const stats = await fs.stat(this.outputFile);
                     console.log(`   📄 Output file size: ${stats.size} bytes`);
