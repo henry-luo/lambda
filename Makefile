@@ -423,15 +423,17 @@ help:
 	@echo "  lint          - Run linter (cppcheck) on source files"
 	@echo "  analyze-size  - Analyze executable size breakdown by components"
 	@echo "  test-layout              - Run Radiant layout integration tests (all suites)"
-	@echo "                             Usage: make test-layout SUITE=baseline (run specific suite)"
-	@echo "                             Usage: make test-layout TEST=table_simple (run specific test)"
-	@echo "                             Usage: make test-layout PATTERN=float (run tests matching pattern)"
+	@echo "                             Usage: make test-layout suite=baseline (run specific suite)"
+	@echo "                             Usage: make test-layout test=table_simple (run specific test)"
+	@echo "                             Usage: make test-layout pattern=float (run tests matching pattern)"
+	@echo "                             Note: Uppercase variants also work (SUITE=, TEST=, PATTERN=)"
 	@echo "                             Available suites: auto-detected from test/layout/data/"
 	@echo "  capture-layout   - Extract browser layout references using Puppeteer"
 	@echo "                             Usage: make capture-layout (all suites, skip existing)"
-	@echo "                             Usage: make capture-layout SUITE=baseline"
-	@echo "                             Usage: make capture-layout FORCE=1 (regenerate all)"
-	@echo "                             Usage: make capture-layout FILE=path/to/test.html"
+	@echo "                             Usage: make capture-layout suite=baseline"
+	@echo "                             Usage: make capture-layout force=1 (regenerate all)"
+	@echo "                             Usage: make capture-layout file=path/to/test.html"
+	@echo "                             Note: Uppercase variants also work (SUITE=, FORCE=, FILE=)"
 	@echo ""
 	@echo "Options:"
 	@echo "  JOBS=N        - Set number of parallel compilation jobs (default: $(JOBS))"
@@ -1383,10 +1385,10 @@ build-test: build-lambda-input
 # Capture browser layout references using Puppeteer
 # Usage:
 #   make capture-layout                           # captures all categories (skips existing files)
-#   make capture-layout SUITE=baseline        # captures only baseline category
-#   make capture-layout FILE=path/to/test.html   # captures a single file
-#   make capture-layout FORCE=1                  # force regenerate all existing references
-#   make capture-layout SUITE=basic FORCE=1   # force regenerate specific category
+#   make capture-layout suite=baseline        # captures only baseline category (or SUITE=baseline)
+#   make capture-layout file=path/to/test.html   # captures a single file (or FILE=path)
+#   make capture-layout force=1                  # force regenerate all existing references (or FORCE=1)
+#   make capture-layout suite=basic force=1   # force regenerate specific category
 capture-layout:
 	@echo "🧭 Capturing browser layout references..."
 	@if [ -d "test/layout/tools" ]; then \
@@ -1396,19 +1398,24 @@ capture-layout:
 	        npm install; \
 	    fi; \
 	    FORCE_FLAG=""; \
-	    if [ -n "$(FORCE)" ] && [ "$(FORCE)" != "0" ]; then \
+	    FORCE_VAR="$(or $(force),$(FORCE))"; \
+	    if [ -n "$$FORCE_VAR" ] && [ "$$FORCE_VAR" != "0" ]; then \
 	        FORCE_FLAG="--force"; \
 	        echo "🔄 Force regeneration enabled"; \
 	    fi; \
-	    if [ -n "$(FILE)" ]; then \
-	        echo "📄 Single file: $(FILE)"; \
-	        node extract_browser_references.js $$FORCE_FLAG $(FILE); \
-	    elif [ -n "$(SUITE)" ]; then \
-	        echo "📂 Suite: $(SUITE)"; \
-	        node extract_browser_references.js $$FORCE_FLAG --category $(SUITE); \
+	    FILE_VAR="$(or $(file),$(FILE))"; \
+	    if [ -n "$$FILE_VAR" ]; then \
+	        echo "📄 Single file: $$FILE_VAR"; \
+	        node extract_browser_references.js $$FORCE_FLAG $$FILE_VAR; \
 	    else \
-	        echo "📚 All available categories (auto-discovered)"; \
-	        node extract_browser_references.js $$FORCE_FLAG; \
+	        SUITE_VAR="$(or $(suite),$(SUITE))"; \
+	        if [ -n "$$SUITE_VAR" ]; then \
+	            echo "📂 Suite: $$SUITE_VAR"; \
+	            node extract_browser_references.js $$FORCE_FLAG --category $$SUITE_VAR; \
+	        else \
+	            echo "📚 All available categories (auto-discovered)"; \
+	            node extract_browser_references.js $$FORCE_FLAG; \
+	        fi; \
 	    fi; \
 	else \
 	    echo "❌ Error: Tools directory not found at test/layout/tools"; \
@@ -1419,15 +1426,18 @@ test-layout:
 	@echo "🎨 Running Radiant Layout Engine Tests"
 	@echo "======================================"
 	@if [ -f "test/layout/test_radiant_layout.js" ]; then \
-		if [ -n "$(TEST)" ]; then \
-			echo "🎯 Running single test: $(TEST)"; \
-			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe --test $(TEST) -v; \
-		elif [ -n "$(PATTERN)" ]; then \
-			echo "🔍 Running tests matching pattern: $(PATTERN)"; \
-			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe --pattern $(PATTERN); \
-		elif [ -n "$(SUITE)" ]; then \
-			echo "📂 Running test suite: $(SUITE)"; \
-			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe --category $(SUITE); \
+		TEST_VAR="$(or $(test),$(TEST))"; \
+		PATTERN_VAR="$(or $(pattern),$(PATTERN))"; \
+		SUITE_VAR="$(or $(suite),$(SUITE))"; \
+		if [ -n "$$TEST_VAR" ]; then \
+			echo "🎯 Running single test: $$TEST_VAR"; \
+			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe --test $$TEST_VAR -v; \
+		elif [ -n "$$PATTERN_VAR" ]; then \
+			echo "🔍 Running tests matching pattern: $$PATTERN_VAR"; \
+			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe --pattern $$PATTERN_VAR; \
+		elif [ -n "$$SUITE_VAR" ]; then \
+			echo "📂 Running test suite: $$SUITE_VAR"; \
+			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe --category $$SUITE_VAR; \
 		else \
 			echo "🎯 Running all layout tests"; \
 			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe; \
