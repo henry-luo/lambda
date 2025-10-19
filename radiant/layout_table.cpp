@@ -101,6 +101,42 @@ static void parse_cell_attributes(DomNode* cellNode, ViewTableCell* cell) {
             }
         }
     }
+
+    // Parse vertical-align CSS property
+    if (element->element.style) {
+        const lxb_css_rule_declaration_t* valign_decl =
+            lxb_dom_element_style_by_id(
+                (lxb_dom_element_t*)element,
+                LXB_CSS_PROPERTY_VERTICAL_ALIGN);
+        if (valign_decl && valign_decl->u.vertical_align) {
+            lxb_css_property_vertical_align_t* vertical_align = valign_decl->u.vertical_align;
+            PropValue valign = vertical_align->alignment.type ?
+                vertical_align->alignment.type : vertical_align->shift.type;
+
+            // Map CSS vertical-align values to cell enum
+            switch (valign) {
+                case LXB_CSS_VALUE_TOP:
+                    cell->vertical_align = ViewTableCell::CELL_VALIGN_TOP;
+                    log_debug("Cell vertical-align: top");
+                    break;
+                case LXB_CSS_VALUE_MIDDLE:
+                    cell->vertical_align = ViewTableCell::CELL_VALIGN_MIDDLE;
+                    log_debug("Cell vertical-align: middle");
+                    break;
+                case LXB_CSS_VALUE_BOTTOM:
+                    cell->vertical_align = ViewTableCell::CELL_VALIGN_BOTTOM;
+                    log_debug("Cell vertical-align: bottom");
+                    break;
+                case LXB_CSS_VALUE_BASELINE:
+                    cell->vertical_align = ViewTableCell::CELL_VALIGN_BASELINE;
+                    log_debug("Cell vertical-align: baseline");
+                    break;
+                default:
+                    // Keep default (top)
+                    break;
+            }
+        }
+    }
 }
 
 // =============================================================================
@@ -391,6 +427,21 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 static int measure_cell_min_width(ViewTableCell* cell) {
     if (!cell) return 0;
 
+    // STEP 1: Check for explicit CSS width first
+    if (cell->node && cell->node->lxb_elmt && cell->node->lxb_elmt->element.style) {
+        const lxb_css_rule_declaration_t* width_decl =
+            lxb_dom_element_style_by_id(
+                (lxb_dom_element_t*)cell->node->lxb_elmt,
+                LXB_CSS_PROPERTY_WIDTH);
+        if (width_decl && width_decl->u.width) {
+            // Note: resolve_length_value needs a LayoutContext, but we don't have one here
+            // For now, we'll just detect that explicit width exists and measure content
+            // The width will be properly applied later in the fixed layout or column width calculation
+            log_debug("Cell has explicit CSS width property");
+        }
+    }
+
+    // STEP 2: Measure content width
     int content_width = 0;
 
     // Measure actual content width with precision
@@ -414,6 +465,13 @@ static int measure_cell_min_width(ViewTableCell* cell) {
         if (child_width > content_width) {
             content_width = child_width;
         }
+    }
+
+    // STEP 3: For empty cells, ensure minimum content width
+    // Empty cells should still take up space in the layout
+    if (content_width == 0) {
+        content_width = 1; // Minimum 1px content for empty cells
+        log_debug("Empty cell detected - using minimum 1px content width");
     }
 
     // Browser-compatible box model calculation
@@ -454,12 +512,11 @@ static int measure_cell_min_width(ViewTableCell* cell) {
 // Enhanced table layout algorithm with colspan/rowspan support
 void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (!table) return;
-    // printf("DEBUG: Starting enhanced table auto layout\n");
     log_debug("Starting enhanced table auto layout");
     log_debug("Table layout mode: %s",
            table->table_layout == ViewTable::TABLE_LAYOUT_FIXED ? "fixed" : "auto");
-    printf("DEBUG: Table border-spacing: %fpx %fpx, border-collapse: %s\n", 
-           table->border_spacing_h, table->border_spacing_v, 
+    log_debug("Table border-spacing: %fpx %fpx, border-collapse: %s",
+           table->border_spacing_h, table->border_spacing_v,
            table->border_collapse ? "true" : "false");
 
     // CRITICAL FIX: Handle caption positioning first
@@ -552,7 +609,23 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                 }
                             }
 
-                            int cell_width = measure_cell_min_width(tcell);
+                            // Try to get explicit width from CSS first
+                            int cell_width = 0;
+                            if (tcell->node && tcell->node->lxb_elmt && tcell->node->lxb_elmt->element.style) {
+                                const lxb_css_rule_declaration_t* width_decl =
+                                    lxb_dom_element_style_by_id(
+                                        (lxb_dom_element_t*)tcell->node->lxb_elmt,
+                                        LXB_CSS_PROPERTY_WIDTH);
+                                if (width_decl && width_decl->u.width) {
+                                    cell_width = resolve_length_value(
+                                        lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
+                                }
+                            }
+
+                            // If no explicit width, measure content
+                            if (cell_width == 0) {
+                                cell_width = measure_cell_min_width(tcell);
+                            }
 
                             if (tcell->col_span == 1) {
                                 // Single column cell
@@ -608,7 +681,23 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         }
                     }
 
-                    int cell_width = measure_cell_min_width(tcell);
+                    // Try to get explicit width from CSS first
+                    int cell_width = 0;
+                    if (tcell->node && tcell->node->lxb_elmt && tcell->node->lxb_elmt->element.style) {
+                        const lxb_css_rule_declaration_t* width_decl =
+                            lxb_dom_element_style_by_id(
+                                (lxb_dom_element_t*)tcell->node->lxb_elmt,
+                                LXB_CSS_PROPERTY_WIDTH);
+                        if (width_decl && width_decl->u.width) {
+                            cell_width = resolve_length_value(
+                                lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
+                        }
+                    }
+
+                    // If no explicit width, measure content
+                    if (cell_width == 0) {
+                        cell_width = measure_cell_min_width(tcell);
+                    }
 
                     if (tcell->col_span == 1) {
                         if (cell_width > col_widths[col]) {
@@ -644,116 +733,170 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // Apply table-layout algorithm
+    int fixed_table_width = 0; // Store explicit width for fixed layout
     if (table->table_layout == ViewTable::TABLE_LAYOUT_FIXED) {
-        // Fixed layout: use explicit table width from CSS
-        int target_table_width = 400; // Default fallback
+        log_debug("=== FIXED LAYOUT ALGORITHM ===");
 
-        // Priority 1: Use explicit table width from CSS width property
-        if (lycon->block.given_width > 0) {
-            target_table_width = lycon->block.given_width;
-            log_debug("Using explicit CSS table width: %dpx", target_table_width);
-        } else {
-            // Priority 2: Use container width
-            int container_width = lycon->line.right - lycon->line.left;
-            if (container_width > 0) {
-                target_table_width = container_width;
+        // STEP 1: Get explicit table width from CSS
+        int explicit_table_width = 0;
+
+        // Try to read width directly from table element's CSS
+        if (table->node && table->node->lxb_elmt && table->node->lxb_elmt->element.style) {
+            const lxb_css_rule_declaration_t* width_decl =
+                lxb_dom_element_style_by_id(
+                    (lxb_dom_element_t*)table->node->lxb_elmt,
+                    LXB_CSS_PROPERTY_WIDTH);
+            if (width_decl && width_decl->u.width) {
+                explicit_table_width = resolve_length_value(
+                    lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
+                log_debug("FIXED LAYOUT - read table CSS width: %dpx", explicit_table_width);
             }
-            log_debug("Using container/default width: %dpx", target_table_width);
         }
 
-        // For fixed layout, distribute the CONTENT width equally among columns
-        // We need to subtract border-spacing from the total width
-        int content_width = target_table_width;
-
-        // Subtract border spacing from available width
-        if (table->border_spacing_h > 0 && columns > 1) {
-            // Border spacing appears between columns: (columns-1) * spacing
-            content_width -= (columns - 1) * table->border_spacing_h;
-            log_debug("Subtracting border-spacing: %d * %d = %d",
-                   columns - 1, table->border_spacing_h, (columns - 1) * table->border_spacing_h);
+        // Fallback to lycon->block.given_width or container
+        if (explicit_table_width == 0 && lycon->block.given_width > 0) {
+            explicit_table_width = lycon->block.given_width;
+            log_debug("FIXED LAYOUT - using given_width: %dpx", explicit_table_width);
+        } else if (explicit_table_width == 0) {
+            // No explicit width, use container width or default
+            int container_width = lycon->line.right - lycon->line.left;
+            explicit_table_width = container_width > 0 ? container_width : 600;
+            log_debug("FIXED LAYOUT - given_width=0, using container/default: %dpx (container=%d-%d=%d)",
+                   explicit_table_width, lycon->line.right, lycon->line.left, container_width);
         }
 
-        // CRITICAL FIX: For fixed layout, use first row cell widths, not equal distribution
-        // CSS table-layout: fixed should use the first row to determine column widths
+        // Store for later use
+        fixed_table_width = explicit_table_width;
+        log_debug("FIXED LAYOUT - stored fixed_table_width: %dpx", fixed_table_width);
 
-        log_debug("Fixed layout - reading first row cell widths");
+        // STEP 2: Calculate available content width (subtract borders and spacing)
+        int content_width = explicit_table_width;
 
-        // Try to read actual cell widths from the first row
-        bool found_explicit_widths = false;
-        int total_explicit_width = 0;
+        // Subtract table border (we'll add it back later for final width)
+        content_width -= 4; // 2px left + 2px right border
 
-        // Look for the first row to get cell widths
-        ViewTableRowGroup* first_group = nullptr;
+        // For border-collapse, no additional adjustments needed
+        // For separate borders, subtract border-spacing
+        if (!table->border_collapse && table->border_spacing_h > 0) {
+            content_width -= (columns + 1) * table->border_spacing_h; // Spacing around and between columns
+            log_debug("Subtracting border-spacing: (%d+1)*%.1f = %.1f",
+                   columns, table->border_spacing_h, (columns + 1) * table->border_spacing_h);
+        }
+
+        log_debug("Content width for columns: %dpx", content_width);
+
+        // STEP 3: Read explicit column widths from FIRST ROW cells
+        int* explicit_col_widths = (int*)calloc(columns, sizeof(int));
+        int total_explicit = 0;
+        int unspecified_cols = 0;
+
+        // Find first row
+        ViewTableRow* first_row = nullptr;
         for (ViewBlock* child = table->first_child; child; child = child->next_sibling) {
             if (child->type == RDT_VIEW_TABLE_ROW_GROUP) {
-                first_group = (ViewTableRowGroup*)child;
+                ViewTableRowGroup* group = (ViewTableRowGroup*)child;
+                for (ViewBlock* row_child = group->first_child; row_child; row_child = row_child->next_sibling) {
+                    if (row_child->type == RDT_VIEW_TABLE_ROW) {
+                        first_row = (ViewTableRow*)row_child;
+                        break;
+                    }
+                }
+                if (first_row) break;
+            } else if (child->type == RDT_VIEW_TABLE_ROW) {
+                first_row = (ViewTableRow*)child;
                 break;
             }
         }
 
-        if (first_group) {
-            ViewTableRow* first_row = nullptr;
-            for (ViewBlock* child = first_group->first_child; child; child = child->next_sibling) {
-                if (child->type == RDT_VIEW_TABLE_ROW) {
-                    first_row = (ViewTableRow*)child;
-                    break;
+        // Read cell widths from first row
+        if (first_row) {
+            int col = 0;
+            log_debug("Reading first row cell widths...");
+            for (ViewBlock* cell_view = first_row->first_child;
+                 cell_view && col < columns;
+                 cell_view = cell_view->next_sibling) {
+                if (cell_view->type == RDT_VIEW_TABLE_CELL) {
+                    ViewTableCell* cell = (ViewTableCell*)cell_view;
+
+                    // Try to get explicit width from CSS
+                    int cell_width = 0;
+                    if (cell->node && cell->node->lxb_elmt && cell->node->lxb_elmt->element.style) {
+                        const lxb_css_rule_declaration_t* width_decl =
+                            lxb_dom_element_style_by_id(
+                                (lxb_dom_element_t*)cell->node->lxb_elmt,
+                                LXB_CSS_PROPERTY_WIDTH);
+                        if (width_decl && width_decl->u.width) {
+                            cell_width = resolve_length_value(
+                                lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
+                        }
+                    }
+
+                    if (cell_width > 0) {
+                        explicit_col_widths[col] = cell_width;
+                        total_explicit += cell_width;
+                        log_debug("  Column %d: explicit width %dpx", col, cell_width);
+                    } else {
+                        unspecified_cols++;
+                        log_debug("  Column %d: no explicit width", col);
+                    }
+
+                    col += cell->col_span;
                 }
             }
+        }
 
-            if (first_row) {
-                log_debug("Found first row, checking cell widths");
-                int col = 0;
+        // STEP 4: Distribute widths according to CSS table-layout: fixed algorithm
+        if (total_explicit > 0) {
+            log_debug("Found %d columns with explicit widths (total: %dpx), %d unspecified",
+                   columns - unspecified_cols, total_explicit, unspecified_cols);
 
-                for (ViewBlock* child = first_row->first_child; child && col < columns; child = child->next_sibling) {
-                    if (child->type == RDT_VIEW_TABLE_CELL) {
-                        ViewTableCell* cell = (ViewTableCell*)child;
-
-                        // Try to get width from CSS computed styles
-                        if (cell->node && cell->node->lxb_elmt && cell->node->lxb_elmt->element.style) {
-                            const lxb_css_rule_declaration_t* width_decl =
-                                lxb_dom_element_style_by_id((lxb_dom_element_t*)cell->node->lxb_elmt, LXB_CSS_PROPERTY_WIDTH);
-                            if (width_decl && width_decl->u.width) {
-                                int cell_width = resolve_length_value(lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
-                                if (cell_width > 0) {
-                                    col_widths[col] = cell_width;
-                                    total_explicit_width += cell_width;
-                                    found_explicit_widths = true;
-                                    log_debug("Cell %d explicit width: %dpx", col, cell_width);
-                                }
-                            }
-                        }
-
-                        col += cell->col_span;
+            // Distribute remaining width to unspecified columns
+            int remaining_width = content_width - total_explicit;
+            if (unspecified_cols > 0 && remaining_width > 0) {
+                int width_per_unspecified = remaining_width / unspecified_cols;
+                for (int i = 0; i < columns; i++) {
+                    if (explicit_col_widths[i] == 0) {
+                        explicit_col_widths[i] = width_per_unspecified;
                     }
                 }
-            }
-        }
-
-        // If we found explicit widths, adjust to fit table width
-        if (found_explicit_widths && total_explicit_width != content_width) {
-            log_debug("Adjusting explicit widths (%dpx) to fit table width (%dpx)",
-                   total_explicit_width, content_width);
-
-            // Scale the widths proportionally to fit the table width
-            double scale_factor = (double)content_width / total_explicit_width;
-            for (int i = 0; i < columns; i++) {
-                if (col_widths[i] > 0) {
-                    col_widths[i] = (int)(col_widths[i] * scale_factor);
+                log_debug("Distributing %dpx to %d unspecified columns (%dpx each)",
+                       remaining_width, unspecified_cols, width_per_unspecified);
+            } else if (unspecified_cols > 0) {
+                // Not enough space even for explicit widths, scale everything
+                double scale_factor = (double)content_width / total_explicit;
+                for (int i = 0; i < columns; i++) {
+                    if (explicit_col_widths[i] > 0) {
+                        explicit_col_widths[i] = (int)(explicit_col_widths[i] * scale_factor);
+                    }
                 }
+                // Distribute any remainder
+                int scaled_total = 0;
+                for (int i = 0; i < columns; i++) scaled_total += explicit_col_widths[i];
+                int remainder = content_width - scaled_total;
+                for (int i = 0; i < columns && remainder > 0; i++) {
+                    if (explicit_col_widths[i] == 0) {
+                        explicit_col_widths[i] = remainder / unspecified_cols;
+                    }
+                }
+                log_debug("Scaled explicit widths by %.2f to fit content width", scale_factor);
             }
-        }
-
-        // If no explicit widths found, distribute equally
-        if (!found_explicit_widths) {
+        } else {
+            // No explicit widths, distribute equally
             int width_per_col = content_width / columns;
             for (int i = 0; i < columns; i++) {
-                col_widths[i] = width_per_col;
+                explicit_col_widths[i] = width_per_col;
             }
-            log_debug("No explicit widths found - using equal distribution: %dpx per column", width_per_col);
+            log_debug("No explicit widths - equal distribution: %dpx per column", width_per_col);
         }
 
-        log_debug("Fixed layout complete - content: %dpx, total: %dpx",
-               content_width, target_table_width);
+        // STEP 5: Replace col_widths with fixed layout widths
+        memcpy(col_widths, explicit_col_widths, columns * sizeof(int));
+        free(explicit_col_widths);
+
+        log_debug("=== FIXED LAYOUT COMPLETE ===");
+        for (int i = 0; i < columns; i++) {
+            log_debug("  Final column %d width: %dpx", i, col_widths[i]);
+        }
     }
 
     // Step 3: Calculate table width with border model support
@@ -770,22 +913,25 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     log_debug("Our total table width: %dpx (browser expects 59.13px, diff: %.2fpx)",
            table_width, table_width - 59.13);
 
+    log_debug("table_width before border adjustments: %d, border_collapse=%d",
+           table_width, table->border_collapse);
+
     // Apply border spacing or border collapse adjustments
     if (table->border_collapse) {
         // Border-collapse: borders overlap, reduce total width
         if (columns > 1) {
-            table_width -= (columns - 1); // Remove 1px per internal border
+            int reduction = (columns - 1);
+            log_debug("Border-collapse reducing width by %dpx", reduction);
+            table_width -= reduction; // Remove 1px per internal border
         }
         log_debug("Border-collapse applied - table width: %d", table_width);
     } else if (table->border_spacing_h > 0) {
         // Separate borders: add spacing between columns AND around table edges
-        printf("DEBUG: Applying border-spacing %fpx to table width\n", table->border_spacing_h);
+        log_debug("Applying border-spacing %fpx to table width", table->border_spacing_h);
         if (columns > 1) {
             table_width += (columns - 1) * table->border_spacing_h; // Between columns
         }
         table_width += 2 * table->border_spacing_h; // Left and right edges
-        printf("DEBUG: Border-spacing applied (%fpx) - table width: %d (includes edge spacing)\n",
-               table->border_spacing_h, table_width);
         log_debug("Border-spacing applied (%dpx) - table width: %d (includes edge spacing)",
                (int)table->border_spacing_h, table_width);
     }
@@ -795,20 +941,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
         table_padding_horizontal = table->bound->padding.left + table->bound->padding.right;
         table_width += table_padding_horizontal;
-        printf("DEBUG: Added table padding horizontal: %dpx (left=%d, right=%d, top=%d, bottom=%d)\n",
-               table_padding_horizontal, table->bound->padding.left, table->bound->padding.right,
-               table->bound->padding.top, table->bound->padding.bottom);
         log_debug("Added table padding horizontal: %dpx (left=%d, right=%d)",
                table_padding_horizontal, table->bound->padding.left, table->bound->padding.right);
-    } else {
-        printf("DEBUG: No table padding found - bound=%p\n", table->bound);
     }
 
     // CRITICAL FIX: For fixed layout, override calculated width with CSS width
-    if (table->table_layout == ViewTable::TABLE_LAYOUT_FIXED && lycon->block.given_width > 0) {
-        table_width = lycon->block.given_width;
+    if (table->table_layout == ViewTable::TABLE_LAYOUT_FIXED && fixed_table_width > 0) {
+        log_debug("Fixed layout override - changing table_width from %d to %d",
+               table_width, fixed_table_width);
+        table_width = fixed_table_width;
         log_debug("Fixed layout override - using CSS width: %dpx", table_width);
     }
+
+    log_debug("Final table_width for layout: %dpx", table_width);
 
     // Step 4: Position cells and calculate row heights with border model
     int* col_x_positions = (int*)calloc(columns + 1, sizeof(int));
@@ -819,8 +964,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
         table_padding_left = table->bound->padding.left;
         log_debug("Added table padding left: +%dpx", table_padding_left);
     }
-    
-    col_x_positions[0] = table_padding_left;
+
+    // Add table border width (content starts inside the border)
+    int table_border_left = 0;
+    if (table->bound && table->bound->border && table->bound->border->width.left > 0) {
+        table_border_left = (int)table->bound->border->width.left;
+        log_debug("Added table border left: +%dpx", table_border_left);
+    }
+
+    col_x_positions[0] = table_border_left + table_padding_left;
     if (!table->border_collapse && table->border_spacing_h > 0) {
         col_x_positions[0] += table->border_spacing_h;
         log_debug("Added left border-spacing: +%dpx", table->border_spacing_h);
@@ -838,6 +990,14 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     // Start Y position after caption, with table padding and top border-spacing
     int current_y = caption_height;
+
+    // Add table border (content starts inside the border)
+    int table_border_top = 0;
+    if (table->bound && table->bound->border && table->bound->border->width.top > 0) {
+        table_border_top = (int)table->bound->border->width.top;
+        current_y += table_border_top;
+        log_debug("Added table border top: +%dpx", table_border_top);
+    }
 
     // Add table padding (space inside table border)
     int table_padding_top = 0;
@@ -865,30 +1025,46 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             int group_start_y = current_y;
 
             // Position row group at table content area (after padding and border-spacing)
-            // printf("DEBUG: BEFORE assignment - child->x=%.1f, child->y=%.1f, child->width=%.1f\n", child->x, child->y, child->width);
-            
+
+            // Calculate tbody content width as sum of column widths
+            int tbody_content_width = 0;
+            for (int i = 0; i < columns; i++) {
+                tbody_content_width += col_widths[i];
+            }
+
+            // Add border-spacing between columns (if separate borders)
+            if (!table->border_collapse && table->border_spacing_h > 0 && columns > 1) {
+                tbody_content_width += (columns - 1) * table->border_spacing_h;
+            }
+
             // Position tbody based on border-collapse mode
             if (table->border_collapse) {
                 // Border-collapse: tbody starts at half the table border width
                 child->x = 1.5f; // Half of table border width (3px / 2)
                 child->y = 1.5f; // Half of table border width (3px / 2)
-                child->width = (float)(table_width + 3); // Add to match browser behavior
+                child->width = (float)tbody_content_width;
             } else {
-                // Border-separate: apply border-spacing calculations
-                // Expected: tbody at (31,35) absolute, table at (16,16), so tbody should be (15,19) relative to table
-                child->x = (float)(col_x_positions[0] + 2); // Add table border offset
-                child->y = (float)(current_y + 2); // Add table border offset  
-                child->width = (float)(table_width - 30); // Total horizontal spacing = 30px
+                // Border-separate: tbody starts after table padding and left border-spacing
+                // col_x_positions[0] already includes table padding + border-spacing
+                child->x = (float)col_x_positions[0];
+                child->y = (float)current_y;
+                child->width = (float)tbody_content_width;
             }
-            
-            // printf("DEBUG: AFTER assignment - child->x=%.1f, child->y=%.1f, child->width=%.1f\n", child->x, child->y, child->width);
-            printf("DEBUG: Row group positioned at x=%d, y=%d, width=%d (col_x_positions[0]=%d, table_width=%d)\n",
-                   child->x, child->y, child->width, col_x_positions[0], table_width);
-            log_debug("Row group positioned at x=%d, y=%d, width=%d",
-                   child->x, child->y, child->width);
+
+            log_debug("Row group positioned at x=%.1f, y=%.1f, width=%.1f (tbody_content_width=%d, columns=%d)",
+                   child->x, child->y, child->width, tbody_content_width, columns);
+
+            // Count rows in this group to identify the last row
+            int row_count = 0;
+            for (ViewBlock* count_row = child->first_child; count_row; count_row = count_row->next_sibling) {
+                if (count_row->type == RDT_VIEW_TABLE_ROW) row_count++;
+            }
+            int current_row_index = 0;
 
             for (ViewBlock* row = child->first_child; row; row = row->next_sibling) {
                 if (row->type == RDT_VIEW_TABLE_ROW) {
+                    current_row_index++;
+                    bool is_last_row = (current_row_index == row_count);
                     // Position row relative to row group
                     row->x = 0;
                     row->y = current_y - group_start_y; // Relative to row group
@@ -921,17 +1097,22 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                     int content_x = 1; // 1px border
                                     int content_y = 1; // 1px border
 
-                                    // Add CSS padding
+                                    // Add CSS padding for X (left)
                                     if (tcell->bound) {
                                         content_x += tcell->bound->padding.left;
                                         content_y += tcell->bound->padding.top;
                                     }
 
+                                    // Apply vertical alignment to Y position
+                                    // Vertical align adjusts within the cell's content area (after border+padding)
+                                    // We need to know cell height first, so we'll adjust this after height calculation
+                                    // For now, store the base Y (will adjust below after measuring child)
+
                                     // Position text relative to cell (parent)
                                     text->x = content_x;
-                                    text->y = content_y;
+                                    text->y = content_y;  // Will adjust for vertical-align later
 
-                                    log_debug("Relative text positioning - x=%d, y=%d (relative to cell parent)",
+                                    log_debug("Initial text positioning - x=%d, y=%d (before vertical-align)",
                                            text->x, text->y);
                                 }
                             }
@@ -946,15 +1127,46 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             // Enhanced cell height calculation with browser accuracy
                             int content_height = 0;
 
-                            // Measure content height precisely
+                            // STEP 1: Check for explicit CSS height property first
+                            int explicit_cell_height = 0;
+                            if (tcell->node && tcell->node->lxb_elmt && tcell->node->lxb_elmt->element.style) {
+                                const lxb_css_rule_declaration_t* height_decl =
+                                    lxb_dom_element_style_by_id(
+                                        (lxb_dom_element_t*)tcell->node->lxb_elmt,
+                                        LXB_CSS_PROPERTY_HEIGHT);
+                                if (height_decl && height_decl->u.height) {
+                                    explicit_cell_height = resolve_length_value(
+                                        lycon, LXB_CSS_PROPERTY_HEIGHT, height_decl->u.height);
+                                    log_debug("Cell has explicit CSS height: %dpx", explicit_cell_height);
+                                }
+                            }
+
+                            // STEP 2: Measure content height precisely (for auto height or minimum)
                             for (View* cc = ((ViewGroup*)cell)->child; cc; cc = cc->next) {
                                 if (cc->type == RDT_VIEW_TEXT) {
                                     ViewText* text = (ViewText*)cc;
                                     int text_height = text->height > 0 ? text->height : 17; // Default line height
                                     if (text_height > content_height) content_height = text_height;
-                                } else if (cc->type == RDT_VIEW_BLOCK) {
+                                } else if (cc->type == RDT_VIEW_BLOCK || cc->type == RDT_VIEW_INLINE || cc->type == RDT_VIEW_INLINE_BLOCK) {
                                     ViewBlock* block = (ViewBlock*)cc;
-                                    if (block->height > content_height) content_height = block->height;
+
+                                    // Check if child has explicit CSS height
+                                    int child_css_height = 0;
+                                    if (block->node && block->node->lxb_elmt && block->node->lxb_elmt->element.style) {
+                                        const lxb_css_rule_declaration_t* child_height_decl =
+                                            lxb_dom_element_style_by_id(
+                                                (lxb_dom_element_t*)block->node->lxb_elmt,
+                                                LXB_CSS_PROPERTY_HEIGHT);
+                                        if (child_height_decl && child_height_decl->u.height) {
+                                            child_css_height = resolve_length_value(
+                                                lycon, LXB_CSS_PROPERTY_HEIGHT, child_height_decl->u.height);
+                                            log_debug("Child element (type=%d) has explicit CSS height: %dpx", cc->type, child_css_height);
+                                        }
+                                    }
+
+                                    // Use child CSS height if present, otherwise use measured height
+                                    int child_height = child_css_height > 0 ? child_css_height : block->height;
+                                    if (child_height > content_height) content_height = child_height;
                                 }
                             }
 
@@ -963,9 +1175,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                 content_height = 17; // Browser default line height
                             }
 
-                            // Browser-compatible box model for height
-                            int cell_height = content_height;
-                            // Add cell padding - read from actual CSS properties
+                            // STEP 3: Calculate final cell height - use explicit height if present
+                            int cell_height = 0;
+
+                            // Read cell padding
                             int padding_vertical = 0;
                             if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
                                 padding_vertical = tcell->bound->padding.top + tcell->bound->padding.bottom;
@@ -981,19 +1194,76 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                 }
                                 padding_vertical = 0;
                             }
-                            cell_height += padding_vertical;  // Add CSS padding
-                            cell_height += 2;  // CSS border: 1px top + 1px bottom
 
-                            log_debug("Cell height calculation - content=%d, padding=%d, border=2, total=%d",
-                                   content_height, padding_vertical, cell_height);
+                            // Use explicit CSS height if provided, otherwise use content height
+                            if (explicit_cell_height > 0) {
+                                // CSS height already includes everything, just use it directly
+                                cell_height = explicit_cell_height;
+                                log_debug("Using explicit CSS height: %dpx (overrides content height %dpx)",
+                                       cell_height, content_height);
+                            } else {
+                                // Auto height: calculate from content + padding + border
+                                cell_height = content_height;
+                                cell_height += padding_vertical;  // Add CSS padding
+                                cell_height += 2;  // CSS border: 1px top + 1px bottom
+                                log_debug("Using auto height - content=%d, padding=%d, border=2, total=%d",
+                                       content_height, padding_vertical, cell_height);
+                            }
 
                             cell->height = cell_height;
 
                             // Store calculated height
                             cell->height = cell_height;
 
-                            if (cell_height > row_height) {
-                                row_height = cell_height;
+                            // Apply vertical alignment to cell children
+                            // This adjusts the Y position of content within the cell based on vertical-align property
+                            if (tcell->vertical_align != ViewTableCell::CELL_VALIGN_TOP) {
+                                // Calculate available space in cell (content area after border and padding)
+                                int cell_content_area = cell_height - 2; // Subtract border (1px top + 1px bottom)
+                                int padding_vertical = 0;
+                                if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
+                                    padding_vertical = tcell->bound->padding.top + tcell->bound->padding.bottom;
+                                    cell_content_area -= padding_vertical;
+                                }
+
+                                // Measure child height
+                                int child_height = content_height; // Use measured content height
+
+                                // Calculate adjustment based on alignment
+                                int y_adjustment = 0;
+                                if (tcell->vertical_align == ViewTableCell::CELL_VALIGN_MIDDLE) {
+                                    y_adjustment = (cell_content_area - child_height) / 2;
+                                    log_debug("Vertical-align middle: cell_content_area=%d, child_height=%d, adjustment=%d",
+                                           cell_content_area, child_height, y_adjustment);
+                                } else if (tcell->vertical_align == ViewTableCell::CELL_VALIGN_BOTTOM) {
+                                    y_adjustment = cell_content_area - child_height;
+                                    log_debug("Vertical-align bottom: cell_content_area=%d, child_height=%d, adjustment=%d",
+                                           cell_content_area, child_height, y_adjustment);
+                                }
+
+                                // Apply adjustment to all children
+                                if (y_adjustment > 0) {
+                                    for (View* cc = ((ViewGroup*)cell)->child; cc; cc = cc->next) {
+                                        cc->y += y_adjustment;
+                                        log_debug("Applied vertical-align adjustment: child y=%d (added %d)",
+                                               cc->y, y_adjustment);
+                                    }
+                                }
+                            }
+
+                            // Handle rowspan for row height calculation
+                            // If cell spans multiple rows, only count a portion of its height for this row
+                            int height_for_row = cell_height;
+                            if (tcell->row_span > 1) {
+                                // Distribute cell height across spanned rows
+                                // For simplicity, divide evenly (more complex: consider content distribution)
+                                height_for_row = cell_height / tcell->row_span;
+                                log_debug("Rowspan cell - total_height=%d, rowspan=%d, height_for_row=%d",
+                                       cell_height, tcell->row_span, height_for_row);
+                            }
+
+                            if (height_for_row > row_height) {
+                                row_height = height_for_row;
                             }
                         }
                     }
@@ -1001,8 +1271,8 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     row->height = row_height;
                     current_y += row_height;
 
-                    // Add vertical border-spacing after each row (except last)
-                    if (!table->border_collapse && table->border_spacing_v > 0) {
+                    // Add vertical border-spacing after each row (except last row in group)
+                    if (!table->border_collapse && table->border_spacing_v > 0 && !is_last_row) {
                         current_y += table->border_spacing_v;
                         log_debug("Added vertical spacing after row: +%dpx", table->border_spacing_v);
                     }
@@ -1075,15 +1345,46 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     // Enhanced cell height calculation with browser accuracy
                     int content_height = 0;
 
-                    // Measure content height precisely
+                    // STEP 1: Check for explicit CSS height property first
+                    int explicit_cell_height = 0;
+                    if (tcell->node && tcell->node->lxb_elmt && tcell->node->lxb_elmt->element.style) {
+                        const lxb_css_rule_declaration_t* height_decl =
+                            lxb_dom_element_style_by_id(
+                                (lxb_dom_element_t*)tcell->node->lxb_elmt,
+                                LXB_CSS_PROPERTY_HEIGHT);
+                        if (height_decl && height_decl->u.height) {
+                            explicit_cell_height = resolve_length_value(
+                                lycon, LXB_CSS_PROPERTY_HEIGHT, height_decl->u.height);
+                            log_debug("Cell has explicit CSS height: %dpx", explicit_cell_height);
+                        }
+                    }
+
+                    // STEP 2: Measure content height precisely (for auto height or minimum)
                     for (View* cc = ((ViewGroup*)cell)->child; cc; cc = cc->next) {
                         if (cc->type == RDT_VIEW_TEXT) {
                             ViewText* text = (ViewText*)cc;
                             int text_height = text->height > 0 ? text->height : 17;
                             if (text_height > content_height) content_height = text_height;
-                        } else if (cc->type == RDT_VIEW_BLOCK) {
+                        } else if (cc->type == RDT_VIEW_BLOCK || cc->type == RDT_VIEW_INLINE || cc->type == RDT_VIEW_INLINE_BLOCK) {
                             ViewBlock* block = (ViewBlock*)cc;
-                            if (block->height > content_height) content_height = block->height;
+
+                            // Check if child has explicit CSS height
+                            int child_css_height = 0;
+                            if (block->node && block->node->lxb_elmt && block->node->lxb_elmt->element.style) {
+                                const lxb_css_rule_declaration_t* child_height_decl =
+                                    lxb_dom_element_style_by_id(
+                                        (lxb_dom_element_t*)block->node->lxb_elmt,
+                                        LXB_CSS_PROPERTY_HEIGHT);
+                                if (child_height_decl && child_height_decl->u.height) {
+                                    child_css_height = resolve_length_value(
+                                        lycon, LXB_CSS_PROPERTY_HEIGHT, child_height_decl->u.height);
+                                    log_debug("Direct row child element (type=%d) has explicit CSS height: %dpx", cc->type, child_css_height);
+                                }
+                            }
+
+                            // Use child CSS height if present, otherwise use measured height
+                            int child_height = child_css_height > 0 ? child_css_height : block->height;
+                            if (child_height > content_height) content_height = child_height;
                         }
                     }
 
@@ -1092,9 +1393,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         content_height = 17;
                     }
 
-                    // Browser-compatible box model for height
-                    int cell_height = content_height;
-                    // Add cell padding - read from actual CSS properties
+                    // STEP 3: Calculate final cell height - use explicit height if present
+                    int cell_height = 0;
+
+                    // Read cell padding
                     int padding_vertical = 0;
                     if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
                         padding_vertical = tcell->bound->padding.top + tcell->bound->padding.bottom;
@@ -1104,13 +1406,70 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         log_debug("No CSS padding found, using default 0");
                         padding_vertical = 0;
                     }
-                    cell_height += padding_vertical;  // Add CSS padding
-                    cell_height += 2;  // CSS border: 1px top + 1px bottom
+
+                    // Use explicit CSS height if provided, otherwise use content height
+                    if (explicit_cell_height > 0) {
+                        // CSS height already includes everything, just use it directly
+                        cell_height = explicit_cell_height;
+                        log_debug("Using explicit CSS height: %dpx (overrides content height %dpx)",
+                               cell_height, content_height);
+                    } else {
+                        // Auto height: calculate from content + padding + border
+                        cell_height = content_height;
+                        cell_height += padding_vertical;  // Add CSS padding
+                        cell_height += 2;  // CSS border: 1px top + 1px bottom
+                        log_debug("Using auto height - content=%d, padding=%d, border=2, total=%d",
+                               content_height, padding_vertical, cell_height);
+                    }
                     // Store calculated height
                     cell->height = cell_height;
 
-                    if (cell_height > row_height) {
-                        row_height = cell_height;
+                    // Apply vertical alignment to cell children
+                    // This adjusts the Y position of content within the cell based on vertical-align property
+                    if (tcell->vertical_align != ViewTableCell::CELL_VALIGN_TOP) {
+                        // Calculate available space in cell (content area after border and padding)
+                        int cell_content_area = cell_height - 2; // Subtract border (1px top + 1px bottom)
+                        if (tcell->bound && tcell->bound->padding.top >= 0 && tcell->bound->padding.bottom >= 0) {
+                            cell_content_area -= (tcell->bound->padding.top + tcell->bound->padding.bottom);
+                        }
+
+                        // Measure child height
+                        int child_height = content_height; // Use measured content height
+
+                        // Calculate adjustment based on alignment
+                        int y_adjustment = 0;
+                        if (tcell->vertical_align == ViewTableCell::CELL_VALIGN_MIDDLE) {
+                            y_adjustment = (cell_content_area - child_height) / 2;
+                            log_debug("Vertical-align middle: cell_content_area=%d, child_height=%d, adjustment=%d",
+                                   cell_content_area, child_height, y_adjustment);
+                        } else if (tcell->vertical_align == ViewTableCell::CELL_VALIGN_BOTTOM) {
+                            y_adjustment = cell_content_area - child_height;
+                            log_debug("Vertical-align bottom: cell_content_area=%d, child_height=%d, adjustment=%d",
+                                   cell_content_area, child_height, y_adjustment);
+                        }
+
+                        // Apply adjustment to all children
+                        if (y_adjustment > 0) {
+                            for (View* cc = ((ViewGroup*)cell)->child; cc; cc = cc->next) {
+                                cc->y += y_adjustment;
+                                log_debug("Applied vertical-align adjustment: child y=%d (added %d)",
+                                       cc->y, y_adjustment);
+                            }
+                        }
+                    }
+
+                    // Handle rowspan for row height calculation
+                    // If cell spans multiple rows, only count a portion of its height for this row
+                    int height_for_row = cell_height;
+                    if (tcell->row_span > 1) {
+                        // Distribute cell height across spanned rows
+                        height_for_row = cell_height / tcell->row_span;
+                        log_debug("Rowspan cell - total_height=%d, rowspan=%d, height_for_row=%d",
+                               cell_height, tcell->row_span, height_for_row);
+                    }
+
+                    if (height_for_row > row_height) {
+                        row_height = height_for_row;
                     }
                 }
             }
