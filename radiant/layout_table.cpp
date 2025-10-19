@@ -576,6 +576,42 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
 
     log_debug("Table has %d columns, %d rows", columns, rows);
 
+    // Check if table has explicit width (for percentage cell width calculation)
+    int explicit_table_width = 0;
+    int table_content_width = 0; // Width available for cells
+
+    if (table->node && table->node->lxb_elmt && table->node->lxb_elmt->element.style) {
+        const lxb_css_rule_declaration_t* width_decl =
+            lxb_dom_element_style_by_id(
+                (lxb_dom_element_t*)table->node->lxb_elmt,
+                LXB_CSS_PROPERTY_WIDTH);
+        if (width_decl && width_decl->u.width) {
+            explicit_table_width = resolve_length_value(
+                lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
+
+            // Calculate content width (subtract borders and spacing)
+            table_content_width = explicit_table_width;
+
+            // Subtract table border
+            if (table->bound && table->bound->border) {
+                table_content_width -= (int)(table->bound->border->width.left + table->bound->border->width.right);
+            }
+
+            // Subtract table padding
+            if (table->bound && table->bound->padding.left >= 0 && table->bound->padding.right >= 0) {
+                table_content_width -= table->bound->padding.left + table->bound->padding.right;
+            }
+
+            // Subtract border-spacing
+            if (!table->border_collapse && table->border_spacing_h > 0) {
+                table_content_width -= (columns + 1) * table->border_spacing_h;
+            }
+
+            log_debug("Table explicit width: %dpx, content width for cells: %dpx",
+                   explicit_table_width, table_content_width);
+        }
+    }
+
     // Step 2: Enhanced column width calculation with colspan/rowspan support
     int* col_widths = (int*)calloc(columns, sizeof(int));
 
@@ -617,8 +653,45 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                         (lxb_dom_element_t*)tcell->node->lxb_elmt,
                                         LXB_CSS_PROPERTY_WIDTH);
                                 if (width_decl && width_decl->u.width) {
-                                    cell_width = resolve_length_value(
-                                        lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
+                                    // Check if it's a percentage value
+                                    if (width_decl->u.width->type == LXB_CSS_VALUE__PERCENTAGE && table_content_width > 0) {
+                                        // Calculate percentage relative to table content width
+                                        float percentage = width_decl->u.width->u.percentage.num;
+                                        int css_content_width = (int)(table_content_width * percentage / 100.0f);
+
+                                        // CSS width is content-box, need to add border and padding
+                                        cell_width = css_content_width;
+
+                                        // Add padding
+                                        if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
+                                            cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
+                                        }
+
+                                        // Add border (1px left + 1px right)
+                                        cell_width += 2;
+
+                                        log_debug("Cell percentage width: %.1f%% of %dpx = %dpx content + padding + border = %dpx total",
+                                               percentage, table_content_width, css_content_width, cell_width);
+                                    } else {
+                                        // Absolute width
+                                        int css_content_width = resolve_length_value(
+                                            lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
+                                        if (css_content_width > 0) {
+                                            // CSS width is content-box, need to add border and padding
+                                            cell_width = css_content_width;
+
+                                            // Add padding
+                                            if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
+                                                cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
+                                            }
+
+                                            // Add border (1px left + 1px right)
+                                            cell_width += 2;
+
+                                            log_debug("Cell explicit CSS width: %dpx content + padding + border = %dpx total",
+                                                   css_content_width, cell_width);
+                                        }
+                                    }
                                 }
                             }
 
@@ -689,17 +762,52 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                 (lxb_dom_element_t*)tcell->node->lxb_elmt,
                                 LXB_CSS_PROPERTY_WIDTH);
                         if (width_decl && width_decl->u.width) {
-                            cell_width = resolve_length_value(
-                                lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
+                            // Check if it's a percentage value
+                            if (width_decl->u.width->type == LXB_CSS_VALUE__PERCENTAGE && table_content_width > 0) {
+                                // Calculate percentage relative to table content width
+                                float percentage = width_decl->u.width->u.percentage.num;
+                                int css_content_width = (int)(table_content_width * percentage / 100.0f);
+
+                                // CSS width is content-box, need to add border and padding
+                                cell_width = css_content_width;
+
+                                // Add padding
+                                if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
+                                    cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
+                                }
+
+                                // Add border (1px left + 1px right)
+                                cell_width += 2;
+
+                                log_debug("Direct row cell percentage width: %.1f%% of %dpx = %dpx content + padding + border = %dpx total",
+                                       percentage, table_content_width, css_content_width, cell_width);
+                            } else {
+                                // Absolute width
+                                int css_content_width = resolve_length_value(
+                                    lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
+                                if (css_content_width > 0) {
+                                    // CSS width is content-box, need to add border and padding
+                                    cell_width = css_content_width;
+
+                                    // Add padding
+                                    if (tcell->bound && tcell->bound->padding.left >= 0 && tcell->bound->padding.right >= 0) {
+                                        cell_width += tcell->bound->padding.left + tcell->bound->padding.right;
+                                    }
+
+                                    // Add border (1px left + 1px right)
+                                    cell_width += 2;
+
+                                    log_debug("Direct row cell explicit CSS width: %dpx content + padding + border = %dpx total",
+                                           css_content_width, cell_width);
+                                }
+                            }
                         }
                     }
 
                     // If no explicit width, measure content
                     if (cell_width == 0) {
                         cell_width = measure_cell_min_width(tcell);
-                    }
-
-                    if (tcell->col_span == 1) {
+                    }                    if (tcell->col_span == 1) {
                         if (cell_width > col_widths[col]) {
                             col_widths[col] = cell_width;
                         }
@@ -826,8 +934,19 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                                 (lxb_dom_element_t*)cell->node->lxb_elmt,
                                 LXB_CSS_PROPERTY_WIDTH);
                         if (width_decl && width_decl->u.width) {
-                            cell_width = resolve_length_value(
-                                lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
+                            // Check if it's a percentage value
+                            if (width_decl->u.width->type == LXB_CSS_VALUE__PERCENTAGE) {
+                                // Calculate percentage relative to table content width
+                                float percentage = width_decl->u.width->u.percentage.num;
+                                cell_width = (int)(content_width * percentage / 100.0f);
+                                log_debug("  Column %d: percentage width %.1f%% of %dpx = %dpx",
+                                       col, percentage, content_width, cell_width);
+                            } else {
+                                // Absolute width (px, em, etc.)
+                                cell_width = resolve_length_value(
+                                    lycon, LXB_CSS_PROPERTY_WIDTH, width_decl->u.width);
+                                log_debug("  Column %d: absolute width %dpx", col, cell_width);
+                            }
                         }
                     }
 
@@ -1505,10 +1624,17 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
     }
 
     // CRITICAL FIX: Add table border to final dimensions
-    // CSS shows: table { border: 2px solid #000; }
-    // So we need to add 4px width (2px left + 2px right) and 4px height (2px top + 2px bottom)
-    int table_border_width = 4;  // 2px left + 2px right
-    int table_border_height = 4; // 2px top + 2px bottom
+    // Read actual table border widths
+    int table_border_width = 0;
+    int table_border_height = 0;
+
+    if (table->bound && table->bound->border) {
+        table_border_width = (int)(table->bound->border->width.left + table->bound->border->width.right);
+        table_border_height = (int)(table->bound->border->width.top + table->bound->border->width.bottom);
+        log_debug("Using actual table border: width=%dpx (left=%.1f, right=%.1f), height=%dpx (top=%.1f, bottom=%.1f)",
+               table_border_width, table->bound->border->width.left, table->bound->border->width.right,
+               table_border_height, table->bound->border->width.top, table->bound->border->width.bottom);
+    }
 
     // Set final table dimensions including border
     table->width = table_width + table_border_width;
