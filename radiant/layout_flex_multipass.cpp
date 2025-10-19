@@ -91,7 +91,7 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
                 }
 
                 // Center the item
-                if (item->bound && item->bound->margin.left == LENGTH_AUTO && item->bound->margin.right == LENGTH_AUTO) {
+                if (item->bound && item->bound->margin.left_type == LXB_CSS_VALUE_AUTO && item->bound->margin.right_type == LXB_CSS_VALUE_AUTO) {
                     // Center horizontally
                     int center_x = (container_width - item->width) / 2;
                     if (flex_container->bound) {
@@ -104,7 +104,7 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
                     log_debug("Centered item horizontally at x=%d", center_x);
                 }
 
-                if (item->bound && item->bound->margin.top == LENGTH_AUTO && item->bound->margin.bottom == LENGTH_AUTO) {
+                if (item->bound && item->bound->margin.top_type == LXB_CSS_VALUE_AUTO && item->bound->margin.bottom_type == LXB_CSS_VALUE_AUTO) {
                     // Center vertically
                     int center_y = (container_height - item->height) / 2;
                     if (flex_container->bound) {
@@ -127,8 +127,8 @@ void apply_auto_margin_centering(LayoutContext* lycon, ViewBlock* flex_container
 // Check if an item has auto margins
 bool has_auto_margins(ViewBlock* item) {
     if (!item) return false;
-    return item->bound && (item->bound->margin.left == LENGTH_AUTO || item->bound->margin.right == LENGTH_AUTO ||
-           item->bound->margin.top == LENGTH_AUTO || item->bound->margin.bottom == LENGTH_AUTO);
+    return item->bound && (item->bound->margin.left_type == LXB_CSS_VALUE_AUTO || item->bound->margin.right_type == LXB_CSS_VALUE_AUTO ||
+           item->bound->margin.top_type == LXB_CSS_VALUE_AUTO || item->bound->margin.bottom_type == LXB_CSS_VALUE_AUTO);
 }
 
 // Simplified implementations that use existing functions
@@ -176,8 +176,8 @@ void align_items_main_axis_enhanced(FlexContainerLayout* flex_layout, FlexLineIn
 bool has_main_axis_auto_margins(FlexLineInfo* line) {
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
-        if (item->bound && (item->bound->margin.left == LENGTH_AUTO || item->bound->margin.right == LENGTH_AUTO ||
-            item->bound->margin.top == LENGTH_AUTO || item->bound->margin.bottom == LENGTH_AUTO)) {
+        if (item->bound && (item->bound->margin.left_type == LXB_CSS_VALUE_AUTO || item->bound->margin.right_type == LXB_CSS_VALUE_AUTO ||
+            item->bound->margin.top_type == LXB_CSS_VALUE_AUTO || item->bound->margin.bottom_type == LXB_CSS_VALUE_AUTO)) {
             return true;
         }
     }
@@ -193,9 +193,9 @@ void handle_main_axis_auto_margins(FlexContainerLayout* flex_layout, FlexLineInf
         ViewBlock* item = line->items[i];
 
         bool main_start_auto = is_main_axis_horizontal(flex_layout) ?
-            item->bound && item->bound->margin.left == LENGTH_AUTO : item->bound && item->bound->margin.top == LENGTH_AUTO;
+            item->bound && item->bound->margin.left_type == LXB_CSS_VALUE_AUTO : item->bound && item->bound->margin.top_type == LXB_CSS_VALUE_AUTO;
         bool main_end_auto = is_main_axis_horizontal(flex_layout) ?
-            item->bound && item->bound->margin.right == LENGTH_AUTO : item->bound && item->bound->margin.bottom == LENGTH_AUTO;
+            item->bound && item->bound->margin.right_type == LXB_CSS_VALUE_AUTO : item->bound && item->bound->margin.bottom_type == LXB_CSS_VALUE_AUTO;
 
         if (main_start_auto && main_end_auto) {
             // Center the item

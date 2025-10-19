@@ -925,11 +925,11 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
     for (int i = 0; i < line->item_count; i++) {
         ViewBlock* item = line->items[i];
         if (is_main_axis_horizontal(flex_layout)) {
-            if (item->bound && item->bound->margin.left == LENGTH_AUTO) auto_margin_count++;
-            if (item->bound && item->bound->margin.right == LENGTH_AUTO) auto_margin_count++;
+            if (item->bound && item->bound->margin.left_type == LXB_CSS_VALUE_AUTO) auto_margin_count++;
+            if (item->bound && item->bound->margin.right_type == LXB_CSS_VALUE_AUTO) auto_margin_count++;
         } else {
-            if (item->bound && item->bound->margin.top == LENGTH_AUTO) auto_margin_count++;
-            if (item->bound && item->bound->margin.bottom == LENGTH_AUTO) auto_margin_count++;
+            if (item->bound && item->bound->margin.top_type == LXB_CSS_VALUE_AUTO) auto_margin_count++;
+            if (item->bound && item->bound->margin.bottom_type == LXB_CSS_VALUE_AUTO) auto_margin_count++;
         }
     }
 
@@ -1004,9 +1004,9 @@ void align_items_main_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line)
         // Handle auto margins
         if (auto_margin_count > 0) {
             bool left_auto = is_main_axis_horizontal(flex_layout) ?
-                item->bound && item->bound->margin.left == LENGTH_AUTO : item->bound && item->bound->margin.top == LENGTH_AUTO;
+                item->bound && item->bound->margin.left_type == LXB_CSS_VALUE_AUTO : item->bound && item->bound->margin.top_type == LXB_CSS_VALUE_AUTO;
             bool right_auto = is_main_axis_horizontal(flex_layout) ?
-                item->bound && item->bound->margin.right == LENGTH_AUTO : item->bound && item->bound->margin.bottom == LENGTH_AUTO;
+                item->bound && item->bound->margin.right_type == LXB_CSS_VALUE_AUTO : item->bound && item->bound->margin.bottom_type == LXB_CSS_VALUE_AUTO;
 
             printf("DEBUG: MAIN_ALIGN_ITEM %d - auto margins: left=%d, right=%d\n",
                    i, left_auto, right_auto);
@@ -1073,9 +1073,9 @@ void align_items_cross_axis(FlexContainerLayout* flex_layout, FlexLineInfo* line
 
         // Check for auto margins in cross axis
         bool top_auto = is_main_axis_horizontal(flex_layout) ?
-            item->bound && item->bound->margin.top == LENGTH_AUTO : item->bound && item->bound->margin.left == LENGTH_AUTO;
+            item->bound && item->bound->margin.top_type == LXB_CSS_VALUE_AUTO : item->bound && item->bound->margin.left_type == LXB_CSS_VALUE_AUTO;
         bool bottom_auto = is_main_axis_horizontal(flex_layout) ?
-            item->bound && item->bound->margin.bottom == LENGTH_AUTO : item->bound && item->bound->margin.right == LENGTH_AUTO;
+            item->bound && item->bound->margin.bottom_type == LXB_CSS_VALUE_AUTO : item->bound && item->bound->margin.right_type == LXB_CSS_VALUE_AUTO;
 
         if (top_auto || bottom_auto) {
             // Handle auto margins in cross axis
