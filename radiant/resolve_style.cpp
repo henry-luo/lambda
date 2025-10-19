@@ -328,7 +328,7 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
         break;
     case LXB_CSS_VALUE_AUTO:
         log_info("length value: auto");
-        result = LENGTH_AUTO;
+        result = 0;
         break;
     default:
         log_warn("unknown length type: %d (LXB_CSS_VALUE_AUTO=%d)", value->type, LXB_CSS_VALUE_AUTO);
@@ -338,66 +338,86 @@ float resolve_length_value(LayoutContext* lycon, uintptr_t property,
     return result;
 }
 
-// resolve property 'margin', and put result in 'spacing'
+// resolve property 'margin', 'padding', etc.
 void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
-    const lxb_css_property_margin_t *margin, int32_t specificity, Spacing* spacing) {
-    int value_cnt = 0;  Spacing sp;
+    const lxb_css_property_margin_t *src_space, int32_t specificity, Spacing* trg_spacing) {
+    Margin sp;  // temporal space
+    int value_cnt = 0;  bool is_margin = property == LXB_CSS_PROPERTY_MARGIN;
     log_debug("resolve_spacing_prop");
-    if (margin->top.type != LXB_CSS_VALUE__UNDEF) {
+    if (src_space->top.type != LXB_CSS_VALUE__UNDEF) {
         log_debug("resolving spacing 1st");
-        sp.top = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->top);
+        sp.top = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&src_space->top);
         value_cnt++;
     }
-    if (margin->right.type != LXB_CSS_VALUE__UNDEF) {
+    if (src_space->right.type != LXB_CSS_VALUE__UNDEF) {
         log_debug("resolving spacing 2nd");
-        sp.right = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->right);
+        sp.right = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&src_space->right);
         value_cnt++;
     }
-    if (margin->bottom.type != LXB_CSS_VALUE__UNDEF) {
+    if (src_space->bottom.type != LXB_CSS_VALUE__UNDEF) {
         log_debug("resolving spacing 3rd");
-        sp.bottom = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->bottom);
+        sp.bottom = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&src_space->bottom);
         value_cnt++;
     }
-    if (margin->left.type != LXB_CSS_VALUE__UNDEF) {
+    if (src_space->left.type != LXB_CSS_VALUE__UNDEF) {
         log_debug("resolving spacing 4th");
-        sp.left = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&margin->left);
+        sp.left = resolve_length_value(lycon, property, (lxb_css_value_length_percentage_t *)&src_space->left);
         value_cnt++;
     }
-    log_debug("spacing value count: %d, value: %f, specificity: %d, top spec: %d", value_cnt, sp.top, specificity, spacing->top_specificity);
+    log_debug("spacing value count: %d, value: %f, specificity: %d, top spec: %d", value_cnt, sp.top, specificity, trg_spacing->top_specificity);
     switch (value_cnt) {
     case 1:
         sp.right = sp.left = sp.bottom = sp.top;
+        if (is_margin) { sp.right_type = sp.left_type = sp.bottom_type = sp.top_type = src_space->top.type; }
         break;
     case 2:
-        sp.bottom = sp.top;
-        sp.left = sp.right;
+        sp.bottom = sp.top;  sp.left = sp.right;
+        if (is_margin) {
+            sp.top_type = sp.bottom_type = src_space->top.type;
+            sp.left_type = sp.right_type = src_space->right.type;
+        }
         break;
     case 3:
         sp.left = sp.right;
+        if (is_margin) {
+            sp.top_type = src_space->top.type;  sp.bottom_type = src_space->bottom.type;
+            sp.left_type = sp.right_type = src_space->right.type;
+        }
         break;
     case 4:
-        break;  // no change
+        // no change to values
+        if (is_margin) {
+            sp.top_type = src_space->top.type;  sp.bottom_type = src_space->bottom.type;
+            sp.left_type = src_space->left.type;  sp.right_type = src_space->right.type;
+        }
+        break;
     }
-    if (specificity > spacing->top_specificity) {
-        spacing->top = sp.top == LENGTH_AUTO ? 0 : sp.top;
-        spacing->top_specificity = specificity;
-        log_debug("updated top spacing to %f", spacing->top);
+    // store value in final spacing struct if specificity is higher
+    Margin *trg_margin = is_margin ? (Margin *) trg_spacing : NULL;
+    if (specificity > trg_spacing->top_specificity) {
+        trg_spacing->top = sp.top;
+        trg_spacing->top_specificity = specificity;
+        if (trg_margin) trg_margin->top_type = sp.top_type;
+        log_debug("updated top spacing to %f", trg_spacing->top);
     }
-    if (specificity > spacing->bottom_specificity) {
-        spacing->bottom = sp.bottom == LENGTH_AUTO ? 0 : sp.bottom;
-        spacing->bottom_specificity = specificity;
+    if (specificity > trg_spacing->bottom_specificity) {
+        trg_spacing->bottom = sp.bottom;
+        trg_spacing->bottom_specificity = specificity;
+        if (trg_margin) trg_margin->bottom_type = sp.bottom_type;
     }
-    if (specificity > spacing->right_specificity) {
+    if (specificity > trg_spacing->right_specificity) {
         // only margin-left and right support auto value
-        spacing->right = sp.right;
-        spacing->right_specificity = specificity;
+        trg_spacing->right = sp.right;
+        trg_spacing->right_specificity = specificity;
+        if (trg_margin) trg_margin->right_type = sp.right_type;
     }
-    if (specificity > spacing->left_specificity) {
-        spacing->left = sp.left;
-        spacing->left_specificity = specificity;
+    if (specificity > trg_spacing->left_specificity) {
+        trg_spacing->left = sp.left;
+        trg_spacing->left_specificity = specificity;
+        if (trg_margin) trg_margin->left_type = sp.left_type;
     }
     log_debug("spacing value: top %f, right %f, bottom %f, left %f",
-        spacing->top, spacing->right, spacing->bottom, spacing->left);
+        trg_spacing->top, trg_spacing->right, trg_spacing->bottom, trg_spacing->left);
 }
 
 DisplayValue resolve_display(lxb_html_element_t* elmt) {

@@ -55,21 +55,21 @@ extern "C" {
 // LXB_CSS_VALUE_STATIC = 0x014d, LXB_CSS_VALUE_RELATIVE = 0x014e,
 // LXB_CSS_VALUE_ABSOLUTE = 0x014f, LXB_CSS_VALUE_FIXED = 0x0151, LXB_CSS_VALUE_STICKY = 0x0150
 
-static inline float pack_as_nan(int value) {
-    uint32_t bits = 0x7FC00000u | ((uint32_t)value & 0x003FFFFF);       // quiet NaN + payload
-    float f;
-    memcpy(&f, &bits, sizeof(f));                           // avoid aliasing UB
-    return f;
-}
+// static inline float pack_as_nan(int value) {
+//     uint32_t bits = 0x7FC00000u | ((uint32_t)value & 0x003FFFFF);       // quiet NaN + payload
+//     float f;
+//     memcpy(&f, &bits, sizeof(f));                           // avoid aliasing UB
+//     return f;
+// }
 
 // CSS auto packed as special NaN float value
-inline const float LENGTH_AUTO = pack_as_nan(LXB_CSS_VALUE_AUTO);
+// inline const float LENGTH_AUTO = pack_as_nan(LXB_CSS_VALUE_AUTO);
 
-inline bool is_length_auto(float a) {
-    uint32_t ia;
-    memcpy(&ia, &a, sizeof(a));
-    return (ia & 0x003FFFFF) == LXB_CSS_VALUE_AUTO;
-}
+// inline bool is_length_auto(float a) {
+//     uint32_t ia;
+//     memcpy(&ia, &a, sizeof(a));
+//     return (ia & 0x003FFFFF) == LXB_CSS_VALUE_AUTO;
+// }
 
 typedef union {
     uint32_t c;  // 32-bit ABGR color format,
@@ -163,20 +163,26 @@ typedef struct {
     PropValue vertical_align;
 } InlineProp;
 
-typedef struct {
-    union {
-        struct { float top, right, bottom, left; };  // for margin and padding
-        struct { float top_left, top_right, bottom_right, bottom_left; };  // for border radius
-    };
+typedef struct Spacing {
+    struct { float top, right, bottom, left; };  // for margin, padding, border
     int32_t top_specificity, right_specificity, bottom_specificity, left_specificity;
 } Spacing;
+
+typedef struct Margin : Spacing {
+    lxb_css_value_type_t top_type, right_type, bottom_type, left_type;   // for CSS enum values, like 'auto'
+} Margin;
+
+typedef struct Corner : Spacing {
+    struct { float top_left, top_right, bottom_right, bottom_left; };  // for border radius
+    int32_t tl_specificity, tr_specificity, br_specificity, bl_specificity;
+} Corner;
 
 typedef struct {
     Spacing width;
     PropValue top_style, right_style, bottom_style, left_style;
     Color top_color, right_color, bottom_color, left_color;
     int32_t top_color_specificity, right_color_specificity, bottom_color_specificity, left_color_specificity;
-    Spacing radius;
+    Corner radius;
 } BorderProp;
 
 typedef struct {
@@ -187,7 +193,7 @@ typedef struct {
 } BackgroundProp;
 
 typedef struct {
-    Spacing margin;
+    Margin margin;
     Spacing padding;
     BorderProp* border;
     BackgroundProp* background;

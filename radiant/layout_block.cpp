@@ -487,8 +487,8 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     else { // derive from parent block width
         if (block->bound) {
             content_width = pa_block.width
-                - (block->bound->margin.left == LENGTH_AUTO ? 0 : block->bound->margin.left)
-                - (block->bound->margin.right == LENGTH_AUTO ? 0 : block->bound->margin.right);
+                - (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO ? 0 : block->bound->margin.left)
+                - (block->bound->margin.right_type == LXB_CSS_VALUE_AUTO ? 0 : block->bound->margin.right);
         }
         else { content_width = pa_block.width; }
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
@@ -532,12 +532,13 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         block->height = content_height + block->bound->padding.top + block->bound->padding.bottom +
             (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
         // todo: we should keep LENGTH_AUTO (may be in flags) for reflow
-        log_debug("block margins: left=%f, right=%f, LENGTH_AUTO: %f", block->bound->margin.left, block->bound->margin.right, LENGTH_AUTO);
-        if (is_length_auto(block->bound->margin.left) && is_length_auto(block->bound->margin.right))  {
+        log_debug("block margins: left=%f, right=%f, left_type=%d, right_type=%d",
+            block->bound->margin.left, block->bound->margin.right, block->bound->margin.left_type, block->bound->margin.right_type);
+        if (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO && block->bound->margin.right_type == LXB_CSS_VALUE_AUTO)  {
             block->bound->margin.left = block->bound->margin.right = max((pa_block.width - block->width) / 2, 0);
         } else {
-            if (is_length_auto(block->bound->margin.left)) block->bound->margin.left = 0;
-            if (is_length_auto(block->bound->margin.right)) block->bound->margin.right = 0;
+            if (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO) block->bound->margin.left = 0;
+            if (block->bound->margin.right_type == LXB_CSS_VALUE_AUTO) block->bound->margin.right = 0;
         }
         log_debug("finalize block margins: left=%f, right=%f", block->bound->margin.left, block->bound->margin.right);
         block->x += block->bound->margin.left;
