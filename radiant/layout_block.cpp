@@ -477,7 +477,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // determine block width and height
     float content_width = -1;
-    if (lycon->block.given_width >= 0) {
+    if (block->blk && block->blk->given_width_type != LXB_CSS_VALUE_AUTO && lycon->block.given_width >= 0) {
         content_width = max(lycon->block.given_width, 0);
         content_width = adjust_min_max_width(block, content_width);
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {

@@ -217,6 +217,7 @@ typedef struct {
     PropValue list_style_type;
     PropValue box_sizing;  // LXB_CSS_VALUE_CONTENT_BOX or LXB_CSS_VALUE_BORDER_BOX
     float given_width, given_height;  // CSS specified width/height values
+    lxb_css_value_type_t given_width_type;
     PropValue clear;          // clear property for floats
     PropValue float_prop;     // float property (left, right, none)
 } BlockProp;

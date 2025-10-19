@@ -1126,12 +1126,13 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY_WIDTH: {
         const lxb_css_property_width_t *width = declr->u.width;
         float value = resolve_length_value(lycon, LXB_CSS_PROPERTY_WIDTH, width);
-        lycon->block.given_width = isnan(value) ? value : max(value, 0);  // width cannot be negative
-        log_debug("width property: %f, isnan: %d", lycon->block.given_width, isnan(lycon->block.given_width));
+        lycon->block.given_width = max(value, 0);  // width cannot be negative
+        log_debug("width property: %f, type: %d", lycon->block.given_width, width->type);
         // Store the raw width value for box-sizing calculations
         if (block) {
             if (!block->blk) { block->blk = alloc_block_prop(lycon); }
             block->blk->given_width = lycon->block.given_width;
+            block->blk->given_width_type = width->type;
         }
         break;
     }
