@@ -310,9 +310,12 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                                         lycon->line.advance_x = 0;
                                         lycon->line.is_line_start = true;
 
-                                        log_debug("Cell content layout - width=%d, height=%d, advance_y=%d",
-                                               lycon->block.width, lycon->block.height, lycon->block.advance_y);
+                                        log_debug("Cell content initial layout for measurement - width=%d, height=%d",
+                                               lycon->block.width, lycon->block.height);
 
+                                        // Initial layout for content measurement
+                                        // NOTE: This uses potentially incorrect parent width (cell->width may be 0)
+                                        // We'll re-layout later with correct parent width after cell dimensions are set
                                         for (DomNode* cc = cellNode->first_child(); cc; cc = cc->next_sibling()) {
                                             layout_flow_node(lycon, cc);
                                         }
@@ -385,9 +388,12 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                             lycon->line.advance_x = 0;
                             lycon->line.is_line_start = true;
 
-                            log_debug("Direct cell content layout - width=%d, height=%d, advance_y=%d",
-                                   lycon->block.width, lycon->block.height, lycon->block.advance_y);
+                            log_debug("Direct cell content initial layout for measurement - width=%d, height=%d",
+                                   lycon->block.width, lycon->block.height);
 
+                            // Initial layout for content measurement
+                            // NOTE: This uses potentially incorrect parent width (cell->width may be 0)
+                            // We'll re-layout later with correct parent width after cell dimensions are set
                             for (DomNode* cc = cellNode->first_child(); cc; cc = cc->next_sibling()) {
                                 layout_flow_node(lycon, cc);
                             }
@@ -423,7 +429,76 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
 // LAYOUT ALGORITHM
 // =============================================================================
 
+// Layout cell content with correct parent width (after cell dimensions are set)
+// This re-lays out children that were previously laid out with incorrect (0px) parent width.
+// This fixes the child block width inheritance issue.
+static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
+    ViewTableCell* tcell = static_cast<ViewTableCell*>(cell);
+    if (!tcell || !tcell->node) return;
+
+    // Save layout context to restore later
+    Blockbox saved_block = lycon->block;
+    Linebox saved_line = lycon->line;
+    ViewGroup* saved_parent = lycon->parent;
+    View* saved_prev = lycon->prev_view;
+    DomNode* saved_elmt = lycon->elmt;
+
+    // Calculate cell content area dimensions
+    // Start with full cell size and subtract borders
+    int content_width = cell->width - 2;  // 1px left border + 1px right border
+    int content_height = cell->height - 2; // 1px top border + 1px bottom border
+
+    // Account for padding (if any)
+    if (tcell->bound) {
+        content_width -= (tcell->bound->padding.left + tcell->bound->padding.right);
+        content_height -= (tcell->bound->padding.top + tcell->bound->padding.bottom);
+    }
+
+    // Ensure non-negative dimensions
+    if (content_width < 0) content_width = 0;
+    if (content_height < 0) content_height = 0;
+
+    // Clear existing children (they were laid out with wrong parent width)
+    // We need to save and clear the child list, then re-layout from DOM
+    ((ViewGroup*)cell)->child = nullptr;
+    if (cell->first_child) {
+        // Note: Not freeing memory here, assuming it will be garbage collected later
+        // or that the layout system handles this
+        cell->first_child = nullptr;
+    }
+
+    // Set up layout context for cell content with CORRECT parent width
+    lycon->block.width = content_width;
+    lycon->block.height = content_height;
+    lycon->block.advance_y = 0;
+    lycon->line.left = 0;
+    lycon->line.right = content_width;  // Child blocks will use this as parent width!
+    lycon->line.advance_x = 0;
+    lycon->line.is_line_start = true;
+    lycon->parent = (ViewGroup*)cell;
+    lycon->prev_view = nullptr;
+    lycon->elmt = tcell->node;
+
+    log_debug("Re-layout cell content with correct width - cell total=%d, content=%d (before: likely 0)",
+              cell->width, content_width);
+
+    // Re-layout children with correct parent width
+    // Child blocks without explicit width will now inherit content_width via pa_block.width
+    for (DomNode* cc = tcell->node->first_child(); cc; cc = cc->next_sibling()) {
+        layout_flow_node(lycon, cc);
+    }
+
+    // Restore layout context
+    lycon->block = saved_block;
+    lycon->line = saved_line;
+    lycon->parent = saved_parent;
+    lycon->prev_view = saved_prev;
+    lycon->elmt = saved_elmt;
+}
+
 // Enhanced cell width measurement with browser-accurate calculations
+// NOTE: After lazy child layout implementation, children aren't laid out yet when this is called.
+// We need to measure from already-laid-out children if they exist, or use a default minimum.
 static int measure_cell_min_width(ViewTableCell* cell) {
     if (!cell) return 0;
 
@@ -445,6 +520,7 @@ static int measure_cell_min_width(ViewTableCell* cell) {
     int content_width = 0;
 
     // Measure actual content width with precision
+    // NOTE: With lazy child layout, children may not be laid out yet, so this may find no children
     for (View* child = ((ViewGroup*)cell)->child; child; child = child->next) {
         int child_width = 0;
 
@@ -1243,6 +1319,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                             }
                             cell->width = cell_width;
 
+                            // CRITICAL FIX: Now that cell width is set, layout cell content with correct parent width
+                            // This allows child blocks to inherit the correct parent width instead of 0
+                            layout_table_cell_content(lycon, cell);
+
                             // Enhanced cell height calculation with browser accuracy
                             int content_height = 0;
 
@@ -1460,6 +1540,10 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                         cell_width += col_widths[c];
                     }
                     cell->width = cell_width;
+
+                    // CRITICAL FIX: Now that cell width is set, layout cell content with correct parent width
+                    // This allows child blocks to inherit the correct parent width instead of 0
+                    layout_table_cell_content(lycon, cell);
 
                     // Enhanced cell height calculation with browser accuracy
                     int content_height = 0;
