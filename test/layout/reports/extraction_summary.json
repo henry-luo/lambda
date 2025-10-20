@@ -1,7 +1,7 @@
 {
-  "total_files": 29,
-  "generated": 1,
-  "skipped": 28,
+  "total_files": 24,
+  "generated": 0,
+  "skipped": 24,
   "failed": 0,
   "success_rate": 100,
   "browser_info": {
@@ -87,14 +87,6 @@
     },
     {
       "category": "basic",
-      "file": "box_001_width_height.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 26,
-      "error": null
-    },
-    {
-      "category": "basic",
       "file": "clear-001.html",
       "success": true,
       "was_skipped": true,
@@ -115,14 +107,6 @@
       "success": true,
       "was_skipped": true,
       "node_count": 25,
-      "error": null
-    },
-    {
-      "category": "basic",
-      "file": "flex_009_auto_margins.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 19,
       "error": null
     },
     {
@@ -211,30 +195,6 @@
       "success": true,
       "was_skipped": true,
       "node_count": 27,
-      "error": null
-    },
-    {
-      "category": "basic",
-      "file": "table-001.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 27,
-      "error": null
-    },
-    {
-      "category": "basic",
-      "file": "table_001_simple_table.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 24,
-      "error": null
-    },
-    {
-      "category": "basic",
-      "file": "table_simple_005_colspan.html",
-      "success": true,
-      "was_skipped": true,
-      "node_count": 31,
       "error": null
     },
     {
