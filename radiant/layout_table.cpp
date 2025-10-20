@@ -48,6 +48,13 @@ static void resolve_table_properties(DomNode* element, ViewTable* table) {
     lxb_html_element_t* html_element = element->lxb_elmt;
     if (!html_element) return;
 
+    // Check if table-layout was already set to FIXED by CSS (via custom property)
+    // If so, respect the CSS value and don't override it
+    if (table->table_layout == ViewTable::TABLE_LAYOUT_FIXED) {
+        log_debug("Table layout: already set to FIXED by CSS, skipping heuristic");
+        return;
+    }
+
     // Default to auto layout
     table->table_layout = ViewTable::TABLE_LAYOUT_AUTO;
 
@@ -377,9 +384,6 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                                         lycon->line.advance_x = 0;
                                         lycon->line.is_line_start = true;
 
-                                        log_debug("Cell content initial layout for measurement - width=%d, height=%d",
-                                               lycon->block.width, lycon->block.height);
-
                                         // Initial layout for content measurement
                                         // NOTE: This uses potentially incorrect parent width (cell->width may be 0)
                                         // We'll re-layout later with correct parent width after cell dimensions are set
@@ -454,9 +458,6 @@ ViewTable* build_table_tree(LayoutContext* lycon, DomNode* tableNode) {
                             lycon->line.right = lycon->block.width;
                             lycon->line.advance_x = 0;
                             lycon->line.is_line_start = true;
-
-                            log_debug("Direct cell content initial layout for measurement - width=%d, height=%d",
-                                   lycon->block.width, lycon->block.height);
 
                             // Initial layout for content measurement
                             // NOTE: This uses potentially incorrect parent width (cell->width may be 0)
@@ -563,7 +564,7 @@ static void layout_table_cell_content(LayoutContext* lycon, ViewBlock* cell) {
     lycon->prev_view = nullptr;
     lycon->elmt = tcell->node;
 
-    log_debug("Re-layout cell content - cell=%dx%d, border=(%d,%d), padding=(%d,%d,%d,%d), content_start=(%d,%d), content=%dx%d",
+    log_debug("Pass 2: Re-layout cell content - cell=%dx%d, border=(%d,%d), padding=(%d,%d,%d,%d), content_start=(%d,%d), content=%dx%d",
               cell->width, cell->height, border_left, border_top,
               padding_left, padding_right, padding_top, padding_bottom,
               content_start_x, content_start_y, content_width, content_height);
@@ -1612,6 +1613,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
                     if (table->fixed_row_height > 0) {
                         row->height = table->fixed_row_height;
                         log_debug("Applied fixed layout row height: %dpx", table->fixed_row_height);
+
+                        // CRITICAL: Update all cell heights in this row to match fixed row height
+                        // Cells were calculated with auto height, but fixed layout overrides this
+                        for (ViewBlock* cell = row->first_child; cell; cell = cell->next_sibling) {
+                            if (cell->type == RDT_VIEW_TABLE_CELL) {
+                                cell->height = table->fixed_row_height;
+                                log_debug("Updated cell height to match fixed_row_height=%d", table->fixed_row_height);
+                            }
+                        }
                     } else {
                         row->height = row_height;
                     }
@@ -1828,6 +1838,15 @@ void table_auto_layout(LayoutContext* lycon, ViewTable* table) {
             if (table->fixed_row_height > 0) {
                 row->height = table->fixed_row_height;
                 log_debug("Applied fixed layout row height: %dpx", table->fixed_row_height);
+
+                // CRITICAL: Update all cell heights in this row to match fixed row height
+                // Cells were calculated with auto height, but fixed layout overrides this
+                for (ViewBlock* cell = row->first_child; cell; cell = cell->next_sibling) {
+                    if (cell->type == RDT_VIEW_TABLE_CELL) {
+                        cell->height = table->fixed_row_height;
+                        log_debug("Updated cell height to match fixed_row_height=%d", table->fixed_row_height);
+                    }
+                }
             } else {
                 row->height = row_height;
             }

@@ -1449,9 +1449,6 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
     case LXB_CSS_PROPERTY__CUSTOM: { // properties not supported by Lexbor, return as #custom
         const lxb_css_property__custom_t *custom = declr->u.custom;
         // Handle CSS Grid properties as custom properties until lexbor supports them
-        printf("DEBUG: CUSTOM_PROPERTY - name='%.*s' (len=%d), value='%.*s'\n",
-               (int)custom->name.length, custom->name.data, (int)custom->name.length,
-               (int)custom->value.length, custom->value.data);
         log_debug("Processing custom property: %.*s = %.*s\n",
                (int)custom->name.length, (const char*)custom->name.data,
                (int)custom->value.length, (const char*)custom->value.data);
@@ -1732,11 +1729,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             ViewTable* table = lycon->view->type == RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
             if (table) {
                 const char* value_str = (const char*)custom->value.data;
-                if (strcmp(value_str, "fixed") == 0) {
+                // use strncmp since value_str is not null-terminated
+                if (custom->value.length == 5 && strncmp(value_str, "fixed", 5) == 0) {
                     table->table_layout = ViewTable::TABLE_LAYOUT_FIXED;
                     log_debug("Detected table-layout: fixed (inline)");
                 }
-                else if (strcmp(value_str, "auto") == 0) {
+                else if (custom->value.length == 4 && strncmp(value_str, "auto", 4) == 0) {
                     table->table_layout = ViewTable::TABLE_LAYOUT_AUTO;
                     log_debug("Detected table-layout: auto (inline)");
                 }
@@ -1746,11 +1744,12 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
             ViewTable* table = lycon->view->type == RDT_VIEW_TABLE ? (ViewTable*)lycon->view : NULL;
             if (table) {
                 const char* value_str = (const char*)custom->value.data;
-                if (strcmp(value_str, "collapse") == 0) {
+                // Use strncmp since value_str is not null-terminated
+                if (custom->value.length == 8 && strncmp(value_str, "collapse", 8) == 0) {
                     table->border_collapse = true;
                     log_debug("Detected border-collapse: collapse (inline)");
                 }
-                else if (strcmp(value_str, "separate") == 0) {
+                else if (custom->value.length == 8 && strncmp(value_str, "separate", 8) == 0) {
                     table->border_collapse = false;
                     log_debug("Detected border-collapse: separate (inline)");
                 }
