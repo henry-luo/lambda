@@ -415,6 +415,9 @@ typedef struct ViewTable : ViewBlock {
     float border_spacing_h; // horizontal spacing between columns (px)
     float border_spacing_v; // vertical spacing between rows (px)
 
+    // Fixed layout height distribution
+    int fixed_row_height;   // Height per row for table-layout:fixed with explicit height (0=auto)
+
     // Table-specific state will be held externally (e.g., TableModel) and referenced by ViewTable later.
 } ViewTable;
 
