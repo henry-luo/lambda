@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Table Cell Alignment\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: table;\n            border: 2px solid #333;\n            padding: 10px;\n            border-spacing: 10px;\n        }\n        .row {\n            display: table-row;\n            height: 120px;\n        }\n        .cell {\n            display: table-cell;\n            padding: 10px;\n            box-sizing: border-box;\n            font-size: 14px;\n            border: 1px solid #666;\n        }\n        .cell:nth-child(1) { \n            background-color: #ffcccc; \n            vertical-align: top;\n            text-align: left;\n        }\n        .cell:nth-child(2) { \n            background-color: #ccffcc; \n            vertical-align: middle;\n            text-align: center;\n        }\n        .cell:nth-child(3) { \n            background-color: #ccccff; \n            vertical-align: bottom;\n            text-align: right;\n        }\n    \n\n\n    \n        \n            Top Left\n            Middle Center\n            Bottom Right\n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"table_002_cell_alignment\",\n        \"category\": \"basic\",\n        \"features\": [\"vertical-align\", \"text-align\", \"table-cell-alignment\"],\n        \"description\": \"Table cells with different vertical and horizontal alignment properties\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS2/tables.html#height-layout\"],\n        \"complexity\": \"basic\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Table Cell Alignment\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: table;\n            border: 2px solid #333;\n            padding: 10px;\n            border-spacing: 10px;\n        }\n        .row {\n            display: table-row;\n            height: 120px;\n        }\n        .cell {\n            display: table-cell;\n            padding: 10px;\n            box-sizing: border-box;\n            font-size: 14px;\n            border: 1px solid #666;\n        }\n        .cell:nth-child(1) { \n            background-color: #ffcccc; \n            vertical-align: top;\n            text-align: left;\n        }\n        .cell:nth-child(2) { \n            background-color: #ccffcc; \n            vertical-align: middle;\n            text-align: center;\n        }\n        .cell:nth-child(3) { \n            background-color: #ccccff; \n            vertical-align: bottom;\n            text-align: right;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Table Cell Alignment",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Table Cell Alignment",
+                "length": 26,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: table;\n            border: 2px solid #333;\n            padding: 10px;\n            border-spacing: 10px;\n        }\n        .row {\n            display: table-row;\n            height: 120px;\n        }\n        .cell {\n            display: table-cell;\n            padding: 10px;\n            box-sizing: border-box;\n            font-size: 14px;\n            border: 1px solid #666;\n        }\n        .cell:nth-child(1) { \n            background-color: #ffcccc; \n            vertical-align: top;\n            text-align: left;\n        }\n        .cell:nth-child(2) { \n            background-color: #ccffcc; \n            vertical-align: middle;\n            text-align: center;\n        }\n        .cell:nth-child(3) { \n            background-color: #ccccff; \n            vertical-align: bottom;\n            text-align: right;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            display: table;\n            border: 2px solid #333;\n            padding: 10px;\n            border-spacing: 10px;\n        }\n        .row {\n            display: table-row;\n            height: 120px;\n        }\n        .cell {\n            display: table-cell;\n            padding: 10px;\n            box-sizing: border-box;\n            font-size: 14px;\n            border: 1px solid #666;\n        }\n        .cell:nth-child(1) { \n            background-color: #ffcccc; \n            vertical-align: top;\n            text-align: left;\n        }\n        .cell:nth-child(2) { \n            background-color: #ccffcc; \n            vertical-align: middle;\n            text-align: center;\n        }\n        .cell:nth-child(3) { \n            background-color: #ccccff; \n            vertical-align: bottom;\n            text-align: right;\n        }\n    ",
+                "length": 1129,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Top Left\n            Middle Center\n            Bottom Right\n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"table_002_cell_alignment\",\n        \"category\": \"basic\",\n        \"features\": [\"vertical-align\", \"text-align\", \"table-cell-alignment\"],\n        \"description\": \"Table cells with different vertical and horizontal alignment properties\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS2/tables.html#height-layout\"],\n        \"complexity\": \"basic\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Top Left\n            Middle Center\n            Bottom Right",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "div.row",
                 "tag": "div",
                 "id": null,
@@ -568,13 +667,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Top Left\n            Middle Center\n            Bottom Right",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 3,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "div.cell:nth-of-type(1)",
                     "tag": "div",
                     "id": null,
@@ -632,33 +729,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Top Left",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 1,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Top Left",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 33,
-                            "y": 33,
-                            "width": 49.83,
-                            "height": 16,
-                            "right": 82.83,
-                            "bottom": 49
-                          }
-                        ],
                         "length": 8,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 8
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 33,
+                              "y": 33,
+                              "width": 49.83,
+                              "height": 16,
+                              "right": 82.83,
+                              "bottom": 49,
+                              "text": "Top Left",
+                              "startIndex": 0,
+                              "endIndex": 8
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "table-cell",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.cell:nth-of-type(2)",
                     "tag": "div",
                     "id": null,
@@ -716,33 +821,41 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Middle Center",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 3,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Middle Center",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 138,
-                            "y": 142,
-                            "width": 87.16,
-                            "height": 16,
-                            "right": 225.16,
-                            "bottom": 158
-                          }
-                        ],
                         "length": 13,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 13
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 138,
+                              "y": 142,
+                              "width": 87.16,
+                              "height": 16,
+                              "right": 225.16,
+                              "bottom": 158,
+                              "text": "Middle Center",
+                              "startIndex": 0,
+                              "endIndex": 13
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "table-cell",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "div.cell:nth-of-type(3)",
                     "tag": "div",
                     "id": null,
@@ -800,37 +913,45 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Bottom Right",
-                    "hasTextNodes": true,
-                    "textNodes": [
+                    "depth": 4,
+                    "elementIndex": 5,
+                    "children": [
                       {
+                        "nodeType": "text",
                         "text": "Bottom Right",
-                        "parentElement": "div",
-                        "rects": [
-                          {
-                            "x": 286.06,
-                            "y": 251,
-                            "width": 80.94,
-                            "height": 16,
-                            "right": 367,
-                            "bottom": 267
-                          }
-                        ],
                         "length": 12,
                         "isWhitespaceOnly": false,
-                        "startOffset": 0,
-                        "endOffset": 12
+                        "layout": {
+                          "rects": [
+                            {
+                              "x": 286.06,
+                              "y": 251,
+                              "width": 80.94,
+                              "height": 16,
+                              "right": 367,
+                              "bottom": 267,
+                              "text": "Bottom Right",
+                              "startIndex": 0,
+                              "endIndex": 12
+                            }
+                          ],
+                          "hasLayout": true,
+                          "parentVisible": true,
+                          "parentDisplay": "table-cell",
+                          "parentVisibility": "visible"
+                        },
+                        "depth": 5,
+                        "nodeIndex": 0,
+                        "children": []
                       }
-                    ],
-                    "childCount": 0,
-                    "depth": 4,
-                    "children": []
+                    ]
                   }
                 ]
               }
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -886,12 +1007,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"table_002_cell_alignment\",\n        \"category\": \"basic\",\n        \"features\": [\"vertical-align\", \"text-align\", \"table-cell-alignment\"],\n        \"description\": \"Table cells with different vertical and horizontal alignment properties\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS2/tables.html#height-layout\"],\n        \"complexity\": \"basic\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"table_002_cell_alignment\",\n        \"category\": \"basic\",\n        \"features\": [\"vertical-align\", \"text-align\", \"table-cell-alignment\"],\n        \"description\": \"Table cells with different vertical and horizontal alignment properties\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS2/tables.html#height-layout\"],\n        \"complexity\": \"basic\"\n    }\n    ",
+                "length": 384,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

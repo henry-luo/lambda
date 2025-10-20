@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Table Vertical Alignment Test\n  \n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; height: 60px; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    .top { vertical-align: top; }\n    .middle { vertical-align: middle; }\n    .bottom { vertical-align: bottom; }\n    .baseline { vertical-align: baseline; }\n  \n\n\n  \n    Vertical Alignment Test (60px cell height)\n    \n      \n        Alignment\n        Content\n        Description\n      \n    \n    \n      \n        Top\n        This content should be aligned to the top of the cell\n        Default alignment\n      \n      \n        Middle\n        This content should be centered vertically in the cell\n        Centered alignment\n      \n      \n        Bottom\n        This content should be aligned to the bottom of the cell\n        Bottom alignment\n      \n      \n        Baseline\n        This content should align to text baseline\n        Baseline alignment\n      \n      \n        Multi-rowMiddle\n        Top in multi-row context\n        Bottom in multi-row context\n      \n      \n        Middle in multi-row context\n        Baseline in multi-row context",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Table Vertical Alignment Test\n  \n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; height: 60px; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    .top { vertical-align: top; }\n    .middle { vertical-align: middle; }\n    .bottom { vertical-align: bottom; }\n    .baseline { vertical-align: baseline; }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 3,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -249,14 +276,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Table Vertical Alignment Test",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Table Vertical Alignment Test",
+                "length": 29,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -312,16 +370,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; height: 60px; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    .top { vertical-align: top; }\n    .middle { vertical-align: middle; }\n    .bottom { vertical-align: bottom; }\n    .baseline { vertical-align: baseline; }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; height: 60px; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    .top { vertical-align: top; }\n    .middle { vertical-align: middle; }\n    .bottom { vertical-align: bottom; }\n    .baseline { vertical-align: baseline; }\n  ",
+                "length": 482,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -377,13 +466,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Vertical Alignment Test (60px cell height)\n    \n      \n        Alignment\n        Content\n        Description\n      \n    \n    \n      \n        Top\n        This content should be aligned to the top of the cell\n        Default alignment\n      \n      \n        Middle\n        This content should be centered vertically in the cell\n        Centered alignment\n      \n      \n        Bottom\n        This content should be aligned to the bottom of the cell\n        Bottom alignment\n      \n      \n        Baseline\n        This content should align to text baseline\n        Baseline alignment\n      \n      \n        Multi-rowMiddle\n        Top in multi-row context\n        Bottom in multi-row context\n      \n      \n        Middle in multi-row context\n        Baseline in multi-row context",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 1,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "table",
             "tag": "table",
             "id": null,
@@ -439,13 +526,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Vertical Alignment Test (60px cell height)\n    \n      \n        Alignment\n        Content\n        Description\n      \n    \n    \n      \n        Top\n        This content should be aligned to the top of the cell\n        Default alignment\n      \n      \n        Middle\n        This content should be centered vertically in the cell\n        Centered alignment\n      \n      \n        Bottom\n        This content should be aligned to the bottom of the cell\n        Bottom alignment\n      \n      \n        Baseline\n        This content should align to text baseline\n        Baseline alignment\n      \n      \n        Multi-rowMiddle\n        Top in multi-row context\n        Bottom in multi-row context\n      \n      \n        Middle in multi-row context\n        Baseline in multi-row context",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 3,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "caption",
                 "tag": "caption",
                 "id": null,
@@ -501,33 +586,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Vertical Alignment Test (60px cell height)",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Vertical Alignment Test (60px cell height)",
-                    "parentElement": "caption",
-                    "rects": [
-                      {
-                        "x": 234.69,
-                        "y": 16,
-                        "width": 310.3,
-                        "height": 17,
-                        "right": 544.98,
-                        "bottom": 33
-                      }
-                    ],
                     "length": 42,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 42
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 234.69,
+                          "y": 16,
+                          "width": 310.3,
+                          "height": 17,
+                          "right": 544.98,
+                          "bottom": 33,
+                          "text": "Vertical Alignment Test (60px cell height)",
+                          "startIndex": 0,
+                          "endIndex": 42
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "table-caption",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "thead",
                 "tag": "thead",
                 "id": null,
@@ -583,13 +676,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Alignment\n        Content\n        Description",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 1,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "tr",
                     "tag": "tr",
                     "id": null,
@@ -645,13 +736,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Alignment\n        Content\n        Description",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(1)",
                         "tag": "th",
                         "id": null,
@@ -707,33 +796,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Alignment",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Alignment",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 29,
-                                "y": 72,
-                                "width": 78.22,
-                                "height": 17,
-                                "right": 107.22,
-                                "bottom": 89
-                              }
-                            ],
                             "length": 9,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 9
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 29,
+                                  "y": 72,
+                                  "width": 78.22,
+                                  "height": 17,
+                                  "right": 107.22,
+                                  "bottom": 89,
+                                  "text": "Alignment",
+                                  "startIndex": 0,
+                                  "endIndex": 9
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(2)",
                         "tag": "th",
                         "id": null,
@@ -789,33 +886,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Content",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Content",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 296.91,
-                                "y": 72,
-                                "width": 60.44,
-                                "height": 17,
-                                "right": 357.34,
-                                "bottom": 89
-                              }
-                            ],
                             "length": 7,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 7
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 296.91,
+                                  "y": 72,
+                                  "width": 60.44,
+                                  "height": 17,
+                                  "right": 357.34,
+                                  "bottom": 89,
+                                  "text": "Content",
+                                  "startIndex": 0,
+                                  "endIndex": 7
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(3)",
                         "tag": "th",
                         "id": null,
@@ -871,37 +976,45 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Description",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Description",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 604.84,
-                                "y": 72,
-                                "width": 88.02,
-                                "height": 17,
-                                "right": 692.86,
-                                "bottom": 89
-                              }
-                            ],
                             "length": 11,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 11
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 604.84,
+                                  "y": 72,
+                                  "width": 88.02,
+                                  "height": 17,
+                                  "right": 692.86,
+                                  "bottom": 89,
+                                  "text": "Description",
+                                  "startIndex": 0,
+                                  "endIndex": 11
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "tbody",
                 "tag": "tbody",
                 "id": null,
@@ -957,13 +1070,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Top\n        This content should be aligned to the top of the cell\n        Default alignment\n      \n      \n        Middle\n        This content should be centered vertically in the cell\n        Centered alignment\n      \n      \n        Bottom\n        This content should be aligned to the bottom of the cell\n        Bottom alignment\n      \n      \n        Baseline\n        This content should align to text baseline\n        Baseline alignment\n      \n      \n        Multi-rowMiddle\n        Top in multi-row context\n        Bottom in multi-row context\n      \n      \n        Middle in multi-row context\n        Baseline in multi-row context",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 6,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(1)",
                     "tag": "tr",
                     "id": null,
@@ -1019,13 +1130,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Top\n        This content should be aligned to the top of the cell\n        Default alignment",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td.top:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1083,33 +1192,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Top",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Top",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 29,
-                                "y": 129,
-                                "width": 25.8,
-                                "height": 17,
-                                "right": 54.8,
-                                "bottom": 146
-                              }
-                            ],
                             "length": 3,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 3
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 29,
+                                  "y": 129,
+                                  "width": 25.8,
+                                  "height": 17,
+                                  "right": 54.8,
+                                  "bottom": 146,
+                                  "text": "Top",
+                                  "startIndex": 0,
+                                  "endIndex": 3
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td.top:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1167,33 +1284,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "This content should be aligned to the top of the cell",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "This content should be aligned to the top of the cell",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 133.22,
-                                "y": 129,
-                                "width": 361.14,
-                                "height": 17,
-                                "right": 494.36,
-                                "bottom": 146
-                              }
-                            ],
                             "length": 53,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 53
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 133.22,
+                                  "y": 129,
+                                  "width": 361.14,
+                                  "height": 17,
+                                  "right": 494.36,
+                                  "bottom": 146,
+                                  "text": "This content should be aligned to the top of the cell",
+                                  "startIndex": 0,
+                                  "endIndex": 53
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td.top:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -1251,35 +1376,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Default alignment",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Default alignment",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 547.03,
-                                "y": 129,
-                                "width": 124.52,
-                                "height": 17,
-                                "right": 671.55,
-                                "bottom": 146
-                              }
-                            ],
                             "length": 17,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 17
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 547.03,
+                                  "y": 129,
+                                  "width": 124.52,
+                                  "height": 17,
+                                  "right": 671.55,
+                                  "bottom": 146,
+                                  "text": "Default alignment",
+                                  "startIndex": 0,
+                                  "endIndex": 17
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(2)",
                     "tag": "tr",
                     "id": null,
@@ -1335,13 +1468,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Middle\n        This content should be centered vertically in the cell\n        Centered alignment",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td.middle:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1399,33 +1530,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Middle",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Middle",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 29,
-                                "y": 228,
-                                "width": 47.14,
-                                "height": 17,
-                                "right": 76.14,
-                                "bottom": 245
-                              }
-                            ],
                             "length": 6,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 6
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 29,
+                                  "y": 228,
+                                  "width": 47.14,
+                                  "height": 17,
+                                  "right": 76.14,
+                                  "bottom": 245,
+                                  "text": "Middle",
+                                  "startIndex": 0,
+                                  "endIndex": 6
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td.middle:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1483,33 +1622,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "This content should be centered vertically in the cell",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "This content should be centered vertically in the cell",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 133.22,
-                                "y": 228,
-                                "width": 366.42,
-                                "height": 17,
-                                "right": 499.64,
-                                "bottom": 245
-                              }
-                            ],
                             "length": 54,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 54
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 133.22,
+                                  "y": 228,
+                                  "width": 366.42,
+                                  "height": 17,
+                                  "right": 499.64,
+                                  "bottom": 245,
+                                  "text": "This content should be centered vertically in the cell",
+                                  "startIndex": 0,
+                                  "endIndex": 54
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td.middle:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -1567,35 +1714,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Centered alignment",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Centered alignment",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 547.03,
-                                "y": 228,
-                                "width": 139.64,
-                                "height": 17,
-                                "right": 686.67,
-                                "bottom": 245
-                              }
-                            ],
                             "length": 18,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 18
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 547.03,
+                                  "y": 228,
+                                  "width": 139.64,
+                                  "height": 17,
+                                  "right": 686.67,
+                                  "bottom": 245,
+                                  "text": "Centered alignment",
+                                  "startIndex": 0,
+                                  "endIndex": 18
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(3)",
                     "tag": "tr",
                     "id": null,
@@ -1651,13 +1806,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Bottom\n        This content should be aligned to the bottom of the cell\n        Bottom alignment",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 5,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td.bottom:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1715,33 +1868,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Bottom",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Bottom",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 29,
-                                "y": 327,
-                                "width": 50.69,
-                                "height": 17,
-                                "right": 79.69,
-                                "bottom": 344
-                              }
-                            ],
                             "length": 6,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 6
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 29,
+                                  "y": 327,
+                                  "width": 50.69,
+                                  "height": 17,
+                                  "right": 79.69,
+                                  "bottom": 344,
+                                  "text": "Bottom",
+                                  "startIndex": 0,
+                                  "endIndex": 6
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td.bottom:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1799,33 +1960,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "This content should be aligned to the bottom of the cell",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "This content should be aligned to the bottom of the cell",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 133.22,
-                                "y": 327,
-                                "width": 387.81,
-                                "height": 17,
-                                "right": 521.03,
-                                "bottom": 344
-                              }
-                            ],
                             "length": 56,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 56
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 133.22,
+                                  "y": 327,
+                                  "width": 387.81,
+                                  "height": 17,
+                                  "right": 521.03,
+                                  "bottom": 344,
+                                  "text": "This content should be aligned to the bottom of the cell",
+                                  "startIndex": 0,
+                                  "endIndex": 56
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td.bottom:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -1883,35 +2052,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Bottom alignment",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Bottom alignment",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 547.03,
-                                "y": 327,
-                                "width": 124.52,
-                                "height": 17,
-                                "right": 671.55,
-                                "bottom": 344
-                              }
-                            ],
                             "length": 16,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 16
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 547.03,
+                                  "y": 327,
+                                  "width": 124.52,
+                                  "height": 17,
+                                  "right": 671.55,
+                                  "bottom": 344,
+                                  "text": "Bottom alignment",
+                                  "startIndex": 0,
+                                  "endIndex": 16
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(4)",
                     "tag": "tr",
                     "id": null,
@@ -1967,13 +2144,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Baseline\n        This content should align to text baseline\n        Baseline alignment",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 7,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td.baseline:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -2031,33 +2206,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Baseline",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Baseline",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 29,
-                                "y": 363,
-                                "width": 61.38,
-                                "height": 17,
-                                "right": 90.38,
-                                "bottom": 380
-                              }
-                            ],
                             "length": 8,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 8
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 29,
+                                  "y": 363,
+                                  "width": 61.38,
+                                  "height": 17,
+                                  "right": 90.38,
+                                  "bottom": 380,
+                                  "text": "Baseline",
+                                  "startIndex": 0,
+                                  "endIndex": 8
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td.baseline:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -2115,33 +2298,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "This content should align to text baseline",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "This content should align to text baseline",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 133.22,
-                                "y": 363,
-                                "width": 289.08,
-                                "height": 17,
-                                "right": 422.3,
-                                "bottom": 380
-                              }
-                            ],
                             "length": 42,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 42
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 133.22,
+                                  "y": 363,
+                                  "width": 289.08,
+                                  "height": 17,
+                                  "right": 422.3,
+                                  "bottom": 380,
+                                  "text": "This content should align to text baseline",
+                                  "startIndex": 0,
+                                  "endIndex": 42
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td.baseline:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -2199,35 +2390,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Baseline alignment",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Baseline alignment",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 547.03,
-                                "y": 363,
-                                "width": 135.2,
-                                "height": 17,
-                                "right": 682.23,
-                                "bottom": 380
-                              }
-                            ],
                             "length": 18,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 18
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 547.03,
+                                  "y": 363,
+                                  "width": 135.2,
+                                  "height": 17,
+                                  "right": 682.23,
+                                  "bottom": 380,
+                                  "text": "Baseline alignment",
+                                  "startIndex": 0,
+                                  "endIndex": 18
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(5)",
                     "tag": "tr",
                     "id": null,
@@ -2283,13 +2482,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Multi-rowMiddle\n        Top in multi-row context\n        Bottom in multi-row context",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 9,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td.middle:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -2347,50 +2544,39 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Multi-rowMiddle",
-                        "hasTextNodes": true,
-                        "textNodes": [
-                          {
-                            "text": "Multi-row",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 29,
-                                "y": 492,
-                                "width": 64.89,
-                                "height": 17,
-                                "right": 93.89,
-                                "bottom": 509
-                              }
-                            ],
-                            "length": 9,
-                            "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 9
-                          },
-                          {
-                            "text": "Middle",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 29,
-                                "y": 510,
-                                "width": 47.14,
-                                "height": 17,
-                                "right": 76.14,
-                                "bottom": 527
-                              }
-                            ],
-                            "length": 6,
-                            "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 6
-                          }
-                        ],
-                        "childCount": 1,
                         "depth": 5,
+                        "elementIndex": 1,
                         "children": [
                           {
+                            "nodeType": "text",
+                            "text": "Multi-row",
+                            "length": 9,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 29,
+                                  "y": 492,
+                                  "width": 64.89,
+                                  "height": 17,
+                                  "right": 93.89,
+                                  "bottom": 509,
+                                  "text": "Multi-row",
+                                  "startIndex": 0,
+                                  "endIndex": 9
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "element",
                             "selector": "br",
                             "tag": "br",
                             "id": null,
@@ -2446,16 +2632,42 @@
                               "overflowX": "visible",
                               "overflowY": "visible"
                             },
-                            "textContent": null,
-                            "hasTextNodes": false,
-                            "textNodes": [],
-                            "childCount": 0,
                             "depth": 6,
+                            "elementIndex": 1,
+                            "children": []
+                          },
+                          {
+                            "nodeType": "text",
+                            "text": "Middle",
+                            "length": 6,
+                            "isWhitespaceOnly": false,
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 29,
+                                  "y": 510,
+                                  "width": 47.14,
+                                  "height": 17,
+                                  "right": 76.14,
+                                  "bottom": 527,
+                                  "text": "Middle",
+                                  "startIndex": 0,
+                                  "endIndex": 6
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 2,
                             "children": []
                           }
                         ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td.top:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -2513,33 +2725,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Top in multi-row context",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Top in multi-row context",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 133.22,
-                                "y": 441,
-                                "width": 168.06,
-                                "height": 17,
-                                "right": 301.28,
-                                "bottom": 458
-                              }
-                            ],
                             "length": 24,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 24
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 133.22,
+                                  "y": 441,
+                                  "width": 168.06,
+                                  "height": 17,
+                                  "right": 301.28,
+                                  "bottom": 458,
+                                  "text": "Top in multi-row context",
+                                  "startIndex": 0,
+                                  "endIndex": 24
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td.bottom:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -2597,35 +2817,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Bottom in multi-row context",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Bottom in multi-row context",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 547.03,
-                                "y": 483,
-                                "width": 192.95,
-                                "height": 17,
-                                "right": 739.98,
-                                "bottom": 500
-                              }
-                            ],
                             "length": 27,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 27
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 547.03,
+                                  "y": 483,
+                                  "width": 192.95,
+                                  "height": 17,
+                                  "right": 739.98,
+                                  "bottom": 500,
+                                  "text": "Bottom in multi-row context",
+                                  "startIndex": 0,
+                                  "endIndex": 27
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(6)",
                     "tag": "tr",
                     "id": null,
@@ -2681,13 +2909,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Middle in multi-row context\n        Baseline in multi-row context",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 2,
                     "depth": 4,
+                    "elementIndex": 11,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td.middle:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -2745,33 +2971,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Middle in multi-row context",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Middle in multi-row context",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 133.22,
-                                "y": 540,
-                                "width": 189.41,
-                                "height": 17,
-                                "right": 322.63,
-                                "bottom": 557
-                              }
-                            ],
                             "length": 27,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 27
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 133.22,
+                                  "y": 540,
+                                  "width": 189.41,
+                                  "height": 17,
+                                  "right": 322.63,
+                                  "bottom": 557,
+                                  "text": "Middle in multi-row context",
+                                  "startIndex": 0,
+                                  "endIndex": 27
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td.baseline:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -2829,31 +3063,38 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Baseline in multi-row context",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Baseline in multi-row context",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 547.03,
-                                "y": 519,
-                                "width": 203.64,
-                                "height": 17,
-                                "right": 750.67,
-                                "bottom": 536
-                              }
-                            ],
                             "length": 29,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 29
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 547.03,
+                                  "y": 519,
+                                  "width": 203.64,
+                                  "height": 17,
+                                  "right": 750.67,
+                                  "bottom": 536,
+                                  "text": "Baseline in multi-row context",
+                                  "startIndex": 0,
+                                  "endIndex": 29
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }

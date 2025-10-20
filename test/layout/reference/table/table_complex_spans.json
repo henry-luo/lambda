@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Table Complex Spans Test\n  \n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; text-align: center; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    .highlight { background: #ffffcc !important; }\n  \n\n\n  \n    Complex Colspan and Rowspan Combinations\n    \n      \n        Q1 2024 Sales Report\n      \n      \n        Region\n        Jan\n        Feb\n        Mar\n      \n    \n    \n      \n        North America\n        $10,000\n        $12,000\n        $15,000\n      \n      \n        Total: $37,000\n      \n      \n        Europe\n        $8,000\n        $9,500\n        $11,000\n      \n      \n        Total: $28,500\n      \n      \n        Grand Total\n        $65,500",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Table Complex Spans Test\n  \n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; text-align: center; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    .highlight { background: #ffffcc !important; }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 3,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -249,14 +276,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Table Complex Spans Test",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Table Complex Spans Test",
+                "length": 24,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -312,16 +370,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; text-align: center; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    .highlight { background: #ffffcc !important; }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; text-align: center; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n    .highlight { background: #ffffcc !important; }\n  ",
+                "length": 381,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -377,13 +466,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Complex Colspan and Rowspan Combinations\n    \n      \n        Q1 2024 Sales Report\n      \n      \n        Region\n        Jan\n        Feb\n        Mar\n      \n    \n    \n      \n        North America\n        $10,000\n        $12,000\n        $15,000\n      \n      \n        Total: $37,000\n      \n      \n        Europe\n        $8,000\n        $9,500\n        $11,000\n      \n      \n        Total: $28,500\n      \n      \n        Grand Total\n        $65,500",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 1,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "table",
             "tag": "table",
             "id": null,
@@ -439,13 +526,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Complex Colspan and Rowspan Combinations\n    \n      \n        Q1 2024 Sales Report\n      \n      \n        Region\n        Jan\n        Feb\n        Mar\n      \n    \n    \n      \n        North America\n        $10,000\n        $12,000\n        $15,000\n      \n      \n        Total: $37,000\n      \n      \n        Europe\n        $8,000\n        $9,500\n        $11,000\n      \n      \n        Total: $28,500\n      \n      \n        Grand Total\n        $65,500",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 3,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "caption",
                 "tag": "caption",
                 "id": null,
@@ -501,33 +586,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Complex Colspan and Rowspan Combinations",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Complex Colspan and Rowspan Combinations",
-                    "parentElement": "caption",
-                    "rects": [
-                      {
-                        "x": 28.09,
-                        "y": 16,
-                        "width": 354.7,
-                        "height": 17,
-                        "right": 382.8,
-                        "bottom": 33
-                      }
-                    ],
                     "length": 40,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 40
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 28.09,
+                          "y": 16,
+                          "width": 354.7,
+                          "height": 17,
+                          "right": 382.8,
+                          "bottom": 33,
+                          "text": "Complex Colspan and Rowspan Combinations",
+                          "startIndex": 0,
+                          "endIndex": 40
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "table-caption",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "thead",
                 "tag": "thead",
                 "id": null,
@@ -583,13 +676,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Q1 2024 Sales Report\n      \n      \n        Region\n        Jan\n        Feb\n        Mar",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(1)",
                     "tag": "tr",
                     "id": null,
@@ -645,13 +736,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Q1 2024 Sales Report",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "th",
                         "tag": "th",
                         "id": null,
@@ -707,35 +796,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Q1 2024 Sales Report",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Q1 2024 Sales Report",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 123.63,
-                                "y": 51,
-                                "width": 163.64,
-                                "height": 17,
-                                "right": 287.27,
-                                "bottom": 68
-                              }
-                            ],
                             "length": 20,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 20
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 123.63,
+                                  "y": 51,
+                                  "width": 163.64,
+                                  "height": 17,
+                                  "right": 287.27,
+                                  "bottom": 68,
+                                  "text": "Q1 2024 Sales Report",
+                                  "startIndex": 0,
+                                  "endIndex": 20
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(2)",
                     "tag": "tr",
                     "id": null,
@@ -791,13 +888,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Region\n        Jan\n        Feb\n        Mar",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 4,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(1)",
                         "tag": "th",
                         "id": null,
@@ -853,33 +948,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Region",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Region",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 52.58,
-                                "y": 87,
-                                "width": 54.22,
-                                "height": 17,
-                                "right": 106.8,
-                                "bottom": 104
-                              }
-                            ],
                             "length": 6,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 6
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 52.58,
+                                  "y": 87,
+                                  "width": 54.22,
+                                  "height": 17,
+                                  "right": 106.8,
+                                  "bottom": 104,
+                                  "text": "Region",
+                                  "startIndex": 0,
+                                  "endIndex": 6
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(2)",
                         "tag": "th",
                         "id": null,
@@ -935,33 +1038,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Jan",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Jan",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 171.5,
-                                "y": 87,
-                                "width": 27.58,
-                                "height": 17,
-                                "right": 199.08,
-                                "bottom": 104
-                              }
-                            ],
                             "length": 3,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 3
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 171.5,
+                                  "y": 87,
+                                  "width": 27.58,
+                                  "height": 17,
+                                  "right": 199.08,
+                                  "bottom": 104,
+                                  "text": "Jan",
+                                  "startIndex": 0,
+                                  "endIndex": 3
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(3)",
                         "tag": "th",
                         "id": null,
@@ -1017,33 +1128,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Feb",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Feb",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 254.91,
-                                "y": 87,
-                                "width": 28.45,
-                                "height": 17,
-                                "right": 283.36,
-                                "bottom": 104
-                              }
-                            ],
                             "length": 3,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 3
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 254.91,
+                                  "y": 87,
+                                  "width": 28.45,
+                                  "height": 17,
+                                  "right": 283.36,
+                                  "bottom": 104,
+                                  "text": "Feb",
+                                  "startIndex": 0,
+                                  "endIndex": 3
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(4)",
                         "tag": "th",
                         "id": null,
@@ -1099,37 +1218,45 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Mar",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 7,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Mar",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 338.75,
-                                "y": 87,
-                                "width": 28.45,
-                                "height": 17,
-                                "right": 367.2,
-                                "bottom": 104
-                              }
-                            ],
                             "length": 3,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 3
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 338.75,
+                                  "y": 87,
+                                  "width": 28.45,
+                                  "height": 17,
+                                  "right": 367.2,
+                                  "bottom": 104,
+                                  "text": "Mar",
+                                  "startIndex": 0,
+                                  "endIndex": 3
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "tbody",
                 "tag": "tbody",
                 "id": null,
@@ -1185,13 +1312,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "North America\n        $10,000\n        $12,000\n        $15,000\n      \n      \n        Total: $37,000\n      \n      \n        Europe\n        $8,000\n        $9,500\n        $11,000\n      \n      \n        Total: $28,500\n      \n      \n        Grand Total\n        $65,500",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 5,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(1)",
                     "tag": "tr",
                     "id": null,
@@ -1247,13 +1372,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "North America\n        $10,000\n        $12,000\n        $15,000",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 4,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td.highlight:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1311,33 +1434,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "North America",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "North America",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 29,
-                                "y": 141,
-                                "width": 101.38,
-                                "height": 17,
-                                "right": 130.38,
-                                "bottom": 158
-                              }
-                            ],
                             "length": 13,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 13
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 29,
+                                  "y": 141,
+                                  "width": 101.38,
+                                  "height": 17,
+                                  "right": 130.38,
+                                  "bottom": 158,
+                                  "text": "North America",
+                                  "startIndex": 0,
+                                  "endIndex": 13
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1393,33 +1524,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "$10,000",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "$10,000",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 156.38,
-                                "y": 123,
-                                "width": 57.84,
-                                "height": 17,
-                                "right": 214.22,
-                                "bottom": 140
-                              }
-                            ],
                             "length": 7,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 7
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 156.38,
+                                  "y": 123,
+                                  "width": 57.84,
+                                  "height": 17,
+                                  "right": 214.22,
+                                  "bottom": 140,
+                                  "text": "$10,000",
+                                  "startIndex": 0,
+                                  "endIndex": 7
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -1475,33 +1614,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "$12,000",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "$12,000",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 240.22,
-                                "y": 123,
-                                "width": 57.84,
-                                "height": 17,
-                                "right": 298.06,
-                                "bottom": 140
-                              }
-                            ],
                             "length": 7,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 7
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 240.22,
+                                  "y": 123,
+                                  "width": 57.84,
+                                  "height": 17,
+                                  "right": 298.06,
+                                  "bottom": 140,
+                                  "text": "$12,000",
+                                  "startIndex": 0,
+                                  "endIndex": 7
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(4)",
                         "tag": "td",
                         "id": null,
@@ -1557,35 +1704,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "$15,000",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 7,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "$15,000",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 324.06,
-                                "y": 123,
-                                "width": 57.84,
-                                "height": 17,
-                                "right": 381.91,
-                                "bottom": 140
-                              }
-                            ],
                             "length": 7,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 7
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 324.06,
+                                  "y": 123,
+                                  "width": 57.84,
+                                  "height": 17,
+                                  "right": 381.91,
+                                  "bottom": 140,
+                                  "text": "$15,000",
+                                  "startIndex": 0,
+                                  "endIndex": 7
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(2)",
                     "tag": "tr",
                     "id": null,
@@ -1641,13 +1796,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Total: $37,000",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td",
                         "tag": "td",
                         "id": null,
@@ -1703,35 +1856,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Total: $37,000",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Total: $37,000",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 218.88,
-                                "y": 159,
-                                "width": 100.53,
-                                "height": 17,
-                                "right": 319.41,
-                                "bottom": 176
-                              }
-                            ],
                             "length": 14,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 14
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 218.88,
+                                  "y": 159,
+                                  "width": 100.53,
+                                  "height": 17,
+                                  "right": 319.41,
+                                  "bottom": 176,
+                                  "text": "Total: $37,000",
+                                  "startIndex": 0,
+                                  "endIndex": 14
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(3)",
                     "tag": "tr",
                     "id": null,
@@ -1787,13 +1948,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Europe\n        $8,000\n        $9,500\n        $11,000",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 4,
                     "depth": 4,
+                    "elementIndex": 5,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td.highlight:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1851,33 +2010,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Europe",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Europe",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 53.89,
-                                "y": 213,
-                                "width": 51.59,
-                                "height": 17,
-                                "right": 105.48,
-                                "bottom": 230
-                              }
-                            ],
                             "length": 6,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 6
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 53.89,
+                                  "y": 213,
+                                  "width": 51.59,
+                                  "height": 17,
+                                  "right": 105.48,
+                                  "bottom": 230,
+                                  "text": "Europe",
+                                  "startIndex": 0,
+                                  "endIndex": 6
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1933,33 +2100,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "$8,000",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "$8,000",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 160.83,
-                                "y": 195,
-                                "width": 48.94,
-                                "height": 17,
-                                "right": 209.77,
-                                "bottom": 212
-                              }
-                            ],
                             "length": 6,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 6
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 160.83,
+                                  "y": 195,
+                                  "width": 48.94,
+                                  "height": 17,
+                                  "right": 209.77,
+                                  "bottom": 212,
+                                  "text": "$8,000",
+                                  "startIndex": 0,
+                                  "endIndex": 6
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -2015,33 +2190,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "$9,500",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "$9,500",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 244.67,
-                                "y": 195,
-                                "width": 48.94,
-                                "height": 17,
-                                "right": 293.61,
-                                "bottom": 212
-                              }
-                            ],
                             "length": 6,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 6
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 244.67,
+                                  "y": 195,
+                                  "width": 48.94,
+                                  "height": 17,
+                                  "right": 293.61,
+                                  "bottom": 212,
+                                  "text": "$9,500",
+                                  "startIndex": 0,
+                                  "endIndex": 6
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(4)",
                         "tag": "td",
                         "id": null,
@@ -2097,35 +2280,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "$11,000",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 7,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "$11,000",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 324.66,
-                                "y": 195,
-                                "width": 56.66,
-                                "height": 17,
-                                "right": 381.31,
-                                "bottom": 212
-                              }
-                            ],
                             "length": 7,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 7
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 324.66,
+                                  "y": 195,
+                                  "width": 56.66,
+                                  "height": 17,
+                                  "right": 381.31,
+                                  "bottom": 212,
+                                  "text": "$11,000",
+                                  "startIndex": 0,
+                                  "endIndex": 7
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(4)",
                     "tag": "tr",
                     "id": null,
@@ -2181,13 +2372,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Total: $28,500",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 7,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td",
                         "tag": "td",
                         "id": null,
@@ -2243,35 +2432,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Total: $28,500",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Total: $28,500",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 218.88,
-                                "y": 231,
-                                "width": 100.53,
-                                "height": 17,
-                                "right": 319.41,
-                                "bottom": 248
-                              }
-                            ],
                             "length": 14,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 14
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 218.88,
+                                  "y": 231,
+                                  "width": 100.53,
+                                  "height": 17,
+                                  "right": 319.41,
+                                  "bottom": 248,
+                                  "text": "Total: $28,500",
+                                  "startIndex": 0,
+                                  "endIndex": 14
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(5)",
                     "tag": "tr",
                     "id": null,
@@ -2327,13 +2524,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Grand Total\n        $65,500",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 2,
                     "depth": 4,
+                    "elementIndex": 9,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td.highlight:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -2391,33 +2586,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Grand Total",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Grand Total",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 80.39,
-                                "y": 267,
-                                "width": 82.42,
-                                "height": 17,
-                                "right": 162.81,
-                                "bottom": 284
-                              }
-                            ],
                             "length": 11,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 11
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 80.39,
+                                  "y": 267,
+                                  "width": 82.42,
+                                  "height": 17,
+                                  "right": 162.81,
+                                  "bottom": 284,
+                                  "text": "Grand Total",
+                                  "startIndex": 0,
+                                  "endIndex": 11
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -2473,31 +2676,38 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "$65,500",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "$65,500",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 282.14,
-                                "y": 267,
-                                "width": 57.84,
-                                "height": 17,
-                                "right": 339.98,
-                                "bottom": 284
-                              }
-                            ],
                             "length": 7,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 7
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 282.14,
+                                  "y": 267,
+                                  "width": 57.84,
+                                  "height": 17,
+                                  "right": 339.98,
+                                  "bottom": 284,
+                                  "text": "$65,500",
+                                  "startIndex": 0,
+                                  "endIndex": 7
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }

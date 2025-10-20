@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Table Rowspan Test\n  \n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n  \n\n\n  \n    Rowspan Test Table\n    \n      \n        Name\n        Department\n        Role\n      \n    \n    \n      \n        Engineering\n        Frontend\n        Developer\n      \n      \n        Backend\n        Senior Developer\n      \n      \n        Marketing\n        Digital\n        Manager\n      \n      \n        Content\n        Writer\n      \n      \n        Social Media\n        Specialist",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Table Rowspan Test\n  \n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 3,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -249,14 +276,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Table Rowspan Test",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Table Rowspan Test",
+                "length": 18,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -312,16 +370,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 1px solid #666; background: #fff; }\n    thead th { background: #f0f0f0; }\n    caption { caption-side: top; font-weight: bold; margin-bottom: 8px; }\n  ",
+                "length": 310,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -377,13 +466,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Rowspan Test Table\n    \n      \n        Name\n        Department\n        Role\n      \n    \n    \n      \n        Engineering\n        Frontend\n        Developer\n      \n      \n        Backend\n        Senior Developer\n      \n      \n        Marketing\n        Digital\n        Manager\n      \n      \n        Content\n        Writer\n      \n      \n        Social Media\n        Specialist",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 1,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "table",
             "tag": "table",
             "id": null,
@@ -439,13 +526,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Rowspan Test Table\n    \n      \n        Name\n        Department\n        Role\n      \n    \n    \n      \n        Engineering\n        Frontend\n        Developer\n      \n      \n        Backend\n        Senior Developer\n      \n      \n        Marketing\n        Digital\n        Manager\n      \n      \n        Content\n        Writer\n      \n      \n        Social Media\n        Specialist",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 3,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "caption",
                 "tag": "caption",
                 "id": null,
@@ -501,33 +586,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Rowspan Test Table",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Rowspan Test Table",
-                    "parentElement": "caption",
-                    "rects": [
-                      {
-                        "x": 129.16,
-                        "y": 16,
-                        "width": 152.33,
-                        "height": 17,
-                        "right": 281.48,
-                        "bottom": 33
-                      }
-                    ],
                     "length": 18,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 18
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 129.16,
+                          "y": 16,
+                          "width": 152.33,
+                          "height": 17,
+                          "right": 281.48,
+                          "bottom": 33,
+                          "text": "Rowspan Test Table",
+                          "startIndex": 0,
+                          "endIndex": 18
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "table-caption",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "thead",
                 "tag": "thead",
                 "id": null,
@@ -583,13 +676,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Name\n        Department\n        Role",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 1,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "tr",
                     "tag": "tr",
                     "id": null,
@@ -645,13 +736,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Name\n        Department\n        Role",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(1)",
                         "tag": "th",
                         "id": null,
@@ -707,33 +796,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Name",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Name",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 49.91,
-                                "y": 51,
-                                "width": 43.58,
-                                "height": 17,
-                                "right": 93.48,
-                                "bottom": 68
-                              }
-                            ],
                             "length": 4,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 4
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 49.91,
+                                  "y": 51,
+                                  "width": 43.58,
+                                  "height": 17,
+                                  "right": 93.48,
+                                  "bottom": 68,
+                                  "text": "Name",
+                                  "startIndex": 0,
+                                  "endIndex": 4
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(2)",
                         "tag": "th",
                         "id": null,
@@ -789,33 +886,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Department",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Department",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 141.75,
-                                "y": 51,
-                                "width": 88.91,
-                                "height": 17,
-                                "right": 230.66,
-                                "bottom": 68
-                              }
-                            ],
                             "length": 10,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 10
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 141.75,
+                                  "y": 51,
+                                  "width": 88.91,
+                                  "height": 17,
+                                  "right": 230.66,
+                                  "bottom": 68,
+                                  "text": "Department",
+                                  "startIndex": 0,
+                                  "endIndex": 10
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(3)",
                         "tag": "th",
                         "id": null,
@@ -871,37 +976,45 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Role",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Role",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 302.48,
-                                "y": 51,
-                                "width": 34.67,
-                                "height": 17,
-                                "right": 337.16,
-                                "bottom": 68
-                              }
-                            ],
                             "length": 4,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 4
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 302.48,
+                                  "y": 51,
+                                  "width": 34.67,
+                                  "height": 17,
+                                  "right": 337.16,
+                                  "bottom": 68,
+                                  "text": "Role",
+                                  "startIndex": 0,
+                                  "endIndex": 4
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "tbody",
                 "tag": "tbody",
                 "id": null,
@@ -957,13 +1070,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Engineering\n        Frontend\n        Developer\n      \n      \n        Backend\n        Senior Developer\n      \n      \n        Marketing\n        Digital\n        Manager\n      \n      \n        Content\n        Writer\n      \n      \n        Social Media\n        Specialist",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 5,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(1)",
                     "tag": "tr",
                     "id": null,
@@ -1019,13 +1130,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Engineering\n        Frontend\n        Developer",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1081,33 +1190,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Engineering",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Engineering",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 29,
-                                "y": 105,
-                                "width": 85.41,
-                                "height": 17,
-                                "right": 114.41,
-                                "bottom": 122
-                              }
-                            ],
                             "length": 11,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 11
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 29,
+                                  "y": 105,
+                                  "width": 85.41,
+                                  "height": 17,
+                                  "right": 114.41,
+                                  "bottom": 122,
+                                  "text": "Engineering",
+                                  "startIndex": 0,
+                                  "endIndex": 11
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1163,33 +1280,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Frontend",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Frontend",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 140.41,
-                                "y": 87,
-                                "width": 64.05,
-                                "height": 17,
-                                "right": 204.45,
-                                "bottom": 104
-                              }
-                            ],
                             "length": 8,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 8
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 140.41,
+                                  "y": 87,
+                                  "width": 64.05,
+                                  "height": 17,
+                                  "right": 204.45,
+                                  "bottom": 104,
+                                  "text": "Frontend",
+                                  "startIndex": 0,
+                                  "endIndex": 8
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -1245,35 +1370,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Developer",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Developer",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 258.02,
-                                "y": 87,
-                                "width": 72.94,
-                                "height": 17,
-                                "right": 330.95,
-                                "bottom": 104
-                              }
-                            ],
                             "length": 9,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 9
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 258.02,
+                                  "y": 87,
+                                  "width": 72.94,
+                                  "height": 17,
+                                  "right": 330.95,
+                                  "bottom": 104,
+                                  "text": "Developer",
+                                  "startIndex": 0,
+                                  "endIndex": 9
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(2)",
                     "tag": "tr",
                     "id": null,
@@ -1329,13 +1462,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Backend\n        Senior Developer",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 2,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1391,33 +1522,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Backend",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Backend",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 140.41,
-                                "y": 123,
-                                "width": 62.27,
-                                "height": 17,
-                                "right": 202.67,
-                                "bottom": 140
-                              }
-                            ],
                             "length": 7,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 7
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 140.41,
+                                  "y": 123,
+                                  "width": 62.27,
+                                  "height": 17,
+                                  "right": 202.67,
+                                  "bottom": 140,
+                                  "text": "Backend",
+                                  "startIndex": 0,
+                                  "endIndex": 7
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1473,35 +1612,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Senior Developer",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Senior Developer",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 258.02,
-                                "y": 123,
-                                "width": 123.63,
-                                "height": 17,
-                                "right": 381.64,
-                                "bottom": 140
-                              }
-                            ],
                             "length": 16,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 16
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 258.02,
+                                  "y": 123,
+                                  "width": 123.63,
+                                  "height": 17,
+                                  "right": 381.64,
+                                  "bottom": 140,
+                                  "text": "Senior Developer",
+                                  "startIndex": 0,
+                                  "endIndex": 16
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(3)",
                     "tag": "tr",
                     "id": null,
@@ -1557,13 +1704,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Marketing\n        Digital\n        Manager",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 5,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1619,33 +1764,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Marketing",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Marketing",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 29,
-                                "y": 195,
-                                "width": 70.25,
-                                "height": 17,
-                                "right": 99.25,
-                                "bottom": 212
-                              }
-                            ],
                             "length": 9,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 9
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 29,
+                                  "y": 195,
+                                  "width": 70.25,
+                                  "height": 17,
+                                  "right": 99.25,
+                                  "bottom": 212,
+                                  "text": "Marketing",
+                                  "startIndex": 0,
+                                  "endIndex": 9
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1701,33 +1854,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Digital",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Digital",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 140.41,
-                                "y": 159,
-                                "width": 44.47,
-                                "height": 17,
-                                "right": 184.88,
-                                "bottom": 176
-                              }
-                            ],
                             "length": 7,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 7
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 140.41,
+                                  "y": 159,
+                                  "width": 44.47,
+                                  "height": 17,
+                                  "right": 184.88,
+                                  "bottom": 176,
+                                  "text": "Digital",
+                                  "startIndex": 0,
+                                  "endIndex": 7
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -1783,35 +1944,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Manager",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Manager",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 258.02,
-                                "y": 159,
-                                "width": 63.16,
-                                "height": 17,
-                                "right": 321.17,
-                                "bottom": 176
-                              }
-                            ],
                             "length": 7,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 7
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 258.02,
+                                  "y": 159,
+                                  "width": 63.16,
+                                  "height": 17,
+                                  "right": 321.17,
+                                  "bottom": 176,
+                                  "text": "Manager",
+                                  "startIndex": 0,
+                                  "endIndex": 7
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(4)",
                     "tag": "tr",
                     "id": null,
@@ -1867,13 +2036,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Content\n        Writer",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 2,
                     "depth": 4,
+                    "elementIndex": 7,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1929,33 +2096,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Content",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Content",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 140.41,
-                                "y": 195,
-                                "width": 56.05,
-                                "height": 17,
-                                "right": 196.45,
-                                "bottom": 212
-                              }
-                            ],
                             "length": 7,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 7
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 140.41,
+                                  "y": 195,
+                                  "width": 56.05,
+                                  "height": 17,
+                                  "right": 196.45,
+                                  "bottom": 212,
+                                  "text": "Content",
+                                  "startIndex": 0,
+                                  "endIndex": 7
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -2011,35 +2186,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Writer",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Writer",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 258.02,
-                                "y": 195,
-                                "width": 42.38,
-                                "height": 17,
-                                "right": 300.39,
-                                "bottom": 212
-                              }
-                            ],
                             "length": 6,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 6
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 258.02,
+                                  "y": 195,
+                                  "width": 42.38,
+                                  "height": 17,
+                                  "right": 300.39,
+                                  "bottom": 212,
+                                  "text": "Writer",
+                                  "startIndex": 0,
+                                  "endIndex": 6
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(5)",
                     "tag": "tr",
                     "id": null,
@@ -2095,13 +2278,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Social Media\n        Specialist",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 2,
                     "depth": 4,
+                    "elementIndex": 9,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -2157,33 +2338,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Social Media",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Social Media",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 140.41,
-                                "y": 231,
-                                "width": 91.61,
-                                "height": 17,
-                                "right": 232.02,
-                                "bottom": 248
-                              }
-                            ],
                             "length": 12,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 12
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 140.41,
+                                  "y": 231,
+                                  "width": 91.61,
+                                  "height": 17,
+                                  "right": 232.02,
+                                  "bottom": 248,
+                                  "text": "Social Media",
+                                  "startIndex": 0,
+                                  "endIndex": 12
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -2239,31 +2428,38 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Specialist",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Specialist",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 258.02,
-                                "y": 231,
-                                "width": 68.48,
-                                "height": 17,
-                                "right": 326.5,
-                                "bottom": 248
-                              }
-                            ],
                             "length": 10,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 10
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 258.02,
+                                  "y": 231,
+                                  "width": 68.48,
+                                  "height": 17,
+                                  "right": 326.5,
+                                  "bottom": 248,
+                                  "text": "Specialist",
+                                  "startIndex": 0,
+                                  "endIndex": 10
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }

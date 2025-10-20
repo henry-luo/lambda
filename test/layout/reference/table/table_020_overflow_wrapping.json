@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Table Overflow and Text Wrapping\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n            overflow: auto;\n        }\n        table {\n            width: 100%;\n            table-layout: fixed;\n            border-collapse: collapse;\n        }\n        th, td {\n            padding: 8px;\n            text-align: left;\n            font-size: 12px;\n            border: 1px solid #666;\n            vertical-align: top;\n        }\n        th {\n            background-color: #e0e0e0;\n            font-weight: bold;\n        }\n        .nowrap-col { \n            white-space: nowrap; \n            overflow: hidden;\n            text-overflow: ellipsis;\n            background-color: #ffcccc;\n            width: 25%;\n        }\n        .wrap-col { \n            word-wrap: break-word;\n            background-color: #ccffcc;\n            width: 35%;\n        }\n        .hidden-col { \n            overflow: hidden;\n            background-color: #ccccff;\n            width: 40%;\n        }\n    \n\n\n    \n        \n            \n                \n                    No Wrap + Ellipsis\n                    Word Wrap\n                    Hidden Overflow\n                \n            \n            \n                \n                    This is a very long text that should be truncated with ellipsis\n                    This is a very long text that should wrap to multiple lines properly\n                    This is a very long text that will be hidden when it overflows the cell boundaries\n                \n                \n                    Another long text example for testing\n                    Another wrapping text example with multiple words\n                    Another overflow text example that gets cut off\n                \n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"table_020_overflow_wrapping\",\n        \"category\": \"intermediate\",\n        \"features\": [\"text-overflow\", \"white-space\", \"word-wrap\", \"overflow-hidden\", \"ellipsis\"],\n        \"description\": \"Table cells with different text overflow and wrapping behaviors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS2/text.html#white-space-prop\"],\n        \"complexity\": \"intermediate\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Table Overflow and Text Wrapping\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n            overflow: auto;\n        }\n        table {\n            width: 100%;\n            table-layout: fixed;\n            border-collapse: collapse;\n        }\n        th, td {\n            padding: 8px;\n            text-align: left;\n            font-size: 12px;\n            border: 1px solid #666;\n            vertical-align: top;\n        }\n        th {\n            background-color: #e0e0e0;\n            font-weight: bold;\n        }\n        .nowrap-col { \n            white-space: nowrap; \n            overflow: hidden;\n            text-overflow: ellipsis;\n            background-color: #ffcccc;\n            width: 25%;\n        }\n        .wrap-col { \n            word-wrap: break-word;\n            background-color: #ccffcc;\n            width: 35%;\n        }\n        .hidden-col { \n            overflow: hidden;\n            background-color: #ccccff;\n            width: 40%;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Table Overflow and Text Wrapping",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Table Overflow and Text Wrapping",
+                "length": 38,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n            overflow: auto;\n        }\n        table {\n            width: 100%;\n            table-layout: fixed;\n            border-collapse: collapse;\n        }\n        th, td {\n            padding: 8px;\n            text-align: left;\n            font-size: 12px;\n            border: 1px solid #666;\n            vertical-align: top;\n        }\n        th {\n            background-color: #e0e0e0;\n            font-weight: bold;\n        }\n        .nowrap-col { \n            white-space: nowrap; \n            overflow: hidden;\n            text-overflow: ellipsis;\n            background-color: #ffcccc;\n            width: 25%;\n        }\n        .wrap-col { \n            word-wrap: break-word;\n            background-color: #ccffcc;\n            width: 35%;\n        }\n        .hidden-col { \n            overflow: hidden;\n            background-color: #ccccff;\n            width: 40%;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { font-family: 'Arial', sans-serif; font-size: 16px; }\n        \n        /* Test-specific CSS */\n        .container {\n            width: 400px;\n            height: 300px;\n            border: 2px solid #333;\n            padding: 10px;\n            overflow: auto;\n        }\n        table {\n            width: 100%;\n            table-layout: fixed;\n            border-collapse: collapse;\n        }\n        th, td {\n            padding: 8px;\n            text-align: left;\n            font-size: 12px;\n            border: 1px solid #666;\n            vertical-align: top;\n        }\n        th {\n            background-color: #e0e0e0;\n            font-weight: bold;\n        }\n        .nowrap-col { \n            white-space: nowrap; \n            overflow: hidden;\n            text-overflow: ellipsis;\n            background-color: #ffcccc;\n            width: 25%;\n        }\n        .wrap-col { \n            word-wrap: break-word;\n            background-color: #ccffcc;\n            width: 35%;\n        }\n        .hidden-col { \n            overflow: hidden;\n            background-color: #ccccff;\n            width: 40%;\n        }\n    ",
+                "length": 1235,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "No Wrap + Ellipsis\n                    Word Wrap\n                    Hidden Overflow\n                \n            \n            \n                \n                    This is a very long text that should be truncated with ellipsis\n                    This is a very long text that should wrap to multiple lines properly\n                    This is a very long text that will be hidden when it overflows the cell boundaries\n                \n                \n                    Another long text example for testing\n                    Another wrapping text example with multiple words\n                    Another overflow text example that gets cut off\n                \n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"table_020_overflow_wrapping\",\n        \"category\": \"intermediate\",\n        \"features\": [\"text-overflow\", \"white-space\", \"word-wrap\", \"overflow-hidden\", \"ellipsis\"],\n        \"description\": \"Table cells with different text overflow and wrapping behaviors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS2/text.html#white-space-prop\"],\n        \"complexity\": \"intermediate\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 2,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "div.container",
             "tag": "div",
             "id": null,
@@ -504,13 +605,11 @@
               "overflowX": "auto",
               "overflowY": "auto"
             },
-            "textContent": "No Wrap + Ellipsis\n                    Word Wrap\n                    Hidden Overflow\n                \n            \n            \n                \n                    This is a very long text that should be truncated with ellipsis\n                    This is a very long text that should wrap to multiple lines properly\n                    This is a very long text that will be hidden when it overflows the cell boundaries\n                \n                \n                    Another long text example for testing\n                    Another wrapping text example with multiple words\n                    Another overflow text example that gets cut off",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 1,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "table",
                 "tag": "table",
                 "id": null,
@@ -566,13 +665,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "No Wrap + Ellipsis\n                    Word Wrap\n                    Hidden Overflow\n                \n            \n            \n                \n                    This is a very long text that should be truncated with ellipsis\n                    This is a very long text that should wrap to multiple lines properly\n                    This is a very long text that will be hidden when it overflows the cell boundaries\n                \n                \n                    Another long text example for testing\n                    Another wrapping text example with multiple words\n                    Another overflow text example that gets cut off",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "thead",
                     "tag": "thead",
                     "id": null,
@@ -628,13 +725,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "No Wrap + Ellipsis\n                    Word Wrap\n                    Hidden Overflow",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 1,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "tr",
                         "tag": "tr",
                         "id": null,
@@ -690,13 +785,11 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "No Wrap + Ellipsis\n                    Word Wrap\n                    Hidden Overflow",
-                        "hasTextNodes": false,
-                        "textNodes": [],
-                        "childCount": 3,
                         "depth": 5,
+                        "elementIndex": 1,
                         "children": [
                           {
+                            "nodeType": "element",
                             "selector": "th.nowrap-col:nth-of-type(1)",
                             "tag": "th",
                             "id": null,
@@ -754,41 +847,41 @@
                               "overflowX": "hidden",
                               "overflowY": "hidden"
                             },
-                            "textContent": "No Wrap + Ellipsis",
-                            "hasTextNodes": true,
-                            "textNodes": [
+                            "depth": 6,
+                            "elementIndex": 1,
+                            "children": [
                               {
+                                "nodeType": "text",
                                 "text": "No Wrap + Ellipsis",
-                                "parentElement": "th",
-                                "rects": [
-                                  {
-                                    "x": 21,
-                                    "y": 21,
-                                    "width": 104.81,
-                                    "height": 14,
-                                    "right": 125.81,
-                                    "bottom": 35
-                                  },
-                                  {
-                                    "x": 21,
-                                    "y": 21,
-                                    "width": 62.8,
-                                    "height": 14,
-                                    "right": 83.8,
-                                    "bottom": 35
-                                  }
-                                ],
                                 "length": 18,
                                 "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 18
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 21,
+                                      "y": 21,
+                                      "width": 104.81,
+                                      "height": 14,
+                                      "right": 125.81,
+                                      "bottom": 35,
+                                      "text": "No Wrap + Ellipsis",
+                                      "startIndex": 0,
+                                      "endIndex": 18
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
                               }
-                            ],
-                            "childCount": 0,
-                            "depth": 6,
-                            "children": []
+                            ]
                           },
                           {
+                            "nodeType": "element",
                             "selector": "th.wrap-col:nth-of-type(2)",
                             "tag": "th",
                             "id": null,
@@ -846,33 +939,41 @@
                               "overflowX": "visible",
                               "overflowY": "visible"
                             },
-                            "textContent": "Word Wrap",
-                            "hasTextNodes": true,
-                            "textNodes": [
+                            "depth": 6,
+                            "elementIndex": 3,
+                            "children": [
                               {
+                                "nodeType": "text",
                                 "text": "Word Wrap",
-                                "parentElement": "th",
-                                "rects": [
-                                  {
-                                    "x": 114.75,
-                                    "y": 21,
-                                    "width": 63.56,
-                                    "height": 14,
-                                    "right": 178.31,
-                                    "bottom": 35
-                                  }
-                                ],
                                 "length": 9,
                                 "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 9
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 114.75,
+                                      "y": 21,
+                                      "width": 63.56,
+                                      "height": 14,
+                                      "right": 178.31,
+                                      "bottom": 35,
+                                      "text": "Word Wrap",
+                                      "startIndex": 0,
+                                      "endIndex": 9
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
                               }
-                            ],
-                            "childCount": 0,
-                            "depth": 6,
-                            "children": []
+                            ]
                           },
                           {
+                            "nodeType": "element",
                             "selector": "th.hidden-col:nth-of-type(3)",
                             "tag": "th",
                             "id": null,
@@ -930,37 +1031,45 @@
                               "overflowX": "hidden",
                               "overflowY": "hidden"
                             },
-                            "textContent": "Hidden Overflow",
-                            "hasTextNodes": true,
-                            "textNodes": [
+                            "depth": 6,
+                            "elementIndex": 5,
+                            "children": [
                               {
+                                "nodeType": "text",
                                 "text": "Hidden Overflow",
-                                "parentElement": "th",
-                                "rects": [
-                                  {
-                                    "x": 246,
-                                    "y": 21,
-                                    "width": 95.34,
-                                    "height": 14,
-                                    "right": 341.34,
-                                    "bottom": 35
-                                  }
-                                ],
                                 "length": 15,
                                 "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 15
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 246,
+                                      "y": 21,
+                                      "width": 95.34,
+                                      "height": 14,
+                                      "right": 341.34,
+                                      "bottom": 35,
+                                      "text": "Hidden Overflow",
+                                      "startIndex": 0,
+                                      "endIndex": 15
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
                               }
-                            ],
-                            "childCount": 0,
-                            "depth": 6,
-                            "children": []
+                            ]
                           }
                         ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tbody",
                     "tag": "tbody",
                     "id": null,
@@ -1016,13 +1125,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "This is a very long text that should be truncated with ellipsis\n                    This is a very long text that should wrap to multiple lines properly\n                    This is a very long text that will be hidden when it overflows the cell boundaries\n                \n                \n                    Another long text example for testing\n                    Another wrapping text example with multiple words\n                    Another overflow text example that gets cut off",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 2,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "tr:nth-of-type(1)",
                         "tag": "tr",
                         "id": null,
@@ -1078,13 +1185,11 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "This is a very long text that should be truncated with ellipsis\n                    This is a very long text that should wrap to multiple lines properly\n                    This is a very long text that will be hidden when it overflows the cell boundaries",
-                        "hasTextNodes": false,
-                        "textNodes": [],
-                        "childCount": 3,
                         "depth": 5,
+                        "elementIndex": 1,
                         "children": [
                           {
+                            "nodeType": "element",
                             "selector": "td.nowrap-col:nth-of-type(1)",
                             "tag": "td",
                             "id": null,
@@ -1142,41 +1247,41 @@
                               "overflowX": "hidden",
                               "overflowY": "hidden"
                             },
-                            "textContent": "This is a very long text that should be truncated with ellipsis",
-                            "hasTextNodes": true,
-                            "textNodes": [
+                            "depth": 6,
+                            "elementIndex": 1,
+                            "children": [
                               {
+                                "nodeType": "text",
                                 "text": "This is a very long text that should be truncated with ellipsis",
-                                "parentElement": "td",
-                                "rects": [
-                                  {
-                                    "x": 21,
-                                    "y": 52,
-                                    "width": 315.5,
-                                    "height": 14,
-                                    "right": 336.5,
-                                    "bottom": 66
-                                  },
-                                  {
-                                    "x": 21,
-                                    "y": 52,
-                                    "width": 64.69,
-                                    "height": 14,
-                                    "right": 85.69,
-                                    "bottom": 66
-                                  }
-                                ],
                                 "length": 63,
                                 "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 63
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 21,
+                                      "y": 52,
+                                      "width": 315.5,
+                                      "height": 14,
+                                      "right": 336.5,
+                                      "bottom": 66,
+                                      "text": "This is a very long text that should be truncated with ellipsis",
+                                      "startIndex": 0,
+                                      "endIndex": 63
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
                               }
-                            ],
-                            "childCount": 0,
-                            "depth": 6,
-                            "children": []
+                            ]
                           },
                           {
+                            "nodeType": "element",
                             "selector": "td.wrap-col:nth-of-type(2)",
                             "tag": "td",
                             "id": null,
@@ -1234,57 +1339,125 @@
                               "overflowX": "visible",
                               "overflowY": "visible"
                             },
-                            "textContent": "This is a very long text that should wrap to multiple lines properly",
-                            "hasTextNodes": true,
-                            "textNodes": [
-                              {
-                                "text": "This is a very long text that should wrap to multiple lines properly",
-                                "parentElement": "td",
-                                "rects": [
-                                  {
-                                    "x": 114.75,
-                                    "y": 52,
-                                    "width": 96.7,
-                                    "height": 14,
-                                    "right": 211.45,
-                                    "bottom": 66
-                                  },
-                                  {
-                                    "x": 114.75,
-                                    "y": 66,
-                                    "width": 110.73,
-                                    "height": 14,
-                                    "right": 225.48,
-                                    "bottom": 80
-                                  },
-                                  {
-                                    "x": 114.75,
-                                    "y": 80,
-                                    "width": 82.72,
-                                    "height": 14,
-                                    "right": 197.47,
-                                    "bottom": 94
-                                  },
-                                  {
-                                    "x": 114.75,
-                                    "y": 94,
-                                    "width": 43.36,
-                                    "height": 14,
-                                    "right": 158.11,
-                                    "bottom": 108
-                                  }
-                                ],
-                                "length": 68,
-                                "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 68
-                              }
-                            ],
-                            "childCount": 0,
                             "depth": 6,
-                            "children": []
+                            "elementIndex": 3,
+                            "children": [
+                              {
+                                "nodeType": "text",
+                                "text": "This is a very long ",
+                                "length": 20,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 114.75,
+                                      "y": 52,
+                                      "width": 96.7,
+                                      "height": 14,
+                                      "right": 211.45,
+                                      "bottom": 66,
+                                      "text": "This is a very long ",
+                                      "startIndex": 0,
+                                      "endIndex": 20
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "text that should wrap ",
+                                "length": 22,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 114.75,
+                                      "y": 66,
+                                      "width": 110.73,
+                                      "height": 14,
+                                      "right": 225.48,
+                                      "bottom": 80,
+                                      "text": "text that should wrap ",
+                                      "startIndex": 0,
+                                      "endIndex": 22
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "to multiple lines ",
+                                "length": 18,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 114.75,
+                                      "y": 80,
+                                      "width": 82.72,
+                                      "height": 14,
+                                      "right": 197.47,
+                                      "bottom": 94,
+                                      "text": "to multiple lines ",
+                                      "startIndex": 0,
+                                      "endIndex": 18
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "properly",
+                                "length": 8,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 114.75,
+                                      "y": 94,
+                                      "width": 43.36,
+                                      "height": 14,
+                                      "right": 158.11,
+                                      "bottom": 108,
+                                      "text": "properly",
+                                      "startIndex": 0,
+                                      "endIndex": 8
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              }
+                            ]
                           },
                           {
+                            "nodeType": "element",
                             "selector": "td.hidden-col:nth-of-type(3)",
                             "tag": "td",
                             "id": null,
@@ -1342,59 +1515,127 @@
                               "overflowX": "hidden",
                               "overflowY": "hidden"
                             },
-                            "textContent": "This is a very long text that will be hidden when it overflows the cell boundaries",
-                            "hasTextNodes": true,
-                            "textNodes": [
-                              {
-                                "text": "This is a very long text that will be hidden when it overflows the cell boundaries",
-                                "parentElement": "td",
-                                "rects": [
-                                  {
-                                    "x": 246,
-                                    "y": 52,
-                                    "width": 119.39,
-                                    "height": 14,
-                                    "right": 365.39,
-                                    "bottom": 66
-                                  },
-                                  {
-                                    "x": 246,
-                                    "y": 66,
-                                    "width": 128.09,
-                                    "height": 14,
-                                    "right": 374.09,
-                                    "bottom": 80
-                                  },
-                                  {
-                                    "x": 246,
-                                    "y": 80,
-                                    "width": 101.38,
-                                    "height": 14,
-                                    "right": 347.38,
-                                    "bottom": 94
-                                  },
-                                  {
-                                    "x": 246,
-                                    "y": 94,
-                                    "width": 59.39,
-                                    "height": 14,
-                                    "right": 305.39,
-                                    "bottom": 108
-                                  }
-                                ],
-                                "length": 82,
-                                "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 82
-                              }
-                            ],
-                            "childCount": 0,
                             "depth": 6,
-                            "children": []
+                            "elementIndex": 5,
+                            "children": [
+                              {
+                                "nodeType": "text",
+                                "text": "This is a very long text ",
+                                "length": 25,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 246,
+                                      "y": 52,
+                                      "width": 119.39,
+                                      "height": 14,
+                                      "right": 365.39,
+                                      "bottom": 66,
+                                      "text": "This is a very long text ",
+                                      "startIndex": 0,
+                                      "endIndex": 25
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "that will be hidden when ",
+                                "length": 25,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 246,
+                                      "y": 66,
+                                      "width": 128.09,
+                                      "height": 14,
+                                      "right": 374.09,
+                                      "bottom": 80,
+                                      "text": "that will be hidden when ",
+                                      "startIndex": 0,
+                                      "endIndex": 25
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "it overflows the cell ",
+                                "length": 22,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 246,
+                                      "y": 80,
+                                      "width": 101.38,
+                                      "height": 14,
+                                      "right": 347.38,
+                                      "bottom": 94,
+                                      "text": "it overflows the cell ",
+                                      "startIndex": 0,
+                                      "endIndex": 22
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "boundaries",
+                                "length": 10,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 246,
+                                      "y": 94,
+                                      "width": 59.39,
+                                      "height": 14,
+                                      "right": 305.39,
+                                      "bottom": 108,
+                                      "text": "boundaries",
+                                      "startIndex": 0,
+                                      "endIndex": 10
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              }
+                            ]
                           }
                         ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "tr:nth-of-type(2)",
                         "tag": "tr",
                         "id": null,
@@ -1450,13 +1691,11 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Another long text example for testing\n                    Another wrapping text example with multiple words\n                    Another overflow text example that gets cut off",
-                        "hasTextNodes": false,
-                        "textNodes": [],
-                        "childCount": 3,
                         "depth": 5,
+                        "elementIndex": 3,
                         "children": [
                           {
+                            "nodeType": "element",
                             "selector": "td.nowrap-col:nth-of-type(1)",
                             "tag": "td",
                             "id": null,
@@ -1514,41 +1753,41 @@
                               "overflowX": "hidden",
                               "overflowY": "hidden"
                             },
-                            "textContent": "Another long text example for testing",
-                            "hasTextNodes": true,
-                            "textNodes": [
+                            "depth": 6,
+                            "elementIndex": 1,
+                            "children": [
                               {
+                                "nodeType": "text",
                                 "text": "Another long text example for testing",
-                                "parentElement": "td",
-                                "rects": [
-                                  {
-                                    "x": 21,
-                                    "y": 125,
-                                    "width": 195.45,
-                                    "height": 14,
-                                    "right": 216.45,
-                                    "bottom": 139
-                                  },
-                                  {
-                                    "x": 21,
-                                    "y": 125,
-                                    "width": 61.39,
-                                    "height": 14,
-                                    "right": 82.39,
-                                    "bottom": 139
-                                  }
-                                ],
                                 "length": 37,
                                 "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 37
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 21,
+                                      "y": 125,
+                                      "width": 195.45,
+                                      "height": 14,
+                                      "right": 216.45,
+                                      "bottom": 139,
+                                      "text": "Another long text example for testing",
+                                      "startIndex": 0,
+                                      "endIndex": 37
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
                               }
-                            ],
-                            "childCount": 0,
-                            "depth": 6,
-                            "children": []
+                            ]
                           },
                           {
+                            "nodeType": "element",
                             "selector": "td.wrap-col:nth-of-type(2)",
                             "tag": "td",
                             "id": null,
@@ -1606,49 +1845,97 @@
                               "overflowX": "visible",
                               "overflowY": "visible"
                             },
-                            "textContent": "Another wrapping text example with multiple words",
-                            "hasTextNodes": true,
-                            "textNodes": [
-                              {
-                                "text": "Another wrapping text example with multiple words",
-                                "parentElement": "td",
-                                "rects": [
-                                  {
-                                    "x": 114.75,
-                                    "y": 125,
-                                    "width": 94.06,
-                                    "height": 14,
-                                    "right": 208.81,
-                                    "bottom": 139
-                                  },
-                                  {
-                                    "x": 114.75,
-                                    "y": 139,
-                                    "width": 92.72,
-                                    "height": 14,
-                                    "right": 207.47,
-                                    "bottom": 153
-                                  },
-                                  {
-                                    "x": 114.75,
-                                    "y": 153,
-                                    "width": 76.7,
-                                    "height": 14,
-                                    "right": 191.45,
-                                    "bottom": 167
-                                  }
-                                ],
-                                "length": 49,
-                                "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 49
-                              }
-                            ],
-                            "childCount": 0,
                             "depth": 6,
-                            "children": []
+                            "elementIndex": 3,
+                            "children": [
+                              {
+                                "nodeType": "text",
+                                "text": "Another wrapping ",
+                                "length": 17,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 114.75,
+                                      "y": 125,
+                                      "width": 94.06,
+                                      "height": 14,
+                                      "right": 208.81,
+                                      "bottom": 139,
+                                      "text": "Another wrapping ",
+                                      "startIndex": 0,
+                                      "endIndex": 17
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "text example with ",
+                                "length": 18,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 114.75,
+                                      "y": 139,
+                                      "width": 92.72,
+                                      "height": 14,
+                                      "right": 207.47,
+                                      "bottom": 153,
+                                      "text": "text example with ",
+                                      "startIndex": 0,
+                                      "endIndex": 18
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "multiple words",
+                                "length": 14,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 114.75,
+                                      "y": 153,
+                                      "width": 76.7,
+                                      "height": 14,
+                                      "right": 191.45,
+                                      "bottom": 167,
+                                      "text": "multiple words",
+                                      "startIndex": 0,
+                                      "endIndex": 14
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              }
+                            ]
                           },
                           {
+                            "nodeType": "element",
                             "selector": "td.hidden-col:nth-of-type(3)",
                             "tag": "td",
                             "id": null,
@@ -1706,39 +1993,66 @@
                               "overflowX": "hidden",
                               "overflowY": "hidden"
                             },
-                            "textContent": "Another overflow text example that gets cut off",
-                            "hasTextNodes": true,
-                            "textNodes": [
-                              {
-                                "text": "Another overflow text example that gets cut off",
-                                "parentElement": "td",
-                                "rects": [
-                                  {
-                                    "x": 246,
-                                    "y": 125,
-                                    "width": 112.73,
-                                    "height": 14,
-                                    "right": 358.73,
-                                    "bottom": 139
-                                  },
-                                  {
-                                    "x": 246,
-                                    "y": 139,
-                                    "width": 130.53,
-                                    "height": 14,
-                                    "right": 376.53,
-                                    "bottom": 153
-                                  }
-                                ],
-                                "length": 47,
-                                "isWhitespaceOnly": false,
-                                "startOffset": 0,
-                                "endOffset": 47
-                              }
-                            ],
-                            "childCount": 0,
                             "depth": 6,
-                            "children": []
+                            "elementIndex": 5,
+                            "children": [
+                              {
+                                "nodeType": "text",
+                                "text": "Another overflow text ",
+                                "length": 22,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 246,
+                                      "y": 125,
+                                      "width": 112.73,
+                                      "height": 14,
+                                      "right": 358.73,
+                                      "bottom": 139,
+                                      "text": "Another overflow text ",
+                                      "startIndex": 0,
+                                      "endIndex": 22
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              },
+                              {
+                                "nodeType": "text",
+                                "text": "example that gets cut off",
+                                "length": 25,
+                                "isWhitespaceOnly": false,
+                                "layout": {
+                                  "rects": [
+                                    {
+                                      "x": 246,
+                                      "y": 139,
+                                      "width": 130.53,
+                                      "height": 14,
+                                      "right": 376.53,
+                                      "bottom": 153,
+                                      "text": "example that gets cut off",
+                                      "startIndex": 0,
+                                      "endIndex": 25
+                                    }
+                                  ],
+                                  "hasLayout": true,
+                                  "parentVisible": true,
+                                  "parentDisplay": "table-cell",
+                                  "parentVisibility": "visible"
+                                },
+                                "depth": 7,
+                                "nodeIndex": 0,
+                                "children": []
+                              }
+                            ]
                           }
                         ]
                       }
@@ -1749,6 +2063,7 @@
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -1804,12 +2119,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"table_020_overflow_wrapping\",\n        \"category\": \"intermediate\",\n        \"features\": [\"text-overflow\", \"white-space\", \"word-wrap\", \"overflow-hidden\", \"ellipsis\"],\n        \"description\": \"Table cells with different text overflow and wrapping behaviors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS2/text.html#white-space-prop\"],\n        \"complexity\": \"intermediate\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"table_020_overflow_wrapping\",\n        \"category\": \"intermediate\",\n        \"features\": [\"text-overflow\", \"white-space\", \"word-wrap\", \"overflow-hidden\", \"ellipsis\"],\n        \"description\": \"Table cells with different text overflow and wrapping behaviors\",\n        \"spec_references\": [\"https://www.w3.org/TR/CSS2/text.html#white-space-prop\"],\n        \"complexity\": \"intermediate\"\n    }\n    ",
+                "length": 414,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }

@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Table Borders\n  \n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 2px solid #666; background: #fff; }\n    thead th { background: #eee; border-bottom-color: #333; }\n    tfoot td { background: #fafafa; border-top-color: #333; }\n  \n\n\n  \n    Header/Body/Footer Borders\n    \n      H1H2H3\n    \n    \n      Cell 1Red L / Green RCell 3\n      Blue TopCell 5Magenta Bottom\n    \n    \n      F1F2F3",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Table Borders\n  \n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 2px solid #666; background: #fff; }\n    thead th { background: #eee; border-bottom-color: #333; }\n    tfoot td { background: #fafafa; border-top-color: #333; }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 3,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -249,14 +276,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Table Borders",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Table Borders",
+                "length": 13,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n  ",
+            "length": 3,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -312,16 +370,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 2px solid #666; background: #fff; }\n    thead th { background: #eee; border-bottom-color: #333; }\n    tfoot td { background: #fafafa; border-top-color: #333; }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    body { margin: 16px; font-family: Arial, sans-serif; }\n    table { border-collapse: separate; border-spacing: 0; }\n    th, td { padding: 8px 12px; border: 2px solid #666; background: #fff; }\n    thead th { background: #eee; border-bottom-color: #333; }\n    tfoot td { background: #fafafa; border-top-color: #333; }\n  ",
+                "length": 322,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -377,13 +466,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Header/Body/Footer Borders\n    \n      H1H2H3\n    \n    \n      Cell 1Red L / Green RCell 3\n      Blue TopCell 5Magenta Bottom\n    \n    \n      F1F2F3",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 1,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "table",
             "tag": "table",
             "id": null,
@@ -439,13 +526,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Header/Body/Footer Borders\n    \n      H1H2H3\n    \n    \n      Cell 1Red L / Green RCell 3\n      Blue TopCell 5Magenta Bottom\n    \n    \n      F1F2F3",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 4,
             "depth": 2,
+            "elementIndex": 1,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "caption",
                 "tag": "caption",
                 "id": null,
@@ -501,33 +586,41 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Header/Body/Footer Borders",
-                "hasTextNodes": true,
-                "textNodes": [
+                "depth": 3,
+                "elementIndex": 1,
+                "children": [
                   {
+                    "nodeType": "text",
                     "text": "Header/Body/Footer Borders",
-                    "parentElement": "caption",
-                    "rects": [
-                      {
-                        "x": 103.38,
-                        "y": 16,
-                        "width": 204.55,
-                        "height": 17,
-                        "right": 307.92,
-                        "bottom": 33
-                      }
-                    ],
                     "length": 26,
                     "isWhitespaceOnly": false,
-                    "startOffset": 0,
-                    "endOffset": 26
+                    "layout": {
+                      "rects": [
+                        {
+                          "x": 103.38,
+                          "y": 16,
+                          "width": 204.55,
+                          "height": 17,
+                          "right": 307.92,
+                          "bottom": 33,
+                          "text": "Header/Body/Footer Borders",
+                          "startIndex": 0,
+                          "endIndex": 26
+                        }
+                      ],
+                      "hasLayout": true,
+                      "parentVisible": true,
+                      "parentDisplay": "table-caption",
+                      "parentVisibility": "visible"
+                    },
+                    "depth": 4,
+                    "nodeIndex": 0,
+                    "children": []
                   }
-                ],
-                "childCount": 0,
-                "depth": 3,
-                "children": []
+                ]
               },
               {
+                "nodeType": "element",
                 "selector": "thead",
                 "tag": "thead",
                 "id": null,
@@ -583,13 +676,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "H1H2H3",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 1,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "tr",
                     "tag": "tr",
                     "id": null,
@@ -645,13 +736,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "H1H2H3",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(1)",
                         "tag": "th",
                         "id": null,
@@ -707,33 +796,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "H1",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 0,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "H1",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 50.77,
-                                "y": 44,
-                                "width": 20.45,
-                                "height": 17,
-                                "right": 71.22,
-                                "bottom": 61
-                              }
-                            ],
                             "length": 2,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 2
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 50.77,
+                                  "y": 44,
+                                  "width": 20.45,
+                                  "height": 17,
+                                  "right": 71.22,
+                                  "bottom": 61,
+                                  "text": "H1",
+                                  "startIndex": 0,
+                                  "endIndex": 2
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(2)",
                         "tag": "th",
                         "id": null,
@@ -789,33 +886,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "H2",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "H2",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 167.7,
-                                "y": 44,
-                                "width": 20.45,
-                                "height": 17,
-                                "right": 188.16,
-                                "bottom": 61
-                              }
-                            ],
                             "length": 2,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 2
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 167.7,
+                                  "y": 44,
+                                  "width": 20.45,
+                                  "height": 17,
+                                  "right": 188.16,
+                                  "bottom": 61,
+                                  "text": "H2",
+                                  "startIndex": 0,
+                                  "endIndex": 2
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(3)",
                         "tag": "th",
                         "id": null,
@@ -871,37 +976,45 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "H3",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 2,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "H3",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 312.36,
-                                "y": 44,
-                                "width": 20.45,
-                                "height": 17,
-                                "right": 332.81,
-                                "bottom": 61
-                              }
-                            ],
                             "length": 2,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 2
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 312.36,
+                                  "y": 44,
+                                  "width": 20.45,
+                                  "height": 17,
+                                  "right": 332.81,
+                                  "bottom": 61,
+                                  "text": "H3",
+                                  "startIndex": 0,
+                                  "endIndex": 2
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "tbody",
                 "tag": "tbody",
                 "id": null,
@@ -957,13 +1070,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Cell 1Red L / Green RCell 3\n      Blue TopCell 5Magenta Bottom",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 2,
                 "depth": 3,
+                "elementIndex": 5,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(1)",
                     "tag": "tr",
                     "id": null,
@@ -1019,13 +1130,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Cell 1Red L / Green RCell 3",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1081,33 +1190,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Cell 1",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 0,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Cell 1",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 30,
-                                "y": 82,
-                                "width": 40.91,
-                                "height": 17,
-                                "right": 70.91,
-                                "bottom": 99
-                              }
-                            ],
                             "length": 6,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 6
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 30,
+                                  "y": 82,
+                                  "width": 40.91,
+                                  "height": 17,
+                                  "right": 70.91,
+                                  "bottom": 99,
+                                  "text": "Cell 1",
+                                  "startIndex": 0,
+                                  "endIndex": 6
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1163,33 +1280,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Red L / Green R",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Red L / Green R",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 119.98,
-                                "y": 82,
-                                "width": 115.91,
-                                "height": 17,
-                                "right": 235.89,
-                                "bottom": 99
-                              }
-                            ],
                             "length": 15,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 15
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 119.98,
+                                  "y": 82,
+                                  "width": 115.91,
+                                  "height": 17,
+                                  "right": 235.89,
+                                  "bottom": 99,
+                                  "text": "Red L / Green R",
+                                  "startIndex": 0,
+                                  "endIndex": 15
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -1245,35 +1370,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Cell 3",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 2,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Cell 3",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 263.89,
-                                "y": 82,
-                                "width": 40.91,
-                                "height": 17,
-                                "right": 304.8,
-                                "bottom": 99
-                              }
-                            ],
                             "length": 6,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 6
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 263.89,
+                                  "y": 82,
+                                  "width": 40.91,
+                                  "height": 17,
+                                  "right": 304.8,
+                                  "bottom": 99,
+                                  "text": "Cell 3",
+                                  "startIndex": 0,
+                                  "endIndex": 6
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(2)",
                     "tag": "tr",
                     "id": null,
@@ -1329,13 +1462,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Blue TopCell 5Magenta Bottom",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1391,33 +1522,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Blue Top",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 0,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Blue Top",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 30,
-                                "y": 120,
-                                "width": 61.98,
-                                "height": 17,
-                                "right": 91.98,
-                                "bottom": 137
-                              }
-                            ],
                             "length": 8,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 8
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 30,
+                                  "y": 120,
+                                  "width": 61.98,
+                                  "height": 17,
+                                  "right": 91.98,
+                                  "bottom": 137,
+                                  "text": "Blue Top",
+                                  "startIndex": 0,
+                                  "endIndex": 8
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1473,33 +1612,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Cell 5",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Cell 5",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 119.98,
-                                "y": 120,
-                                "width": 40.91,
-                                "height": 17,
-                                "right": 160.89,
-                                "bottom": 137
-                              }
-                            ],
                             "length": 6,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 6
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 119.98,
+                                  "y": 120,
+                                  "width": 40.91,
+                                  "height": 17,
+                                  "right": 160.89,
+                                  "bottom": 137,
+                                  "text": "Cell 5",
+                                  "startIndex": 0,
+                                  "endIndex": 6
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -1555,37 +1702,45 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Magenta Bottom",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 2,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Magenta Bottom",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 263.89,
-                                "y": 120,
-                                "width": 117.41,
-                                "height": 17,
-                                "right": 381.3,
-                                "bottom": 137
-                              }
-                            ],
                             "length": 14,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 14
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 263.89,
+                                  "y": 120,
+                                  "width": 117.41,
+                                  "height": 17,
+                                  "right": 381.3,
+                                  "bottom": 137,
+                                  "text": "Magenta Bottom",
+                                  "startIndex": 0,
+                                  "endIndex": 14
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "tfoot",
                 "tag": "tfoot",
                 "id": null,
@@ -1641,13 +1796,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "F1F2F3",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 1,
                 "depth": 3,
+                "elementIndex": 7,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "tr",
                     "tag": "tr",
                     "id": null,
@@ -1703,13 +1856,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "F1F2F3",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1765,33 +1916,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "F1",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 0,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "F1",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 30,
-                                "y": 158,
-                                "width": 18.67,
-                                "height": 17,
-                                "right": 48.67,
-                                "bottom": 175
-                              }
-                            ],
                             "length": 2,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 2
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 30,
+                                  "y": 158,
+                                  "width": 18.67,
+                                  "height": 17,
+                                  "right": 48.67,
+                                  "bottom": 175,
+                                  "text": "F1",
+                                  "startIndex": 0,
+                                  "endIndex": 2
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1847,33 +2006,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "F2",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "F2",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 119.98,
-                                "y": 158,
-                                "width": 18.67,
-                                "height": 17,
-                                "right": 138.66,
-                                "bottom": 175
-                              }
-                            ],
                             "length": 2,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 2
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 119.98,
+                                  "y": 158,
+                                  "width": 18.67,
+                                  "height": 17,
+                                  "right": 138.66,
+                                  "bottom": 175,
+                                  "text": "F2",
+                                  "startIndex": 0,
+                                  "endIndex": 2
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -1929,31 +2096,38 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "F3",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 2,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "F3",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 263.89,
-                                "y": 158,
-                                "width": 18.67,
-                                "height": 17,
-                                "right": 282.56,
-                                "bottom": 175
-                              }
-                            ],
                             "length": 2,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 2
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 263.89,
+                                  "y": 158,
+                                  "width": 18.67,
+                                  "height": 17,
+                                  "right": 282.56,
+                                  "bottom": 175,
+                                  "text": "F3",
+                                  "startIndex": 0,
+                                  "endIndex": 2
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }

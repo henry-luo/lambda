@@ -7,6 +7,7 @@
     }
   },
   "layout_tree": {
+    "nodeType": "element",
     "selector": "html",
     "tag": "html",
     "id": null,
@@ -62,13 +63,11 @@
       "overflowX": "visible",
       "overflowY": "visible"
     },
-    "textContent": "Test: Basic Table Layout\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 800px;\n        }\n        \n        /* Table styles */\n        table {\n            border-collapse: collapse;\n            width: 100%;\n            margin: 16px 0;\n        }\n        \n        th, td {\n            border: 1px solid #d1d9e0;\n            padding: 8px 12px;\n            text-align: left;\n        }\n        \n        th {\n            background-color: #f6f8fa;\n            font-weight: bold;\n        }\n        \n        tr:nth-child(even) {\n            background-color: #f9f9f9;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n    \n\n\n    Data Table\n    The following table demonstrates basic table layout:\n    \n    \n        \n            \n                Name\n                Age\n                City\n            \n        \n        \n            \n                John Doe\n                30\n                New York\n            \n            \n                Jane Smith\n                25\n                Los Angeles\n            \n            \n                Bob Johnson\n                35\n                Chicago\n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"table_001_basic_table\",\n        \"category\": \"table\",\n        \"features\": [\"table-layout\", \"border-collapse\", \"cell-padding\", \"alternating-rows\", \"thead-tbody\"],\n        \"description\": \"Basic table with headers, borders, and alternating row colors\",\n        \"markdown_equivalent\": \"### Data Table\\n\\n| Name | Age | City |\\n|------|-----|------|\\n| John Doe | 30 | New York |\\n| Jane Smith | 25 | Los Angeles |\\n| Bob Johnson | 35 | Chicago |\",\n        \"complexity\": \"basic\"\n    }",
-    "hasTextNodes": false,
-    "textNodes": [],
-    "childCount": 2,
     "depth": 0,
+    "elementIndex": 0,
     "children": [
       {
+        "nodeType": "element",
         "selector": "head",
         "tag": "head",
         "id": null,
@@ -124,13 +123,27 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Test: Basic Table Layout\n    \n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 800px;\n        }\n        \n        /* Table styles */\n        table {\n            border-collapse: collapse;\n            width: 100%;\n            margin: 16px 0;\n        }\n        \n        th, td {\n            border: 1px solid #d1d9e0;\n            padding: 8px 12px;\n            text-align: left;\n        }\n        \n        th {\n            background-color: #f6f8fa;\n            font-weight: bold;\n        }\n        \n        tr:nth-child(even) {\n            background-color: #f9f9f9;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 0,
         "children": [
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 0,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(1)",
             "tag": "meta",
             "id": null,
@@ -186,14 +199,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 1,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 2,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "meta:nth-of-type(2)",
             "tag": "meta",
             "id": null,
@@ -249,14 +276,28 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": null,
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 3,
             "children": []
           },
           {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 4,
+            "children": []
+          },
+          {
+            "nodeType": "element",
             "selector": "title",
             "tag": "title",
             "id": null,
@@ -312,14 +353,45 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Test: Basic Table Layout",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 5,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "Test: Basic Table Layout",
+                "length": 24,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n    ",
+            "length": 5,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 6,
             "children": []
           },
           {
+            "nodeType": "element",
             "selector": "style",
             "tag": "style",
             "id": null,
@@ -375,16 +447,47 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "/* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 800px;\n        }\n        \n        /* Table styles */\n        table {\n            border-collapse: collapse;\n            width: 100%;\n            margin: 16px 0;\n        }\n        \n        th, td {\n            border: 1px solid #d1d9e0;\n            padding: 8px 12px;\n            text-align: left;\n        }\n        \n        th {\n            background-color: #f6f8fa;\n            font-weight: bold;\n        }\n        \n        tr:nth-child(even) {\n            background-color: #f9f9f9;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
+            "elementIndex": 7,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n        /* Reset for consistency */\n        * { margin: 0; padding: 0; box-sizing: border-box; }\n        body { \n            font-family: 'Arial', sans-serif; \n            font-size: 16px; \n            line-height: 1.5;\n            padding: 20px;\n            max-width: 800px;\n        }\n        \n        /* Table styles */\n        table {\n            border-collapse: collapse;\n            width: 100%;\n            margin: 16px 0;\n        }\n        \n        th, td {\n            border: 1px solid #d1d9e0;\n            padding: 8px 12px;\n            text-align: left;\n        }\n        \n        th {\n            background-color: #f6f8fa;\n            font-weight: bold;\n        }\n        \n        tr:nth-child(even) {\n            background-color: #f9f9f9;\n        }\n        \n        h3 {\n            font-size: 20px;\n            margin-bottom: 12px;\n            font-weight: bold;\n        }\n        \n        p {\n            margin-bottom: 16px;\n        }\n    ",
+                "length": 960,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
+          },
+          {
+            "nodeType": "text",
+            "text": "\n",
+            "length": 1,
+            "isWhitespaceOnly": true,
+            "layout": {
+              "rects": [],
+              "hasLayout": false,
+              "parentVisible": false,
+              "parentDisplay": "none",
+              "parentVisibility": "visible"
+            },
+            "depth": 2,
+            "nodeIndex": 8,
             "children": []
           }
         ]
       },
       {
+        "nodeType": "element",
         "selector": "body",
         "tag": "body",
         "id": null,
@@ -440,13 +543,11 @@
           "overflowX": "visible",
           "overflowY": "visible"
         },
-        "textContent": "Data Table\n    The following table demonstrates basic table layout:\n    \n    \n        \n            \n                Name\n                Age\n                City\n            \n        \n        \n            \n                John Doe\n                30\n                New York\n            \n            \n                Jane Smith\n                25\n                Los Angeles\n            \n            \n                Bob Johnson\n                35\n                Chicago\n            \n        \n    \n    \n    \n    \n    {\n        \"test_id\": \"table_001_basic_table\",\n        \"category\": \"table\",\n        \"features\": [\"table-layout\", \"border-collapse\", \"cell-padding\", \"alternating-rows\", \"thead-tbody\"],\n        \"description\": \"Basic table with headers, borders, and alternating row colors\",\n        \"markdown_equivalent\": \"### Data Table\\n\\n| Name | Age | City |\\n|------|-----|------|\\n| John Doe | 30 | New York |\\n| Jane Smith | 25 | Los Angeles |\\n| Bob Johnson | 35 | Chicago |\",\n        \"complexity\": \"basic\"\n    }",
-        "hasTextNodes": false,
-        "textNodes": [],
-        "childCount": 4,
         "depth": 1,
+        "elementIndex": 2,
         "children": [
           {
+            "nodeType": "element",
             "selector": "h3",
             "tag": "h3",
             "id": null,
@@ -502,33 +603,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Data Table",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 1,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "Data Table",
-                "parentElement": "h3",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 24,
-                    "width": 99.67,
-                    "height": 22,
-                    "right": 119.67,
-                    "bottom": 46
-                  }
-                ],
                 "length": 10,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 10
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 24,
+                      "width": 99.67,
+                      "height": 22,
+                      "right": 119.67,
+                      "bottom": 46,
+                      "text": "Data Table",
+                      "startIndex": 0,
+                      "endIndex": 10
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "p",
             "tag": "p",
             "id": null,
@@ -584,33 +693,41 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "The following table demonstrates basic table layout:",
-            "hasTextNodes": true,
-            "textNodes": [
+            "depth": 2,
+            "elementIndex": 3,
+            "children": [
               {
+                "nodeType": "text",
                 "text": "The following table demonstrates basic table layout:",
-                "parentElement": "p",
-                "rects": [
-                  {
-                    "x": 20,
-                    "y": 65,
-                    "width": 367.33,
-                    "height": 17,
-                    "right": 387.33,
-                    "bottom": 82
-                  }
-                ],
                 "length": 52,
                 "isWhitespaceOnly": false,
-                "startOffset": 0,
-                "endOffset": 52
+                "layout": {
+                  "rects": [
+                    {
+                      "x": 20,
+                      "y": 65,
+                      "width": 367.33,
+                      "height": 17,
+                      "right": 387.33,
+                      "bottom": 82,
+                      "text": "The following table demonstrates basic table layout:",
+                      "startIndex": 0,
+                      "endIndex": 52
+                    }
+                  ],
+                  "hasLayout": true,
+                  "parentVisible": true,
+                  "parentDisplay": "block",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
               }
-            ],
-            "childCount": 0,
-            "depth": 2,
-            "children": []
+            ]
           },
           {
+            "nodeType": "element",
             "selector": "table",
             "tag": "table",
             "id": null,
@@ -666,13 +783,11 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "Name\n                Age\n                City\n            \n        \n        \n            \n                John Doe\n                30\n                New York\n            \n            \n                Jane Smith\n                25\n                Los Angeles\n            \n            \n                Bob Johnson\n                35\n                Chicago",
-            "hasTextNodes": false,
-            "textNodes": [],
-            "childCount": 2,
             "depth": 2,
+            "elementIndex": 5,
             "children": [
               {
+                "nodeType": "element",
                 "selector": "thead",
                 "tag": "thead",
                 "id": null,
@@ -728,13 +843,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "Name\n                Age\n                City",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 1,
                 "depth": 3,
+                "elementIndex": 1,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "tr",
                     "tag": "tr",
                     "id": null,
@@ -790,13 +903,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Name\n                Age\n                City",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(1)",
                         "tag": "th",
                         "id": null,
@@ -852,33 +963,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Name",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Name",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 33,
-                                "y": 114,
-                                "width": 43.58,
-                                "height": 17,
-                                "right": 76.58,
-                                "bottom": 131
-                              }
-                            ],
                             "length": 4,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 4
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 33,
+                                  "y": 114,
+                                  "width": 43.58,
+                                  "height": 17,
+                                  "right": 76.58,
+                                  "bottom": 131,
+                                  "text": "Name",
+                                  "startIndex": 0,
+                                  "endIndex": 4
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(2)",
                         "tag": "th",
                         "id": null,
@@ -934,33 +1053,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Age",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Age",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 347.41,
-                                "y": 114,
-                                "width": 30.23,
-                                "height": 17,
-                                "right": 377.64,
-                                "bottom": 131
-                              }
-                            ],
                             "length": 3,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 3
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 347.41,
+                                  "y": 114,
+                                  "width": 30.23,
+                                  "height": 17,
+                                  "right": 377.64,
+                                  "bottom": 131,
+                                  "text": "Age",
+                                  "startIndex": 0,
+                                  "endIndex": 3
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "th:nth-of-type(3)",
                         "tag": "th",
                         "id": null,
@@ -1016,37 +1143,45 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "City",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "City",
-                            "parentElement": "th",
-                            "rects": [
-                              {
-                                "x": 494.06,
-                                "y": 114,
-                                "width": 30.23,
-                                "height": 17,
-                                "right": 524.3,
-                                "bottom": 131
-                              }
-                            ],
                             "length": 4,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 4
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 494.06,
+                                  "y": 114,
+                                  "width": 30.23,
+                                  "height": 17,
+                                  "right": 524.3,
+                                  "bottom": 131,
+                                  "text": "City",
+                                  "startIndex": 0,
+                                  "endIndex": 4
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }
                 ]
               },
               {
+                "nodeType": "element",
                 "selector": "tbody",
                 "tag": "tbody",
                 "id": null,
@@ -1102,13 +1237,11 @@
                   "overflowX": "visible",
                   "overflowY": "visible"
                 },
-                "textContent": "John Doe\n                30\n                New York\n            \n            \n                Jane Smith\n                25\n                Los Angeles\n            \n            \n                Bob Johnson\n                35\n                Chicago",
-                "hasTextNodes": false,
-                "textNodes": [],
-                "childCount": 3,
                 "depth": 3,
+                "elementIndex": 3,
                 "children": [
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(1)",
                     "tag": "tr",
                     "id": null,
@@ -1164,13 +1297,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "John Doe\n                30\n                New York",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 1,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1226,33 +1357,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "John Doe",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "John Doe",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 33,
-                                "y": 155,
-                                "width": 68.5,
-                                "height": 17,
-                                "right": 101.5,
-                                "bottom": 172
-                              }
-                            ],
                             "length": 8,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 8
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 33,
+                                  "y": 155,
+                                  "width": 68.5,
+                                  "height": 17,
+                                  "right": 101.5,
+                                  "bottom": 172,
+                                  "text": "John Doe",
+                                  "startIndex": 0,
+                                  "endIndex": 8
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1308,33 +1447,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "30",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "30",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 347.41,
-                                "y": 155,
-                                "width": 17.8,
-                                "height": 17,
-                                "right": 365.2,
-                                "bottom": 172
-                              }
-                            ],
                             "length": 2,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 2
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 347.41,
+                                  "y": 155,
+                                  "width": 17.8,
+                                  "height": 17,
+                                  "right": 365.2,
+                                  "bottom": 172,
+                                  "text": "30",
+                                  "startIndex": 0,
+                                  "endIndex": 2
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -1390,35 +1537,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "New York",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "New York",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 494.06,
-                                "y": 155,
-                                "width": 67.59,
-                                "height": 17,
-                                "right": 561.66,
-                                "bottom": 172
-                              }
-                            ],
                             "length": 8,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 8
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 494.06,
+                                  "y": 155,
+                                  "width": 67.59,
+                                  "height": 17,
+                                  "right": 561.66,
+                                  "bottom": 172,
+                                  "text": "New York",
+                                  "startIndex": 0,
+                                  "endIndex": 8
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(2)",
                     "tag": "tr",
                     "id": null,
@@ -1474,13 +1629,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Jane Smith\n                25\n                Los Angeles",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 3,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1536,33 +1689,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Jane Smith",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Jane Smith",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 33,
-                                "y": 196,
-                                "width": 80.05,
-                                "height": 17,
-                                "right": 113.05,
-                                "bottom": 213
-                              }
-                            ],
                             "length": 10,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 10
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 33,
+                                  "y": 196,
+                                  "width": 80.05,
+                                  "height": 17,
+                                  "right": 113.05,
+                                  "bottom": 213,
+                                  "text": "Jane Smith",
+                                  "startIndex": 0,
+                                  "endIndex": 10
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1618,33 +1779,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "25",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "25",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 347.41,
-                                "y": 196,
-                                "width": 17.8,
-                                "height": 17,
-                                "right": 365.2,
-                                "bottom": 213
-                              }
-                            ],
                             "length": 2,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 2
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 347.41,
+                                  "y": 196,
+                                  "width": 17.8,
+                                  "height": 17,
+                                  "right": 365.2,
+                                  "bottom": 213,
+                                  "text": "25",
+                                  "startIndex": 0,
+                                  "endIndex": 2
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -1700,35 +1869,43 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Los Angeles",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Los Angeles",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 494.06,
-                                "y": 196,
-                                "width": 87.19,
-                                "height": 17,
-                                "right": 581.25,
-                                "bottom": 213
-                              }
-                            ],
                             "length": 11,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 11
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 494.06,
+                                  "y": 196,
+                                  "width": 87.19,
+                                  "height": 17,
+                                  "right": 581.25,
+                                  "bottom": 213,
+                                  "text": "Los Angeles",
+                                  "startIndex": 0,
+                                  "endIndex": 11
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   },
                   {
+                    "nodeType": "element",
                     "selector": "tr:nth-of-type(3)",
                     "tag": "tr",
                     "id": null,
@@ -1784,13 +1961,11 @@
                       "overflowX": "visible",
                       "overflowY": "visible"
                     },
-                    "textContent": "Bob Johnson\n                35\n                Chicago",
-                    "hasTextNodes": false,
-                    "textNodes": [],
-                    "childCount": 3,
                     "depth": 4,
+                    "elementIndex": 5,
                     "children": [
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(1)",
                         "tag": "td",
                         "id": null,
@@ -1846,33 +2021,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Bob Johnson",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 1,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Bob Johnson",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 33,
-                                "y": 237,
-                                "width": 93.41,
-                                "height": 17,
-                                "right": 126.41,
-                                "bottom": 254
-                              }
-                            ],
                             "length": 11,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 11
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 33,
+                                  "y": 237,
+                                  "width": 93.41,
+                                  "height": 17,
+                                  "right": 126.41,
+                                  "bottom": 254,
+                                  "text": "Bob Johnson",
+                                  "startIndex": 0,
+                                  "endIndex": 11
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(2)",
                         "tag": "td",
                         "id": null,
@@ -1928,33 +2111,41 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "35",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 3,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "35",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 347.41,
-                                "y": 237,
-                                "width": 17.8,
-                                "height": 17,
-                                "right": 365.2,
-                                "bottom": 254
-                              }
-                            ],
                             "length": 2,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 2
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 347.41,
+                                  "y": 237,
+                                  "width": 17.8,
+                                  "height": 17,
+                                  "right": 365.2,
+                                  "bottom": 254,
+                                  "text": "35",
+                                  "startIndex": 0,
+                                  "endIndex": 2
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       },
                       {
+                        "nodeType": "element",
                         "selector": "td:nth-of-type(3)",
                         "tag": "td",
                         "id": null,
@@ -2010,31 +2201,38 @@
                           "overflowX": "visible",
                           "overflowY": "visible"
                         },
-                        "textContent": "Chicago",
-                        "hasTextNodes": true,
-                        "textNodes": [
+                        "depth": 5,
+                        "elementIndex": 5,
+                        "children": [
                           {
+                            "nodeType": "text",
                             "text": "Chicago",
-                            "parentElement": "td",
-                            "rects": [
-                              {
-                                "x": 494.06,
-                                "y": 237,
-                                "width": 58.7,
-                                "height": 17,
-                                "right": 552.77,
-                                "bottom": 254
-                              }
-                            ],
                             "length": 7,
                             "isWhitespaceOnly": false,
-                            "startOffset": 0,
-                            "endOffset": 7
+                            "layout": {
+                              "rects": [
+                                {
+                                  "x": 494.06,
+                                  "y": 237,
+                                  "width": 58.7,
+                                  "height": 17,
+                                  "right": 552.77,
+                                  "bottom": 254,
+                                  "text": "Chicago",
+                                  "startIndex": 0,
+                                  "endIndex": 7
+                                }
+                              ],
+                              "hasLayout": true,
+                              "parentVisible": true,
+                              "parentDisplay": "table-cell",
+                              "parentVisibility": "visible"
+                            },
+                            "depth": 6,
+                            "nodeIndex": 0,
+                            "children": []
                           }
-                        ],
-                        "childCount": 0,
-                        "depth": 5,
-                        "children": []
+                        ]
                       }
                     ]
                   }
@@ -2043,6 +2241,7 @@
             ]
           },
           {
+            "nodeType": "element",
             "selector": "#test-metadata",
             "tag": "script",
             "id": "test-metadata",
@@ -2098,12 +2297,26 @@
               "overflowX": "visible",
               "overflowY": "visible"
             },
-            "textContent": "{\n        \"test_id\": \"table_001_basic_table\",\n        \"category\": \"table\",\n        \"features\": [\"table-layout\", \"border-collapse\", \"cell-padding\", \"alternating-rows\", \"thead-tbody\"],\n        \"description\": \"Basic table with headers, borders, and alternating row colors\",\n        \"markdown_equivalent\": \"### Data Table\\n\\n| Name | Age | City |\\n|------|-----|------|\\n| John Doe | 30 | New York |\\n| Jane Smith | 25 | Los Angeles |\\n| Bob Johnson | 35 | Chicago |\",\n        \"complexity\": \"basic\"\n    }",
-            "hasTextNodes": true,
-            "textNodes": [],
-            "childCount": 0,
             "depth": 2,
-            "children": []
+            "elementIndex": 9,
+            "children": [
+              {
+                "nodeType": "text",
+                "text": "\n    {\n        \"test_id\": \"table_001_basic_table\",\n        \"category\": \"table\",\n        \"features\": [\"table-layout\", \"border-collapse\", \"cell-padding\", \"alternating-rows\", \"thead-tbody\"],\n        \"description\": \"Basic table with headers, borders, and alternating row colors\",\n        \"markdown_equivalent\": \"### Data Table\\n\\n| Name | Age | City |\\n|------|-----|------|\\n| John Doe | 30 | New York |\\n| Jane Smith | 25 | Los Angeles |\\n| Bob Johnson | 35 | Chicago |\",\n        \"complexity\": \"basic\"\n    }\n    ",
+                "length": 510,
+                "isWhitespaceOnly": false,
+                "layout": {
+                  "rects": [],
+                  "hasLayout": false,
+                  "parentVisible": false,
+                  "parentDisplay": "none",
+                  "parentVisibility": "visible"
+                },
+                "depth": 3,
+                "nodeIndex": 0,
+                "children": []
+              }
+            ]
           }
         ]
       }
