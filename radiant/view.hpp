@@ -251,8 +251,14 @@ typedef struct FontBox {
     int current_font_size;  // font size of current element
 } FontBox;
 
-typedef struct ViewText : View {
+typedef struct TextRect {
+    float x, y, width, height;
     int start_index, length;  // start and length of the text in the style node
+    TextRect* next;
+} TextRect;
+
+typedef struct ViewText : View {
+    TextRect *rect;  // first text rect
     FontProp *font;  // font for this text
 } ViewText;
 

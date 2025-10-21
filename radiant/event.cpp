@@ -41,11 +41,13 @@ void target_children(EventContext* evcon, View* view) {
 }
 
 void target_text_view(EventContext* evcon, ViewText* text) {
-    float x = evcon->block.x + text->x, y = evcon->block.y + text->y;
     unsigned char* str = text->node->text_data();
-    unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
+    NEXT_RECT:
+    TextRect *text_rect = text->rect;
+    float x = evcon->block.x + text_rect->x, y = evcon->block.y + text_rect->y;
+    unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
     log_debug("target text:'%t' start:%d, len:%d, x:%d, y:%d, wd:%d, hg:%d, blk_x:%d",
-        str, text->start_index, text->length, text->x, text->y, text->width, text->height, evcon->block.x);
+        str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, evcon->block.x);
     bool has_space = false;
     for (; p < end; p++) {
         int wd = 0;
@@ -70,11 +72,13 @@ void target_text_view(EventContext* evcon, ViewText* text) {
         MousePositionEvent* event = &evcon->event.mouse_position;
         if (x <= event->x && event->x < char_right && y <= event->y && event->y < char_bottom) {
             log_debug("hit on text: %c", *p);
-            evcon->target = (View*)text;  return;
+            evcon->target = text;  evcon->target_text_rect = text_rect;  return;
         }
         // advance to the next position
         x += wd;
     }
+    text_rect = text_rect->next;
+    if (text_rect) { goto NEXT_RECT; }
 }
 
 void target_inline_view(EventContext* evcon, ViewSpan* view_span) {
