@@ -175,16 +175,18 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     log_debug("text rect: '%.*t', x %f, y %f, width %f, height %f, font size %f, font family '%s'",
         text_length, text->node->text_data() + rect->start_index, rect->x, rect->y, rect->width, rect->height, text->font->font_size, text->font->family);
 
-    if (text->rect == rect) {
+    if (text->rect == rect) {  // first rect
         text->x = rect->x;
         text->y = rect->y;
         text->width = rect->width;
         text->height = rect->height;
-    } else {
+    } else {  // following rects after first rect
+        float right = max(text->x + text->width, rect->x + rect->width);
+        float bottom = max(text->y + text->height, rect->y + rect->height);
         text->x = min(text->x, rect->x);
         text->y = min(text->y, rect->y);
-        text->width = max(text->width, rect->x + rect->width - text->x);
-        text->height = max(text->height, rect->y + rect->height - text->y);
+        text->width = right - text->x;
+        text->height = bottom - text->y;
     }
 }
 
