@@ -426,12 +426,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
                 // scale image by pixel ratio
                 float w = img->width * lycon->ui_context->pixel_ratio;
                 float h = img->height * lycon->ui_context->pixel_ratio;
-                log_debug("image dims: intrinsic - %f x %f, spec - %f x %f", w, h,
+                log_debug("image intrinsic dims: %f x %f, given: %f x %f", w, h,
                     lycon->block.given_width, lycon->block.given_height);
                 if (lycon->block.given_width >= 0) { // scale unspecified height
                     lycon->block.given_height = lycon->block.given_width * h / w;
                 }
-                if (lycon->block.given_height >= 0) { // scale unspecified width
+                else if (lycon->block.given_height >= 0) { // scale unspecified width
                     lycon->block.given_width = lycon->block.given_height * w / h;
                 }
                 else { // both width and height unspecified
@@ -449,7 +449,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             if (img->format == IMAGE_FORMAT_SVG) {
                 img->max_render_width = max(lycon->block.given_width, img->max_render_width);
             }
-            log_debug("image dimensions: %d x %d", lycon->block.given_width, lycon->block.given_height);
+            log_debug("image dimensions: %f x %f", lycon->block.given_width, lycon->block.given_height);
         }
         else { // failed to load image
             lycon->block.given_width = 40;  lycon->block.given_height = 30;
@@ -477,7 +477,7 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
 
     // determine block width and height
     float content_width = -1;
-    if (block->blk && block->blk->given_width_type != LXB_CSS_VALUE_AUTO && lycon->block.given_width >= 0) {
+    if (lycon->block.given_width >= 0 && (!block->blk || block->blk->given_width_type != LXB_CSS_VALUE_AUTO)) {
         content_width = max(lycon->block.given_width, 0);
         content_width = adjust_min_max_width(block, content_width);
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
