@@ -124,7 +124,7 @@ bool element_has_positioning(ViewBlock* block);
 bool element_has_float(ViewBlock* block);
 
 void line_init(LayoutContext* lycon);
-float calculate_vertical_align_offset(PropValue align, float item_height, float line_height, float baseline_pos, float item_baseline);
+float calculate_vertical_align_offset(LayoutContext* lycon, PropValue align, float item_height, float line_height, float baseline_pos, float item_baseline);
 void view_vertical_align(LayoutContext* lycon, View* view);
 
 // DomNode style resolution

@@ -641,9 +641,12 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
             block->x = lycon->line.advance_x;
         }
         if (block->in_line && block->in_line->vertical_align) {
+            float item_height = block->height + (block->bound ?
+                block->bound->margin.top + block->bound->margin.bottom : 0);
+            float item_baseline = block->height + (block->bound ? block->bound->margin.top: 0);
             float offset = calculate_vertical_align_offset(
-                block->in_line->vertical_align, block->height, lycon->block.line_height,
-                lycon->line.max_ascender, block->height);
+                lycon, block->in_line->vertical_align, item_height, lycon->block.line_height,
+                lycon->line.max_ascender, item_baseline);
             block->y = lycon->block.advance_y + offset;  // block->bound->margin.top will be added below
             log_debug("vertical-aligned-inline-block: offset %f, line %f, block %f, adv: %f, y: %f, va:%d, %d",
                 offset, lycon->block.line_height, block->height, lycon->block.advance_y, block->y,
@@ -662,7 +665,15 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         // update baseline
         if (block->in_line && block->in_line->vertical_align != LXB_CSS_VALUE_BASELINE) {
             float block_flow_height = block->height + (block->bound ? block->bound->margin.top + block->bound->margin.bottom : 0);
-            lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->line.max_ascender);
+            if (block->in_line->vertical_align == LXB_CSS_VALUE_TEXT_TOP) {
+                lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->block.init_ascender);
+            }
+            else if (block->in_line->vertical_align == LXB_CSS_VALUE_TEXT_BOTTOM) {
+                lycon->line.max_ascender = max(lycon->line.max_ascender, block_flow_height - lycon->block.init_descender);
+            }
+            else {
+                lycon->line.max_descender = max(lycon->line.max_descender, block_flow_height - lycon->line.max_ascender);
+            }
         } else {
             // default baseline alignment for inline block
             if (block->bound) {
