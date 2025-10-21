@@ -173,14 +173,14 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     float line_height = max(lycon->block.line_height, lycon->line.max_ascender + lycon->line.max_descender);
     if (view->type == RDT_VIEW_TEXT) {
         ViewText* text_view = (ViewText*)view;
-        float item_height = text_view->height;
-        // for text, baseline is at font.ascender
-        log_debug("text view font: %p", text_view->font);
-        float item_baseline = text_view->font ? text_view->font->ascender : item_height;
-        float vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
-            line_height, lycon->line.max_ascender, item_baseline);
         TextRect* rect = text_view->rect;
         while (rect) {
+            float item_height = rect->height;
+            // for text, baseline is at font.ascender
+            log_debug("text view font: %p", text_view->font);
+            float item_baseline = text_view->font ? text_view->font->ascender : item_height;
+            float vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
+                line_height, lycon->line.max_ascender, item_baseline);
             log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*t'",
                 rect->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
                 rect->length, text_view->node->text_data() + rect->start_index);
@@ -212,26 +212,29 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
     }
 }
 
-void span_line_align(LayoutContext* lycon, float offset, ViewSpan* span) {
-    // align the views in the line
-    log_debug("span line align");
-    View* view = span->child;
+void view_line_align(LayoutContext* lycon, float offset, View* view) {
     while (view) {
+        log_debug("view line align: %d", view->type);
+        view->x += offset;
         if (view->type == RDT_VIEW_TEXT) {
             ViewText* text = (ViewText*)view;
             text->x += offset;
-        }
-        else if (view->type == RDT_VIEW_BLOCK) {
-            ViewBlock* block = (ViewBlock*)view;
-            block->x += offset;
+            TextRect* rect = text->rect;
+            while (rect) {
+                rect->x += offset;
+                rect = rect->next;
+            }
         }
         else if (view->type == RDT_VIEW_INLINE) {
             ViewSpan* sp = (ViewSpan*)view;
-            span_line_align(lycon, offset, sp);
+            if (sp->child) view_line_align(lycon, offset, sp->child);
         }
+        // else if (view->is_block()) {
+        //     view->x += offset;
+        // }
+        // else {} // br
         view = view->next;
     }
-    log_debug("end of span line align");
 }
 
 void line_align(LayoutContext* lycon) {
@@ -249,21 +252,7 @@ void line_align(LayoutContext* lycon) {
                 offset = lycon->block.width - line_width;
             }
             if (offset <= 0) return;  // no need to adjust the views
-            do {
-                if (view->type == RDT_VIEW_TEXT) {
-                    ViewText* text = (ViewText*)view;
-                    text->x += offset;
-                }
-                else if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK) {
-                    ViewBlock* block = (ViewBlock*)view;
-                    block->x += offset;
-                }
-                else if (view->type == RDT_VIEW_INLINE) {
-                    ViewSpan* span = (ViewSpan*)view;
-                    span_line_align(lycon, offset, span);
-                }
-                view = view->next;
-            } while (view);
+            view_line_align(lycon, offset, view);
         }
     }
     log_debug("end of line align");
