@@ -45,7 +45,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
     // handle horizontal overflow
     if (flow_width > block->width) { // hz overflow
         if (!block->scroller) {
-            block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+            block->scroller = alloc_scroll_prop(lycon);
         }
         block->scroller->has_hz_overflow = true;
         if (block->scroller->overflow_x == LXB_CSS_VALUE_VISIBLE) {
@@ -68,7 +68,7 @@ void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue displ
         // no change to block->height
         if (flow_height > block->height) { // vt overflow
             if (!block->scroller) {
-                block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+                block->scroller = alloc_scroll_prop(lycon);
             }
             block->scroller->has_vt_overflow = true;
             if (block->scroller->overflow_y == LXB_CSS_VALUE_VISIBLE) {
@@ -338,7 +338,7 @@ void apply_element_default_style(LayoutContext* lycon, DomNode* elmt, ViewBlock*
             block->bound->border->width.bottom = block->bound->border->width.left = 1 * lycon->ui_context->pixel_ratio;
         block->bound->border->width.top_specificity = block->bound->border->width.left_specificity =
             block->bound->border->width.right_specificity = block->bound->border->width.bottom_specificity = -1;
-        if (!block->scroller) { block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp)); }
+        if (!block->scroller) { block->scroller = alloc_scroll_prop(lycon); }
         block->scroller->overflow_x = LXB_CSS_VALUE_AUTO;
         block->scroller->overflow_y = LXB_CSS_VALUE_AUTO;
         // default iframe size to 300 x 200

@@ -333,9 +333,6 @@ void render_scroller(RenderContext* rdcon, ViewBlock* block, BlockBlot* pa_block
     // need to reset block.x and y, which was changed by the scroller
     rdcon->block.x = pa_block->x + block->x;  rdcon->block.y = pa_block->y + block->y;
     if (block->scroller->has_hz_scroll || block->scroller->has_vt_scroll) {
-        if (!block->scroller->pane) {
-            block->scroller->pane = (ScrollPane*)calloc(1, sizeof(ScrollPane));
-        }
         Rect rect = {rdcon->block.x, rdcon->block.y, block->width, block->height};
         if (block->bound && block->bound->border) {
             rect.x += block->bound->border->width.left;

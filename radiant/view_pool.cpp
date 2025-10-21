@@ -6,6 +6,23 @@
 #include "../lib/mempool.h"
 void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent);
 
+// Helper function to get view type name for JSON
+const char* View::name() {
+    switch (this->type) {
+        case RDT_VIEW_BLOCK: return "block";
+        case RDT_VIEW_INLINE_BLOCK: return "inline-block";
+        case RDT_VIEW_LIST_ITEM: return "list-item";
+        case RDT_VIEW_TABLE: return "table";
+        case RDT_VIEW_TABLE_ROW_GROUP: return "table-row-group";
+        case RDT_VIEW_TABLE_ROW: return "table-row";
+        case RDT_VIEW_TABLE_CELL: return "table-cell";
+        case RDT_VIEW_INLINE: return "inline";
+        case RDT_VIEW_TEXT: return "text";
+        case RDT_VIEW_BR: return "br";
+        default: return "unknown";
+    }
+}
+
 View* View::previous_view() {
     if (!parent || parent->child == this) return NULL;
     View* sibling = parent->child;
@@ -82,12 +99,7 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
     if (!lycon->line.start_view) lycon->line.start_view = view;
 
     // CRITICAL FIX: Also maintain ViewBlock hierarchy for flex layout
-    if ((type == RDT_VIEW_BLOCK || type == RDT_VIEW_INLINE_BLOCK || type == RDT_VIEW_LIST_ITEM ||
-         type == RDT_VIEW_TABLE || type == RDT_VIEW_TABLE_ROW_GROUP ||
-         type == RDT_VIEW_TABLE_ROW || type == RDT_VIEW_TABLE_CELL) &&
-        lycon->parent && (lycon->parent->type == RDT_VIEW_BLOCK || lycon->parent->type == RDT_VIEW_INLINE_BLOCK ||
-            lycon->parent->type == RDT_VIEW_TABLE || lycon->parent->type == RDT_VIEW_TABLE_ROW_GROUP ||
-            lycon->parent->type == RDT_VIEW_TABLE_ROW || lycon->parent->type == RDT_VIEW_TABLE_CELL)) {
+    if (view->is_block() && lycon->parent && lycon->parent->is_block()) {
         ViewBlock* block_child = (ViewBlock*)view;
         ViewBlock* block_parent = (ViewBlock*)lycon->parent;
 
@@ -105,15 +117,15 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
 }
 
 void free_view(ViewTree* tree, View* view) {
-    printf("free view %p, type %d\n", view, view->type);
-    if (view->type != RDT_VIEW_TEXT) {
+    log_debug("free view %p, type %s", view, view->name());
+    if (view->type >= RDT_VIEW_INLINE) {
         View* child = ((ViewGroup*)view)->child;
         while (child) {
             View* next = child->next;
             free_view(tree, child);
             child = next;
         }
-        // free blk
+        // free view property groups
         ViewSpan* span = (ViewSpan*)view;
         if (span->font) {
             log_debug("free font prop");
@@ -133,10 +145,7 @@ void free_view(ViewTree* tree, View* view) {
             if (span->bound->border) pool_free(tree->pool, span->bound->border);
             pool_free(tree->pool, span->bound);
         }
-        if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
-            view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_TABLE ||
-            view->type == RDT_VIEW_TABLE_ROW_GROUP || view->type == RDT_VIEW_TABLE_ROW ||
-            view->type == RDT_VIEW_TABLE_CELL) {
+        if (view->is_block()) {
             ViewBlock* block = (ViewBlock*)view;
             if (block->blk) {
                 log_debug("free block prop");
@@ -148,6 +157,9 @@ void free_view(ViewTree* tree, View* view) {
                 pool_free(tree->pool, block->scroller);
             }
         }
+    }
+    else { // text or br view
+        log_debug("free text/br view");
     }
     pool_free(tree->pool, view);
 }
@@ -161,6 +173,13 @@ void* alloc_prop(LayoutContext* lycon, size_t size) {
         log_debug("Failed to allocate property");
         return NULL;
     }
+}
+
+ScrollProp* alloc_scroll_prop(LayoutContext* lycon) {
+    ScrollProp* prop = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+    prop->overflow_x = prop->overflow_y = LXB_CSS_VALUE_VISIBLE;   // initial value
+    prop->pane = (ScrollPane*)pool_calloc(lycon->doc->view_tree->pool, sizeof(ScrollPane));
+    return prop;
 }
 
 BlockProp* alloc_block_prop(LayoutContext* lycon) {
@@ -239,13 +258,13 @@ void alloc_grid_prop(LayoutContext* lycon, ViewBlock* block) {
 }
 
 void view_pool_init(ViewTree* tree) {
-    printf("init view pool\n");
+    log_debug("init view pool");
     tree->pool = pool_create();
     if (!tree->pool) {
-        printf("Failed to initialize view pool\n");
+        log_error("Failed to initialize view pool");
     }
     else {
-        printf("view pool initialized\n");
+        log_debug("view pool initialized");
     }
 }
 
@@ -390,14 +409,7 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
 void print_block(ViewBlock* block, StrBuf* buf, int indent) {
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_format(buf, "[view-%s:%s, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f\n",
-        block->type == RDT_VIEW_BLOCK ? "block" :
-        block->type == RDT_VIEW_INLINE_BLOCK ? "inline-block" :
-        block->type == RDT_VIEW_LIST_ITEM ? "list-item" :
-        block->type == RDT_VIEW_TABLE ? "table" :
-        block->type == RDT_VIEW_TABLE_ROW_GROUP ? "table-row-group" :
-        block->type == RDT_VIEW_TABLE_ROW ? "table-row" :
-        block->type == RDT_VIEW_TABLE_CELL ? "table-cell" : "image",
-        block->node->name(),
+        block->name(), block->node->name(),
         (float)block->x, (float)block->y, (float)block->width, (float)block->height);
     print_block_props(block, buf, indent + 2);
     print_inline_props((ViewSpan*)block, buf, indent+2);
@@ -410,10 +422,7 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
     View* view = view_group->child;
     if (view) {
         do {
-            if (view->type == RDT_VIEW_BLOCK || view->type == RDT_VIEW_INLINE_BLOCK ||
-                view->type == RDT_VIEW_LIST_ITEM || view->type == RDT_VIEW_TABLE ||
-                view->type == RDT_VIEW_TABLE_ROW_GROUP || view->type == RDT_VIEW_TABLE_ROW ||
-                view->type == RDT_VIEW_TABLE_CELL) {
+            if (view->is_block()) {
                 print_block((ViewBlock*)view, buf, indent);
             }
             else if (view->type == RDT_VIEW_INLINE) {
@@ -489,23 +498,6 @@ void print_view_tree(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio) {
     print_view_tree_json(view_root, url, pixel_ratio);
 }
 
-// Helper function to get view type name for JSON
-const char* get_view_type_name_json(ViewType type) {
-    switch (type) {
-        case RDT_VIEW_BLOCK: return "block";
-        case RDT_VIEW_INLINE_BLOCK: return "inline-block";
-        case RDT_VIEW_LIST_ITEM: return "list-item";
-        case RDT_VIEW_TABLE: return "table";
-        case RDT_VIEW_TABLE_ROW_GROUP: return "table-row-group";
-        case RDT_VIEW_TABLE_ROW: return "table-row";
-        case RDT_VIEW_TABLE_CELL: return "table-cell";
-        case RDT_VIEW_INLINE: return "inline";
-        case RDT_VIEW_TEXT: return "text";
-        case RDT_VIEW_BR: return "br";
-        default: return "unknown";
-    }
-}
-
 // Helper function to escape JSON strings
 void append_json_string(StrBuf* buf, const char* str) {
     if (!str) {
@@ -569,7 +561,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     // Basic view properties
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"type\": ");
-    append_json_string(buf, get_view_type_name_json(block->type));
+    append_json_string(buf, block->name());
     strbuf_append_str(buf, ",\n");
 
     strbuf_append_char_n(buf, ' ', indent + 2);
@@ -808,7 +800,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             strbuf_append_str(buf, "{\n");
             strbuf_append_char_n(buf, ' ', indent + 6);
             strbuf_append_str(buf, "\"type\": ");
-            append_json_string(buf, get_view_type_name_json(child->type));
+            append_json_string(buf, child->name());
             strbuf_append_str(buf, "\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "}");
@@ -929,7 +921,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
     // Basic view properties
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"type\": ");
-    append_json_string(buf, get_view_type_name_json(span->type));
+    append_json_string(buf, span->name());
     strbuf_append_str(buf, ",\n");
 
     strbuf_append_char_n(buf, ' ', indent + 2);
@@ -1087,7 +1079,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
             strbuf_append_str(buf, "{\n");
             strbuf_append_char_n(buf, ' ', indent + 6);
             strbuf_append_str(buf, "\"type\": ");
-            append_json_string(buf, get_view_type_name_json(child->type));
+            append_json_string(buf, child->name());
             strbuf_append_str(buf, "\n");
             strbuf_append_char_n(buf, ' ', indent + 4);
             strbuf_append_str(buf, "}");
