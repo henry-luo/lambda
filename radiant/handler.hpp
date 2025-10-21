@@ -4,6 +4,7 @@
 typedef struct EventContext {
     RdtEvent event;
     View* target;
+    TextRect* target_text_rect;
     float offset_x, offset_y;  // mouse offset from target view
 
     // style context

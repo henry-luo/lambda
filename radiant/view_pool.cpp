@@ -444,20 +444,24 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                 strbuf_append_char_n(buf, ' ', indent);
                 ViewText* text = (ViewText*)view;
                 unsigned char* text_data = view->node->text_data();
-                unsigned char* str = text_data ? text_data + text->start_index : nullptr;
-                if (!str || !(*str) || text->length <= 0) {
-                    strbuf_append_format(buf, "invalid text node: len:%d\n", text->length);
-                } else {
-                    strbuf_append_str(buf, "[text:'");
-                    strbuf_append_str_n(buf, (char*)str, text->length);
-                    // replace newline and '\'' with '^'
-                    char* s = buf->str + buf->length - text->length;
-                    while (*s) {
-                        if (*s == '\n' || *s == '\r') { *s = '^'; }
-                        s++;
+                TextRect* rect = text->rect;
+                while (rect) {
+                    unsigned char* str = text_data ? text_data + rect->start_index : nullptr;
+                    if (!str || !(*str) || rect->length <= 0) {
+                        strbuf_append_format(buf, "invalid text node: len:%d\n", rect->length);
+                    } else {
+                        strbuf_append_str(buf, "[text:'");
+                        strbuf_append_str_n(buf, (char*)str, rect->length);
+                        // replace newline and '\'' with '^'
+                        char* s = buf->str + buf->length - rect->length;
+                        while (*s) {
+                            if (*s == '\n' || *s == '\r') { *s = '^'; }
+                            s++;
+                        }
+                        strbuf_append_format(buf, "', start:%d, len:%d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f]\n",
+                            rect->start_index, rect->length, rect->x, rect->y, rect->width, rect->height);
                     }
-                    strbuf_append_format(buf, "', start:%d, len:%d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f]\n",
-                        text->start_index, text->length, (float)text->x, (float)text->y, (float)text->width, (float)text->height);
+                    rect = rect->next;
                 }
             }
             else {
@@ -519,9 +523,9 @@ void append_json_string(StrBuf* buf, const char* str) {
     strbuf_append_char(buf, '"');
 }
 
-void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio) {
+void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio, TextRect* rect = nullptr) {
     // calculate absolute position for view
-    float abs_x = view->x, abs_y = view->y;
+    float abs_x = rect ? rect->x : view->x, abs_y = rect ? rect->y : view->y;
     // Calculate absolute position by traversing up the parent chain
     ViewGroup* parent = view->parent;
     while (parent) {
@@ -534,8 +538,8 @@ void print_bounds_json(View* view, StrBuf* buf, int indent, float pixel_ratio) {
     // Convert absolute view dimensions to CSS pixels
     float css_x = abs_x / pixel_ratio;
     float css_y = abs_y / pixel_ratio;
-    float css_width = view->width / pixel_ratio;
-    float css_height = view->height / pixel_ratio;
+    float css_width = (rect ? rect->width : view->width) / pixel_ratio;
+    float css_height = (rect ? rect->height : view->height) / pixel_ratio;
 
     strbuf_append_char_n(buf, ' ', indent + 4);
     strbuf_append_format(buf, "\"x\": %.1f,\n", css_x);
@@ -779,10 +783,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
         }
         first_child = false;
 
-        if (child->type == RDT_VIEW_BLOCK || child->type == RDT_VIEW_INLINE_BLOCK ||
-            child->type == RDT_VIEW_LIST_ITEM || child->type == RDT_VIEW_TABLE ||
-            child->type == RDT_VIEW_TABLE_ROW_GROUP || child->type == RDT_VIEW_TABLE_ROW ||
-            child->type == RDT_VIEW_TABLE_CELL) {
+        if (child->is_block()) {
             print_block_json((ViewBlock*)child, buf, indent + 4, pixel_ratio);
         }
         else if (child->type == RDT_VIEW_TEXT) {
@@ -837,16 +838,17 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
 
     // Extract text content with better error handling (matching text output)
     bool is_last_char_space = false;
+    TextRect* rect = text->rect;
     if (text->node) {
         unsigned char* text_data = text->node->text_data();
-        if (text_data && text->length > 0) {
-            char* content = (char*)malloc(text->length + 1);
-            strncpy(content, (char*)(text_data + text->start_index), text->length);
-            content[text->length] = '\0';
-            unsigned char last_char = content[text->length - 1];  // todo: this is not unicode-safe
+        if (text_data && rect->length > 0) {
+            char content[2048];
+            int len = min(sizeof(content) - 1, rect->length);
+            strncpy(content, (char*)(text_data + rect->start_index), len);
+            content[len] = '\0';
+            unsigned char last_char = content[len - 1];  // todo: this is not unicode-safe
             is_last_char_space = is_space(last_char);
             append_json_string(buf, content);
-            free(content);
         } else {
             append_json_string(buf, "[empty]");
         }
@@ -859,23 +861,15 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"text_info\": {\n");
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"start_index\": %d,\n", text->start_index);
+    strbuf_append_format(buf, "\"start_index\": %d,\n", rect->start_index);
     strbuf_append_char_n(buf, ' ', indent + 4);
-    strbuf_append_format(buf, "\"length\": %d\n", text->length);
+    strbuf_append_format(buf, "\"length\": %d\n", rect->length);
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "},\n");
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"layout\": {\n");
-    // reduce width if last char is space
-    // if (is_last_char_space && text->width >= 1) {
-    //     ViewText temp_text = *text;
-    //     temp_text.width -= text->font->space_width;  // reduce width of trailing space
-    //     log_debug("Adjusting text width for trailing space: original %.1f -> adjusted %.1f", (float)text->width, (float)temp_text.width);
-    //     print_bounds_json(&temp_text, buf, indent, pixel_ratio);
-    // } else {
-        print_bounds_json(text, buf, indent, pixel_ratio);
-    //}
+    print_bounds_json(text, buf, indent, pixel_ratio, rect);
 
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "}\n");

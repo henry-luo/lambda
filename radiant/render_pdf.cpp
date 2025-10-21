@@ -123,14 +123,14 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
     if (!text || !text->node || !text->node->text_data()) return;
 
     // Calculate absolute position using block context (like SVG renderer)
-    float x = (float)ctx->block.x + text->x;
-    float y = (float)ctx->block.y + text->y;
-
     // Extract the text content
     unsigned char* str = text->node->text_data();
-    char* text_content = (char*)malloc(text->length + 1);
-    strncpy(text_content, (char*)str + text->start_index, text->length);
-    text_content[text->length] = '\0';  // Fix: Use single backslash for null terminator
+    TextRect *text_rect = text->rect;
+    NEXT_RECT:
+    float x = (float)ctx->block.x + text_rect->x, y = (float)ctx->block.y + text_rect->y;
+    char* text_content = (char*)malloc(text_rect->length + 1);
+    strncpy(text_content, (char*)str + text_rect->start_index, text_rect->length);
+    text_content[text_rect->length] = '\0';  // Fix: Use single backslash for null terminator
 
     if (strlen(text_content) == 0) {
         free(text_content);
@@ -145,8 +145,9 @@ void render_text_view_pdf(PdfRenderContext* ctx, ViewText* text) {
 
     // Render the text using absolute coordinates
     pdf_render_text(ctx, text_content, x, y, ctx->color);
-
     free(text_content);
+    text_rect = text_rect->next;
+    if (text_rect) { goto NEXT_RECT; }
 }
 
 // Render block view with background and borders

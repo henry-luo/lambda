@@ -57,70 +57,74 @@ void draw_glyph(RenderContext* rdcon, FT_Bitmap *bitmap, int x, int y) {
     }
 }
 
-void render_text_view(RenderContext* rdcon, ViewText* text) {
+void render_text_view(RenderContext* rdcon, ViewText* text_view) {
     if (!rdcon->font.ft_face) {
         log_debug("font face is null");
         return;
     }
-    float x = rdcon->block.x + text->x, y = rdcon->block.y + text->y;
-    unsigned char* str = text->node->text_data();
-    unsigned char* p = str + text->start_index;  unsigned char* end = p + text->length;
-    log_debug("draw text:'%t', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)",
-        str, text->start_index, text->length, text->x, text->y, text->width, text->height, x, y);
-    bool has_space = false;  uint32_t codepoint;
-    while (p < end) {
-        // log_debug("draw character '%c'", *p);
-        if (is_space(*p)) {
-            if (!has_space) {  // add whitespace
-                has_space = true;
-                // log_debug("draw_space: %c, x:%f, end:%f", *p, x, x + rdcon->font.space_width);
-                x += rdcon->font.style->space_width;
-            }
-            // else  // skip consecutive spaces
-            p++;
-        }
-        else {
-            has_space = false;
-            int bytes = utf8_to_codepoint(p, &codepoint);
-            if (bytes <= 0) { p++;  codepoint = 0; }
-            else { p += bytes; }
-
-            FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.ft_face, rdcon->font.style, codepoint, true);
-            if (!glyph) {
-                // draw a square box for missing glyph
-                Rect rect = {x + 1, y, (float)(rdcon->font.style->space_width - 2), (float)(rdcon->font.ft_face->size->metrics.y_ppem / 64.0)};
-                fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip);
-                x += rdcon->font.style->space_width;
+    unsigned char* str = text_view->node->text_data();
+    TextRect* text_rect = text_view->rect;
+    while (text_rect) {
+        float x = rdcon->block.x + text_rect->x, y = rdcon->block.y + text_rect->y;
+        unsigned char* p = str + text_rect->start_index;  unsigned char* end = p + text_rect->length;
+        log_debug("draw text:'%t', start:%d, len:%d, x:%f, y:%f, wd:%f, hg:%f, at (%f, %f)",
+            str, text_rect->start_index, text_rect->length, text_rect->x, text_rect->y, text_rect->width, text_rect->height, x, y);
+        bool has_space = false;  uint32_t codepoint;
+        while (p < end) {
+            // log_debug("draw character '%c'", *p);
+            if (is_space(*p)) {
+                if (!has_space) {  // add whitespace
+                    has_space = true;
+                    // log_debug("draw_space: %c, x:%f, end:%f", *p, x, x + rdcon->font.space_width);
+                    x += rdcon->font.style->space_width;
+                }
+                // else  // skip consecutive spaces
+                p++;
             }
             else {
-                // draw the glyph to the image buffer
-                float ascend = rdcon->font.ft_face->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
-                draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap_left, y + ascend - glyph->bitmap_top);
-                // advance to the next position
-                x += glyph->advance.x / 64.0;
+                has_space = false;
+                int bytes = utf8_to_codepoint(p, &codepoint);
+                if (bytes <= 0) { p++;  codepoint = 0; }
+                else { p += bytes; }
+
+                FT_GlyphSlot glyph = load_glyph(rdcon->ui_context, rdcon->font.ft_face, rdcon->font.style, codepoint, true);
+                if (!glyph) {
+                    // draw a square box for missing glyph
+                    Rect rect = {x + 1, y, (float)(rdcon->font.style->space_width - 2), (float)(rdcon->font.ft_face->size->metrics.y_ppem / 64.0)};
+                    fill_surface_rect(rdcon->ui_context->surface, &rect, 0xFF0000FF, &rdcon->block.clip);
+                    x += rdcon->font.style->space_width;
+                }
+                else {
+                    // draw the glyph to the image buffer
+                    float ascend = rdcon->font.ft_face->size->metrics.ascender / 64.0; // still use orginal font ascend to align glyphs at same baseline
+                    draw_glyph(rdcon, &glyph->bitmap, x + glyph->bitmap_left, y + ascend - glyph->bitmap_top);
+                    // advance to the next position
+                    x += glyph->advance.x / 64.0;
+                }
             }
         }
-    }
-    // render text deco
-    if (rdcon->font.style->text_deco != LXB_CSS_VALUE_NONE) {
-        float thinkness = max(rdcon->font.ft_face->underline_thickness / 64.0, 1);
-        Rect rect;
-        // todo: underline probably shoul draw below/before the text, and leaves a gap where text has descender
-        if (rdcon->font.style->text_deco == LXB_CSS_VALUE_UNDERLINE) {
-            // underline drawn at baseline, with a gap of thickness
-            rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y +
-                (rdcon->font.ft_face->size->metrics.ascender / 64.0) + thinkness;
+        // render text deco
+        if (rdcon->font.style->text_deco != LXB_CSS_VALUE_NONE) {
+            float thinkness = max(rdcon->font.ft_face->underline_thickness / 64.0, 1);
+            Rect rect;
+            // todo: underline probably shoul draw below/before the text, and leaves a gap where text has descender
+            if (rdcon->font.style->text_deco == LXB_CSS_VALUE_UNDERLINE) {
+                // underline drawn at baseline, with a gap of thickness
+                rect.x = rdcon->block.x + text_rect->x;  rect.y = rdcon->block.y + text_rect->y +
+                    (rdcon->font.ft_face->size->metrics.ascender / 64.0) + thinkness;
+            }
+            else if (rdcon->font.style->text_deco == LXB_CSS_VALUE_OVERLINE) {
+                rect.x = rdcon->block.x + text_rect->x;  rect.y = rdcon->block.y + text_rect->y;
+            }
+            else if (rdcon->font.style->text_deco == LXB_CSS_VALUE_LINE_THROUGH) {
+                rect.x = rdcon->block.x + text_rect->x;  rect.y = rdcon->block.y + text_rect->y + text_rect->height / 2;
+            }
+            rect.width = text_rect->width;  rect.height = thinkness; // corrected the variable name from h to height
+            log_debug("text deco: %d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f", rdcon->font.style->text_deco,
+                rect.x, rect.y, rect.width, rect.height); // corrected w to width
+            fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
         }
-        else if (rdcon->font.style->text_deco == LXB_CSS_VALUE_OVERLINE) {
-            rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y;
-        }
-        else if (rdcon->font.style->text_deco == LXB_CSS_VALUE_LINE_THROUGH) {
-            rect.x = rdcon->block.x + text->x;  rect.y = rdcon->block.y + text->y + text->height / 2;
-        }
-        rect.width = text->width;  rect.height = thinkness; // corrected the variable name from h to height
-        log_debug("text deco: %d, x:%.1f, y:%.1f, wd:%.1f, hg:%.1f", rdcon->font.style->text_deco,
-            rect.x, rect.y, rect.width, rect.height); // corrected w to width
-        fill_surface_rect(rdcon->ui_context->surface, &rect, rdcon->color.c, &rdcon->block.clip);
+        text_rect = text_rect->next;
     }
 }
 
@@ -199,7 +203,10 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
 
         // Initialize the ViewText structure
         text.type = RDT_VIEW_TEXT;  text.next = NULL;  text.parent = NULL;
-        text.start_index = 0;  text.length = num->length;
+        text.font = rdcon->font.style;
+        TextRect text_rect;
+        text.rect = &text_rect;  text_rect.next = NULL;
+        text_rect.start_index = 0;  text_rect.length = num->length;
 
         // Create DomNode wrapper
         DomNode dom_wrapper;
@@ -210,7 +217,7 @@ void render_list_bullet(RenderContext* rdcon, ViewBlock* list_item) {
         float font_size = rdcon->font.ft_face->size->metrics.y_ppem / 64.0;
         text.x = list_item->x - 20 * ratio;
         text.y = list_item->y;  // align at top the list item
-        text.width = text.length * font_size;  text.height = font_size;
+        text.width = text_rect.length * font_size;  text.height = font_size;
         render_text_view(rdcon, &text);
         strbuf_free(num);
     }

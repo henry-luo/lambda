@@ -14,6 +14,7 @@ void view_pool_destroy(ViewTree* tree);
 char* read_text_file(const char *filename);
 void finalize_block_flow(LayoutContext* lycon, ViewBlock* block, PropValue display);
 void layout_inline(LayoutContext* lycon, DomNode *elmt, DisplayValue display);
+void adjust_text_bounds(ViewText* text);
 
 bool is_space(char c) {
     return c == ' ' || c == '\t' || c== '\r' || c == '\n';
@@ -178,10 +179,15 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         float item_baseline = text_view->font ? text_view->font->ascender : item_height;
         float vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
-        log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*t'",
-            text_view->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
-            text_view->length, text_view->node->text_data() + text_view->start_index);
-        text_view->y = lycon->block.advance_y + max(vertical_offset, 0);
+        TextRect* rect = text_view->rect;
+        while (rect) {
+            log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*t'",
+                rect->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
+                rect->length, text_view->node->text_data() + rect->start_index);
+            rect->y = lycon->block.advance_y + max(vertical_offset, 0);
+            rect = rect->next;
+        }
+        adjust_text_bounds(text_view);
     }
     else if (view->type == RDT_VIEW_INLINE_BLOCK) {
         ViewBlock* block = (ViewBlock*)view;

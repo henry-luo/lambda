@@ -53,19 +53,19 @@ void svg_color_to_string(Color color, char* result) {
 
 void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
     if (!text->node || !text->node->text_data()) return;
-
-    float x = ctx->block.x + text->x;
-    float y = ctx->block.y + text->y;
-
     // Extract the text content
     unsigned char* str = text->node->text_data();
-    char* text_content = (char*)malloc(text->length + 1);
-    strncpy(text_content, (char*)str + text->start_index, text->length);
-    text_content[text->length] = '\0';
+
+    TextRect *text_rect = text->rect;
+    NEXT_RECT:
+    float x = ctx->block.x + text_rect->x, y = ctx->block.y + text_rect->y;
+    char* text_content = (char*)malloc(text_rect->length + 1);
+    strncpy(text_content, (char*)str + text_rect->start_index, text_rect->length);
+    text_content[text_rect->length] = '\0';
 
     // Escape XML entities in text
-    StrBuf* escaped_text = strbuf_new_cap(text->length * 2);
-    for (int i = 0; i < text->length; i++) {
+    StrBuf* escaped_text = strbuf_new_cap(text_rect->length * 2);
+    for (int i = 0; i < text_rect->length; i++) {
         char c = text_content[i];
         switch (c) {
             case '<': strbuf_append_str(escaped_text, "&lt;"); break;
@@ -118,8 +118,9 @@ void render_text_view_svg(SvgRenderContext* ctx, ViewText* text) {
 
     strbuf_append_format(ctx->svg_content, ">%s</text>\n", escaped_text->str);
 
-    free(text_content);
-    strbuf_free(escaped_text);
+    free(text_content);  strbuf_free(escaped_text);
+    text_rect = text_rect->next;
+    if (text_rect) { goto NEXT_RECT; }
 }
 
 void render_bound_svg(SvgRenderContext* ctx, ViewBlock* view) {
