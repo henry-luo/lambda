@@ -79,7 +79,7 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
     const char* node_name = node ? node->name() : "NULL";
     const char* parent_name = lycon->parent ? "has_parent" : "no_parent";
     log_debug("*** ALLOC_VIEW TRACE: Created view %p (type=%d) for node %s (%p), parent=%p (%s)",
-              view, type, node_name, node, lycon->parent, parent_name);
+        view, type, node_name, node, lycon->parent, parent_name);
 
     // CRITICAL FIX: Initialize flex properties for ViewBlocks
     if (type == RDT_VIEW_BLOCK || type == RDT_VIEW_INLINE_BLOCK || type == RDT_VIEW_LIST_ITEM) {
@@ -441,11 +441,11 @@ void print_view_group(ViewGroup* view_group, StrBuf* buf, int indent) {
                     (float)view->x, (float)view->y, (float)view->width, (float)view->height);
             }
             else if (view->type == RDT_VIEW_TEXT) {
-                strbuf_append_char_n(buf, ' ', indent);
                 ViewText* text = (ViewText*)view;
                 unsigned char* text_data = view->node->text_data();
                 TextRect* rect = text->rect;
                 while (rect) {
+                    strbuf_append_char_n(buf, ' ', indent);
                     unsigned char* str = text_data ? text_data + rect->start_index : nullptr;
                     if (!str || !(*str) || rect->length <= 0) {
                         strbuf_append_format(buf, "invalid text node: len:%d\n", rect->length);
@@ -820,6 +820,10 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
 
 // JSON generation for text nodes
 void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio) {
+    TextRect* rect = text->rect;
+
+    NEXT_RECT:
+    bool is_last_char_space = false;
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "{\n");
 
@@ -836,9 +840,6 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
     strbuf_append_char_n(buf, ' ', indent + 2);
     strbuf_append_str(buf, "\"content\": ");
 
-    // Extract text content with better error handling (matching text output)
-    bool is_last_char_space = false;
-    TextRect* rect = text->rect;
     if (text->node) {
         unsigned char* text_data = text->node->text_data();
         if (text_data && rect->length > 0) {
@@ -876,6 +877,9 @@ void print_text_json(ViewText* text, StrBuf* buf, int indent, float pixel_ratio)
 
     strbuf_append_char_n(buf, ' ', indent);
     strbuf_append_str(buf, "}");
+
+    rect = rect->next;
+    if (rect) { strbuf_append_str(buf, ",\n");  goto NEXT_RECT; }
 }
 
 void print_br_json(View* br, StrBuf* buf, int indent, float pixel_ratio) {
