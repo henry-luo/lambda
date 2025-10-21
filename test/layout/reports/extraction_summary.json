@@ -1,7 +1,7 @@
 {
-  "total_files": 49,
-  "generated": 49,
-  "skipped": 0,
+  "total_files": 19,
+  "generated": 1,
+  "skipped": 18,
   "failed": 0,
   "success_rate": 100,
   "browser_info": {
@@ -14,395 +14,155 @@
   },
   "results": [
     {
-      "category": "table",
-      "file": "basic_602_table_minimal.html",
+      "category": "basic",
+      "file": "baseline_817_vertical_align.html",
       "success": true,
       "was_skipped": false,
+      "node_count": 30,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "baseline_818_white_space.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 36,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "baseline_819_visibility.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 26,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "border-002.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 23,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "border-width-001.html",
+      "success": true,
+      "was_skipped": true,
       "node_count": 24,
       "error": null
     },
     {
-      "category": "table",
-      "file": "basic_603_table_colspan.html",
+      "category": "basic",
+      "file": "border-width-shorthand-001.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
+      "node_count": 21,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "code_001_basic_blocks.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 31,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "color-001.html",
+      "success": true,
+      "was_skipped": true,
       "node_count": 25,
       "error": null
     },
     {
-      "category": "table",
-      "file": "basic_604_table_rowspan.html",
+      "category": "basic",
+      "file": "image_001_basic_layout.html",
       "success": true,
-      "was_skipped": false,
-      "node_count": 22,
+      "was_skipped": true,
+      "node_count": 29,
       "error": null
     },
     {
-      "category": "table",
-      "file": "basic_605_table_mixed_spans.html",
+      "category": "basic",
+      "file": "image_002_sample_images.html",
       "success": true,
-      "was_skipped": false,
-      "node_count": 34,
+      "was_skipped": true,
+      "node_count": 37,
       "error": null
     },
     {
-      "category": "table",
-      "file": "basic_606_table_fixed_layout.html",
+      "category": "basic",
+      "file": "inline-block-001.html",
       "success": true,
-      "was_skipped": false,
-      "node_count": 33,
+      "was_skipped": true,
+      "node_count": 24,
       "error": null
     },
     {
-      "category": "table",
-      "file": "basic_607_table_border_collapse.html",
+      "category": "basic",
+      "file": "line-height-001.html",
       "success": true,
-      "was_skipped": false,
-      "node_count": 28,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "basic_608_table_border_spacing.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 28,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "basic_609_table_fixed_spacing.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 34,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "basic_610_table_auto_vs_fixed.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 53,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table-001.html",
-      "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
       "node_count": 27,
       "error": null
     },
     {
-      "category": "table",
-      "file": "table_001_basic_layout.html",
+      "category": "basic",
+      "file": "margin-001.html",
       "success": true,
-      "was_skipped": false,
-      "node_count": 31,
+      "was_skipped": true,
+      "node_count": 26,
       "error": null
     },
     {
-      "category": "table",
-      "file": "table_001_basic_table.html",
+      "category": "basic",
+      "file": "margin-002.html",
       "success": true,
-      "was_skipped": false,
-      "node_count": 51,
+      "was_skipped": true,
+      "node_count": 26,
       "error": null
     },
     {
-      "category": "table",
-      "file": "table_001_simple_table.html",
+      "category": "basic",
+      "file": "margin-collapse-001.html",
       "success": true,
-      "was_skipped": false,
+      "was_skipped": true,
+      "node_count": 34,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "padding-001.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 26,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "padding-002.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 26,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "quote_001_basic_blockquote.html",
+      "success": true,
+      "was_skipped": true,
+      "node_count": 27,
+      "error": null
+    },
+    {
+      "category": "basic",
+      "file": "text-decoration-001.html",
+      "success": true,
+      "was_skipped": true,
       "node_count": 24,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_002_cell_alignment.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 24,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_003_fixed_layout.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 31,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_004_auto_layout.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 35,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_005_caption_header.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 42,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_006_border_collapse.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 31,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_007_empty_cells.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 28,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_008_column_groups.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 35,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_009_footer_group.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 41,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_010_inline_table.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 48,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_011_colspan.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 38,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_012_rowspan.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 32,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_013_html_table.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 42,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_014_width_height.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 53,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_015_border_separate.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 44,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_016_empty_cells_hide.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 44,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_017_caption_bottom.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 50,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_018_complex_spanning.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 56,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_019_vertical_alignment.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 50,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_020_overflow_wrapping.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 50,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_border_collapse.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 66,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_border_spacing_stylesheet.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 28,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_borders.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 46,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_caption_variations.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 117,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_colspan_test.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 44,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_complex_spans.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 58,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_edge_cases.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 150,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_fixed_layout.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 33,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_nested_content.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 109,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_rowspan_colspan.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 45,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_rowspan_test.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 53,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_simple.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 45,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_simple_005_colspan.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 31,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_simple_009_empty_cells.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 38,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_test_suite.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 240,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_vertical_alignment.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 66,
-      "error": null
-    },
-    {
-      "category": "table",
-      "file": "table_width_algorithms.html",
-      "success": true,
-      "was_skipped": false,
-      "node_count": 95,
       "error": null
     }
   ]

@@ -118,7 +118,7 @@ void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     log_leave();
 }
 
-float calculate_vertical_align_offset(PropValue align, float item_height, float line_height, float baseline_pos, float item_baseline) {
+float calculate_vertical_align_offset(LayoutContext* lycon, PropValue align, float item_height, float line_height, float baseline_pos, float item_baseline) {
     log_debug("calculate vertical align: align=%d, item_height=%f, line_height=%f, baseline_pos=%f, item_baseline=%f",
         align, item_height, line_height, baseline_pos, item_baseline);
     switch (align) {
@@ -132,11 +132,11 @@ float calculate_vertical_align_offset(PropValue align, float item_height, float 
         log_debug("bottom-aligned-text: line %d", line_height);
         return line_height - item_height;
     case LXB_CSS_VALUE_TEXT_TOP:
-        // Align with the top of the parent's font
-        return 0;
+        // align with the top of the parent's font
+        return baseline_pos - lycon->block.init_ascender;
     case LXB_CSS_VALUE_TEXT_BOTTOM:
-        // Align with the bottom of the parent's font
-        return line_height - item_height;
+        // align with the bottom of the parent's font
+        return baseline_pos + lycon->block.init_descender - item_height;
     case LXB_CSS_VALUE_SUB:
         // Subscript position (approximately 0.3em lower)
         return baseline_pos - item_baseline + 0.3 * line_height;
@@ -179,7 +179,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
             // for text, baseline is at font.ascender
             log_debug("text view font: %p", text_view->font);
             float item_baseline = text_view->font ? text_view->font->ascender : item_height;
-            float vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
+            float vertical_offset = calculate_vertical_align_offset(lycon, lycon->line.vertical_align, item_height,
                 line_height, lycon->line.max_ascender, item_baseline);
             log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*t'",
                 rect->y, lycon->block.advance_y, vertical_offset, lycon->block.line_height, item_height,
@@ -196,7 +196,7 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         float item_baseline = block->height + (block->bound ? block->bound->margin.top: 0);
         PropValue align = block->in_line && block->in_line->vertical_align ?
             block->in_line->vertical_align : lycon->line.vertical_align;
-        float vertical_offset = calculate_vertical_align_offset(align, item_height,
+        float vertical_offset = calculate_vertical_align_offset(lycon, align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
         block->y = lycon->block.advance_y + max(vertical_offset, 0) + (block->bound ? block->bound->margin.top : 0);
         log_debug("vertical-adjusted-inline-block: y=%d, adv=%d, offset=%f, line=%f, blk=%f",
