@@ -199,10 +199,12 @@ void adjust_text_bounds(ViewText* text) {
     text->height = rect->height;
     rect = rect->next;
     while (rect) {
+        float right = max(text->x + text->width, rect->x + rect->width);
+        float bottom = max(text->y + text->height, rect->y + rect->height);
         text->x = min(text->x, rect->x);
         text->y = min(text->y, rect->y);
-        text->width = max(text->width, rect->x + rect->width - text->x);
-        text->height = max(text->height, rect->y + rect->height - text->y);
+        text->width = right - text->x;
+        text->height = bottom - text->y;
         rect = rect->next;
     }
 }
