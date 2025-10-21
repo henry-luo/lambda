@@ -174,12 +174,18 @@ void output_text(LayoutContext* lycon, ViewText* text, TextRect* rect, int text_
     lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.ft_face->size->metrics.descender) / 64.0);
     log_debug("text rect: '%.*t', x %f, y %f, width %f, height %f, font size %f, font family '%s'",
         text_length, text->node->text_data() + rect->start_index, rect->x, rect->y, rect->width, rect->height, text->font->font_size, text->font->family);
-    TextRect* rc = text->rect;
-    text->x = min(text->x, rc->x);
-    text->y = min(text->y, rc->y);
-    text->width = max(text->width, rc->x + rc->width - text->x);
-    text->height = max(text->height, rc->y + rc->height - text->y);
-    rc = rc->next;
+
+    if (text->rect == rect) {
+        text->x = rect->x;
+        text->y = rect->y;
+        text->width = rect->width;
+        text->height = rect->height;
+    } else {
+        text->x = min(text->x, rect->x);
+        text->y = min(text->y, rect->y);
+        text->width = max(text->width, rect->x + rect->width - text->x);
+        text->height = max(text->height, rect->y + rect->height - text->y);
+    }
 }
 
 void adjust_text_bounds(ViewText* text) {
