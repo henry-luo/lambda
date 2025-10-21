@@ -78,9 +78,9 @@ void pool_destroy(Pool* pool) {
         return;
     }
 
-    // Free all memory in the heap first, then release the heap
+    // Release the heap - this will free all allocations made from it
+    // Note: rpmalloc_heap_release already frees all memory, so we don't need heap_free_all
     if (pool->heap) {
-        rpmalloc_heap_free_all(pool->heap);
         rpmalloc_heap_release(pool->heap);
     }
 
