@@ -167,7 +167,7 @@ LineFillStatus view_has_line_filled(LayoutContext* lycon, View* view, DomNode* n
 
 void output_text(LayoutContext* lycon, ViewText* text, int text_length, float text_width) {
     text->length = text_length;  assert(text->length > 0);
-    text->width = text_width;  text->font = lycon->font.style;
+    text->width = text_width;
     lycon->line.advance_x += text_width;
     lycon->line.max_ascender = max(lycon->line.max_ascender, lycon->font.ft_face->size->metrics.ascender / 64.0);
     lycon->line.max_descender = max(lycon->line.max_descender, (-lycon->font.ft_face->size->metrics.descender) / 64.0);
@@ -193,6 +193,7 @@ void layout_text(LayoutContext* lycon, DomNode *text_node) {
     ViewText* text = (ViewText*)alloc_view(lycon, RDT_VIEW_TEXT, text_node);
     lycon->prev_view = (View*)text;
     text->start_index = str - text_start;
+    text->font = lycon->font.style;
     float font_height = lycon->font.ft_face->size->metrics.height / 64.0;
     text->x = lycon->line.advance_x;
     text->height = font_height;  // should text->height be lycon->block.line_height or font_height?

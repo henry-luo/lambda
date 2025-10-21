@@ -174,7 +174,8 @@ void view_vertical_align(LayoutContext* lycon, View* view) {
         ViewText* text_view = (ViewText*)view;
         float item_height = text_view->height;
         // for text, baseline is at font.ascender
-        float item_baseline = text_view->font->ascender;
+        log_debug("text view font: %p", text_view->font);
+        float item_baseline = text_view->font ? text_view->font->ascender : item_height;
         float vertical_offset = calculate_vertical_align_offset(lycon->line.vertical_align, item_height,
             line_height, lycon->line.max_ascender, item_baseline);
         log_debug("vertical-adjusted-text: y=%d, adv=%d, offset=%f, line=%f, hg=%f, txt='%.*t'",
