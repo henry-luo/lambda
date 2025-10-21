@@ -309,7 +309,3 @@ void update_scroller(ViewBlock* block, float content_width, float content_height
         block->scroller->clip.bottom = block->height - (block->bound->border ? block->bound->border->width.bottom : 0);
     }
 }
-
-void scrollpane_destroy(ScrollPane* sp) {
-    if (sp) free(sp);
-}

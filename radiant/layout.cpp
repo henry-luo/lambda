@@ -414,7 +414,7 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     lycon->doc->view_tree->root = (View*)html;  lycon->parent = (ViewGroup*)html;
     lycon->elmt = elmt;
     // default html styles
-    html->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+    html->scroller = alloc_scroll_prop(lycon);
     html->scroller->overflow_x = LXB_CSS_VALUE_AUTO;
     html->scroller->overflow_y = LXB_CSS_VALUE_AUTO;
     lycon->block.given_width = lycon->ui_context->window_width;

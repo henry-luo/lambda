@@ -127,11 +127,12 @@ typedef enum {
     RDT_VIEW_NONE = 0,
     RDT_VIEW_TEXT,
     RDT_VIEW_BR,
+    // ViewSpan
     RDT_VIEW_INLINE,
+    // ViewBlock
     RDT_VIEW_INLINE_BLOCK,
     RDT_VIEW_BLOCK,
     RDT_VIEW_LIST_ITEM,
-    RDT_VIEW_SCROLL_PANE,
     RDT_VIEW_TABLE,
     RDT_VIEW_TABLE_ROW_GROUP,
     RDT_VIEW_TABLE_ROW,
@@ -235,10 +236,13 @@ struct View {
 
     inline bool is_inline() { return type == RDT_VIEW_TEXT || type == RDT_VIEW_INLINE || type == RDT_VIEW_INLINE_BLOCK; }
 
-    inline bool is_block() { return type == RDT_VIEW_BLOCK || type == RDT_VIEW_INLINE_BLOCK || type == RDT_VIEW_LIST_ITEM || type == RDT_VIEW_SCROLL_PANE ||
-        type == RDT_VIEW_TABLE || type == RDT_VIEW_TABLE_ROW_GROUP || type == RDT_VIEW_TABLE_ROW || type == RDT_VIEW_TABLE_CELL; }
+    inline bool is_block() {
+        return type == RDT_VIEW_BLOCK || type == RDT_VIEW_INLINE_BLOCK || type == RDT_VIEW_LIST_ITEM ||
+            type == RDT_VIEW_TABLE || type == RDT_VIEW_TABLE_ROW_GROUP || type == RDT_VIEW_TABLE_ROW || type == RDT_VIEW_TABLE_CELL;
+    }
 
     View* previous_view();
+    const char* name();
 };
 
 typedef struct FontBox {

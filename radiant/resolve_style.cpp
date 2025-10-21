@@ -1185,9 +1185,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!block) { break; }
         const lxb_css_property_overflow_x_t *overflow_x = declr->u.overflow_x;
         log_debug("overflow x property: %d", overflow_x->type);
-        if (!block->scroller) {
-            block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
-        }
+        if (!block->scroller) { block->scroller = alloc_scroll_prop(lycon); }
         block->scroller->overflow_x = overflow_x->type;
         break;
     }
@@ -1195,9 +1193,7 @@ lxb_status_t resolve_element_style(lexbor_avl_t *avl, lexbor_avl_node_t **root,
         if (!block) { break; }
         const lxb_css_property_overflow_y_t *overflow = declr->u.overflow_y;
         log_debug("overflow property: %d", overflow->type);
-        if (!block->scroller) {
-            block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
-        }
+        if (!block->scroller) { block->scroller = alloc_scroll_prop(lycon); }
         block->scroller->overflow_y = overflow->type;
         break;
     }
