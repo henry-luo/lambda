@@ -1,5 +1,5 @@
 # Makefile for HTTP/HTTPS server library and tests
-# Uses libssl (part of OpenSSL) for SSL/TLS functionality, not the full OpenSSL package
+# Uses mbedTLS for SSL/TLS functionality
 
 # project configuration
 CC = gcc
@@ -10,11 +10,11 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
     # macOS with homebrew - use specific library paths
     INCLUDES = -I/opt/homebrew/include
-    LIBS = -L/opt/homebrew/lib -levent -levent_openssl -lssl -lcrypto
+    LIBS = -L/opt/homebrew/lib -levent -lmbedtls -lmbedx509 -lmbedcrypto
 else
     # Linux/Ubuntu - use system libraries
-    INCLUDES = 
-    LIBS = -levent -levent_openssl -lssl -lcrypto
+    INCLUDES =
+    LIBS = -levent -lmbedtls -lmbedx509 -lmbedcrypto
 endif
 
 # source directories
@@ -74,18 +74,18 @@ example: example_server
 
 # install dependencies (macos with homebrew)
 install-deps-mac:
-	brew install libevent openssl@3
+	brew install libevent mbedtls
 
-# install dependencies (ubuntu/debian) - using libssl-dev instead of full openssl
+# install dependencies (ubuntu/debian) - using mbedtls instead of openssl
 install-deps-ubuntu:
 	sudo apt-get update
-	sudo apt-get install libevent-dev libssl-dev
+	sudo apt-get install libevent-dev libmbedtls-dev
 
 # check for required libraries
 check-deps:
 	@echo "checking for required libraries..."
 	@pkg-config --exists libevent || echo "libevent not found"
-	@pkg-config --exists openssl || echo "openssl not found"
+	@pkg-config --exists mbedtls || echo "mbedtls not found"
 	@echo "dependencies check complete"
 
 # clean build artifacts
