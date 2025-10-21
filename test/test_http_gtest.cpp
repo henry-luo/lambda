@@ -27,8 +27,8 @@ protected:
 
 // Test HTTP functionality
 TEST_F(HttpInputTest, test_http_download) {
-    // Test downloading a simple JSON file from httpbin.org
-    const char* test_url = "https://httpbin.org/json";
+    // Test downloading a simple JSON file from GitHub API
+    const char* test_url = "https://api.github.com/zen";
 
     printf("Testing HTTP download from: %s\n", test_url);
 
@@ -51,7 +51,7 @@ TEST_F(HttpInputTest, test_http_download) {
 
 TEST_F(HttpInputTest, test_http_cache) {
     // Test that caching works by downloading the same URL twice
-    const char* test_url = "https://httpbin.org/uuid";
+    const char* test_url = "https://api.github.com/octocat";
 
     printf("Testing HTTP caching with: %s\n", test_url);
 
@@ -95,7 +95,7 @@ TEST_F(HttpInputTest, test_https_ssl) {
 
 TEST_F(HttpInputTest, test_http_error_handling) {
     // Test error handling with invalid URL
-    const char* invalid_url = "https://httpbin.org/status/404";
+    const char* invalid_url = "https://api.github.com/this-definitely-does-not-exist-404";
 
     printf("Testing HTTP error handling with: %s\n", invalid_url);
 

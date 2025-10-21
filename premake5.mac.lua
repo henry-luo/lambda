@@ -122,7 +122,6 @@ project "lambda-input-full-c"
         "/opt/homebrew/include",
         "/opt/homebrew/include/libpng16",
         "mac-deps/curl-8.10.1/include",
-        "/opt/homebrew/include/openssl",
     }
     
     buildoptions {
@@ -147,8 +146,9 @@ project "lambda-input-full-c"
         "/opt/homebrew/lib/libutf8proc.a",
         "/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
+        "/opt/homebrew/lib/libmbedtls.a",
+        "/opt/homebrew/lib/libmbedx509.a",
+        "/opt/homebrew/lib/libmbedcrypto.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
@@ -226,7 +226,6 @@ project "lambda-input-full-cpp"
         "/opt/homebrew/include",
         "/opt/homebrew/include/libpng16",
         "mac-deps/curl-8.10.1/include",
-        "/opt/homebrew/include/openssl",
     }
     
     filter "files:**.c"
@@ -264,8 +263,9 @@ project "lambda-input-full-cpp"
         "/opt/homebrew/lib/libutf8proc.a",
         "/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
+        "/opt/homebrew/lib/libmbedtls.a",
+        "/opt/homebrew/lib/libmbedx509.a",
+        "/opt/homebrew/lib/libmbedcrypto.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
     }
@@ -639,7 +639,6 @@ project "lambda"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -656,8 +655,9 @@ project "lambda"
         "/usr/local/lib/libmir.a",
         "/opt/homebrew/lib/libmpdec.a",
         "/opt/homebrew/lib/libutf8proc.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
+        "/opt/homebrew/lib/libmbedtls.a",
+        "/opt/homebrew/lib/libmbedx509.a",
+        "/opt/homebrew/lib/libmbedcrypto.a",
         "/opt/homebrew/lib/libhpdf.a",
         "/opt/homebrew/lib/libnghttp2.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
@@ -677,8 +677,6 @@ project "lambda"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
         "/opt/homebrew/lib/libhpdf.a",
     }
     
@@ -752,7 +750,6 @@ project "test_strbuf_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -814,7 +811,6 @@ project "test_stringbuf_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -877,7 +873,6 @@ project "test_strview_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -939,7 +934,6 @@ project "test_num_stack_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1001,7 +995,6 @@ project "test_datetime_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1064,7 +1057,6 @@ project "test_url_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1126,7 +1118,6 @@ project "test_url_extra_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1188,7 +1179,6 @@ project "test_cmdedit_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1255,7 +1245,6 @@ project "test_mempool_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1317,7 +1306,6 @@ project "test_mime_detect_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1346,8 +1334,6 @@ project "test_mime_detect_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -1423,7 +1409,6 @@ project "test_math_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1453,8 +1438,6 @@ project "test_math_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -1530,7 +1513,6 @@ project "test_math_ascii_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1560,8 +1542,6 @@ project "test_math_ascii_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -1637,7 +1617,6 @@ project "test_markup_roundtrip_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1667,8 +1646,6 @@ project "test_markup_roundtrip_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -1744,7 +1721,6 @@ project "test_input_roundtrip_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1774,8 +1750,6 @@ project "test_input_roundtrip_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -1851,7 +1825,6 @@ project "test_dir_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1880,8 +1853,6 @@ project "test_dir_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -1957,7 +1928,6 @@ project "test_http_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -1986,8 +1956,6 @@ project "test_http_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -2063,7 +2031,6 @@ project "test_sysinfo_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2093,8 +2060,6 @@ project "test_sysinfo_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -2170,7 +2135,6 @@ project "test_jsx_roundtrip_new_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2200,8 +2164,6 @@ project "test_jsx_roundtrip_new_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -2277,7 +2239,6 @@ project "test_mdx_roundtrip_new_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2306,8 +2267,6 @@ project "test_mdx_roundtrip_new_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -2383,7 +2342,6 @@ project "test_css_tokenizer_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2413,8 +2371,6 @@ project "test_css_tokenizer_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -2490,7 +2446,6 @@ project "test_css_parser_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2520,8 +2475,6 @@ project "test_css_parser_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -2597,7 +2550,6 @@ project "test_css_integration_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2627,8 +2579,6 @@ project "test_css_integration_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -2704,7 +2654,6 @@ project "test_css_files_safe_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2734,8 +2683,6 @@ project "test_css_files_safe_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -2811,7 +2758,6 @@ project "test_css_frameworks_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2841,8 +2787,6 @@ project "test_css_frameworks_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -2918,7 +2862,6 @@ project "test_mdx_roundtrip_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -2947,8 +2890,6 @@ project "test_mdx_roundtrip_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -3024,7 +2965,6 @@ project "test_jsx_roundtrip_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3053,8 +2993,6 @@ project "test_jsx_roundtrip_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -3133,7 +3071,6 @@ project "test_latex_html_fixtures_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3163,8 +3100,6 @@ project "test_latex_html_fixtures_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -3241,7 +3176,6 @@ project "test_validator_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3270,8 +3204,6 @@ project "test_validator_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -3346,7 +3278,6 @@ project "test_ast_validator_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3376,8 +3307,6 @@ project "test_ast_validator_gtest"
         "/usr/local/lib/libmir.a",
         "-Wl,-force_load,/opt/homebrew/lib/libnghttp2.a",
         "../../mac-deps/curl-8.10.1/lib/libcurl.a",
-        "/opt/homebrew/lib/libssl.a",
-        "/opt/homebrew/lib/libcrypto.a",
     }
     
     -- Add dynamic libraries
@@ -3452,7 +3381,6 @@ project "test_lambda_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3513,7 +3441,6 @@ project "test_lambda_repl_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3574,7 +3501,6 @@ project "test_lambda_proc_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3635,7 +3561,6 @@ project "test_js_gtest"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {
@@ -3696,7 +3621,6 @@ project "test_lambda_runner"
         "lib/mem-pool/include",
         "mac-deps/curl-8.10.1/include",
         "/usr/local/include",
-        "/opt/homebrew/include/openssl",
     }
     
     libdirs {

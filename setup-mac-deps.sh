@@ -795,9 +795,9 @@ build_nghttp2_for_mac() {
     return 1
 }
 
-# Function to build libcurl with HTTP/2 support for Mac
+# Function to build libcurl with HTTP/2 support for Mac (using mbedTLS)
 build_curl_with_http2_for_mac() {
-    echo "Building libcurl with HTTP/2 support for Mac..."
+    echo "Building libcurl with HTTP/2 and mbedTLS support for Mac..."
 
     # Check if already built
     if [ -f "mac-deps/curl-8.10.1/lib/libcurl.a" ]; then
@@ -820,20 +820,27 @@ build_curl_with_http2_for_mac() {
 
     cd mac-deps/curl-8.10.1
 
-    # Get OpenSSL path from Homebrew
+    # Get mbedTLS path from Homebrew
     if command -v brew >/dev/null 2>&1; then
-        OPENSSL_PATH=$(brew --prefix openssl@3)
+        MBEDTLS_PATH=$(brew --prefix mbedtls)
+        if [ ! -d "$MBEDTLS_PATH" ]; then
+            echo "❌ mbedTLS not found in Homebrew. Install it with: brew install mbedtls"
+            cd - > /dev/null
+            return 1
+        fi
     else
-        echo "❌ Homebrew required for OpenSSL path"
+        echo "❌ Homebrew required for mbedTLS path"
         cd - > /dev/null
         return 1
     fi
 
-    # Configure libcurl with HTTP/2 support
-    echo "Configuring libcurl with HTTP/2 support..."
+    # Configure libcurl with HTTP/2 and mbedTLS support
+    echo "Configuring libcurl with HTTP/2 and mbedTLS support..."
+    echo "mbedTLS path: $MBEDTLS_PATH"
     if ./configure --prefix="$SCRIPT_DIR/mac-deps/curl-8.10.1" \
         --enable-static --disable-shared \
-        --with-openssl="$OPENSSL_PATH" \
+        --with-mbedtls="$MBEDTLS_PATH" \
+        --without-openssl --without-gnutls --without-wolfssl \
         --with-nghttp2="$SCRIPT_DIR/mac-deps/nghttp2" \
         --disable-ldap --disable-ldaps --disable-rtsp --disable-proxy \
         --disable-dict --disable-telnet --disable-tftp --disable-pop3 \
@@ -853,7 +860,16 @@ build_curl_with_http2_for_mac() {
         if make -j$(sysctl -n hw.ncpu); then
             echo "Installing libcurl..."
             if make install; then
-                echo "✅ libcurl with HTTP/2 built successfully"
+                echo "✅ libcurl with HTTP/2 and mbedTLS built successfully"
+
+                # Verify mbedTLS linkage
+                echo "Verifying mbedTLS linkage..."
+                if otool -L lib/.libs/libcurl.a 2>/dev/null | grep -q mbedtls; then
+                    echo "✅ libcurl is properly linked with mbedTLS"
+                else
+                    echo "⚠️  Note: Static library linkage verification may not show mbedTLS (normal for .a files)"
+                fi
+
                 cd - > /dev/null
                 return 0
             fi
@@ -1080,9 +1096,11 @@ HOMEBREW_DEPS=(
     "mpdecimal"  # For decimal arithmetic - referenced in build config
     "utf8proc"   # For Unicode processing - referenced in build config
     "coreutils"  # For timeout command needed by test suite
-    "openssl@3"  # For SSL/TLS support - required for libcurl
+    "mbedtls"    # For SSL/TLS support - replaced OpenSSL with mbedTLS
     "libharu"    # For PDF generation - referenced in build config
 )
+
+# Note: libcurl will be rebuilt with mbedTLS support (see build_curl_with_http2_for_mac)
 
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
 # Note: freetype is handled separately to ensure specific version 2.13.3
@@ -1184,6 +1202,7 @@ if command -v brew >/dev/null 2>&1; then
     BREW_PREFIX=$(brew --prefix)
     echo "- mpdecimal: $([ -f "$BREW_PREFIX/lib/libmpdec.a" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- utf8proc: $([ -f "$BREW_PREFIX/lib/libutf8proc.a" ] && echo "✓ Available" || echo "✗ Missing")"
+    echo "- mbedtls: $([ -f "$BREW_PREFIX/lib/libmbedtls.a" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- coreutils: $([ -f "$BREW_PREFIX/bin/gtimeout" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- timeout: $([ -f "$BREW_PREFIX/bin/timeout" ] && command -v timeout >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo ""

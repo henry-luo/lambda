@@ -1,6 +1,6 @@
 /**
  * @file server.h
- * @brief HTTP/HTTPS server implementation using libevent and OpenSSL
+ * @brief HTTP/HTTPS server implementation using libevent and mbedTLS
  *
  * this file defines the main server interface for creating and managing
  * HTTP and HTTPS servers with event-driven architecture.
@@ -14,8 +14,7 @@
 #include <event2/buffer.h>
 #include <event2/bufferevent.h>
 #include <event2/bufferevent_ssl.h>
-#include <openssl/ssl.h>
-#include <openssl/err.h>
+#include "mbedtls_compat.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -102,7 +101,7 @@ int server_run(server_t *server);
  * @param user_data user data to pass to handler
  * @return 0 on success, -1 on error
  */
-int server_set_handler(server_t *server, const char *path, 
+int server_set_handler(server_t *server, const char *path,
                       request_handler_t handler, void *user_data);
 
 /**
@@ -112,7 +111,7 @@ int server_set_handler(server_t *server, const char *path,
  * @param user_data user data to pass to handler
  * @return 0 on success, -1 on error
  */
-int server_set_default_handler(server_t *server, 
+int server_set_default_handler(server_t *server,
                               request_handler_t handler, void *user_data);
 
 /**

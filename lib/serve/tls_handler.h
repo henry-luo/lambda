@@ -3,16 +3,13 @@
  * @brief TLS/SSL handling for HTTPS support
  *
  * this file defines functions for managing SSL contexts, loading certificates,
- * and handling secure connections using OpenSSL.
+ * and handling secure connections using mbedTLS.
  */
 
 #ifndef SERVE_TLS_HANDLER_H
 #define SERVE_TLS_HANDLER_H
 
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-#include <openssl/x509.h>
-#include <openssl/pem.h>
+#include "mbedtls_compat.h"
 #include <event2/bufferevent_ssl.h>
 
 #ifdef __cplusplus
@@ -73,7 +70,7 @@ void tls_destroy_context(SSL_CTX *ctx);
  * @param key_file path to private key file
  * @return 0 on success, -1 on error
  */
-int tls_load_certificates(SSL_CTX *ctx, const char *cert_file, 
+int tls_load_certificates(SSL_CTX *ctx, const char *cert_file,
                          const char *key_file);
 
 /**
@@ -83,7 +80,7 @@ int tls_load_certificates(SSL_CTX *ctx, const char *cert_file,
  * @param ca_path path to ca certificate directory (can be NULL)
  * @return 0 on success, -1 on error
  */
-int tls_set_ca_certificates(SSL_CTX *ctx, const char *ca_file, 
+int tls_set_ca_certificates(SSL_CTX *ctx, const char *ca_file,
                            const char *ca_path);
 
 /**
@@ -114,7 +111,7 @@ void tls_set_verify(SSL_CTX *ctx, int verify_peer, int verify_depth);
  * @param state ssl connection state (BUFFEREVENT_SSL_ACCEPTING, etc.)
  * @return ssl bufferevent or NULL on error
  */
-struct bufferevent* tls_create_bufferevent(struct event_base *base, 
+struct bufferevent* tls_create_bufferevent(struct event_base *base,
                                           SSL_CTX *ctx, evutil_socket_t socket,
                                           enum bufferevent_ssl_state state);
 

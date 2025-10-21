@@ -107,7 +107,7 @@
     "libraries": [
         {
             "name": "curl",
-            "description": "libcurl HTTP client library (minimal build)",
+            "description": "libcurl HTTP client library (built with mbedTLS)",
             "include": "mac-deps/curl-8.10.1/include",
             "lib": "mac-deps/curl-8.10.1/lib/libcurl.a",
             "link": "static"
@@ -149,15 +149,24 @@
             "link": "static"
         },
         {
-            "name": "ssl",
-            "include": "/opt/homebrew/include/openssl",
-            "lib": "/opt/homebrew/lib/libssl.a",
+            "name": "mbedtls",
+            "description": "mbedTLS - SSL/TLS library",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libmbedtls.a",
             "link": "static"
         },
         {
-            "name": "crypto",
-            "include": "/opt/homebrew/include/openssl",
-            "lib": "/opt/homebrew/lib/libcrypto.a",
+            "name": "mbedx509",
+            "description": "mbedTLS - X.509 certificate parsing",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libmbedx509.a",
+            "link": "static"
+        },
+        {
+            "name": "mbedcrypto",
+            "description": "mbedTLS - Cryptographic primitives",
+            "include": "/opt/homebrew/include",
+            "lib": "/opt/homebrew/lib/libmbedcrypto.a",
             "link": "static"
         },
         {
@@ -346,8 +355,9 @@
                 "utf8proc",
                 "nghttp2",
                 "curl",
-                "ssl",
-                "crypto",
+                "mbedtls",
+                "mbedx509",
+                "mbedcrypto",
                 "zlib",
                 "rpmalloc"
             ],
@@ -575,15 +585,24 @@
                     "link": "static"
                 },
                 {
-                    "name": "ssl",
+                    "name": "mbedtls",
+                    "description": "mbedTLS - SSL/TLS library",
                     "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libssl.a",
+                    "lib": "/mingw64/lib/libmbedtls.a",
                     "link": "static"
                 },
                 {
-                    "name": "crypto",
+                    "name": "mbedx509",
+                    "description": "mbedTLS - X.509 certificate parsing",
                     "include": "/mingw64/include",
-                    "lib": "/mingw64/lib/libcrypto.a",
+                    "lib": "/mingw64/lib/libmbedx509.a",
+                    "link": "static"
+                },
+                {
+                    "name": "mbedcrypto",
+                    "description": "mbedTLS - Cryptographic primitives",
+                    "include": "/mingw64/include",
+                    "lib": "/mingw64/lib/libmbedcrypto.a",
                     "link": "static"
                 },
                 {
@@ -818,15 +837,24 @@
                     "link": "dynamic"
                 },
                 {
-                    "name": "ssl",
-                    "include": "/usr/include/openssl",
-                    "lib": "/usr/lib/aarch64-linux-gnu/libssl.a",
+                    "name": "mbedtls",
+                    "description": "mbedTLS - SSL/TLS library",
+                    "include": "/usr/include",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libmbedtls.a",
                     "link": "static"
                 },
                 {
-                    "name": "crypto",
-                    "include": "/usr/include/openssl",
-                    "lib": "/usr/lib/aarch64-linux-gnu/libcrypto.a",
+                    "name": "mbedx509",
+                    "description": "mbedTLS - X.509 certificate parsing",
+                    "include": "/usr/include",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libmbedx509.a",
+                    "link": "static"
+                },
+                {
+                    "name": "mbedcrypto",
+                    "description": "mbedTLS - Cryptographic primitives",
+                    "include": "/usr/include",
+                    "lib": "/usr/lib/aarch64-linux-gnu/libmbedcrypto.a",
                     "link": "static"
                 },
                 {
