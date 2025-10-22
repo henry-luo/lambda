@@ -1119,6 +1119,23 @@
                         "binary": "test_avl_tree.exe"
                     },
                     {
+                        "source": "test_css_style_node.cpp",
+                        "name": "🎨 CSS Style Node & Cascade Tests (GTest)",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/avl_tree.c",
+                            "lib/css_property_system.c",
+                            "lib/css_style_node.c",
+                            "lib/mempool.c"
+                        ],
+                        "binary": "test_css_style_node.exe"
+                    },
+                    {
                         "source": "test_css_system.cpp",
                         "name": "🎨 CSS Property System & Style Node Tests (GTest)",
                         "dependencies": [],

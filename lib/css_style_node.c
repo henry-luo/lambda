@@ -14,6 +14,7 @@ static bool collect_selectors_callback(StyleNode* node, void* context);
 static bool merge_tree_callback(StyleNode* node, void* context);
 static bool clone_tree_callback(StyleNode* node, void* context);
 static bool wrapper_callback(AvlNode* avl_node, void* ctx);
+static int css_get_cascade_level(CssDeclaration* decl);
 
 // Context structures for callbacks
 struct CollectContext {
@@ -146,22 +147,58 @@ void css_declaration_unref(CssDeclaration* declaration) {
 int css_declaration_cascade_compare(CssDeclaration* a, CssDeclaration* b) {
     if (!a || !b) return 0;
     
-    // 1. Origin comparison (user-agent < user < author)
-    if (a->origin != b->origin) {
-        return (a->origin < b->origin) ? -1 : 1;
+    // CSS Cascade Order (per CSS Cascading and Inheritance Level 4):
+    // 1. User-agent normal declarations
+    // 2. User normal declarations
+    // 3. Author normal declarations
+    // 4. Animation declarations
+    // 5. Author !important declarations
+    // 6. User !important declarations
+    // 7. User-agent !important declarations
+    
+    // Calculate cascade level for each declaration
+    int level_a = css_get_cascade_level(a);
+    int level_b = css_get_cascade_level(b);
+    
+    if (level_a != level_b) {
+        return (level_a < level_b) ? -1 : 1;
     }
     
-    // 2. Specificity comparison
+    // Within the same cascade level, compare specificity
     int spec_cmp = css_specificity_compare(a->specificity, b->specificity);
     if (spec_cmp != 0) {
         return spec_cmp;
     }
     
-    // 3. Source order comparison (later wins)
+    // Finally, source order comparison (later wins)
     if (a->source_order < b->source_order) return -1;
     if (a->source_order > b->source_order) return 1;
     
     return 0; // Equal
+}
+
+// Helper function to determine cascade level
+static int css_get_cascade_level(CssDeclaration* decl) {
+    if (decl->specificity.important) {
+        // Important declarations (reverse origin order)
+        switch (decl->origin) {
+            case CSS_ORIGIN_USER_AGENT: return 7;
+            case CSS_ORIGIN_USER: return 6;
+            case CSS_ORIGIN_AUTHOR: return 5;
+            case CSS_ORIGIN_ANIMATION: return 4; // Animations don't have !important
+            case CSS_ORIGIN_TRANSITION: return 4; // Transitions don't have !important
+        }
+    } else {
+        // Normal declarations
+        switch (decl->origin) {
+            case CSS_ORIGIN_USER_AGENT: return 1;
+            case CSS_ORIGIN_USER: return 2;
+            case CSS_ORIGIN_AUTHOR: return 3;
+            case CSS_ORIGIN_ANIMATION: return 4;
+            case CSS_ORIGIN_TRANSITION: return 4;
+        }
+    }
+    return 3; // Default to author normal
 }
 
 // ============================================================================
