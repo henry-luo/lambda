@@ -97,32 +97,52 @@ bool css_property_enhanced_validate_value(CSSPropertyID id, CSSPropertyValue* va
     return value->type == expected || value->type == CSS_PROP_TYPE_KEYWORD;
 }
 
+bool css_property_validate_value(CssPropertyId id, CssValue* value) {
+    if (!value) return false;
+    
+    // Basic validation - accept all values for now
+    // In a full implementation, this would validate the value against the property's allowed types
+    (void)id; // Suppress unused parameter warning
+    return true;
+}
+
 CSSProperty* css_parse_property(const char* name, const char* value, Pool* pool) {
     if (!name || !value || !pool) return NULL;
     
     CSSProperty* prop = (CSSProperty*)pool_calloc(pool, sizeof(CSSProperty));
     if (!prop) return NULL;
     
-    prop->id = css_property_id_from_name(name);
-    prop->name = pool_strdup(pool, name);
-    prop->value_count = 1;
+    // Initialize the declaration structure
+    prop->property_id = css_property_id_from_name(name);
+    prop->origin = CSS_ORIGIN_AUTHOR;
+    prop->source_order = 0;
     prop->important = false;
+    prop->source_file = NULL;
+    prop->source_line = 0;
+    
+    // Initialize specificity to zero
+    prop->specificity.inline_style = 0;
+    prop->specificity.ids = 0;
+    prop->specificity.classes = 0;
+    prop->specificity.elements = 0;
+    prop->specificity.important = false;
     
     // Check for !important
     const char* important_pos = strstr(value, "!important");
     if (important_pos) {
         prop->important = true;
+        prop->specificity.important = true;
     }
     
-    // Allocate space for one property value
-    prop->values = (CSSPropertyValue*)pool_calloc(pool, sizeof(CSSPropertyValue));
-    if (!prop->values) {
+    // Create a simple value (just store as keyword for now)
+    prop->value = (CssValue*)pool_calloc(pool, sizeof(CssValue));
+    if (!prop->value) {
         return NULL;
     }
     
     // Simple value parsing - just store as keyword for now
-    prop->values[0].type = CSS_PROP_TYPE_KEYWORD;
-    prop->values[0].value.keyword = pool_strdup(pool, value);
+    prop->value->type = CSS_VALUE_KEYWORD;
+    prop->value->data.keyword = pool_strdup(pool, value);
     
     return prop;
 }

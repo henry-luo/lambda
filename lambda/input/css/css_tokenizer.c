@@ -1,4 +1,4 @@
-#include "css_tokenizer_enhanced.h"
+#include "css_tokenizer.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -135,7 +135,7 @@ char* css_decode_unicode_escapes(const char* input, Pool* pool) {
 }
 
 // CSS3+ function information database
-static CSSFunctionInfo css_function_database[] = {
+static CssFunctionInfo css_function_database[] = {
     // Mathematical functions
     {"calc", 1, 1, NULL, false, true},
     {"min", 1, -1, NULL, true, true},
@@ -239,10 +239,10 @@ static CSSFunctionInfo css_function_database[] = {
     {NULL, 0, 0, NULL, false, false} // Sentinel
 };
 
-CSSFunctionInfo* css_get_function_info(const char* function_name) {
+CssFunctionInfo* css_get_function_info(const char* function_name) {
     if (!function_name) return NULL;
     
-    for (CSSFunctionInfo* info = css_function_database; info->name; info++) {
+    for (CssFunctionInfo* info = css_function_database; info->name; info++) {
         if (strcmp(info->name, function_name) == 0) {
             return info;
         }
@@ -336,26 +336,26 @@ CssColorType css_detect_color_type(const char* color_str) {
     }
     
     if (strcmp(color_str, "currentColor") == 0 || strcmp(color_str, "currentcolor") == 0) {
-        return CSS_COLOR_CURRENT;
+        return CSS_COLOR_CURRENTCOLOR;
     }
     
     return CSS_COLOR_KEYWORD;
 }
 
 // String conversion utilities
-const char* css_token_type_enhanced_to_str(CSSTokenTypeEnhanced type) {
+const char* css_token_type_to_str(CssTokenType type) {
     switch (type) {
-        case CSS_TOKEN_ENHANCED_CUSTOM_PROPERTY: return "CUSTOM_PROPERTY";
-        case CSS_TOKEN_ENHANCED_CALC_FUNCTION: return "CALC_FUNCTION";
-        case CSS_TOKEN_ENHANCED_VAR_FUNCTION: return "VAR_FUNCTION";
-        case CSS_TOKEN_ENHANCED_ENV_FUNCTION: return "ENV_FUNCTION";
-        case CSS_TOKEN_ENHANCED_ATTR_FUNCTION: return "ATTR_FUNCTION";
-        case CSS_TOKEN_ENHANCED_COLOR_FUNCTION: return "COLOR_FUNCTION";
-        case CSS_TOKEN_ENHANCED_NESTING_SELECTOR: return "NESTING_SELECTOR";
-        case CSS_TOKEN_ENHANCED_CDO: return "CDO";
-        case CSS_TOKEN_ENHANCED_CDC: return "CDC";
-        case CSS_TOKEN_ENHANCED_BAD_STRING: return "BAD_STRING";
-        case CSS_TOKEN_ENHANCED_BAD_URL: return "BAD_URL";
+        case CSS_TOKEN_CUSTOM_PROPERTY: return "CUSTOM_PROPERTY";
+        case CSS_TOKEN_CALC_FUNCTION: return "CALC_FUNCTION";
+        case CSS_TOKEN_VAR_FUNCTION: return "VAR_FUNCTION";
+        case CSS_TOKEN_ENV_FUNCTION: return "ENV_FUNCTION";
+        case CSS_TOKEN_ATTR_FUNCTION: return "ATTR_FUNCTION";
+        case CSS_TOKEN_COLOR_FUNCTION: return "COLOR_FUNCTION";
+        case CSS_TOKEN_NESTING_SELECTOR: return "NESTING_SELECTOR";
+        case CSS_TOKEN_CDO: return "CDO";
+        case CSS_TOKEN_CDC: return "CDC";
+        case CSS_TOKEN_BAD_STRING: return "BAD_STRING";
+        case CSS_TOKEN_BAD_URL: return "BAD_URL";
         default:
             // Fall back to original tokenizer for basic types
             return css_token_type_to_str((CSSTokenType)type);
@@ -420,24 +420,24 @@ const char* css_color_type_to_str(CssColorType type) {
         case CSS_COLOR_COLOR: return "color";
         case CSS_COLOR_KEYWORD: return "keyword";
         case CSS_COLOR_TRANSPARENT: return "transparent";
-        case CSS_COLOR_CURRENT: return "current";
+        case CSS_COLOR_CURRENTCOLOR: return "currentcolor";
         case CSS_COLOR_SYSTEM: return "system";
         default: return "unknown";
     }
 }
 
 // Error recovery functions
-bool css_token_is_recoverable_error(CSSTokenEnhanced* token) {
+bool css_token_is_recoverable_error(CssToken* token) {
     if (!token) return false;
     
-    return token->type == CSS_TOKEN_ENHANCED_BAD_STRING ||
-           token->type == CSS_TOKEN_ENHANCED_BAD_URL;
+    return token->type == CSS_TOKEN_BAD_STRING ||
+           token->type == CSS_TOKEN_BAD_URL;
 }
 
-void css_token_fix_common_errors(CSSTokenEnhanced* token, Pool* pool) {
+void css_token_fix_common_errors(CssToken* token, Pool* pool) {
     if (!token || !pool) return;
     
-    if (token->type == CSS_TOKEN_ENHANCED_BAD_STRING) {
+    if (token->type == CSS_TOKEN_BAD_STRING) {
         // Try to close unclosed string
         size_t len = token->length;
         char* fixed_value = (char*)pool_alloc(pool, len + 2);
@@ -446,9 +446,9 @@ void css_token_fix_common_errors(CSSTokenEnhanced* token, Pool* pool) {
             fixed_value[len] = '"'; // Add closing quote
             fixed_value[len + 1] = '\0';
             token->value = fixed_value;
-            token->type = CSS_TOKEN_ENHANCED_STRING;
+            token->type = CSS_TOKEN_STRING;
         }
-    } else if (token->type == CSS_TOKEN_ENHANCED_BAD_URL) {
+    } else if (token->type == CSS_TOKEN_BAD_URL) {
         // Try to close unclosed URL
         size_t len = token->length;
         char* fixed_value = (char*)pool_alloc(pool, len + 2);
@@ -457,7 +457,7 @@ void css_token_fix_common_errors(CSSTokenEnhanced* token, Pool* pool) {
             fixed_value[len] = ')'; // Add closing paren
             fixed_value[len + 1] = '\0';
             token->value = fixed_value;
-            token->type = CSS_TOKEN_ENHANCED_URL;
+            token->type = CSS_TOKEN_URL;
         }
     }
 }
@@ -465,11 +465,11 @@ void css_token_fix_common_errors(CSSTokenEnhanced* token, Pool* pool) {
 CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* token_count) {
     if (!input || !pool || !token_count) return NULL;
     
-    // Use the enhanced tokenizer
-    CSSTokenizerEnhanced* enhanced = css_tokenizer_enhanced_create(pool);
+    // Use the tokenizer
+    CSSTokenizer* enhanced = css_tokenizer_enhanced_create(pool);
     if (!enhanced) return NULL;
     
-    CSSTokenEnhanced* enhanced_tokens;
+    CssToken* enhanced_tokens;
     int enhanced_count = css_tokenizer_enhanced_tokenize(enhanced, input, length, &enhanced_tokens);
     
     if (enhanced_count <= 0) {
@@ -485,7 +485,7 @@ CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* tok
     }
     
     for (int i = 0; i < enhanced_count; i++) {
-        CSSTokenEnhanced* src = &enhanced_tokens[i];
+        CssToken* src = &enhanced_tokens[i];
         CSSToken* dst = &basic_tokens[i];
         
         // Basic type mapping
@@ -505,7 +505,7 @@ void css_free_tokens(CSSToken* tokens) {
     (void)tokens;
 }
 
-const char* css_token_type_to_str(CSSTokenType type) {
+const char* css_enhanced_token_type_to_str(CSSTokenType type) {
     switch (type) {
         case CSS_TOKEN_IDENT: return "IDENT";
         case CSS_TOKEN_FUNCTION: return "FUNCTION";
@@ -539,34 +539,11 @@ bool css_is_newline(int c) {
     return c == '\n' || c == '\r' || c == '\f';
 }
 
-// Implementation of css_tokenize_enhanced
-CSSTokenEnhanced* css_tokenize_enhanced(const char* input, size_t length, 
-                                       Pool* pool, size_t* token_count) {
-    if (!input || !pool || !token_count) {
-        if (token_count) *token_count = 0;
-        return NULL;
-    }
-    
-    // Create a tokenizer and use it
-    CSSTokenizerEnhanced* tokenizer = css_tokenizer_enhanced_create(pool);
-    if (!tokenizer) {
-        *token_count = 0;
-        return NULL;
-    }
-    
-    CSSTokenEnhanced* tokens = NULL;
-    int count = css_tokenizer_enhanced_tokenize(tokenizer, input, length, &tokens);
-    *token_count = (size_t)count;
-    
-    css_tokenizer_enhanced_destroy(tokenizer);
-    return tokens;
-}
-
 // Enhanced tokenizer implementation
-CSSTokenizerEnhanced* css_tokenizer_enhanced_create(Pool* pool) {
+CSSTokenizer* css_tokenizer_enhanced_create(Pool* pool) {
     if (!pool) return NULL;
     
-    CSSTokenizerEnhanced* tokenizer = pool_alloc(pool, sizeof(CSSTokenizerEnhanced));
+    CSSTokenizer* tokenizer = pool_alloc(pool, sizeof(CSSTokenizer));
     if (!tokenizer) return NULL;
     
     tokenizer->pool = pool;
@@ -581,19 +558,20 @@ CSSTokenizerEnhanced* css_tokenizer_enhanced_create(Pool* pool) {
     return tokenizer;
 }
 
-void css_tokenizer_enhanced_destroy(CSSTokenizerEnhanced* tokenizer) {
+void css_tokenizer_enhanced_destroy(CSSTokenizer* tokenizer) {
     // Memory managed by pool, no explicit cleanup needed
     (void)tokenizer;
 }
 
-int css_tokenizer_enhanced_tokenize(CSSTokenizerEnhanced* tokenizer, 
+int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer, 
                                    const char* input, size_t length, 
-                                   CSSTokenEnhanced** tokens) {
+                                   CssToken** tokens) {
     if (!tokenizer || !input || !tokens) return 0;
     
-    // For now, delegate to the existing css_tokenize_enhanced function
+    // Call css_tokenize function directly
     size_t count = 0;
-    *tokens = css_tokenize_enhanced(input, length, tokenizer->pool, &count);
+    CSSToken* css_tokens = css_tokenize(input, length, tokenizer->pool, &count);
+    *tokens = (CssToken*)css_tokens;  // Cast between token types
     return (int)count;
 }
 

@@ -1,139 +1,139 @@
-#include "css_enhanced_integration.h"
+#include "css_integration.h"
+#include "css_property_value_parser.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
 
 // Forward declarations for functions defined later in this file
-static void css_enhanced_detect_features_in_rule(CSSEnhancedStylesheet* stylesheet, CSSEnhancedRule* rule);
-static void css_enhanced_apply_rule_to_element(CSSEnhancedRule* rule, StyleNode* element, Pool* pool);
+static void css_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* rule);
+static void css_apply_rule_to_element(CssRule* rule, CssStyleNode* element, Pool* pool);
 
 // Forward declarations for missing style node and engine functions
 int css_style_node_compare(const void* a, const void* b, void* udata);
 void css_style_node_cleanup(void* node, void* udata);
-CssStyleEngine* css_style_engine_create(Pool* pool);
-static void css_style_engine_destroy(CssStyleEngine* engine);
-CssStyleEngine* css_style_engine_create(Pool* pool);
-static void css_style_engine_destroy(CssStyleEngine* engine);
+CssEngine* css_engine_create(Pool* pool);
+void css_engine_destroy(CssEngine* engine);
+CssEngine* css_engine_create(Pool* pool);
 
 // Style node management functions (stub implementations)
-static void css_style_node_init(StyleNode* node, const char* element_name, Pool* pool) {
+static void css_style_node_init(CssStyleNode* node, const char* element_name, Pool* pool) {
     if (!node || !pool) return;
-    memset(node, 0, sizeof(StyleNode));
+    memset(node, 0, sizeof(CssStyleNode));
     // Basic initialization - element_name handling would go here
 }
 
-static void css_style_node_set_element_name(StyleNode* node, const char* element_name) {
+static void css_style_node_set_element_name(CssStyleNode* node, const char* element_name) {
     // Stub: element name setting would be implemented here
     if (!node || !element_name) return;
 }
 
-static void css_style_node_add_class(StyleNode* node, const char* class_name) {
+static void css_style_node_add_class(CssStyleNode* node, const char* class_name) {
     // Stub: class name addition would be implemented here  
     if (!node || !class_name) return;
 }
 
-static void css_style_node_add_property(StyleNode* node, const char* prop_name, 
+static void css_style_node_add_property(CssStyleNode* node, const char* prop_name, 
                                        void* value, Pool* pool) {
     // Stub: property addition would be implemented here
     if (!node || !prop_name || !value || !pool) return;
 }
 
 // Additional style node query functions (stubs)
-static bool css_style_node_has_class(StyleNode* node, const char* class_name) {
+static bool css_style_node_has_class(CssStyleNode* node, const char* class_name) {
     // Stub: class checking would be implemented here
     if (!node || !class_name) return false;
     return false; // Default stub behavior
 }
 
-static bool css_style_node_matches_id(StyleNode* node, const char* id) {
+static bool css_style_node_matches_id(CssStyleNode* node, const char* id) {
     // Stub: ID matching would be implemented here
     if (!node || !id) return false;
     return false; // Default stub behavior
 }
 
-static bool css_style_node_matches_element_name(StyleNode* node, const char* element_name) {
+static bool css_style_node_matches_element_name(CssStyleNode* node, const char* element_name) {
     // Stub: element name matching would be implemented here
     if (!node || !element_name) return false;
     return false; // Default stub behavior
 }
 
 // Enhanced CSS4+ pseudo-selector functions (stubs)
-static bool css_enhanced_pseudo_has_matches(StyleNode* node, CSSSelectorComponent* component) {
+static bool css_enhanced_pseudo_has_matches(CssStyleNode* node, CSSSelectorComponent* component) {
     // Stub: :has() pseudo-class matching
     if (!node || !component) return false;
     return false;
 }
 
-static bool css_enhanced_pseudo_is_matches(StyleNode* node, CSSSelectorComponent* component) {
+static bool css_enhanced_pseudo_is_matches(CssStyleNode* node, CSSSelectorComponent* component) {
     // Stub: :is() pseudo-class matching
     if (!node || !component) return false;
     return false;
 }
 
-static bool css_enhanced_pseudo_where_matches(StyleNode* node, CSSSelectorComponent* component) {
+static bool css_enhanced_pseudo_where_matches(CssStyleNode* node, CSSSelectorComponent* component) {
     // Stub: :where() pseudo-class matching
     if (!node || !component) return false;
     return false;
 }
 
-static bool css_enhanced_pseudo_not_matches(StyleNode* node, CSSSelectorComponent* component) {
+static bool css_enhanced_pseudo_not_matches(CssStyleNode* node, CSSSelectorComponent* component) {
     // Stub: :not() pseudo-class matching
     if (!node || !component) return false;
     return false;
 }
 
-static bool css_enhanced_nesting_parent_matches(StyleNode* node, CSSSelectorComponent* component) {
+static bool css_nesting_parent_matches(CssStyleNode* node, CSSSelectorComponent* component) {
     // Stub: CSS nesting parent selector (&) matching
     if (!node || !component) return false;
     return false;
 }
 
-// Enhanced pseudo-class matching (stub)
-bool css_enhanced_pseudo_class_matches(CSSEnhancedEngine* engine,
-                                      CSSSelectorType pseudo_type,
-                                      CssStyleNode* element) {
-    // Stub: enhanced pseudo-class matching would be implemented here
+// CSS pseudo-class matching (stub)
+bool css_pseudo_class_matches(CssEngine* engine,
+                             CssSelectorType pseudo_type,
+                             CssStyleNode* element) {
+    // Stub: pseudo-class matching would be implemented here
     if (!engine || !element) return false;
     return false;
 }
 
-static void css_style_node_set_id(StyleNode* node, const char* id) {
+static void css_style_node_set_id(CssStyleNode* node, const char* id) {
     // Stub: ID setting would be implemented here
     if (!node || !id) return;
 }
 
-static void css_style_node_add_attribute_selector(StyleNode* node, const char* attr_name, const char* attr_value) {
+static void css_style_node_add_attribute_selector(CssStyleNode* node, const char* attr_name, const char* attr_value) {
     // Stub: attribute selector addition would be implemented here
     if (!node || !attr_name) return;
 }
 
 // Enhanced rule matching functions (stubs)
-static bool css_enhanced_rule_matches_element(CSSEnhancedRule* rule, StyleNode* element) {
+static bool css_enhanced_rule_matches_element(CssRule* rule, CssStyleNode* element) {
     // Stub: enhanced rule matching would be implemented here
     if (!rule || !element) return false;
     return false; // Default stub behavior
 }
 
-static void css_enhanced_sort_rules_by_cascade(CSSEnhancedRule** rules, int rule_count) {
+static void css_enhanced_sort_rules_by_cascade(CssRule** rules, int rule_count) {
     // Stub: cascade sorting would be implemented here
     if (!rules || rule_count <= 0) return;
 }
 
-static void css_enhanced_apply_rule_to_element(CSSEnhancedRule* rule, StyleNode* element, Pool* pool) {
+static void css_enhanced_apply_rule_to_element(CssRule* rule, CssStyleNode* element, Pool* pool) {
     // Stub: rule application would be implemented here
     if (!rule || !element || !pool) return;
 }
 
 // Parse CSS rule from tokens (stub implementation)
-static CSSEnhancedRule* css_enhanced_parse_rule_from_tokens(const CSSTokenEnhanced* tokens,
-                                                          int token_count, Pool* pool) {
+static CssRule* css_parse_rule_from_tokens(const CssToken* tokens,
+                                           int token_count, Pool* pool) {
     // Stub implementation for enhanced rule parsing
     if (!tokens || token_count <= 0 || !pool) {
         return NULL;
     }
     
-    CSSEnhancedRule* rule = pool_calloc(pool, sizeof(CSSEnhancedRule));
+    CssRule* rule = pool_calloc(pool, sizeof(CssRule));
     if (!rule) {
         return NULL;
     }
@@ -144,16 +144,16 @@ static CSSEnhancedRule* css_enhanced_parse_rule_from_tokens(const CSSTokenEnhanc
 }
 
 // Enhanced CSS Engine creation
-CSSEnhancedEngine* css_enhanced_engine_create(Pool* pool) {
+CssEngine* css_enhanced_engine_create(Pool* pool) {
     if (!pool) return NULL;
     
-    CSSEnhancedEngine* engine = (CSSEnhancedEngine*)pool_calloc(pool, sizeof(CSSEnhancedEngine));
+    CssEngine* engine = (CssEngine*)pool_calloc(pool, sizeof(CssEngine));
     if (!engine) return NULL;
     
     engine->pool = pool;
     
     // Initialize core components
-    engine->tokenizer = css_tokenizer_enhanced_create(pool);
+    engine->tokenizer = css_tokenizer_create(pool);
     engine->selector_parser = css_selector_parser_create(pool);
     engine->value_parser = css_property_value_parser_create(pool);
     
@@ -197,7 +197,7 @@ CSSEnhancedEngine* css_enhanced_engine_create(Pool* pool) {
     return engine;
 }
 
-void css_enhanced_engine_destroy(CSSEnhancedEngine* engine) {
+void css_enhanced_engine_destroy(CssEngine* engine) {
     if (!engine) return;
     
     // Cleanup components
@@ -217,7 +217,7 @@ void css_enhanced_engine_destroy(CSSEnhancedEngine* engine) {
 }
 
 // Configuration functions
-void css_enhanced_engine_enable_feature(CSSEnhancedEngine* engine, const char* feature_name, bool enabled) {
+void css_enhanced_engine_enable_feature(CssEngine* engine, const char* feature_name, bool enabled) {
     if (!engine || !feature_name) return;
     
     if (strcmp(feature_name, "css-nesting") == 0) {
@@ -243,14 +243,14 @@ void css_enhanced_engine_enable_feature(CSSEnhancedEngine* engine, const char* f
     }
 }
 
-void css_enhanced_engine_set_viewport(CSSEnhancedEngine* engine, double width, double height) {
+void css_enhanced_engine_set_viewport(CssEngine* engine, double width, double height) {
     if (!engine) return;
     
     engine->context.viewport_width = width;
     engine->context.viewport_height = height;
 }
 
-void css_enhanced_engine_set_color_scheme(CSSEnhancedEngine* engine, const char* scheme) {
+void css_enhanced_engine_set_color_scheme(CssEngine* engine, const char* scheme) {
     if (!engine || !scheme) return;
     
     // Copy scheme string
@@ -262,21 +262,21 @@ void css_enhanced_engine_set_color_scheme(CSSEnhancedEngine* engine, const char*
     }
 }
 
-void css_enhanced_engine_set_root_font_size(CSSEnhancedEngine* engine, double size) {
+void css_enhanced_engine_set_root_font_size(CssEngine* engine, double size) {
     if (!engine || size <= 0) return;
     
     engine->context.root_font_size = size;
 }
 
 // Enhanced CSS parsing
-CSSEnhancedStylesheet* css_enhanced_parse_stylesheet(CSSEnhancedEngine* engine, 
+CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine, 
                                                      const char* css_text, 
                                                      const char* base_url) {
     if (!engine || !css_text) return NULL;
     
     clock_t start_time = clock();
     
-    CSSEnhancedStylesheet* stylesheet = (CSSEnhancedStylesheet*)pool_calloc(engine->pool, sizeof(CSSEnhancedStylesheet));
+    CssStylesheet* stylesheet = (CssStylesheet*)pool_calloc(engine->pool, sizeof(CssStylesheet));
     if (!stylesheet) return NULL;
     
     // Set stylesheet metadata
@@ -291,11 +291,11 @@ CSSEnhancedStylesheet* css_enhanced_parse_stylesheet(CSSEnhancedEngine* engine,
     
     // Initialize rule storage
     stylesheet->rule_capacity = 64;
-    stylesheet->rules = (CSSEnhancedRule**)pool_alloc(engine->pool, 
-                                                     stylesheet->rule_capacity * sizeof(CSSEnhancedRule*));
+    stylesheet->rules = (CssRule**)pool_alloc(engine->pool, 
+                                                     stylesheet->rule_capacity * sizeof(CssRule*));
     
     // Tokenize the CSS
-    CSSTokenEnhanced* tokens;
+    CssToken* tokens;
     int token_count = css_tokenizer_enhanced_tokenize(engine->tokenizer, css_text, strlen(css_text), &tokens);
     
     if (token_count <= 0) {
@@ -307,16 +307,16 @@ CSSEnhancedStylesheet* css_enhanced_parse_stylesheet(CSSEnhancedEngine* engine,
     // Parse rules from tokens
     int token_index = 0;
     while (token_index < token_count) {
-        CSSEnhancedRule* rule = css_enhanced_parse_rule_from_tokens(tokens + token_index, token_count - token_index, engine->pool);
+        CssRule* rule = css_enhanced_parse_rule_from_tokens(tokens + token_index, token_count - token_index, engine->pool);
         if (rule) {
             // Add rule to stylesheet
             if (stylesheet->rule_count >= stylesheet->rule_capacity) {
                 // Expand capacity
                 stylesheet->rule_capacity *= 2;
-                CSSEnhancedRule** new_rules = (CSSEnhancedRule**)pool_alloc(engine->pool, 
-                                                                          stylesheet->rule_capacity * sizeof(CSSEnhancedRule*));
+                CssRule** new_rules = (CssRule**)pool_alloc(engine->pool, 
+                                                                          stylesheet->rule_capacity * sizeof(CssRule*));
                 if (new_rules) {
-                    memcpy(new_rules, stylesheet->rules, stylesheet->rule_count * sizeof(CSSEnhancedRule*));
+                    memcpy(new_rules, stylesheet->rules, stylesheet->rule_count * sizeof(CssRule*));
                     stylesheet->rules = new_rules;
                 }
             }
@@ -341,7 +341,7 @@ CSSEnhancedStylesheet* css_enhanced_parse_stylesheet(CSSEnhancedEngine* engine,
 }
 
 // Feature detection in rules
-static void css_enhanced_detect_features_in_rule(CSSEnhancedStylesheet* stylesheet, CSSEnhancedRule* rule) {
+void css_enhanced_detect_features_in_rule(CssStylesheet* stylesheet, CssRule* rule) {
     if (!stylesheet || !rule) return;
     
     // Check for CSS Nesting (& selector)
@@ -362,7 +362,7 @@ static void css_enhanced_detect_features_in_rule(CSSEnhancedStylesheet* styleshe
     
     // Check for custom properties and other features
     for (int i = 0; i < rule->property_count; i++) {
-        CSSValueEnhanced* value = rule->property_values[i];
+        CssValue* value = rule->property_values[i];
         if (value) {
             switch (value->type) {
                 case CSS_VALUE_ENHANCED_VAR:
@@ -382,8 +382,8 @@ static void css_enhanced_detect_features_in_rule(CSSEnhancedStylesheet* styleshe
 }
 
 // Style node integration
-bool css_enhanced_rule_to_style_node(CSSEnhancedEngine* engine, 
-                                     CSSEnhancedRule* rule, 
+bool css_enhanced_rule_to_style_node(CssEngine* engine, 
+                                     CssRule* rule, 
                                      CssStyleNode** style_nodes, 
                                      int* node_count) {
     if (!engine || !rule || !style_nodes || !node_count) return false;
@@ -403,7 +403,7 @@ bool css_enhanced_rule_to_style_node(CSSEnhancedEngine* engine,
             // Add properties to style node
             for (int i = 0; i < rule->property_count; i++) {
                 const char* prop_name = rule->property_names[i];
-                CSSValueEnhanced* enhanced_value = rule->property_values[i];
+                CssValue* enhanced_value = rule->property_values[i];
                 
                 // Convert enhanced value to basic CSS value for style node
                 // Convert enhanced value to basic representation for compatibility
@@ -413,10 +413,16 @@ bool css_enhanced_rule_to_style_node(CSSEnhancedEngine* engine,
             
             // Set specificity for cascade calculation  
             if (!rule->specificity_computed) {
-                rule->cached_specificity = css_calculate_specificity(current_selector);
+                CssSpecificity spec = css_calculate_specificity(current_selector);
+                // Convert specificity to numeric value: important + (inline << 24) + (ids << 16) + (classes << 8) + elements
+                rule->cached_specificity = (spec.important ? 0x80000000 : 0) +
+                                         (spec.inline_style << 24) +
+                                         (spec.ids << 16) + 
+                                         (spec.classes << 8) +
+                                         spec.elements;
                 rule->specificity_computed = true;
             }
-            // Note: specificity is handled via winning_decl in StyleNode
+            // Note: specificity is handled via winning_decl in CssStyleNode
             
             (*node_count)++;
         }
@@ -427,7 +433,7 @@ bool css_enhanced_rule_to_style_node(CSSEnhancedEngine* engine,
     return *node_count > 0;
 }
 
-CssStyleNode* css_enhanced_selector_to_style_node(CSSEnhancedEngine* engine, 
+CssStyleNode* css_enhanced_selector_to_style_node(CssEngine* engine, 
                                                   CSSComplexSelector* selector) {
     if (!engine || !selector) return NULL;
     
@@ -483,8 +489,8 @@ CssStyleNode* css_enhanced_selector_to_style_node(CSSEnhancedEngine* engine,
 }
 
 // Value conversion from enhanced to string representation
-static const char* css_enhanced_value_to_string_repr(CSSEnhancedEngine* engine, 
-                                                    CSSValueEnhanced* enhanced_value, 
+static const char* css_enhanced_value_to_string_repr(CssEngine* engine, 
+                                                    CssValue* enhanced_value, 
                                                     const char* property_name) {
     if (!enhanced_value || !engine) return "invalid";
     
@@ -493,24 +499,24 @@ static const char* css_enhanced_value_to_string_repr(CSSEnhancedEngine* engine,
 }
 
 // Enhanced cascade integration
-bool css_enhanced_apply_cascade(CSSEnhancedEngine* engine,
+bool css_enhanced_apply_cascade(CssEngine* engine,
                                CssStyleNode* element,
-                               CSSEnhancedStylesheet** stylesheets,
+                               CssStylesheet** stylesheets,
                                int stylesheet_count) {
     if (!engine || !element || !stylesheets) return false;
     
     clock_t start_time = clock();
     
     // Collect all matching rules from all stylesheets
-    CSSEnhancedRule** matching_rules = (CSSEnhancedRule**)pool_alloc(engine->pool, 1000 * sizeof(CSSEnhancedRule*));
+    CssRule** matching_rules = (CssRule**)pool_alloc(engine->pool, 1000 * sizeof(CssRule*));
     int matching_count = 0;
     
     for (int i = 0; i < stylesheet_count; i++) {
-        CSSEnhancedStylesheet* stylesheet = stylesheets[i];
+        CssStylesheet* stylesheet = stylesheets[i];
         if (!stylesheet) continue;
         
         for (int j = 0; j < stylesheet->rule_count; j++) {
-            CSSEnhancedRule* rule = stylesheet->rules[j];
+            CssRule* rule = stylesheet->rules[j];
             if (!rule) continue;
             
             // Check if any selector in the rule matches the element
@@ -527,7 +533,7 @@ bool css_enhanced_apply_cascade(CSSEnhancedEngine* engine,
     
     // Apply rules in cascade order
     for (int i = 0; i < matching_count; i++) {
-        CSSEnhancedRule* rule = matching_rules[i];
+        CssRule* rule = matching_rules[i];
         css_enhanced_apply_rule_to_element(rule, element, engine->pool);
     }
     
@@ -539,7 +545,7 @@ bool css_enhanced_apply_cascade(CSSEnhancedEngine* engine,
 }
 
 // Selector matching with enhanced features
-bool css_enhanced_selector_matches_element(CSSEnhancedEngine* engine,
+bool css_enhanced_selector_matches_element(CssEngine* engine,
                                           CSSComplexSelector* selector,
                                           CssStyleNode* element,
                                           CssStyleNode* scope_root) {
@@ -588,12 +594,12 @@ bool css_enhanced_selector_matches_element(CSSEnhancedEngine* engine,
             // Nesting selectors
             case CSS_SELECTOR_NESTING_PARENT:
                 // & selector - check if element matches parent context
-                matches = css_enhanced_nesting_parent_matches(element, component);
+                matches = css_enhanced_nesting_parent_matches(component, element);
                 break;
                 
             default:
                 // Handle other pseudo-classes and attributes
-                matches = css_enhanced_pseudo_class_matches(engine, component->type, element);
+                matches = css_enhanced_pseudo_class_matches(component, element);
                 break;
         }
         
@@ -604,7 +610,7 @@ bool css_enhanced_selector_matches_element(CSSEnhancedEngine* engine,
 }
 
 // Statistics and monitoring
-void css_enhanced_engine_update_stats(CSSEnhancedEngine* engine) {
+void css_enhanced_engine_update_stats(CssEngine* engine) {
     if (!engine) return;
     
     // Update memory usage (using stub value)
@@ -613,7 +619,7 @@ void css_enhanced_engine_update_stats(CSSEnhancedEngine* engine) {
     // Other statistics are updated during parsing and cascade operations
 }
 
-void css_enhanced_engine_print_stats(CSSEnhancedEngine* engine) {
+void css_enhanced_engine_print_stats(CssEngine* engine) {
     if (!engine) return;
     
     printf("CSS Enhanced Engine Statistics:\n");
@@ -633,11 +639,11 @@ void css_enhanced_engine_print_stats(CSSEnhancedEngine* engine) {
     printf("  Color Level 4: %s\n", engine->features.css_color_4 ? "Yes" : "No");
 }
 
-double css_enhanced_engine_get_parse_time(CSSEnhancedEngine* engine) {
+double css_enhanced_engine_get_parse_time(CssEngine* engine) {
     return engine ? engine->stats.parse_time : 0.0;
 }
 
-size_t css_enhanced_engine_get_memory_usage(CSSEnhancedEngine* engine) {
+size_t css_enhanced_engine_get_memory_usage(CssEngine* engine) {
     return engine ? engine->stats.memory_usage : 0;
 }
 
@@ -667,4 +673,43 @@ CssStyleEngine* css_style_engine_create(Pool* pool) {
 void css_style_engine_destroy(CssStyleEngine* engine) {
     (void)engine;
     // Memory managed by pool
+}
+
+// ============================================================================
+// CSS Enhanced Functions - Implementation
+// ============================================================================
+
+bool css_enhanced_nesting_parent_matches(const CssSelector* selector, const CssStyleNode* node) {
+    // Stub implementation for CSS nesting parent selector (&)
+    // In a full implementation, this would check if the node matches the parent selector context
+    (void)selector; (void)node;
+    return false; // Default to no match for safety
+}
+
+bool css_enhanced_pseudo_class_matches(const CssSelector* selector, const CssStyleNode* node) {
+    // Stub implementation for enhanced pseudo-class matching
+    // In a full implementation, this would handle :hover, :focus, :nth-child, etc.
+    (void)selector; (void)node;
+    return false; // Default to no match for safety
+}
+
+CssRule* css_enhanced_parse_rule_from_tokens(const CssToken* tokens, int token_count, Pool* pool) {
+    // Stub implementation for parsing CSS rules from tokens
+    // In a full implementation, this would parse selectors and declarations
+    (void)tokens; (void)token_count;
+    
+    if (!pool) return NULL;
+    
+    CssRule* rule = (CssRule*)pool_alloc(pool, sizeof(CssRule));
+    if (!rule) return NULL;
+    
+    // Initialize with empty style rule
+    rule->type = CSS_RULE_STYLE;
+    rule->pool = pool;
+    rule->selector_list = NULL;
+    rule->data.style_rule.selector = NULL;
+    rule->data.style_rule.declarations = NULL;
+    rule->data.style_rule.declaration_count = 0;
+    
+    return rule;
 }

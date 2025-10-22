@@ -1,58 +1,60 @@
 #ifndef CSS_PROPERTY_VALUE_PARSER_H
 #define CSS_PROPERTY_VALUE_PARSER_H
 
-#include "css_properties.h"
-#include "css_tokenizer_enhanced.h"
-#include "../../lib/mempool.h"
+#include "css_parser.h"
+#include "css_style.h"
+#include "../../../lib/mempool.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Use CSS value types from css_tokenizer_enhanced.h to avoid conflicts
+/**
+ * CSS Property Value Parser
+ * 
+ * This file contains functions for parsing CSS property values.
+ * Most types are now defined in css_parser.h and css_style.h.
+ */
 
-// Calc() expression operators
-typedef enum {
-    CSS_CALC_OP_ADD,        // +
-    CSS_CALC_OP_SUBTRACT,   // -
-    CSS_CALC_OP_MULTIPLY,   // *
-    CSS_CALC_OP_DIVIDE,     // /
-    CSS_CALC_OP_MOD,        // mod
-    CSS_CALC_OP_REM,        // rem
-    CSS_CALC_OP_MIN,        // min()
-    CSS_CALC_OP_MAX,        // max()
-    CSS_CALC_OP_CLAMP,      // clamp()
-    CSS_CALC_OP_ABS,        // abs()
-    CSS_CALC_OP_SIGN,       // sign()
-    CSS_CALC_OP_SIN,        // sin()
-    CSS_CALC_OP_COS,        // cos()
-    CSS_CALC_OP_TAN,        // tan()
-    CSS_CALC_OP_ASIN,       // asin()
-    CSS_CALC_OP_ACOS,       // acos()
-    CSS_CALC_OP_ATAN,       // atan()
-    CSS_CALC_OP_ATAN2,      // atan2()
-    CSS_CALC_OP_POW,        // pow()
-    CSS_CALC_OP_SQRT,       // sqrt()
-    CSS_CALC_OP_HYPOT,      // hypot()
-    CSS_CALC_OP_LOG,        // log()
-    CSS_CALC_OP_EXP,        // exp()
-    CSS_CALC_OP_ROUND       // round()
-} CSSCalcOperator;
+// Compatibility aliases for legacy code
+typedef CssValue CSSValueParsed;
+typedef CssCalcOperator CSSCalcOperator;
+typedef CssCalcNode CSSCalcNode;
+typedef CssCalcToken CSSCalcToken;
 
-// Calc() expression node
-typedef struct CSSCalcNode {
-    CSSCalcOperator operator;
-    CSSValueTypeEnhanced value_type;
-    
-    // Value data
-    union {
-        double number;
-        struct {
-            double value;
-            const char* unit;
-        } length;
-        double percentage;
-        const char* identifier;
+// Property value parsing functions (main implementations in css_parser.h)
+CssValue* css_parse_property_value(const char* property_name, CssTokenStream* stream, Pool* pool);
+CssValue* css_parse_color_value(CssTokenStream* stream, Pool* pool);
+CssValue* css_parse_length_value(CssTokenStream* stream, Pool* pool);
+CssValue* css_parse_number_value(CssTokenStream* stream, Pool* pool);
+CssValue* css_parse_percentage_value(CssTokenStream* stream, Pool* pool);
+CssValue* css_parse_string_value(CssTokenStream* stream, Pool* pool);
+CssValue* css_parse_url_value(CssTokenStream* stream, Pool* pool);
+CssValue* css_parse_function_value(CssTokenStream* stream, Pool* pool);
+
+// Calc expression parsing (implementations in css_parser.h)
+CssCalcNode* css_parse_calc_ast(CssCalcToken* tokens, size_t count, Pool* pool);
+CssValue* css_evaluate_calc_expression(CssCalcNode* ast, Pool* pool);
+bool css_validate_calc_expression(CssCalcToken* tokens, size_t count);
+
+// Value validation
+bool css_validate_property_value(CssPropertyId property_id, const CssValue* value);
+bool css_value_matches_property_type(const CssValue* value, CssPropertyId property_id);
+
+// Value conversion utilities
+CssValue* css_convert_value_to_canonical(const CssValue* value, Pool* pool);
+double css_resolve_relative_units(const CssValue* value, double font_size, double viewport_size);
+
+// Shorthand property expansion
+CssDeclaration** css_expand_shorthand(CssPropertyId shorthand_id, const CssValue* shorthand_value, 
+                                     Pool* pool, size_t* declaration_count);
+
+// Legacy compatibility
+#define CSSValueTypeEnhanced CssValueType
+#define CSS_VALUE_ENHANCED_KEYWORD CSS_VALUE_KEYWORD
+#define CSS_VALUE_ENHANCED_LENGTH CSS_VALUE_LENGTH
+#define CSS_VALUE_ENHANCED_COLOR CSS_VALUE_COLOR
+#define CSS_VALUE_ENHANCED_NUMBER CSS_VALUE_NUMBER
         struct CSSCalcNode** operands;  // For operator nodes
     } data;
     
@@ -322,27 +324,6 @@ CSSValueEnhanced* css_parse_oklab_function(CSSPropertyValueParser* parser,
 CSSValueEnhanced* css_parse_oklch_function(CSSPropertyValueParser* parser,
                                           const CSSTokenEnhanced* tokens,
                                           int token_count);
-
-// Generic function parsing
-static CSSValueEnhanced* css_parse_generic_function(CSSPropertyValueParser* parser,
-                                                   const char* function_name,
-                                                   const CSSTokenEnhanced* tokens,
-                                                   int token_count);
-
-// Unit conversion and normalization
-double css_value_enhanced_to_pixels(const CSSValueEnhanced* value, double base_font_size, double viewport_width, double viewport_height);
-CSSValueEnhanced* css_value_enhanced_normalize_units(const CSSValueEnhanced* value, Pool* pool);
-
-// Error handling
-void css_property_value_parser_add_error(CSSPropertyValueParser* parser, const char* message);
-bool css_property_value_parser_has_errors(CSSPropertyValueParser* parser);
-void css_property_value_parser_clear_errors(CSSPropertyValueParser* parser);
-const char** css_property_value_parser_get_errors(CSSPropertyValueParser* parser, int* count);
-
-// Debug utilities
-void css_value_enhanced_print_debug(const CSSValueEnhanced* value);
-const char* css_value_enhanced_type_to_string(CSSValueTypeEnhanced type);
-
 #ifdef __cplusplus
 }
 #endif

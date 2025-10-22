@@ -1,4 +1,5 @@
 #include "css_style_node.h"
+#include "css_property_system.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -455,7 +456,7 @@ void* style_tree_get_computed_value(StyleTree* style_tree,
         }
         
         // Return initial value
-        return css_property_get_initial_value(property_id, style_tree->pool);
+        return css_get_initial_value(property_id, style_tree->pool);
     }
     
     StyleNode* node = (StyleNode*)avl_node->declaration;
@@ -613,8 +614,7 @@ void* style_node_compute_value(StyleNode* node, StyleTree* parent_tree) {
         parent_value = style_tree_get_computed_value(parent_tree, decl->property_id, NULL);
     }
     
-    return css_property_compute_value(decl->property_id, decl->value, parent_value, 
-                                     NULL); // Would pass appropriate pool
+    return css_value_compute(decl->value, NULL, parent_tree ? parent_tree->pool : NULL);
 }
 
 void* style_node_get_computed_value(StyleNode* node, StyleTree* parent_tree) {
@@ -664,7 +664,7 @@ void style_node_print_cascade(StyleNode* node) {
         return;
     }
     
-    const char* prop_name = css_property_get_name(node->base.property_id);
+    const char* prop_name = css_get_property_name(node->base.property_id);
     printf("StyleNode for %s (ID: %lu):\n", 
            prop_name ? prop_name : "unknown", node->base.property_id);
     

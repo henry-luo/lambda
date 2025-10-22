@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
-#include "../lib/css_style_node.h"
-#include "../lib/css_property_system.h"
+#include "../lambda/input/css/css_style_node.h"
+#include "../lambda/input/css/css_property_system.h"
 #include "../lib/mempool.h"
 #include <cstring>
 
