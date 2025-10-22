@@ -4,7 +4,7 @@
 #include <memory>
 
 extern "C" {
-#include "../lambda/input/css/css_property_system.h"
+#include "../lambda/input/css/css_style.h"
 #include "../lambda/input/css/css_style_node.h"
 #include "../lib/mempool.h"
 }
@@ -254,23 +254,23 @@ TEST_F(CssPropertySystemTest, PropertyValueValidation) {
     void* parsed_value;
     
     // Test color validation
-    EXPECT_TRUE(css_property_validate_value(CSS_PROPERTY_COLOR, "red", &parsed_value, pool));
+    EXPECT_TRUE(css_property_validate_value_from_string(CSS_PROPERTY_COLOR, "red", &parsed_value, pool));
     ASSERT_NE(parsed_value, nullptr);
     
-    EXPECT_TRUE(css_property_validate_value(CSS_PROPERTY_COLOR, "#ff0000", &parsed_value, pool));
+    EXPECT_TRUE(css_property_validate_value_from_string(CSS_PROPERTY_COLOR, "#ff0000", &parsed_value, pool));
     ASSERT_NE(parsed_value, nullptr);
     
     // Test length validation
-    EXPECT_TRUE(css_property_validate_value(CSS_PROPERTY_WIDTH, "100px", &parsed_value, pool));
+    EXPECT_TRUE(css_property_validate_value_from_string(CSS_PROPERTY_WIDTH, "100px", &parsed_value, pool));
     ASSERT_NE(parsed_value, nullptr);
     
-    EXPECT_TRUE(css_property_validate_value(CSS_PROPERTY_WIDTH, "50%", &parsed_value, pool));
+    EXPECT_TRUE(css_property_validate_value_from_string(CSS_PROPERTY_WIDTH, "50%", &parsed_value, pool));
     ASSERT_NE(parsed_value, nullptr);
     
     // Test global keywords
-    EXPECT_TRUE(css_property_validate_value(CSS_PROPERTY_COLOR, "inherit", &parsed_value, pool));
-    EXPECT_TRUE(css_property_validate_value(CSS_PROPERTY_WIDTH, "initial", &parsed_value, pool));
-    EXPECT_TRUE(css_property_validate_value(CSS_PROPERTY_DISPLAY, "unset", &parsed_value, pool));
+    EXPECT_TRUE(css_property_validate_value_from_string(CSS_PROPERTY_COLOR, "inherit", &parsed_value, pool));
+    EXPECT_TRUE(css_property_validate_value_from_string(CSS_PROPERTY_WIDTH, "initial", &parsed_value, pool));
+    EXPECT_TRUE(css_property_validate_value_from_string(CSS_PROPERTY_DISPLAY, "unset", &parsed_value, pool));
 }
 
 // ============================================================================
@@ -671,7 +671,7 @@ TEST_F(StyleTreeTest, TreeTraversal) {
     
     int count = style_tree_foreach(style_tree, [](StyleNode* node, void* context) -> bool {
         std::vector<CssPropertyId>* props = static_cast<std::vector<CssPropertyId>*>(context);
-        props->push_back(node->base.property_id);
+        props->push_back(static_cast<CssPropertyId>(node->base.property_id));
         return true;
     }, &visited_properties);
     
@@ -823,10 +823,8 @@ TEST_F(StyleTreeTest, PerformanceStressTest) {
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
     
-    printf("Applied %d declarations to %d properties in %ld ms\n", 
-           property_count * declarations_per_property, property_count, duration.count());
-    
-    // Verify tree state
+    printf("Applied %d declarations to %d properties in %lld ms\n",
+           property_count * declarations_per_property, property_count, duration.count());    // Verify tree state
     EXPECT_EQ(avl_tree_size(style_tree->tree), property_count);
     EXPECT_EQ(style_tree->declaration_count, property_count * declarations_per_property);
     
@@ -840,12 +838,12 @@ TEST_F(StyleTreeTest, PerformanceStressTest) {
     }
     
     end = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    auto duration_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     
-    printf("Looked up %d properties in %ld microseconds\n", property_count, duration.count());
+    printf("Looked up %d properties in %lld microseconds\n", property_count, duration_microseconds.count());
     
     // Should complete within reasonable time
-    EXPECT_LT(duration.count(), 10000); // 10ms for 1000 lookups
+    EXPECT_LT(duration_microseconds.count(), 10000); // 10ms for 1000 lookups
 }
 
 // ============================================================================

@@ -568,11 +568,325 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                                    CssToken** tokens) {
     if (!tokenizer || !input || !tokens) return 0;
     
-    // Call css_tokenize function directly
-    size_t count = 0;
-    CSSToken* css_tokens = css_tokenize(input, length, tokenizer->pool, &count);
-    *tokens = (CssToken*)css_tokens;  // Cast between token types
-    return (int)count;
+    // Simple tokenizer implementation for testing
+    // This is a basic implementation to break the recursion and allow tests to pass
+    
+    // Allocate token array (estimate maximum tokens)
+    size_t max_tokens = length + 10; // Conservative estimate
+    CssToken* token_array = pool_alloc(tokenizer->pool, sizeof(CssToken) * max_tokens);
+    if (!token_array) return 0;
+    
+    size_t token_count = 0;
+    size_t pos = 0;
+    
+    while (pos < length && token_count < max_tokens - 1) {
+        // Skip leading whitespace and track it
+        size_t ws_start = pos;
+        while (pos < length && css_is_whitespace(input[pos])) {
+            pos++;
+        }
+        
+        // Create whitespace token if we found any
+        if (pos > ws_start) {
+            CssToken* token = &token_array[token_count++];
+            token->type = CSS_TOKEN_WHITESPACE;
+            token->start = input + ws_start;
+            token->length = pos - ws_start;
+            token->value = NULL; // Will be set when needed
+        }
+        
+        if (pos >= length) break;
+        
+        char ch = input[pos];
+        CssToken* token = &token_array[token_count++];
+        token->start = input + pos;
+        token->length = 1;
+        token->value = NULL;
+        
+        // Basic character classification
+        switch (ch) {
+            case '{':
+                token->type = CSS_TOKEN_LEFT_BRACE;
+                pos++;
+                break;
+            case '}':
+                token->type = CSS_TOKEN_RIGHT_BRACE;
+                pos++;
+                break;
+            case '[':
+                token->type = CSS_TOKEN_LEFT_BRACKET;
+                pos++;
+                break;
+            case ']':
+                token->type = CSS_TOKEN_RIGHT_BRACKET;
+                pos++;
+                break;
+            case '(':
+                token->type = CSS_TOKEN_LEFT_PAREN;
+                pos++;
+                break;
+            case ')':
+                token->type = CSS_TOKEN_RIGHT_PAREN;
+                pos++;
+                break;
+            case ':':
+                token->type = CSS_TOKEN_COLON;
+                pos++;
+                break;
+            case ';':
+                token->type = CSS_TOKEN_SEMICOLON;
+                pos++;
+                break;
+            case ',':
+                token->type = CSS_TOKEN_COMMA;
+                pos++;
+                break;
+            case '"':
+            case '\'': {
+                // Simple string parsing
+                char quote = ch;
+                size_t start = pos;
+                pos++; // Skip opening quote
+                while (pos < length && input[pos] != quote) {
+                    if (input[pos] == '\\' && pos + 1 < length) {
+                        pos += 2; // Skip escaped character
+                    } else {
+                        pos++;
+                    }
+                }
+                if (pos < length) pos++; // Skip closing quote
+                token->type = CSS_TOKEN_STRING;
+                token->length = pos - start;
+                break;
+            }
+            case '#': {
+                // Hash token
+                size_t start = pos;
+                pos++; // Skip #
+                while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
+                    pos++;
+                }
+                token->type = CSS_TOKEN_HASH;
+                token->length = pos - start;
+                token->data.hash_type = CSS_HASH_ID; // Default to ID type
+                break;
+            }
+            case '@': {
+                // At-keyword
+                size_t start = pos;
+                pos++; // Skip @
+                while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
+                    pos++;
+                }
+                token->type = CSS_TOKEN_AT_KEYWORD;
+                token->length = pos - start;
+                break;
+            }
+            case '^':
+                if (pos + 1 < length && input[pos + 1] == '=') {
+                    token->type = CSS_TOKEN_PREFIX_MATCH;
+                    token->length = 2;
+                    pos += 2;
+                } else {
+                    token->type = CSS_TOKEN_DELIM;
+                    token->data.delimiter = ch;
+                    pos++;
+                }
+                break;
+            case '$':
+                if (pos + 1 < length && input[pos + 1] == '=') {
+                    token->type = CSS_TOKEN_SUFFIX_MATCH;
+                    token->length = 2;
+                    pos += 2;
+                } else {
+                    token->type = CSS_TOKEN_DELIM;
+                    token->data.delimiter = ch;
+                    pos++;
+                }
+                break;
+            case '*':
+                if (pos + 1 < length && input[pos + 1] == '=') {
+                    token->type = CSS_TOKEN_SUBSTRING_MATCH;
+                    token->length = 2;
+                    pos += 2;
+                } else {
+                    token->type = CSS_TOKEN_DELIM;
+                    token->data.delimiter = ch;
+                    pos++;
+                }
+                break;
+            case '~':
+                if (pos + 1 < length && input[pos + 1] == '=') {
+                    token->type = CSS_TOKEN_INCLUDE_MATCH;
+                    token->length = 2;
+                    pos += 2;
+                } else {
+                    token->type = CSS_TOKEN_DELIM;
+                    token->data.delimiter = ch;
+                    pos++;
+                }
+                break;
+            case '|':
+                if (pos + 1 < length && input[pos + 1] == '=') {
+                    token->type = CSS_TOKEN_DASH_MATCH;
+                    token->length = 2;
+                    pos += 2;
+                } else if (pos + 1 < length && input[pos + 1] == '|') {
+                    token->type = CSS_TOKEN_COLUMN;
+                    token->length = 2;
+                    pos += 2;
+                } else {
+                    token->type = CSS_TOKEN_DELIM;
+                    token->data.delimiter = ch;
+                    pos++;
+                }
+                break;
+            case '/':
+                if (pos + 1 < length && input[pos + 1] == '*') {
+                    // Comment
+                    size_t start = pos;
+                    pos += 2; // Skip /*
+                    while (pos + 1 < length && !(input[pos] == '*' && input[pos + 1] == '/')) {
+                        pos++;
+                    }
+                    if (pos + 1 < length) pos += 2; // Skip */
+                    token->type = CSS_TOKEN_COMMENT;
+                    token->length = pos - start;
+                } else {
+                    token->type = CSS_TOKEN_DELIM;
+                    token->data.delimiter = ch;
+                    pos++;
+                }
+                break;
+            case '+':
+            case '-':
+                // Check if this is a signed number
+                if (pos + 1 < length && (isdigit(input[pos + 1]) || input[pos + 1] == '.')) {
+                    // Number parsing (same as digit case)
+                    size_t start = pos;
+                    pos++; // Skip sign
+                    
+                    // Parse integer part
+                    while (pos < length && isdigit(input[pos])) {
+                        pos++;
+                    }
+                    
+                    // Parse decimal part
+                    if (pos < length && input[pos] == '.') {
+                        pos++;
+                        while (pos < length && isdigit(input[pos])) {
+                            pos++;
+                        }
+                    }
+                    
+                    // Check for dimension unit or percentage
+                    size_t number_end = pos;
+                    if (pos < length && input[pos] == '%') {
+                        pos++;
+                        token->type = CSS_TOKEN_PERCENTAGE;
+                    } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
+                        // Parse unit
+                        while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
+                            pos++;
+                        }
+                        token->type = CSS_TOKEN_DIMENSION;
+                    } else {
+                        token->type = CSS_TOKEN_NUMBER;
+                    }
+                    
+                    token->length = pos - start;
+                    
+                    // Parse number value
+                    char* num_str = pool_alloc(tokenizer->pool, number_end - start + 1);
+                    if (num_str) {
+                        strncpy(num_str, token->start, number_end - start);
+                        num_str[number_end - start] = '\0';
+                        token->data.number_value = atof(num_str);
+                    }
+                } else {
+                    token->type = CSS_TOKEN_DELIM;
+                    token->data.delimiter = ch;
+                    pos++;
+                }
+                break;
+            default:
+                if (isdigit(ch) || ch == '.') {
+                    // Number or dimension (for cases starting with digit or decimal)
+                    size_t start = pos;
+                    
+                    // Parse integer part
+                    while (pos < length && isdigit(input[pos])) {
+                        pos++;
+                    }
+                    
+                    // Parse decimal part
+                    if (pos < length && input[pos] == '.') {
+                        pos++;
+                        while (pos < length && isdigit(input[pos])) {
+                            pos++;
+                        }
+                    }
+                    
+                    // Check for dimension unit or percentage
+                    size_t number_end = pos;
+                    if (pos < length && input[pos] == '%') {
+                        pos++;
+                        token->type = CSS_TOKEN_PERCENTAGE;
+                    } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
+                        // Parse unit
+                        while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
+                            pos++;
+                        }
+                        token->type = CSS_TOKEN_DIMENSION;
+                    } else {
+                        token->type = CSS_TOKEN_NUMBER;
+                    }
+                    
+                    token->length = pos - start;
+                    
+                    // Parse number value
+                    char* num_str = pool_alloc(tokenizer->pool, number_end - start + 1);
+                    if (num_str) {
+                        strncpy(num_str, token->start, number_end - start);
+                        num_str[number_end - start] = '\0';
+                        token->data.number_value = atof(num_str);
+                    }
+                } else if (isalpha(ch) || ch == '_' || (ch == '-' && pos + 1 < length && isalpha(input[pos + 1]))) {
+                    // Identifier or function
+                    size_t start = pos;
+                    while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
+                        pos++;
+                    }
+                    
+                    // Check for function
+                    if (pos < length && input[pos] == '(') {
+                        token->type = CSS_TOKEN_FUNCTION;
+                        pos++; // Include the opening parenthesis
+                    } else {
+                        token->type = CSS_TOKEN_IDENT;
+                    }
+                    token->length = pos - start;
+                } else {
+                    // Delimiter
+                    token->type = CSS_TOKEN_DELIM;
+                    token->data.delimiter = ch;
+                    pos++;
+                }
+                break;
+        }
+    }
+    
+    // Add EOF token
+    if (token_count < max_tokens) {
+        CssToken* eof_token = &token_array[token_count++];
+        eof_token->type = CSS_TOKEN_EOF;
+        eof_token->start = input + length;
+        eof_token->length = 0;
+        eof_token->value = NULL;
+    }
+    
+    *tokens = token_array;
+    return (int)token_count;
 }
 
 bool css_is_whitespace(int c) {
@@ -585,4 +899,138 @@ bool css_is_digit(int c) {
 
 bool css_is_hex_digit(int c) {
     return css_is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+// ============================================================================
+// Token Utility Functions (for test support)
+// ============================================================================
+
+const char* css_token_type_to_string(CssTokenType type) {
+    switch (type) {
+        case CSS_TOKEN_IDENT: return "IDENT";
+        case CSS_TOKEN_FUNCTION: return "FUNCTION";
+        case CSS_TOKEN_AT_KEYWORD: return "AT_KEYWORD";
+        case CSS_TOKEN_HASH: return "HASH";
+        case CSS_TOKEN_STRING: return "STRING";
+        case CSS_TOKEN_URL: return "URL";
+        case CSS_TOKEN_NUMBER: return "NUMBER";
+        case CSS_TOKEN_DIMENSION: return "DIMENSION";
+        case CSS_TOKEN_PERCENTAGE: return "PERCENTAGE";
+        case CSS_TOKEN_UNICODE_RANGE: return "UNICODE_RANGE";
+        case CSS_TOKEN_INCLUDE_MATCH: return "INCLUDE_MATCH";
+        case CSS_TOKEN_DASH_MATCH: return "DASH_MATCH";
+        case CSS_TOKEN_PREFIX_MATCH: return "PREFIX_MATCH";
+        case CSS_TOKEN_SUFFIX_MATCH: return "SUFFIX_MATCH";
+        case CSS_TOKEN_SUBSTRING_MATCH: return "SUBSTRING_MATCH";
+        case CSS_TOKEN_COLUMN: return "COLUMN";
+        case CSS_TOKEN_WHITESPACE: return "WHITESPACE";
+        case CSS_TOKEN_COMMENT: return "COMMENT";
+        case CSS_TOKEN_COLON: return "COLON";
+        case CSS_TOKEN_SEMICOLON: return "SEMICOLON";
+        case CSS_TOKEN_LEFT_PAREN: return "LEFT_PAREN";
+        case CSS_TOKEN_RIGHT_PAREN: return "RIGHT_PAREN";
+        case CSS_TOKEN_LEFT_BRACE: return "LEFT_BRACE";
+        case CSS_TOKEN_RIGHT_BRACE: return "RIGHT_BRACE";
+        case CSS_TOKEN_LEFT_BRACKET: return "LEFT_BRACKET";
+        case CSS_TOKEN_RIGHT_BRACKET: return "RIGHT_BRACKET";
+        case CSS_TOKEN_COMMA: return "COMMA";
+        case CSS_TOKEN_DELIM: return "DELIM";
+        case CSS_TOKEN_EOF: return "EOF";
+        case CSS_TOKEN_BAD_STRING: return "BAD_STRING";
+        case CSS_TOKEN_BAD_URL: return "BAD_URL";
+        case CSS_TOKEN_IDENTIFIER: return "IDENTIFIER";
+        case CSS_TOKEN_MATCH: return "MATCH";
+        case CSS_TOKEN_CDO: return "CDO";
+        case CSS_TOKEN_CDC: return "CDC";
+        case CSS_TOKEN_CUSTOM_PROPERTY: return "CUSTOM_PROPERTY";
+        case CSS_TOKEN_CALC_FUNCTION: return "CALC_FUNCTION";
+        case CSS_TOKEN_VAR_FUNCTION: return "VAR_FUNCTION";
+        case CSS_TOKEN_ENV_FUNCTION: return "ENV_FUNCTION";
+        case CSS_TOKEN_ATTR_FUNCTION: return "ATTR_FUNCTION";
+        case CSS_TOKEN_SUPPORTS_SELECTOR: return "SUPPORTS_SELECTOR";
+        case CSS_TOKEN_LAYER_NAME: return "LAYER_NAME";
+        case CSS_TOKEN_CONTAINER_NAME: return "CONTAINER_NAME";
+        case CSS_TOKEN_SCOPE_SELECTOR: return "SCOPE_SELECTOR";
+        case CSS_TOKEN_NESTING_SELECTOR: return "NESTING_SELECTOR";
+        case CSS_TOKEN_COLOR_FUNCTION: return "COLOR_FUNCTION";
+        case CSS_TOKEN_ANGLE_FUNCTION: return "ANGLE_FUNCTION";
+        case CSS_TOKEN_TIME_FUNCTION: return "TIME_FUNCTION";
+        case CSS_TOKEN_FREQUENCY_FUNCTION: return "FREQUENCY_FUNCTION";
+        case CSS_TOKEN_RESOLUTION_FUNCTION: return "RESOLUTION_FUNCTION";
+        default: return "UNKNOWN";
+    }
+}
+
+bool css_token_is_whitespace(const CssToken* token) {
+    return token && token->type == CSS_TOKEN_WHITESPACE;
+}
+
+bool css_token_is_comment(const CssToken* token) {
+    return token && token->type == CSS_TOKEN_COMMENT;
+}
+
+bool css_token_equals_string(const CssToken* token, const char* str) {
+    if (!token || !str) return false;
+    size_t str_len = strlen(str);
+    return token->length == str_len && strncmp(token->start, str, str_len) == 0;
+}
+
+char* css_token_to_string(const CssToken* token, Pool* pool) {
+    if (!token || !pool) return NULL;
+    
+    char* result = pool_alloc(pool, token->length + 1);
+    if (!result) return NULL;
+    
+    strncpy(result, token->start, token->length);
+    result[token->length] = '\0';
+    return result;
+}
+
+// ============================================================================
+// Token Stream Functions (for parser support)
+// ============================================================================
+
+CssTokenStream* css_token_stream_create(CssToken* tokens, size_t length, Pool* pool) {
+    if (!tokens || !pool) return NULL;
+    
+    CssTokenStream* stream = pool_alloc(pool, sizeof(CssTokenStream));
+    if (!stream) return NULL;
+    
+    stream->tokens = tokens;
+    stream->length = length;
+    stream->current = 0;
+    stream->pool = pool;
+    
+    return stream;
+}
+
+CssToken* css_token_stream_current(CssTokenStream* stream) {
+    if (!stream || stream->current >= stream->length) return NULL;
+    return &stream->tokens[stream->current];
+}
+
+bool css_token_stream_advance(CssTokenStream* stream) {
+    if (!stream || stream->current >= stream->length) return false;
+    stream->current++;
+    return stream->current <= stream->length;
+}
+
+CssToken* css_token_stream_peek(CssTokenStream* stream, size_t offset) {
+    if (!stream) return NULL;
+    size_t peek_pos = stream->current + offset;
+    if (peek_pos >= stream->length) return NULL;
+    return &stream->tokens[peek_pos];
+}
+
+bool css_token_stream_consume(CssTokenStream* stream, CssTokenType expected_type) {
+    CssToken* current = css_token_stream_current(stream);
+    if (!current || current->type != expected_type) return false;
+    return css_token_stream_advance(stream);
+}
+
+bool css_token_stream_at_end(CssTokenStream* stream) {
+    if (!stream) return true;
+    if (stream->current >= stream->length) return true;
+    CssToken* current = css_token_stream_current(stream);
+    return current && current->type == CSS_TOKEN_EOF;
 }

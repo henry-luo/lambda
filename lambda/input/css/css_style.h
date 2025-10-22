@@ -1029,7 +1029,7 @@ bool css_property_is_custom(CssPropertyId property_id);
  * @param length Output length structure
  * @return true if successfully parsed, false otherwise
  */
-bool css_parse_length_string(const char* value_str, CssLength* length);
+bool css_parse_length(const char* value_str, CssLength* length);
 
 /**
  * Parse a color value from string
@@ -1037,7 +1037,7 @@ bool css_parse_length_string(const char* value_str, CssLength* length);
  * @param color Output color structure
  * @return true if successfully parsed, false otherwise
  */
-bool css_parse_color_string(const char* value_str, CssColor* color);
+bool css_parse_color(const char* value_str, CssColor* color);
 
 /**
  * Parse a keyword value
@@ -1156,6 +1156,10 @@ CssPropertyId css_property_id_from_name(const char* name);
 const char* css_property_name_from_id(CssPropertyId id);
 CssValueType css_property_get_expected_type(CssPropertyId id);
 bool css_property_validate_value(CssPropertyId id, CssValue* value);
+bool css_property_validate_value_from_string(CssPropertyId property_id, 
+                                            const char* value_str, 
+                                            void** parsed_value, 
+                                            Pool* pool);
 
 // Property parsing functions
 CssDeclaration* css_parse_property(const char* name, const char* value, Pool* pool);

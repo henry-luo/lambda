@@ -2,7 +2,7 @@
 #define FIXTURE_LOADER_H
 
 #include "../../lib/stringbuf.h"
-#include "../../lib/mem-pool/include/mem_pool.h"
+#include "../../lib/mempool.h"
 #include <vector>
 #include <string>
 

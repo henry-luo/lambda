@@ -11,7 +11,7 @@
 #include <vector>
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
-#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/mempool.h"
 extern "C" {
     #include "../lib/url.h"  // Use new URL parser
     #include <tree_sitter/api.h>

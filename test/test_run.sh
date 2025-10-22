@@ -202,6 +202,9 @@ get_c_test_display_name() {
         "test_mime_detect") echo "📎 MIME Detection Tests" ;;
         "test_mime_detect_gtest") echo "📎 MIME Detection Tests (GTest)" ;;
         "test_css_files_safe_gtest") echo "🎨 CSS Files Safe Tests (GTest)" ;;
+        "test_css_system") echo "🎨 CSS Property System & Style Node Tests (GTest)" ;;
+        "test_css_style_node") echo "🎨 CSS Style Node & Cascade Tests (GTest)" ;;
+        "test_avl_tree") echo "🌲 AVL Tree Implementation Tests (GTest)" ;;
         "test_mir") echo "⚡ MIR JIT Tests" ;;
         "test_num_stack") echo "🔢 Number Stack Tests" ;;
         "test_strbuf") echo "📝 String Buffer Tests" ;;
@@ -300,7 +303,7 @@ run_test_with_timeout() {
         fi
     else
         # Check if this is a GTest test by examining the executable name
-        if [[ "$base_name" =~ _gtest$ ]] || [[ "$base_name" == "test_flex_minimal" ]] || [[ "$base_name" == "test_flex_new_features" ]]; then
+        if [[ "$base_name" =~ _gtest$ ]] || [[ "$base_name" == "test_flex_minimal" ]] || [[ "$base_name" == "test_flex_new_features" ]] || [[ "$base_name" == "test_css_system" ]] || [[ "$base_name" == "test_css_style_node" ]] || [[ "$base_name" == "test_avl_tree" ]]; then
             # GTest-based tests - use JSON output format
 
             # Special handling for input roundtrip test - only run working JSON tests
