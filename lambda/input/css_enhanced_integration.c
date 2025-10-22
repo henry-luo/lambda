@@ -1,0 +1,567 @@
+#include "css_enhanced_integration.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <time.h>
+
+// Enhanced CSS Engine creation
+CSSEnhancedEngine* css_enhanced_engine_create(Pool* pool) {
+    if (!pool) return NULL;
+    
+    CSSEnhancedEngine* engine = (CSSEnhancedEngine*)pool_calloc(pool, sizeof(CSSEnhancedEngine));
+    if (!engine) return NULL;
+    
+    engine->pool = pool;
+    
+    // Initialize core components
+    engine->tokenizer = css_tokenizer_enhanced_create(pool);
+    engine->selector_parser = css_selector_parser_create(pool);
+    engine->value_parser = css_property_value_parser_create(pool);
+    
+    // Initialize style storage
+    engine->style_tree = avl_tree_create(pool, css_style_node_compare, css_style_node_cleanup);
+    engine->style_engine = css_style_engine_create(pool);
+    
+    // Enable all CSS3+ features by default
+    engine->features.css_nesting = true;
+    engine->features.css_cascade_layers = true;
+    engine->features.css_container_queries = true;
+    engine->features.css_scope = true;
+    engine->features.css_custom_selectors = true;
+    engine->features.css_mixins = false;  // Experimental
+    engine->features.css_color_4 = true;
+    engine->features.css_logical_properties = true;
+    engine->features.css_subgrid = true;
+    engine->features.css_anchor_positioning = false; // Experimental
+    
+    // Configure performance options
+    engine->performance.cache_parsed_selectors = true;
+    engine->performance.cache_computed_values = true;
+    engine->performance.optimize_specificity = true;
+    engine->performance.parallel_parsing = false; // Not implemented yet
+    engine->performance.max_cache_size = 1000;
+    
+    // Set default document context
+    engine->context.base_url = "";
+    engine->context.document_charset = "UTF-8";
+    engine->context.color_scheme = "auto";
+    engine->context.viewport_width = 1920.0;
+    engine->context.viewport_height = 1080.0;
+    engine->context.device_pixel_ratio = 1.0;
+    engine->context.root_font_size = 16.0;
+    engine->context.reduced_motion = false;
+    engine->context.high_contrast = false;
+    
+    // Initialize statistics
+    memset(&engine->stats, 0, sizeof(engine->stats));
+    
+    return engine;
+}
+
+void css_enhanced_engine_destroy(CSSEnhancedEngine* engine) {
+    if (!engine) return;
+    
+    // Cleanup components
+    css_tokenizer_enhanced_destroy(engine->tokenizer);
+    css_selector_parser_destroy(engine->selector_parser);
+    css_property_value_parser_destroy(engine->value_parser);
+    
+    if (engine->style_tree) {
+        avl_tree_destroy(engine->style_tree);
+    }
+    
+    if (engine->style_engine) {
+        css_style_engine_destroy(engine->style_engine);
+    }
+    
+    // Engine itself is pool-allocated, so it will be cleaned up with the pool
+}
+
+// Configuration functions
+void css_enhanced_engine_enable_feature(CSSEnhancedEngine* engine, const char* feature_name, bool enabled) {
+    if (!engine || !feature_name) return;
+    
+    if (strcmp(feature_name, "css-nesting") == 0) {
+        engine->features.css_nesting = enabled;
+    } else if (strcmp(feature_name, "cascade-layers") == 0) {
+        engine->features.css_cascade_layers = enabled;
+    } else if (strcmp(feature_name, "container-queries") == 0) {
+        engine->features.css_container_queries = enabled;
+    } else if (strcmp(feature_name, "css-scope") == 0) {
+        engine->features.css_scope = enabled;
+    } else if (strcmp(feature_name, "custom-selectors") == 0) {
+        engine->features.css_custom_selectors = enabled;
+    } else if (strcmp(feature_name, "css-mixins") == 0) {
+        engine->features.css_mixins = enabled;
+    } else if (strcmp(feature_name, "css-color-4") == 0) {
+        engine->features.css_color_4 = enabled;
+    } else if (strcmp(feature_name, "logical-properties") == 0) {
+        engine->features.css_logical_properties = enabled;
+    } else if (strcmp(feature_name, "css-subgrid") == 0) {
+        engine->features.css_subgrid = enabled;
+    } else if (strcmp(feature_name, "anchor-positioning") == 0) {
+        engine->features.css_anchor_positioning = enabled;
+    }
+}
+
+void css_enhanced_engine_set_viewport(CSSEnhancedEngine* engine, double width, double height) {
+    if (!engine) return;
+    
+    engine->context.viewport_width = width;
+    engine->context.viewport_height = height;
+}
+
+void css_enhanced_engine_set_color_scheme(CSSEnhancedEngine* engine, const char* scheme) {
+    if (!engine || !scheme) return;
+    
+    // Copy scheme string
+    size_t len = strlen(scheme);
+    char* scheme_copy = (char*)pool_alloc(engine->pool, len + 1);
+    if (scheme_copy) {
+        strcpy(scheme_copy, scheme);
+        engine->context.color_scheme = scheme_copy;
+    }
+}
+
+void css_enhanced_engine_set_root_font_size(CSSEnhancedEngine* engine, double size) {
+    if (!engine || size <= 0) return;
+    
+    engine->context.root_font_size = size;
+}
+
+// Enhanced CSS parsing
+CSSEnhancedStylesheet* css_enhanced_parse_stylesheet(CSSEnhancedEngine* engine, 
+                                                     const char* css_text, 
+                                                     const char* base_url) {
+    if (!engine || !css_text) return NULL;
+    
+    clock_t start_time = clock();
+    
+    CSSEnhancedStylesheet* stylesheet = (CSSEnhancedStylesheet*)pool_calloc(engine->pool, sizeof(CSSEnhancedStylesheet));
+    if (!stylesheet) return NULL;
+    
+    // Set stylesheet metadata
+    if (base_url) {
+        size_t url_len = strlen(base_url);
+        char* url_copy = (char*)pool_alloc(engine->pool, url_len + 1);
+        if (url_copy) {
+            strcpy(url_copy, base_url);
+            stylesheet->origin_url = url_copy;
+        }
+    }
+    
+    // Initialize rule storage
+    stylesheet->rule_capacity = 64;
+    stylesheet->rules = (CSSEnhancedRule**)pool_alloc(engine->pool, 
+                                                     stylesheet->rule_capacity * sizeof(CSSEnhancedRule*));
+    
+    // Tokenize the CSS
+    CSSTokenEnhanced* tokens;
+    int token_count = css_tokenizer_enhanced_tokenize(engine->tokenizer, css_text, strlen(css_text), &tokens);
+    
+    if (token_count <= 0) {
+        clock_t end_time = clock();
+        stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+        return stylesheet;
+    }
+    
+    // Parse rules from tokens
+    int token_index = 0;
+    while (token_index < token_count) {
+        CSSEnhancedRule* rule = css_enhanced_parse_rule_from_tokens(engine, tokens, &token_index, token_count);
+        if (rule) {
+            // Add rule to stylesheet
+            if (stylesheet->rule_count >= stylesheet->rule_capacity) {
+                // Expand capacity
+                stylesheet->rule_capacity *= 2;
+                CSSEnhancedRule** new_rules = (CSSEnhancedRule**)pool_alloc(engine->pool, 
+                                                                          stylesheet->rule_capacity * sizeof(CSSEnhancedRule*));
+                if (new_rules) {
+                    memcpy(new_rules, stylesheet->rules, stylesheet->rule_count * sizeof(CSSEnhancedRule*));
+                    stylesheet->rules = new_rules;
+                }
+            }
+            
+            if (stylesheet->rule_count < stylesheet->rule_capacity) {
+                stylesheet->rules[stylesheet->rule_count++] = rule;
+                
+                // Update feature usage flags
+                css_enhanced_detect_features_in_rule(stylesheet, rule);
+            }
+        }
+    }
+    
+    clock_t end_time = clock();
+    stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+    
+    // Update engine statistics
+    engine->stats.rules_parsed += stylesheet->rule_count;
+    engine->stats.parse_time += stylesheet->parse_time;
+    
+    return stylesheet;
+}
+
+// Feature detection in rules
+static void css_enhanced_detect_features_in_rule(CSSEnhancedStylesheet* stylesheet, CSSEnhancedRule* rule) {
+    if (!stylesheet || !rule) return;
+    
+    // Check for CSS Nesting (& selector)
+    if (rule->selector_list) {
+        CSSComplexSelector* current = rule->selector_list;
+        while (current) {
+            CSSSelectorComponent* component = current->components;
+            while (component) {
+                if (component->type == CSS_SELECTOR_NESTING_PARENT ||
+                    component->type == CSS_SELECTOR_NESTING_DESCENDANT) {
+                    stylesheet->uses_nesting = true;
+                }
+                component = component->next;
+            }
+            current = current->next;
+        }
+    }
+    
+    // Check for custom properties and other features
+    for (int i = 0; i < rule->property_count; i++) {
+        CSSValueEnhanced* value = rule->property_values[i];
+        if (value) {
+            switch (value->type) {
+                case CSS_VALUE_ENHANCED_VAR:
+                    stylesheet->uses_custom_properties = true;
+                    break;
+                case CSS_VALUE_ENHANCED_CALC:
+                case CSS_VALUE_ENHANCED_MIN:
+                case CSS_VALUE_ENHANCED_MAX:
+                case CSS_VALUE_ENHANCED_CLAMP:
+                    // Math functions are part of core CSS now
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+}
+
+// Style node integration
+bool css_enhanced_rule_to_style_node(CSSEnhancedEngine* engine, 
+                                     CSSEnhancedRule* rule, 
+                                     CssStyleNode** style_nodes, 
+                                     int* node_count) {
+    if (!engine || !rule || !style_nodes || !node_count) return false;
+    
+    *node_count = 0;
+    
+    // Convert each selector in the selector list to a style node
+    CSSComplexSelector* current_selector = rule->selector_list;
+    int max_nodes = 10; // Reasonable limit
+    *style_nodes = (CssStyleNode*)pool_alloc(engine->pool, max_nodes * sizeof(CssStyleNode));
+    
+    while (current_selector && *node_count < max_nodes) {
+        CssStyleNode* node = css_enhanced_selector_to_style_node(engine, current_selector);
+        if (node) {
+            (*style_nodes)[*node_count] = *node;
+            
+            // Add properties to style node
+            for (int i = 0; i < rule->property_count; i++) {
+                const char* prop_name = rule->property_names[i];
+                CSSValueEnhanced* enhanced_value = rule->property_values[i];
+                
+                // Convert enhanced value to basic CSS value for style node
+                CssValue basic_value = css_enhanced_value_to_basic(engine, enhanced_value, prop_name);
+                css_style_node_add_property(&(*style_nodes)[*node_count], prop_name, basic_value, engine->pool);
+            }
+            
+            // Set specificity
+            if (!rule->specificity_computed) {
+                rule->cached_specificity = css_calculate_specificity(current_selector);
+                rule->specificity_computed = true;
+            }
+            (*style_nodes)[*node_count].specificity = rule->cached_specificity;
+            
+            (*node_count)++;
+        }
+        
+        current_selector = current_selector->next;
+    }
+    
+    return *node_count > 0;
+}
+
+CssStyleNode* css_enhanced_selector_to_style_node(CSSEnhancedEngine* engine, 
+                                                  CSSComplexSelector* selector) {
+    if (!engine || !selector) return NULL;
+    
+    CssStyleNode* node = (CssStyleNode*)pool_calloc(engine->pool, sizeof(CssStyleNode));
+    if (!node) return NULL;
+    
+    // Initialize style node
+    css_style_node_init(node, engine->pool);
+    
+    // Process selector components
+    CSSSelectorComponent* component = selector->components;
+    while (component) {
+        switch (component->type) {
+            case CSS_SELECTOR_TYPE_ELEMENT:
+                if (component->value) {
+                    css_style_node_set_element_name(node, component->value, engine->pool);
+                }
+                break;
+                
+            case CSS_SELECTOR_TYPE_CLASS:
+                if (component->value) {
+                    css_style_node_add_class(node, component->value, engine->pool);
+                }
+                break;
+                
+            case CSS_SELECTOR_TYPE_ID:
+                if (component->value) {
+                    css_style_node_set_id(node, component->value, engine->pool);
+                }
+                break;
+                
+            case CSS_SELECTOR_ATTR_EXACT:
+            case CSS_SELECTOR_ATTR_CONTAINS:
+            case CSS_SELECTOR_ATTR_BEGINS:
+            case CSS_SELECTOR_ATTR_ENDS:
+            case CSS_SELECTOR_ATTR_SUBSTRING:
+            case CSS_SELECTOR_ATTR_EXISTS:
+                // Add attribute selectors to style node
+                if (component->value) {
+                    css_style_node_add_attribute_selector(node, component->value, component->attr_value, engine->pool);
+                }
+                break;
+                
+            default:
+                // Handle pseudo-classes and other selector types
+                break;
+        }
+        
+        component = component->next;
+    }
+    
+    return node;
+}
+
+// Value conversion from enhanced to basic
+static CssValue css_enhanced_value_to_basic(CSSEnhancedEngine* engine, 
+                                           CSSValueEnhanced* enhanced_value, 
+                                           const char* property_name) {
+    CssValue basic_value = {0};
+    
+    if (!enhanced_value) return basic_value;
+    
+    switch (enhanced_value->type) {
+        case CSS_VALUE_ENHANCED_KEYWORD:
+            basic_value.type = CSS_VALUE_TYPE_KEYWORD;
+            basic_value.keyword = enhanced_value->data.keyword;
+            break;
+            
+        case CSS_VALUE_ENHANCED_NUMBER:
+            basic_value.type = CSS_VALUE_TYPE_NUMBER;
+            basic_value.number = enhanced_value->data.number;
+            break;
+            
+        case CSS_VALUE_ENHANCED_LENGTH:
+            basic_value.type = CSS_VALUE_TYPE_LENGTH;
+            basic_value.length.value = enhanced_value->data.length.value;
+            basic_value.length.unit = enhanced_value->data.length.unit;
+            break;
+            
+        case CSS_VALUE_ENHANCED_PERCENTAGE:
+            basic_value.type = CSS_VALUE_TYPE_PERCENTAGE;
+            basic_value.percentage = enhanced_value->data.percentage;
+            break;
+            
+        case CSS_VALUE_ENHANCED_COLOR:
+            basic_value.type = CSS_VALUE_TYPE_COLOR;
+            // Would need to convert color representation
+            break;
+            
+        case CSS_VALUE_ENHANCED_CALC:
+        case CSS_VALUE_ENHANCED_VAR:
+        case CSS_VALUE_ENHANCED_ENV:
+            // For complex values, compute them first
+            {
+                CSSValueEnhanced* computed = css_enhanced_compute_value(engine, enhanced_value, property_name, NULL);
+                if (computed) {
+                    return css_enhanced_value_to_basic(engine, computed, property_name);
+                }
+            }
+            break;
+            
+        default:
+            // Default to string representation
+            basic_value.type = CSS_VALUE_TYPE_STRING;
+            basic_value.string = css_value_enhanced_to_string(enhanced_value, engine->pool);
+            break;
+    }
+    
+    return basic_value;
+}
+
+// Enhanced cascade integration
+bool css_enhanced_apply_cascade(CSSEnhancedEngine* engine,
+                               CssStyleNode* element,
+                               CSSEnhancedStylesheet** stylesheets,
+                               int stylesheet_count) {
+    if (!engine || !element || !stylesheets) return false;
+    
+    clock_t start_time = clock();
+    
+    // Collect all matching rules from all stylesheets
+    CSSEnhancedRule** matching_rules = (CSSEnhancedRule**)pool_alloc(engine->pool, 1000 * sizeof(CSSEnhancedRule*));
+    int matching_count = 0;
+    
+    for (int i = 0; i < stylesheet_count; i++) {
+        CSSEnhancedStylesheet* stylesheet = stylesheets[i];
+        if (!stylesheet) continue;
+        
+        for (int j = 0; j < stylesheet->rule_count; j++) {
+            CSSEnhancedRule* rule = stylesheet->rules[j];
+            if (!rule) continue;
+            
+            // Check if any selector in the rule matches the element
+            if (css_enhanced_rule_matches_element(engine, rule, element)) {
+                if (matching_count < 1000) {
+                    matching_rules[matching_count++] = rule;
+                }
+            }
+        }
+    }
+    
+    // Sort rules by cascade priority (specificity, source order, importance, etc.)
+    css_enhanced_sort_rules_by_cascade(engine, matching_rules, matching_count);
+    
+    // Apply rules in cascade order
+    for (int i = 0; i < matching_count; i++) {
+        CSSEnhancedRule* rule = matching_rules[i];
+        css_enhanced_apply_rule_to_element(engine, rule, element);
+    }
+    
+    clock_t end_time = clock();
+    engine->stats.cascade_time += ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+    engine->stats.cascade_calculations++;
+    
+    return true;
+}
+
+// Rule matching
+static bool css_enhanced_rule_matches_element(CSSEnhancedEngine* engine,
+                                            CSSEnhancedRule* rule,
+                                            CssStyleNode* element) {
+    if (!rule || !element || !rule->selector_list) return false;
+    
+    // Check each selector in the selector list
+    CSSComplexSelector* current = rule->selector_list;
+    while (current) {
+        if (css_enhanced_selector_matches_element(engine, current, element, NULL)) {
+            return true;
+        }
+        current = current->next;
+    }
+    
+    return false;
+}
+
+// Selector matching with enhanced features
+bool css_enhanced_selector_matches_element(CSSEnhancedEngine* engine,
+                                          CSSComplexSelector* selector,
+                                          CssStyleNode* element,
+                                          CssStyleNode* scope_root) {
+    if (!engine || !selector || !element) return false;
+    
+    // Process selector components
+    CSSSelectorComponent* component = selector->components;
+    bool matches = true;
+    
+    while (component && matches) {
+        switch (component->type) {
+            case CSS_SELECTOR_TYPE_ELEMENT:
+                matches = css_style_node_matches_element_name(element, component->value);
+                break;
+                
+            case CSS_SELECTOR_TYPE_CLASS:
+                matches = css_style_node_has_class(element, component->value);
+                break;
+                
+            case CSS_SELECTOR_TYPE_ID:
+                matches = css_style_node_matches_id(element, component->value);
+                break;
+                
+            case CSS_SELECTOR_TYPE_UNIVERSAL:
+                // Universal selector always matches
+                matches = true;
+                break;
+                
+            // Enhanced pseudo-classes
+            case CSS_SELECTOR_PSEUDO_HAS:
+                matches = css_enhanced_pseudo_has_matches(engine, component, element);
+                break;
+                
+            case CSS_SELECTOR_PSEUDO_IS:
+                matches = css_enhanced_pseudo_is_matches(engine, component, element);
+                break;
+                
+            case CSS_SELECTOR_PSEUDO_WHERE:
+                matches = css_enhanced_pseudo_where_matches(engine, component, element);
+                break;
+                
+            case CSS_SELECTOR_PSEUDO_NOT:
+                matches = !css_enhanced_pseudo_not_matches(engine, component, element);
+                break;
+                
+            // Nesting selectors
+            case CSS_SELECTOR_NESTING_PARENT:
+                // & selector - check if element matches parent context
+                matches = css_enhanced_nesting_parent_matches(engine, element, scope_root);
+                break;
+                
+            default:
+                // Handle other pseudo-classes and attributes
+                matches = css_enhanced_pseudo_class_matches(engine, component->type, element);
+                break;
+        }
+        
+        component = component->next;
+    }
+    
+    return matches;
+}
+
+// Statistics and monitoring
+void css_enhanced_engine_update_stats(CSSEnhancedEngine* engine) {
+    if (!engine) return;
+    
+    // Update memory usage
+    engine->stats.memory_usage = pool_get_allocated_size(engine->pool);
+    
+    // Other statistics are updated during parsing and cascade operations
+}
+
+void css_enhanced_engine_print_stats(CSSEnhancedEngine* engine) {
+    if (!engine) return;
+    
+    printf("CSS Enhanced Engine Statistics:\n");
+    printf("  Rules parsed: %d\n", engine->stats.rules_parsed);
+    printf("  Selectors cached: %d\n", engine->stats.selectors_cached);
+    printf("  Values computed: %d\n", engine->stats.values_computed);
+    printf("  Cascade calculations: %d\n", engine->stats.cascade_calculations);
+    printf("  Parse time: %.4f seconds\n", engine->stats.parse_time);
+    printf("  Cascade time: %.4f seconds\n", engine->stats.cascade_time);
+    printf("  Memory usage: %zu bytes\n", engine->stats.memory_usage);
+    
+    printf("\nFeatures enabled:\n");
+    printf("  CSS Nesting: %s\n", engine->features.css_nesting ? "Yes" : "No");
+    printf("  Cascade Layers: %s\n", engine->features.css_cascade_layers ? "Yes" : "No");
+    printf("  Container Queries: %s\n", engine->features.css_container_queries ? "Yes" : "No");
+    printf("  CSS Scope: %s\n", engine->features.css_scope ? "Yes" : "No");
+    printf("  Color Level 4: %s\n", engine->features.css_color_4 ? "Yes" : "No");
+}
+
+double css_enhanced_engine_get_parse_time(CSSEnhancedEngine* engine) {
+    return engine ? engine->stats.parse_time : 0.0;
+}
+
+size_t css_enhanced_engine_get_memory_usage(CSSEnhancedEngine* engine) {
+    return engine ? engine->stats.memory_usage : 0;
+}
