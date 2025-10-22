@@ -3,6 +3,7 @@
 #include <rpmalloc/rpmalloc.h>
 #include <stdio.h>
 #include <stdlib.h>  // for standard malloc/free for pool structure
+#include <string.h>  // for memcpy, strlen
 #include <unistd.h>  // for _exit
 #include <pthread.h> // for thread-safe initialization
 
@@ -149,4 +150,15 @@ void mempool_cleanup(void) {
         }
         pthread_mutex_unlock(&init_mutex);
     }
+}
+
+char* pool_strdup(Pool* pool, const char* str) {
+    if (!pool || !str) return NULL;
+    
+    size_t len = strlen(str) + 1;
+    char* dup = (char*)pool_alloc(pool, len);
+    if (dup) {
+        memcpy(dup, str, len);
+    }
+    return dup;
 }

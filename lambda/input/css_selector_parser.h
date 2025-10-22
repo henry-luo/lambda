@@ -2,8 +2,11 @@
 #define CSS_SELECTOR_PARSER_H
 
 #include "css_tokenizer_enhanced.h"
-#include "../css_style_node.h"
+#include "../../lib/css_style_node.h"
 #include "../../lib/mempool.h"
+
+// Use existing CSS enums from css_property_system.h to avoid conflicts
+#include "../../lib/css_property_system.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -271,6 +274,10 @@ bool css_supports_forgiving_selectors(void);
 void css_print_selector_specificity(CSSComplexSelector* selector);
 void css_print_selector_structure(CSSSelectorList* list);
 char* css_describe_selector_component(CSSSelectorComponent* component, Pool* pool);
+
+// Specificity utility functions
+CssSpecificity css_specificity_create(uint8_t ids, uint8_t classes, uint8_t elements, 
+                                      uint8_t inline_style, bool important);
 
 #ifdef __cplusplus
 }

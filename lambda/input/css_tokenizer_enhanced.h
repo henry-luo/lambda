@@ -1,12 +1,83 @@
 #ifndef CSS_TOKENIZER_ENHANCED_H
 #define CSS_TOKENIZER_ENHANCED_H
 
-#include "css_tokenizer.h"
+// Include existing CSS system first to avoid conflicts
+#include "../../lib/css_property_system.h"
+#include "../../lib/mempool.h"
 #include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Basic CSS Token Types (for compatibility)
+typedef enum {
+    CSS_TOKEN_IDENT,           // identifiers, keywords
+    CSS_TOKEN_FUNCTION,        // function names followed by (
+    CSS_TOKEN_AT_KEYWORD,      // @media, @keyframes, etc.
+    CSS_TOKEN_HASH,            // #colors
+    CSS_TOKEN_STRING,          // "quoted strings"
+    CSS_TOKEN_URL,             // url() values
+    CSS_TOKEN_NUMBER,          // numeric values
+    CSS_TOKEN_DIMENSION,       // numbers with units (10px, 2em)
+    CSS_TOKEN_PERCENTAGE,      // percentage values (50%)
+    CSS_TOKEN_UNICODE_RANGE,   // U+0000-FFFF
+    CSS_TOKEN_INCLUDE_MATCH,   // ~=
+    CSS_TOKEN_DASH_MATCH,      // |=
+    CSS_TOKEN_PREFIX_MATCH,    // ^=
+    CSS_TOKEN_SUFFIX_MATCH,    // $=
+    CSS_TOKEN_SUBSTRING_MATCH, // *=
+    CSS_TOKEN_COLUMN,          // ||
+    CSS_TOKEN_WHITESPACE,      // spaces, tabs, newlines
+    CSS_TOKEN_COMMENT,         // /* comments */
+    CSS_TOKEN_COLON,           // :
+    CSS_TOKEN_SEMICOLON,       // ;
+    CSS_TOKEN_LEFT_PAREN,      // (
+    CSS_TOKEN_RIGHT_PAREN,     // )
+    CSS_TOKEN_LEFT_BRACE,      // {
+    CSS_TOKEN_RIGHT_BRACE,     // }
+    CSS_TOKEN_LEFT_BRACKET,    // [
+    CSS_TOKEN_RIGHT_BRACKET,   // ]
+    CSS_TOKEN_COMMA,           // ,
+    CSS_TOKEN_DELIM,           // any other single character
+    CSS_TOKEN_EOF,             // end of file
+    CSS_TOKEN_BAD_STRING,      // unclosed string
+    CSS_TOKEN_BAD_URL,         // malformed URL
+    CSS_TOKEN_IDENTIFIER,      // alias for CSS_TOKEN_IDENT
+    CSS_TOKEN_MATCH            // generic match tokenization error
+} CSSTokenType;
+
+// Hash token subtypes
+typedef enum {
+    CSS_HASH_ID,               // valid identifier hash
+    CSS_HASH_UNRESTRICTED      // unrestricted hash
+} CSSHashType;
+
+// CSS Token structure (basic compatibility)
+typedef struct {
+    CSSTokenType type;
+    const char* start;         // pointer to start of token in input
+    size_t length;             // length of token
+    const char* value;         // null-terminated token value
+    union {
+        double number_value;   // for NUMBER, DIMENSION, PERCENTAGE tokens
+        CSSHashType hash_type; // for HASH tokens
+        char delimiter;        // for DELIM tokens
+    } data;
+} CSSToken;
+
+// Type alias for consistency with properties API
+typedef CSSToken css_token_t;
+
+// Token stream for parser consumption
+typedef struct {
+    CSSToken* tokens;
+    size_t current;
+    size_t length;
+    Pool* pool;
+} CSSTokenStream;
 
 // Enhanced CSS Token Types for CSS3+ features
 typedef enum {
@@ -21,6 +92,7 @@ typedef enum {
     CSS_TOKEN_ENHANCED_DIMENSION = CSS_TOKEN_DIMENSION,
     CSS_TOKEN_ENHANCED_PERCENTAGE = CSS_TOKEN_PERCENTAGE,
     CSS_TOKEN_ENHANCED_UNICODE_RANGE = CSS_TOKEN_UNICODE_RANGE,
+    CSS_TOKEN_ENHANCED_COMMA = CSS_TOKEN_COMMA,
     
     // Enhanced tokens for CSS3+ features
     CSS_TOKEN_ENHANCED_CDO = 100,          // <!--
@@ -77,43 +149,16 @@ typedef enum {
     CSS_VALUE_ENHANCED_GRID_TEMPLATE,      // grid template syntax
     CSS_VALUE_ENHANCED_TRANSFORM_FUNCTION, // transform functions
     CSS_VALUE_ENHANCED_FILTER_FUNCTION,    // filter functions
-    CSS_VALUE_ENHANCED_GRADIENT           // gradient functions
+    CSS_VALUE_ENHANCED_GRADIENT,           // gradient functions
+    CSS_VALUE_ENHANCED_UNICODE_RANGE,      // unicode-range values
+    CSS_VALUE_ENHANCED_MIN,                // min() function values
+    CSS_VALUE_ENHANCED_MAX,                // max() function values
+    CSS_VALUE_ENHANCED_COLOR_MIX,          // color-mix() function
+    CSS_VALUE_ENHANCED_LIST,               // list values
+    CSS_VALUE_ENHANCED_LENGTH_PERCENTAGE,  // length or percentage values
+    CSS_VALUE_ENHANCED_NUMBER_PERCENTAGE,  // number or percentage values
+    CSS_VALUE_ENHANCED_FUNCTION            // generic function value
 } CSSValueTypeEnhanced;
-
-// Enhanced CSS Unit Types
-typedef enum {
-    // Length units
-    CSS_UNIT_PX, CSS_UNIT_EM, CSS_UNIT_REM, CSS_UNIT_EX, CSS_UNIT_CH,
-    CSS_UNIT_VW, CSS_UNIT_VH, CSS_UNIT_VMIN, CSS_UNIT_VMAX,
-    CSS_UNIT_CM, CSS_UNIT_MM, CSS_UNIT_IN, CSS_UNIT_PT, CSS_UNIT_PC,
-    CSS_UNIT_Q,    // Quarter-millimeters
-    CSS_UNIT_LH,   // Line height
-    CSS_UNIT_RLH,  // Root line height
-    CSS_UNIT_VI,   // Viewport inline
-    CSS_UNIT_VB,   // Viewport block
-    CSS_UNIT_SVW, CSS_UNIT_SVH, CSS_UNIT_LVW, CSS_UNIT_LVH, CSS_UNIT_DVW, CSS_UNIT_DVH,
-    
-    // Angle units
-    CSS_UNIT_DEG, CSS_UNIT_GRAD, CSS_UNIT_RAD, CSS_UNIT_TURN,
-    
-    // Time units
-    CSS_UNIT_S, CSS_UNIT_MS,
-    
-    // Frequency units
-    CSS_UNIT_HZ, CSS_UNIT_KHZ,
-    
-    // Resolution units
-    CSS_UNIT_DPI, CSS_UNIT_DPCM, CSS_UNIT_DPPX,
-    
-    // Grid units
-    CSS_UNIT_FR,  // Fractional units for CSS Grid
-    
-    // Percentage
-    CSS_UNIT_PERCENT,
-    
-    // Dimensionless
-    CSS_UNIT_NONE
-} CSSUnitTypeEnhanced;
 
 // Enhanced CSS Token with additional metadata
 typedef struct {
@@ -125,7 +170,7 @@ typedef struct {
         double number_value;
         struct {
             double value;
-            CSSUnitTypeEnhanced unit;
+            CssUnit unit;
         } dimension;
         struct {
             uint8_t r, g, b, a;
@@ -145,23 +190,6 @@ typedef struct {
     uint32_t unicode_codepoint; // For Unicode escapes
 } CSSTokenEnhanced;
 
-// Enhanced CSS Color Support
-typedef enum {
-    CSS_COLOR_HEX,         // #rrggbb, #rgb
-    CSS_COLOR_RGB,         // rgb(), rgba()
-    CSS_COLOR_HSL,         // hsl(), hsla()
-    CSS_COLOR_HWB,         // hwb()
-    CSS_COLOR_LAB,         // lab()
-    CSS_COLOR_LCH,         // lch()
-    CSS_COLOR_OKLAB,       // oklab()
-    CSS_COLOR_OKLCH,       // oklch()
-    CSS_COLOR_COLOR,       // color()
-    CSS_COLOR_KEYWORD,     // named colors
-    CSS_COLOR_TRANSPARENT, // transparent
-    CSS_COLOR_CURRENT,     // currentColor
-    CSS_COLOR_SYSTEM       // system colors
-} CSSColorTypeEnhanced;
-
 // CSS Function Information
 typedef struct {
     const char* name;
@@ -172,7 +200,24 @@ typedef struct {
     bool supports_calc;
 } CSSFunctionInfo;
 
+// Enhanced tokenizer state
+typedef struct CSSTokenizerEnhanced {
+    Pool* pool;
+    const char* input;
+    size_t length;
+    size_t position;
+    int line;
+    int column;
+    bool supports_unicode;
+    bool supports_css3;
+} CSSTokenizerEnhanced;
+
 // Enhanced tokenizer functions
+CSSTokenizerEnhanced* css_tokenizer_enhanced_create(Pool* pool);
+void css_tokenizer_enhanced_destroy(CSSTokenizerEnhanced* tokenizer);
+int css_tokenizer_enhanced_tokenize(CSSTokenizerEnhanced* tokenizer, 
+                                   const char* input, size_t length, 
+                                   CSSTokenEnhanced** tokens);
 CSSTokenEnhanced* css_tokenize_enhanced(const char* input, size_t length, 
                                        Pool* pool, size_t* token_count);
 
@@ -192,9 +237,9 @@ CSSFunctionInfo* css_get_function_info(const char* function_name);
 bool css_is_valid_css_function(const char* name);
 
 // Enhanced color parsing
-CSSColorTypeEnhanced css_detect_color_type(const char* color_str);
+CssColorType css_detect_color_type(const char* color_str);
 bool css_parse_color_enhanced(const char* color_str, 
-                             CSSColorTypeEnhanced* type,
+                             CssColorType* type,
                              uint8_t* r, uint8_t* g, uint8_t* b, uint8_t* a);
 
 // CSS calc() expression parsing
@@ -210,7 +255,7 @@ typedef struct CSSCalcToken {
     } type;
     union {
         double number;
-        struct { double value; CSSUnitTypeEnhanced unit; } dimension;
+        struct { double value; CssUnit unit; } dimension;
         char operator;
         const char* function_name;
     } data;
@@ -223,7 +268,7 @@ bool css_validate_calc_expression(CSSCalcToken* tokens, size_t count);
 typedef struct CSSGridTemplate {
     char** line_names;
     double* track_sizes;
-    CSSUnitTypeEnhanced* track_units;
+    CssUnit* track_units;
     int track_count;
     bool has_repeat;
     int repeat_count;
@@ -243,7 +288,7 @@ typedef struct CSSMediaToken {
     CSSMediaTokenType type;
     const char* value;
     double number_value;
-    CSSUnitTypeEnhanced unit;
+    CssUnit unit;
 } CSSMediaToken;
 
 CSSMediaToken* css_parse_media_query(const char* media_query, Pool* pool, size_t* token_count);
@@ -257,19 +302,48 @@ typedef struct CSSContainerToken {
     } type;
     const char* feature;
     double value;
-    CSSUnitTypeEnhanced unit;
+    CssUnit unit;
 } CSSContainerToken;
 
 CSSContainerToken* css_parse_container_query(const char* container_query, Pool* pool, size_t* token_count);
 
 // Utility functions for enhanced tokenizer
 const char* css_token_type_enhanced_to_str(CSSTokenTypeEnhanced type);
-const char* css_unit_type_to_str(CSSUnitTypeEnhanced unit);
-const char* css_color_type_to_str(CSSColorTypeEnhanced type);
+const char* css_unit_type_to_str(CssUnit unit);
+const char* css_color_type_to_str(CssColorType type);
 
 // Error recovery and validation
 bool css_token_is_recoverable_error(CSSTokenEnhanced* token);
 void css_token_fix_common_errors(CSSTokenEnhanced* token, Pool* pool);
+
+// Basic CSS tokenizer compatibility functions
+CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* token_count);
+void css_free_tokens(CSSToken* tokens);
+const char* css_token_type_to_str(CSSTokenType type);
+
+// Token stream utilities
+CSSTokenStream* css_token_stream_create(CSSToken* tokens, size_t length, Pool* pool);
+void css_token_stream_free(CSSTokenStream* stream);
+CSSToken* css_token_stream_current(CSSTokenStream* stream);
+CSSToken* css_token_stream_peek(CSSTokenStream* stream, size_t offset);
+bool css_token_stream_advance(CSSTokenStream* stream);
+bool css_token_stream_consume(CSSTokenStream* stream, CSSTokenType expected);
+bool css_token_stream_at_end(CSSTokenStream* stream);
+
+// Token utility functions
+bool css_token_is_whitespace(const CSSToken* token);
+bool css_token_is_comment(const CSSToken* token);
+bool css_token_equals_string(const CSSToken* token, const char* str);
+char* css_token_to_string(const CSSToken* token, Pool* pool);
+
+// Character classification helpers
+bool css_is_name_start_char(int c);
+bool css_is_name_char(int c);
+bool css_is_non_printable(int c);
+bool css_is_newline(int c);
+bool css_is_whitespace(int c);
+bool css_is_digit(int c);
+bool css_is_hex_digit(int c);
 
 #ifdef __cplusplus
 }

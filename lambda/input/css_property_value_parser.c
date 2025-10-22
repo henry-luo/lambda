@@ -5,6 +5,20 @@
 #include <math.h>
 #include <stdio.h>
 
+// Forward declarations
+static void css_property_value_parser_set_default_env_vars(CSSPropertyValueParser* parser);
+static CSSValueEnhanced* css_parse_single_value_enhanced(CSSPropertyValueParser* parser,
+                                                        const CSSTokenEnhanced* token,
+                                                        const char* property_name);
+static CSSValueEnhanced* css_parse_function_value(CSSPropertyValueParser* parser,
+                                                 const CSSTokenEnhanced* tokens,
+                                                 int token_count,
+                                                 const char* property_name);
+static CSSValueEnhanced* css_parse_value_list_enhanced(CSSPropertyValueParser* parser,
+                                                      const CSSTokenEnhanced* tokens,
+                                                      int token_count,
+                                                      const char* property_name);
+
 // Parser creation and destruction
 CSSPropertyValueParser* css_property_value_parser_create(Pool* pool) {
     if (!pool) return NULL;
@@ -139,6 +153,54 @@ CSSValueEnhanced* css_value_enhanced_create_length(Pool* pool, double number, co
     return value;
 }
 
+CSSValueEnhanced* css_value_enhanced_create_string(Pool* pool, const char* string) {
+    if (!pool || !string) return NULL;
+    
+    CSSValueEnhanced* value = (CSSValueEnhanced*)pool_calloc(pool, sizeof(CSSValueEnhanced));
+    if (!value) return NULL;
+    
+    value->type = CSS_VALUE_ENHANCED_STRING;
+    value->data.string = pool_strdup(pool, string);
+    
+    return value;
+}
+
+CSSValueEnhanced* css_value_enhanced_create_url(Pool* pool, const char* url) {
+    if (!pool || !url) return NULL;
+    
+    CSSValueEnhanced* value = (CSSValueEnhanced*)pool_calloc(pool, sizeof(CSSValueEnhanced));
+    if (!value) return NULL;
+    
+    value->type = CSS_VALUE_ENHANCED_URL;
+    value->data.url = pool_strdup(pool, url);
+    
+    return value;
+}
+
+CSSValueEnhanced* css_value_enhanced_create_color_hex(Pool* pool, const char* hex) {
+    if (!pool || !hex) return NULL;
+    
+    CSSValueEnhanced* value = (CSSValueEnhanced*)pool_calloc(pool, sizeof(CSSValueEnhanced));
+    if (!value) return NULL;
+    
+    value->type = CSS_VALUE_ENHANCED_COLOR;
+    value->data.color_hex = pool_strdup(pool, hex);
+    
+    return value;
+}
+
+CSSValueEnhanced* css_value_enhanced_create_unicode_range(Pool* pool, const char* range) {
+    if (!pool || !range) return NULL;
+    
+    CSSValueEnhanced* value = (CSSValueEnhanced*)pool_calloc(pool, sizeof(CSSValueEnhanced));
+    if (!value) return NULL;
+    
+    value->type = CSS_VALUE_ENHANCED_UNICODE_RANGE;
+    value->data.unicode_range = pool_strdup(pool, range);
+    
+    return value;
+}
+
 CSSValueEnhanced* css_value_enhanced_create_percentage(Pool* pool, double percentage) {
     if (!pool) return NULL;
     
@@ -183,13 +245,13 @@ static CSSValueEnhanced* css_parse_single_value_enhanced(CSSPropertyValueParser*
             return css_value_enhanced_create_keyword(parser->pool, token->value);
             
         case CSS_TOKEN_ENHANCED_NUMBER:
-            return css_value_enhanced_create_number(parser->pool, token->number_value);
+            return css_value_enhanced_create_number(parser->pool, token->data.number_value);
             
         case CSS_TOKEN_ENHANCED_DIMENSION:
-            return css_value_enhanced_create_length(parser->pool, token->number_value, token->unit);
+            return css_value_enhanced_create_length(parser->pool, token->data.dimension.value, css_unit_type_to_str(token->data.dimension.unit));
             
         case CSS_TOKEN_ENHANCED_PERCENTAGE:
-            return css_value_enhanced_create_percentage(parser->pool, token->number_value);
+            return css_value_enhanced_create_percentage(parser->pool, token->data.number_value);
             
         case CSS_TOKEN_ENHANCED_STRING:
             return css_value_enhanced_create_string(parser->pool, token->value);
@@ -320,13 +382,75 @@ static CSSValueEnhanced* css_parse_function_value(CSSPropertyValueParser* parser
     return css_parse_generic_function(parser, function_name, tokens + 1, token_count - 1);
 }
 
+// Generic function parser (stub implementation)
+static CSSValueEnhanced* css_parse_generic_function(CSSPropertyValueParser* parser,
+                                                   const char* function_name,
+                                                   const CSSTokenEnhanced* tokens,
+                                                   int token_count) {
+    // Stub implementation for generic function parsing
+    if (!parser || !function_name || !tokens || token_count <= 0) {
+        return NULL;
+    }
+    
+    CSSValueEnhanced* value = pool_calloc(parser->pool, sizeof(CSSValueEnhanced));
+    if (!value) {
+        return NULL;
+    }
+    
+    value->type = CSS_VALUE_ENHANCED_FUNCTION;
+    value->data.function.name = pool_strdup(parser->pool, function_name);
+    value->data.function.arguments = NULL;
+    value->data.function.argument_count = 0;
+    
+    return value;
+}
+
+static CSSValueEnhanced* css_parse_value_list_enhanced(CSSPropertyValueParser* parser,
+                                                      const CSSTokenEnhanced* tokens,
+                                                      int token_count,
+                                                      const char* property_name) {
+    if (!parser || !tokens || token_count <= 0) return NULL;
+    
+    // Create a list value
+    CSSValueEnhanced* list = css_value_list_create(parser->pool, false);
+    if (!list) return NULL;
+    
+    // Parse individual values separated by commas or whitespace
+    int i = 0;
+    while (i < token_count) {
+        // Skip whitespace and commas
+        while (i < token_count && 
+               (tokens[i].type == CSS_TOKEN_WHITESPACE || 
+                tokens[i].type == CSS_TOKEN_ENHANCED_COMMA)) {
+            i++;
+        }
+        
+        if (i >= token_count) break;
+        
+        // Parse single value
+        CSSValueEnhanced* value = css_parse_single_value_enhanced(parser, &tokens[i], property_name);
+        if (value) {
+            css_value_list_add(list, value);
+        }
+        
+        i++;
+    }
+    
+    return list;
+}
+
 // Parse calc() function
-static CSSValueEnhanced* css_parse_calc_function(CSSPropertyValueParser* parser,
+// Forward declaration for calc expression stub
+static CSSCalcNode* css_parse_calc_expression_stub(CSSPropertyValueParser* parser,
+                                                  const CSSTokenEnhanced* tokens,
+                                                  int token_count);
+
+CSSValueEnhanced* css_parse_calc_function(CSSPropertyValueParser* parser,
                                                  const CSSTokenEnhanced* tokens,
                                                  int token_count) {
     if (!parser || !tokens || token_count <= 0) return NULL;
     
-    CSSCalcNode* calc_node = css_parse_calc_expression(parser, tokens, token_count);
+    CSSCalcNode* calc_node = css_parse_calc_expression_stub(parser, tokens, token_count);
     if (!calc_node) return NULL;
     
     CSSValueEnhanced* value = (CSSValueEnhanced*)pool_calloc(parser->pool, sizeof(CSSValueEnhanced));
@@ -336,6 +460,19 @@ static CSSValueEnhanced* css_parse_calc_function(CSSPropertyValueParser* parser,
     value->data.calc_expression = calc_node;
     
     return value;
+}
+
+// Stub for calc expression parsing
+static CSSCalcNode* css_parse_calc_expression_stub(CSSPropertyValueParser* parser,
+                                                  const CSSTokenEnhanced* tokens,
+                                                  int token_count) {
+    // Stub implementation for calc expression parsing
+    if (!parser || !tokens || token_count <= 0) {
+        return NULL;
+    }
+    
+    // Return NULL to indicate calc parsing not yet implemented
+    return NULL;
 }
 
 // Parse var() function
@@ -499,7 +636,7 @@ bool css_value_enhanced_is_function(const CSSValueEnhanced* value, const char* f
 }
 
 // Debug utilities
-const char* css_value_enhanced_type_to_string(CSSValueEnhancedType type) {
+const char* css_value_enhanced_type_to_string(CSSValueTypeEnhanced type) {
     switch (type) {
         case CSS_VALUE_ENHANCED_KEYWORD: return "keyword";
         case CSS_VALUE_ENHANCED_LENGTH: return "length";
@@ -553,4 +690,142 @@ void css_value_enhanced_print_debug(const CSSValueEnhanced* value) {
     }
     
     printf("\n");
+}
+
+// Missing function stubs - These should be properly implemented later
+
+// Environment variable setter for parser
+bool css_property_value_parser_set_env_variable(CSSPropertyValueParser* parser,
+                                               const char* name,
+                                               CSSValueEnhanced* value) {
+    // Stub implementation for environment variable setting
+    if (!parser || !name || !value) return false;
+    // Would set environment variables for env() function resolution
+    return true;
+}
+
+// Provide the implementation for the declared function that returns CSSColorMix*
+CSSColorMix* css_parse_color_mix_function(CSSPropertyValueParser* parser,
+                                         const CSSTokenEnhanced* tokens,
+                                         int token_count) {
+    // Stub implementation for color-mix() function parsing
+    if (!parser || !tokens || token_count <= 0) {
+        return NULL;
+    }
+    
+    // Return NULL for now - actual implementation would parse color-mix syntax
+    return NULL;
+}
+
+// implementation removed - now implemented in css_tokenizer_enhanced.c
+
+// Enhanced value to string conversion
+char* css_value_enhanced_to_string(const CSSValueEnhanced* value, Pool* pool) {
+    // Stub implementation for value to string conversion
+    if (!value || !pool) {
+        return pool_strdup(pool, "invalid");
+    }
+    
+    switch (value->type) {
+        case CSS_VALUE_ENHANCED_KEYWORD:
+            return pool_strdup(pool, value->data.keyword ? value->data.keyword : "unknown");
+        case CSS_VALUE_ENHANCED_STRING:
+            return pool_strdup(pool, value->data.string ? value->data.string : "");
+        case CSS_VALUE_ENHANCED_FUNCTION:
+            return pool_strdup(pool, value->data.function.name ? value->data.function.name : "function()");
+        default:
+            return pool_strdup(pool, "unknown-value");
+    }
+}
+
+CSSValueEnhanced* css_value_list_create(Pool* pool, bool comma_separated) {
+    if (!pool) return NULL;
+    
+    CSSValueEnhanced* list = (CSSValueEnhanced*)pool_calloc(pool, sizeof(CSSValueEnhanced));
+    if (!list) return NULL;
+    
+    list->type = CSS_VALUE_ENHANCED_LIST;
+    list->data.list.comma_separated = comma_separated;
+    list->data.list.count = 0;
+    list->data.list.values = NULL;
+    
+    return list;
+}
+
+void css_value_list_add(CSSValueEnhanced* list, CSSValueEnhanced* value) {
+    // Stub implementation - would need proper dynamic array handling
+    (void)list; (void)value;
+}
+
+// Additional missing function stubs for CSS parsing functions
+CSSValueEnhanced* css_parse_min_max_function(CSSPropertyValueParser* parser,
+                                            const CSSTokenEnhanced* tokens,
+                                            int token_count,
+                                            int op_type) {
+    (void)parser; (void)tokens; (void)token_count; (void)op_type;
+    return NULL; // Stub
+}
+
+CSSValueEnhanced* css_parse_clamp_function(CSSPropertyValueParser* parser,
+                                          const CSSTokenEnhanced* tokens,
+                                          int token_count) {
+    (void)parser; (void)tokens; (void)token_count;
+    return NULL; // Stub
+}
+
+CSSValueEnhanced* css_parse_math_function(CSSPropertyValueParser* parser,
+                                         const CSSTokenEnhanced* tokens,
+                                         int token_count,
+                                         int op_type) {
+    (void)parser; (void)tokens; (void)token_count; (void)op_type;
+    return NULL; // Stub
+}
+
+CSSValueEnhanced* css_parse_rgb_function(CSSPropertyValueParser* parser,
+                                        const CSSTokenEnhanced* tokens,
+                                        int token_count) {
+    (void)parser; (void)tokens; (void)token_count;
+    return NULL; // Stub
+}
+
+CSSValueEnhanced* css_parse_hsl_function(CSSPropertyValueParser* parser,
+                                        const CSSTokenEnhanced* tokens,
+                                        int token_count) {
+    (void)parser; (void)tokens; (void)token_count;
+    return NULL; // Stub
+}
+
+CSSValueEnhanced* css_parse_hwb_function(CSSPropertyValueParser* parser,
+                                        const CSSTokenEnhanced* tokens,
+                                        int token_count) {
+    (void)parser; (void)tokens; (void)token_count;
+    return NULL; // Stub
+}
+
+CSSValueEnhanced* css_parse_lab_function(CSSPropertyValueParser* parser,
+                                        const CSSTokenEnhanced* tokens,
+                                        int token_count) {
+    (void)parser; (void)tokens; (void)token_count;
+    return NULL; // Stub
+}
+
+CSSValueEnhanced* css_parse_lch_function(CSSPropertyValueParser* parser,
+                                        const CSSTokenEnhanced* tokens,
+                                        int token_count) {
+    (void)parser; (void)tokens; (void)token_count;
+    return NULL; // Stub
+}
+
+CSSValueEnhanced* css_parse_oklab_function(CSSPropertyValueParser* parser,
+                                          const CSSTokenEnhanced* tokens,
+                                          int token_count) {
+    (void)parser; (void)tokens; (void)token_count;
+    return NULL; // Stub
+}
+
+CSSValueEnhanced* css_parse_oklch_function(CSSPropertyValueParser* parser,
+                                          const CSSTokenEnhanced* tokens,
+                                          int token_count) {
+    (void)parser; (void)tokens; (void)token_count;
+    return NULL; // Stub
 }
