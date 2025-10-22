@@ -881,6 +881,83 @@ build_curl_with_http2_for_mac() {
     return 1
 }
 
+# Function to build FontConfig without libintl/iconv for Mac
+build_fontconfig_minimal_for_mac() {
+    echo "Building FontConfig (minimal, without libintl/iconv) for Mac..."
+
+    # Check if already built
+    if [ -f "/opt/homebrew/lib/libfontconfig_minimal.a" ]; then
+        echo "FontConfig minimal already built"
+        return 0
+    fi
+
+    # Create build temp directory
+    mkdir -p build_temp
+
+    # Download FontConfig if not exists
+    if [ ! -d "build_temp/fontconfig-2.14.2" ]; then
+        echo "Downloading FontConfig 2.14.2..."
+        cd build_temp
+        curl -L "https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.14.2.tar.xz" -o fontconfig-2.14.2.tar.xz
+        tar -xJf fontconfig-2.14.2.tar.xz
+        rm fontconfig-2.14.2.tar.xz
+        cd - > /dev/null
+    fi
+
+    cd build_temp/fontconfig-2.14.2
+
+    # Get FreeType and Expat paths from Homebrew
+    if command -v brew >/dev/null 2>&1; then
+        FREETYPE_PATH=$(brew --prefix freetype)
+        EXPAT_PATH=$(brew --prefix expat)
+        if [ ! -d "$FREETYPE_PATH" ] || [ ! -d "$EXPAT_PATH" ]; then
+            echo "❌ FreeType or Expat not found in Homebrew. Install them with: brew install freetype expat"
+            cd - > /dev/null
+            return 1
+        fi
+    else
+        echo "❌ Homebrew required for FreeType and Expat paths"
+        cd - > /dev/null
+        return 1
+    fi
+
+    # Configure FontConfig without NLS (libintl/iconv)
+    echo "Configuring FontConfig without libintl/iconv support..."
+    echo "FreeType path: $FREETYPE_PATH"
+    echo "Expat path: $EXPAT_PATH"
+    
+    export PKG_CONFIG_PATH="$FREETYPE_PATH/lib/pkgconfig:$EXPAT_PATH/lib/pkgconfig:$PKG_CONFIG_PATH"
+    
+    if ./configure --prefix=/opt/homebrew \
+        --enable-static --disable-shared \
+        --disable-nls \
+        --with-freetype-config="$FREETYPE_PATH/bin/freetype-config" \
+        --with-expat-includes="$EXPAT_PATH/include" \
+        --with-expat-lib="$EXPAT_PATH/lib" \
+        --disable-docs \
+        --disable-dependency-tracking \
+        --sysconfdir=/opt/homebrew/etc \
+        --localstatedir=/opt/homebrew/var \
+        --mandir=/opt/homebrew/share/man; then
+
+        echo "Building FontConfig..."
+        if make -j$(sysctl -n hw.ncpu); then
+            echo "Installing FontConfig..."
+            if sudo make install; then
+                # Create a symlink with the minimal suffix for clarity
+                sudo ln -sf /opt/homebrew/lib/libfontconfig.a /opt/homebrew/lib/libfontconfig_minimal.a
+                echo "✅ FontConfig (minimal, without libintl/iconv) built successfully"
+                cd - > /dev/null
+                return 0
+            fi
+        fi
+    fi
+
+    echo "❌ FontConfig build failed"
+    cd - > /dev/null
+    return 1
+}
+
 echo "Found native compiler: $(which gcc)"
 
 # Build tree-sitter library for Mac
@@ -1088,6 +1165,19 @@ else
     echo "✅ FreeType 2.13.3 setup completed successfully"
 fi
 
+# Build FontConfig without libintl/iconv for Mac (required by Radiant project)
+echo "Setting up FontConfig (minimal, without libintl/iconv)..."
+if [ -f "/opt/homebrew/lib/libfontconfig_minimal.a" ]; then
+    echo "FontConfig minimal already available"
+else
+    if ! build_fontconfig_minimal_for_mac; then
+        echo "❌ FontConfig minimal build failed - required for Radiant project"
+        exit 1
+    else
+        echo "✅ FontConfig minimal built successfully"
+    fi
+fi
+
 # Install Homebrew dependencies that are required by build_lambda_config.json
 echo "Installing Homebrew dependencies..."
 
@@ -1105,10 +1195,10 @@ HOMEBREW_DEPS=(
 # Radiant project dependencies - for HTML/CSS/SVG rendering engine
 # Note: freetype is handled separately to ensure specific version 2.13.3
 # Note: lexbor is built from submodule instead of Homebrew
+# Note: fontconfig is built from source without libintl/iconv (see build_fontconfig_minimal_for_mac)
 RADIANT_DEPS=(
     "glfw"       # OpenGL window and context management
     "libpng"     # PNG image format support
-    "fontconfig" # Font configuration library
     "expat"      # XML parser library (dependency of fontconfig)
     "zlib"       # Compression library
     "bzip2"      # Alternative compression library
@@ -1212,7 +1302,7 @@ if command -v brew >/dev/null 2>&1; then
     echo "- ThorVG: $([ -f "$SYSTEM_PREFIX/lib/libthorvg.a" ] || [ -f "$SYSTEM_PREFIX/lib/libthorvg.dylib" ] && echo "✓ Available" || echo "✗ Missing")"
     echo "- GLFW: $(brew list glfw >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- libpng: $(brew list libpng >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
-    echo "- fontconfig: $(brew list fontconfig >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
+    echo "- fontconfig: $([ -f "/opt/homebrew/lib/libfontconfig_minimal.a" ] && echo "✓ Available (minimal)" || echo "✗ Missing")"
     echo "- expat: $(brew list expat >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- zlib: $(brew list zlib >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
     echo "- bzip2: $(brew list bzip2 >/dev/null 2>&1 && echo "✓ Available" || echo "✗ Missing")"
