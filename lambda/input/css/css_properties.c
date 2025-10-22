@@ -132,7 +132,79 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_PADDING, "padding", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, true, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_BORDER, "border", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_FLEX, "flex", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "0 1 auto", false, true, NULL, 0, validate_keyword, NULL},
-    {CSS_PROPERTY_GRID, "grid", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL}
+    {CSS_PROPERTY_GRID, "grid", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    
+    // Multi-column Layout Properties
+    {CSS_PROPERTY_COLUMN_WIDTH, "column-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_COLUMN_COUNT, "column-count", PROP_TYPE_INTEGER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
+    {CSS_PROPERTY_COLUMNS, "columns", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_COLUMN_RULE, "column-rule", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_COLUMN_RULE_WIDTH, "column-rule-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_COLUMN_RULE_STYLE, "column-rule-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_COLUMN_RULE_COLOR, "column-rule-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_COLUMN_SPAN, "column-span", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_COLUMN_FILL, "column-fill", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    
+    // Text Effects Properties
+    {CSS_PROPERTY_TEXT_DECORATION_LINE, "text-decoration-line", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_DECORATION_STYLE, "text-decoration-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "solid", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_DECORATION_COLOR, "text-decoration-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "currentColor", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_TEXT_DECORATION_THICKNESS, "text-decoration-thickness", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "auto", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_TEXT_EMPHASIS, "text-emphasis", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_EMPHASIS_STYLE, "text-emphasis-style", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_EMPHASIS_COLOR, "text-emphasis-color", PROP_TYPE_COLOR, PROP_INHERIT_YES, "currentColor", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_TEXT_EMPHASIS_POSITION, "text-emphasis-position", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "over right", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_OVERFLOW, "text-overflow", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "clip", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_WORD_BREAK, "word-break", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_LINE_BREAK, "line-break", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_HYPHENS, "hyphens", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "manual", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_OVERFLOW_WRAP, "overflow-wrap", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_WORD_WRAP, "word-wrap", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TAB_SIZE, "tab-size", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "8", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_HANGING_PUNCTUATION, "hanging-punctuation", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_JUSTIFY, "text-justify", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_ALIGN_ALL, "text-align-all", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "start", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TEXT_ALIGN_LAST, "text-align-last", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    
+    // List Properties
+    {CSS_PROPERTY_LIST_STYLE, "list-style", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "disc outside none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_LIST_STYLE_TYPE, "list-style-type", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "disc", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_LIST_STYLE_POSITION, "list-style-position", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "outside", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_LIST_STYLE_IMAGE, "list-style-image", PROP_TYPE_URL, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_url, NULL},
+    
+    // Table Properties
+    {CSS_PROPERTY_BORDER_COLLAPSE, "border-collapse", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "separate", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_BORDER_SPACING, "border-spacing", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_CAPTION_SIDE, "caption-side", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "top", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_EMPTY_CELLS, "empty-cells", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "show", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_TABLE_LAYOUT, "table-layout", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    
+    // User Interface Properties
+    {CSS_PROPERTY_RESIZE, "resize", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_CARET_COLOR, "caret-color", PROP_TYPE_COLOR, PROP_INHERIT_YES, "auto", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_NAV_INDEX, "nav-index", PROP_TYPE_INTEGER, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_integer, NULL},
+    {CSS_PROPERTY_NAV_UP, "nav-up", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_NAV_RIGHT, "nav-right", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_NAV_DOWN, "nav-down", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_NAV_LEFT, "nav-left", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_APPEARANCE, "appearance", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_USER_SELECT, "user-select", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "auto", false, false, NULL, 0, validate_keyword, NULL},
+    
+    // Box Shadow
+    {CSS_PROPERTY_BOX_SHADOW, "box-shadow", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    
+    // Border Properties (additional)
+    {CSS_PROPERTY_BORDER_IMAGE, "border-image", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_BORDER_IMAGE_SOURCE, "border-image-source", PROP_TYPE_URL, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_url, NULL},
+    {CSS_PROPERTY_BORDER_IMAGE_SLICE, "border-image-slice", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "100%", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_BORDER_IMAGE_WIDTH, "border-image-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "1", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_IMAGE_OUTSET, "border-image-outset", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_IMAGE_REPEAT, "border-image-repeat", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "stretch", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_OUTLINE, "outline", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_OUTLINE_STYLE, "outline-style", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_OUTLINE_WIDTH, "outline-width", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "medium", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_OUTLINE_COLOR, "outline-color", PROP_TYPE_COLOR, PROP_INHERIT_NO, "invert", true, false, NULL, 0, validate_color, NULL},
+    {CSS_PROPERTY_OUTLINE_OFFSET, "outline-offset", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL}
 };
 
 #define PROPERTY_DEFINITION_COUNT (sizeof(property_definitions) / sizeof(property_definitions[0]))

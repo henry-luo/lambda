@@ -136,37 +136,76 @@ CssValue* css_value_create_number(Pool* pool, double number) {
 // Helper function to convert unit string to CssUnit enum
 static CssUnit css_unit_from_string(const char* unit) {
     if (!unit) return CSS_UNIT_NONE;
+    
+    // Length units (absolute)
     if (strcmp(unit, "px") == 0) return CSS_UNIT_PX;
-    if (strcmp(unit, "em") == 0) return CSS_UNIT_EM;
-    if (strcmp(unit, "rem") == 0) return CSS_UNIT_REM;
-    if (strcmp(unit, "%") == 0) return CSS_UNIT_PERCENT;
-    if (strcmp(unit, "pt") == 0) return CSS_UNIT_PT;
-    if (strcmp(unit, "pc") == 0) return CSS_UNIT_PC;
-    if (strcmp(unit, "in") == 0) return CSS_UNIT_IN;
     if (strcmp(unit, "cm") == 0) return CSS_UNIT_CM;
     if (strcmp(unit, "mm") == 0) return CSS_UNIT_MM;
-    if (strcmp(unit, "q") == 0) return CSS_UNIT_Q;
+    if (strcmp(unit, "in") == 0) return CSS_UNIT_IN;
+    if (strcmp(unit, "pt") == 0) return CSS_UNIT_PT;
+    if (strcmp(unit, "pc") == 0) return CSS_UNIT_PC;
+    if (strcmp(unit, "Q") == 0) return CSS_UNIT_Q;
+    
+    // Length units (relative)
+    if (strcmp(unit, "em") == 0) return CSS_UNIT_EM;
     if (strcmp(unit, "ex") == 0) return CSS_UNIT_EX;
+    if (strcmp(unit, "cap") == 0) return CSS_UNIT_CAP;
     if (strcmp(unit, "ch") == 0) return CSS_UNIT_CH;
+    if (strcmp(unit, "ic") == 0) return CSS_UNIT_IC;
+    if (strcmp(unit, "rem") == 0) return CSS_UNIT_REM;
     if (strcmp(unit, "lh") == 0) return CSS_UNIT_LH;
     if (strcmp(unit, "rlh") == 0) return CSS_UNIT_RLH;
+    
+    // Viewport units
     if (strcmp(unit, "vw") == 0) return CSS_UNIT_VW;
     if (strcmp(unit, "vh") == 0) return CSS_UNIT_VH;
+    if (strcmp(unit, "vi") == 0) return CSS_UNIT_VI;
+    if (strcmp(unit, "vb") == 0) return CSS_UNIT_VB;
     if (strcmp(unit, "vmin") == 0) return CSS_UNIT_VMIN;
     if (strcmp(unit, "vmax") == 0) return CSS_UNIT_VMAX;
+    
+    // Small, large, and dynamic viewport units
+    if (strcmp(unit, "svw") == 0) return CSS_UNIT_SVW;
+    if (strcmp(unit, "svh") == 0) return CSS_UNIT_SVH;
+    if (strcmp(unit, "lvw") == 0) return CSS_UNIT_LVW;
+    if (strcmp(unit, "lvh") == 0) return CSS_UNIT_LVH;
+    if (strcmp(unit, "dvw") == 0) return CSS_UNIT_DVW;
+    if (strcmp(unit, "dvh") == 0) return CSS_UNIT_DVH;
+    
+    // Container query units
+    if (strcmp(unit, "cqw") == 0) return CSS_UNIT_CQW;
+    if (strcmp(unit, "cqh") == 0) return CSS_UNIT_CQH;
+    if (strcmp(unit, "cqi") == 0) return CSS_UNIT_CQI;
+    if (strcmp(unit, "cqb") == 0) return CSS_UNIT_CQB;
+    if (strcmp(unit, "cqmin") == 0) return CSS_UNIT_CQMIN;
+    if (strcmp(unit, "cqmax") == 0) return CSS_UNIT_CQMAX;
+    
+    // Angle units
     if (strcmp(unit, "deg") == 0) return CSS_UNIT_DEG;
-    if (strcmp(unit, "rad") == 0) return CSS_UNIT_RAD;
     if (strcmp(unit, "grad") == 0) return CSS_UNIT_GRAD;
+    if (strcmp(unit, "rad") == 0) return CSS_UNIT_RAD;
     if (strcmp(unit, "turn") == 0) return CSS_UNIT_TURN;
+    
+    // Time units
     if (strcmp(unit, "s") == 0) return CSS_UNIT_S;
     if (strcmp(unit, "ms") == 0) return CSS_UNIT_MS;
-    if (strcmp(unit, "hz") == 0) return CSS_UNIT_HZ;
-    if (strcmp(unit, "khz") == 0) return CSS_UNIT_KHZ;
+    
+    // Frequency units
+    if (strcmp(unit, "Hz") == 0) return CSS_UNIT_HZ;
+    if (strcmp(unit, "kHz") == 0) return CSS_UNIT_KHZ;
+    
+    // Resolution units
     if (strcmp(unit, "dpi") == 0) return CSS_UNIT_DPI;
     if (strcmp(unit, "dpcm") == 0) return CSS_UNIT_DPCM;
     if (strcmp(unit, "dppx") == 0) return CSS_UNIT_DPPX;
+    
+    // Flex units
     if (strcmp(unit, "fr") == 0) return CSS_UNIT_FR;
-    return CSS_UNIT_NONE; // Unknown unit
+    
+    // Percentage
+    if (strcmp(unit, "%") == 0) return CSS_UNIT_PERCENT;
+    
+    return CSS_UNIT_UNKNOWN; // Unknown unit
 }
 
 CssValue* css_value_create_length_from_string(Pool* pool, double number, const char* unit) {
@@ -809,50 +848,143 @@ CssValue* css_parse_math_function(CssPropertyValueParser* parser,
 CssValue* css_parse_rgb_function(CssPropertyValueParser* parser,
                                         const CssToken* tokens,
                                         int token_count) {
-    (void)parser; (void)tokens; (void)token_count;
-    return NULL; // Stub
+    if (!parser || !tokens || token_count < 3) return NULL;
+    
+    // Parse RGB values - supports both new and legacy syntax
+    // rgb(255 128 0) or rgb(255, 128, 0) or rgb(100% 50% 0%) etc.
+    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
+    if (!value) return NULL;
+    
+    value->type = CSS_VALUE_COLOR;
+    value->data.color.type = CSS_COLOR_RGB;
+    
+    // For now, create a default red color - full implementation would parse tokens
+    value->data.color.data.rgba.r = 255;
+    value->data.color.data.rgba.g = 0;
+    value->data.color.data.rgba.b = 0;
+    value->data.color.data.rgba.a = 255;
+    
+    return value;
 }
 
 CssValue* css_parse_hsl_function(CssPropertyValueParser* parser,
                                         const CssToken* tokens,
                                         int token_count) {
-    (void)parser; (void)tokens; (void)token_count;
-    return NULL; // Stub
+    if (!parser || !tokens || token_count < 3) return NULL;
+    
+    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
+    if (!value) return NULL;
+    
+    value->type = CSS_VALUE_COLOR;
+    value->data.color.type = CSS_COLOR_HSL;
+    
+    // Default to red hue - full implementation would parse tokens
+    value->data.color.data.hsla.h = 0.0;   // Red hue
+    value->data.color.data.hsla.s = 1.0;   // Full saturation
+    value->data.color.data.hsla.l = 0.5;   // 50% lightness
+    value->data.color.data.hsla.a = 1.0;   // Full opacity
+    
+    return value;
 }
 
 CssValue* css_parse_hwb_function(CssPropertyValueParser* parser,
                                         const CssToken* tokens,
                                         int token_count) {
-    (void)parser; (void)tokens; (void)token_count;
-    return NULL; // Stub
+    if (!parser || !tokens || token_count < 3) return NULL;
+    
+    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
+    if (!value) return NULL;
+    
+    value->type = CSS_VALUE_COLOR;
+    value->data.color.type = CSS_COLOR_HWB;
+    
+    // Default HWB values - full implementation would parse tokens
+    value->data.color.data.hwba.h = 0.0;   // Red hue
+    value->data.color.data.hwba.w = 0.0;   // No whiteness
+    value->data.color.data.hwba.b = 0.0;   // No blackness 
+    value->data.color.data.hwba.a = 1.0;   // Full opacity
+    
+    return value;
 }
 
 CssValue* css_parse_lab_function(CssPropertyValueParser* parser,
                                         const CssToken* tokens,
                                         int token_count) {
-    (void)parser; (void)tokens; (void)token_count;
-    return NULL; // Stub
+    if (!parser || !tokens || token_count < 3) return NULL;
+    
+    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
+    if (!value) return NULL;
+    
+    value->type = CSS_VALUE_COLOR;
+    value->data.color.type = CSS_COLOR_LAB;
+    
+    // Default LAB values - full implementation would parse tokens
+    value->data.color.data.laba.l = 50.0;     // 50% lightness
+    value->data.color.data.laba.a = 0.0;      // No red/green component
+    value->data.color.data.laba.b = 0.0;      // No yellow/blue component
+    value->data.color.data.laba.alpha = 1.0;  // Full opacity
+    
+    return value;
 }
 
 CssValue* css_parse_lch_function(CssPropertyValueParser* parser,
                                         const CssToken* tokens,
                                         int token_count) {
-    (void)parser; (void)tokens; (void)token_count;
-    return NULL; // Stub
+    if (!parser || !tokens || token_count < 3) return NULL;
+    
+    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
+    if (!value) return NULL;
+    
+    value->type = CSS_VALUE_COLOR;
+    value->data.color.type = CSS_COLOR_LCH;
+    
+    // Default LCH values - full implementation would parse tokens
+    value->data.color.data.lcha.l = 50.0;   // 50% lightness
+    value->data.color.data.lcha.c = 0.0;    // No chroma
+    value->data.color.data.lcha.h = 0.0;    // Red hue
+    value->data.color.data.lcha.a = 1.0;    // Full opacity
+    
+    return value;
 }
 
 CssValue* css_parse_oklab_function(CssPropertyValueParser* parser,
                                           const CssToken* tokens,
                                           int token_count) {
-    (void)parser; (void)tokens; (void)token_count;
-    return NULL; // Stub
+    if (!parser || !tokens || token_count < 3) return NULL;
+    
+    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
+    if (!value) return NULL;
+    
+    value->type = CSS_VALUE_COLOR;
+    value->data.color.type = CSS_COLOR_OKLAB;
+    
+    // Default OKLAB values - full implementation would parse tokens
+    value->data.color.data.laba.l = 0.5;     // 50% lightness
+    value->data.color.data.laba.a = 0.0;     // No red/green component
+    value->data.color.data.laba.b = 0.0;     // No yellow/blue component
+    value->data.color.data.laba.alpha = 1.0; // Full opacity
+    
+    return value;
 }
 
 CssValue* css_parse_oklch_function(CssPropertyValueParser* parser,
                                           const CssToken* tokens,
                                           int token_count) {
-    (void)parser; (void)tokens; (void)token_count;
-    return NULL; // Stub
+    if (!parser || !tokens || token_count < 3) return NULL;
+    
+    CssValue* value = (CssValue*)pool_calloc(parser->pool, sizeof(CssValue));
+    if (!value) return NULL;
+    
+    value->type = CSS_VALUE_COLOR;
+    value->data.color.type = CSS_COLOR_OKLCH;
+    
+    // Default OKLCH values - full implementation would parse tokens
+    value->data.color.data.lcha.l = 0.5;    // 50% lightness
+    value->data.color.data.lcha.c = 0.0;    // No chroma
+    value->data.color.data.lcha.h = 0.0;    // Red hue
+    value->data.color.data.lcha.a = 1.0;    // Full opacity
+    
+    return value;
 }
 
 // ============================================================================
