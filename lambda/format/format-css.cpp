@@ -1,4 +1,4 @@
-// CSS Formatter - Simple implementation for CSS output
+// CSS Formatter - Implementation for CSS output
 #include "format.h"
 #include "../../lib/stringbuf.h"
 #include <string.h>
@@ -8,9 +8,11 @@ static void format_css_stylesheet(StringBuf* sb, Element* stylesheet);
 static void format_css_rules(StringBuf* sb, Array* rules, int indent);
 static void format_css_rule(StringBuf* sb, Element* rule, int indent);
 static void format_css_at_rule(StringBuf* sb, Element* at_rule, int indent);
+static void format_css_keyframes(StringBuf* sb, Array* keyframes, int indent);
 static void format_css_selectors(StringBuf* sb, Item selectors_item);
 static void format_css_value(StringBuf* sb, Item value);
 static void format_css_declarations(StringBuf* sb, Element* rule, int indent);
+static void format_css_function(StringBuf* sb, Element* function);
 
 // Helper function to add indentation
 static void add_css_indent(StringBuf* sb, int indent) {
@@ -26,8 +28,32 @@ static void format_css_value(StringBuf* sb, Item value) {
     switch (type) {
         case LMD_TYPE_STRING: {
             String* str = (String*)value.pointer;
-            if (str && str->len > 0) {
-                stringbuf_append_str(sb, str->chars);
+            if (str && str->len > 0 && str->chars) {
+                // Try to extract a clean string, handling potential corruption
+                const char* content = str->chars;
+                size_t len = str->len;
+                
+                // Skip any obvious binary prefixes (length bytes, null bytes, etc.)
+                while (len > 0 && (*content < 32 || *content > 126)) {
+                    content++;
+                    len--;
+                }
+                
+                // Find the end of printable content
+                size_t clean_len = 0;
+                for (size_t i = 0; i < len; i++) {
+                    if (content[i] >= 32 && content[i] <= 126) {
+                        clean_len = i + 1;
+                    } else if (content[i] == 0) {
+                        break; // Stop at null terminator
+                    }
+                }
+                
+                if (clean_len > 0) {
+                    stringbuf_append_format(sb, "%.*s", (int)clean_len, content);
+                } else {
+                    stringbuf_append_str(sb, "\"corrupted-string\"");
+                }
             }
             break;
         }
@@ -56,25 +82,69 @@ static void format_css_value(StringBuf* sb, Item value) {
             }
             break;
         }
-        case LMD_TYPE_ELEMENT: {
-            // Handle CSS functions and other elements as simple fallback
-            Element* element = (Element*)value.pointer;
-            if (element && element->type) {
-                TypeElmt* elmt_type = (TypeElmt*)element->type;
-                if (elmt_type->name.length > 0) {
-                    stringbuf_append_format(sb, "%.*s(...)", (int)elmt_type->name.length, elmt_type->name.str);
-                } else {
-                    stringbuf_append_str(sb, "element");
-                }
+        case LMD_TYPE_SYMBOL: {
+            String* symbol = (String*)value.pointer;
+            if (symbol && symbol->chars && symbol->len > 0) {
+                stringbuf_append_format(sb, "%.*s", (int)symbol->len, symbol->chars);
             } else {
-                stringbuf_append_str(sb, "element");
+                stringbuf_append_str(sb, "null-symbol");
             }
             break;
         }
-        default:
-            // Fallback - just append as string if possible
-            stringbuf_append_str(sb, "auto");
+        case LMD_TYPE_ELEMENT: {
+            Element* element = value.element;
+            if (!element || !element->type) {
+                stringbuf_append_str(sb, "unknown");
+                return;
+            }
+
+            TypeElmt* elmt_type = (TypeElmt*)element->type;
+            if (!elmt_type || elmt_type->name.length == 0) {
+                stringbuf_append_str(sb, "unknown");
+                return;
+            }
+
+            format_css_function(sb, element);
+            return;
+        }
+        default: {
+            // Try to convert to string representation
+            if (value.pointer) {
+                // For unknown types, try to get some meaningful representation
+                stringbuf_append_str(sb, "unknown");
+            } else {
+                // For null values
+                stringbuf_append_str(sb, "null");
+            }
             break;
+        }
+    }
+}
+
+// Format CSS function (rgba, linear-gradient, etc.)
+static void format_css_function(StringBuf* sb, Element* function) {
+    if (!function || !function->type) {
+        return;
+    }
+
+    TypeElmt* elmt_type = (TypeElmt*)function->type;
+    if (elmt_type->name.length > 0) {
+        stringbuf_append_format(sb, "%.*s(", (int)elmt_type->name.length, elmt_type->name.str);
+
+        // Format function parameters from element's list items
+        // Element extends List, so we can access its list items directly
+        List* param_list = (List*)function;
+
+        for (long i = 0; i < param_list->length; i++) {
+            if (i > 0) {
+                stringbuf_append_str(sb, ", ");
+            }
+
+            Item param_value = param_list->items[i];
+            format_css_value(sb, param_value);
+        }
+
+        stringbuf_append_char(sb, ')');
     }
 }
 
@@ -85,7 +155,31 @@ static void format_css_selectors(StringBuf* sb, Item selectors_item) {
     if (type == LMD_TYPE_STRING) {
         String* str = (String*)selectors_item.pointer;
         if (str && str->len > 0) {
-            stringbuf_append_str(sb, str->chars);
+            // Clean selector string - aggressive cleaning for corrupted strings
+            const char* selector_str = str->chars;
+            size_t len = str->len;
+            
+            // Find the first printable ASCII character
+            while (len > 0 && (*selector_str < 32 || *selector_str > 126)) {
+                selector_str++;
+                len--;
+            }
+            
+            // Find the length of valid content
+            size_t clean_len = 0;
+            for (size_t i = 0; i < len; i++) {
+                if (selector_str[i] >= 32 && selector_str[i] <= 126) {
+                    clean_len = i + 1;
+                } else {
+                    break; // Stop at first non-printable
+                }
+            }
+            
+            if (clean_len > 0) {
+                stringbuf_append_format(sb, "%.*s", (int)clean_len, selector_str);
+            } else {
+                stringbuf_append_str(sb, "corrupted-selector");
+            }
         }
     } else if (type == LMD_TYPE_ARRAY) {
         Array* selectors = (Array*)selectors_item.pointer;
@@ -115,7 +209,7 @@ static void format_css_declarations(StringBuf* sb, Element* rule, int indent) {
             continue;
         }
 
-        // Skip special attributes like "_" (selectors)
+        // Skip the selector field "_"
         if (field->name->length == 1 && strncmp(field->name->str, "_", 1) == 0) {
             field = field->next;
             field_count++;
@@ -130,7 +224,32 @@ static void format_css_declarations(StringBuf* sb, Element* rule, int indent) {
         }
 
         add_css_indent(sb, indent + 1);
-        stringbuf_append_format(sb, "%.*s: ", (int)field->name->length, field->name->str);
+        
+        // Clean property name - aggressive cleaning for corrupted strings
+        const char* prop_name = field->name->str;
+        size_t prop_len = field->name->length;
+        
+        // Find the first printable ASCII character
+        while (prop_len > 0 && (*prop_name < 32 || *prop_name > 126)) {
+            prop_name++;
+            prop_len--;
+        }
+        
+        // Find the length of valid content
+        size_t clean_len = 0;
+        for (size_t i = 0; i < prop_len; i++) {
+            if (prop_name[i] >= 32 && prop_name[i] <= 126) {
+                clean_len = i + 1;
+            } else {
+                break; // Stop at first non-printable
+            }
+        }
+        
+        if (clean_len > 0) {
+            stringbuf_append_format(sb, "%.*s: ", (int)clean_len, prop_name);
+        } else {
+            stringbuf_append_str(sb, "corrupted-property: ");
+        }
 
         // Get the property value
         void* field_data = (char*)rule->data + field->byte_offset;
@@ -150,7 +269,7 @@ static void format_css_rule(StringBuf* sb, Element* rule, int indent) {
 
     add_css_indent(sb, indent);
 
-    // Format selectors
+    // Format selectors from the "_" field
     if (rule->type) {
         TypeMap* type_map = (TypeMap*)rule->type;
         ShapeEntry* field = type_map->shape;
@@ -242,7 +361,100 @@ static void format_css_at_rule(StringBuf* sb, Element* at_rule, int indent) {
         }
     }
 
-    stringbuf_append_str(sb, ";\n");
+    // Check if this at-rule has nested rules or keyframes
+    bool has_body = false;
+    if (at_rule->type) {
+        TypeMap* type_map = (TypeMap*)at_rule->type;
+        ShapeEntry* field = type_map->shape;
+        int field_count = 0;
+
+        while (field && field_count < type_map->length) {
+            if (!field->name) {
+                field = field->next;
+                field_count++;
+                continue;
+            }
+
+            if (strncmp(field->name->str, "rules", field->name->length) == 0 ||
+                strncmp(field->name->str, "keyframes", field->name->length) == 0) {
+                has_body = true;
+                stringbuf_append_str(sb, " {\n");
+
+                void* field_data = (char*)at_rule->data + field->byte_offset;
+                Item body_item = create_item_from_field_data(field_data, field->type->type_id);
+                
+                if (strncmp(field->name->str, "keyframes", field->name->length) == 0) {
+                    // Handle keyframes
+                    Array* keyframes = (Array*)body_item.pointer;
+                    format_css_keyframes(sb, keyframes, indent);
+                } else {
+                    // Handle nested rules
+                    Array* nested_rules = (Array*)body_item.pointer;
+                    format_css_rules(sb, nested_rules, indent + 1);
+                }
+
+                add_css_indent(sb, indent);
+                stringbuf_append_str(sb, "}");
+                break;
+            }
+
+            field = field->next;
+            field_count++;
+        }
+    }
+
+    if (!has_body) {
+        stringbuf_append_str(sb, ";");
+    }
+    
+    stringbuf_append_char(sb, '\n');
+}
+
+// Format CSS keyframes
+static void format_css_keyframes(StringBuf* sb, Array* keyframes, int indent) {
+    if (!keyframes) return;
+
+    for (int i = 0; i < keyframes->length; i++) {
+        Item keyframe_item = keyframes->items[i];
+        Element* keyframe = (Element*)keyframe_item.pointer;
+
+        if (!keyframe) continue;
+
+        add_css_indent(sb, indent + 1);
+
+        // Format keyframe selector (0%, 50%, from, to, etc.)
+        if (keyframe->type) {
+            TypeMap* type_map = (TypeMap*)keyframe->type;
+            ShapeEntry* field = type_map->shape;
+            int field_count = 0;
+
+            while (field && field_count < type_map->length) {
+                if (!field->name) {
+                    field = field->next;
+                    field_count++;
+                    continue;
+                }
+
+                if (strncmp(field->name->str, "selector", field->name->length) == 0) {
+                    void* field_data = (char*)keyframe->data + field->byte_offset;
+                    Item selector_item = create_item_from_field_data(field_data, field->type->type_id);
+                    format_css_value(sb, selector_item);
+                    break;
+                }
+
+                field = field->next;
+                field_count++;
+            }
+        }
+
+        stringbuf_append_str(sb, " {\n");
+
+        // Format keyframe declarations
+        format_css_declarations(sb, keyframe, indent + 1);
+
+        add_css_indent(sb, indent + 1);
+        stringbuf_append_str(sb, "}\n");
+    }
 }
 
 // Format an array of CSS rules
@@ -281,7 +493,7 @@ static void format_css_stylesheet(StringBuf* sb, Element* stylesheet) {
     ShapeEntry* field = type_map->shape;
     int field_count = 0;
 
-    // Process rules in order: regular rules, then at-rules
+    // Process different rule collections in logical order
     while (field && field_count < type_map->length) {
         if (!field->name) {
             field = field->next;
@@ -289,11 +501,40 @@ static void format_css_stylesheet(StringBuf* sb, Element* stylesheet) {
             continue;
         }
 
-        if (strncmp(field->name->str, "rules", field->name->length) == 0) {
-            void* field_data = (char*)stylesheet->data + field->byte_offset;
-            Item rules_item = create_item_from_field_data(field_data, field->type->type_id);
-            Array* rules = (Array*)rules_item.pointer;
-            format_css_rules(sb, rules, 0);
+        void* field_data = (char*)stylesheet->data + field->byte_offset;
+        Item collection_item = create_item_from_field_data(field_data, field->type->type_id);
+        Array* collection = (Array*)collection_item.pointer;
+
+        if (collection && collection->length > 0) {
+            const char* field_name = field->name->str;
+            size_t field_name_len = field->name->length;
+
+            // Format different types of rules
+            if (strncmp(field_name, "rules", field_name_len) == 0) {
+                // Regular CSS rules
+                format_css_rules(sb, collection, 0);
+                if (collection->length > 0) stringbuf_append_char(sb, '\n');
+            } else if (strncmp(field_name, "font_faces", field_name_len) == 0) {
+                // @font-face rules
+                format_css_rules(sb, collection, 0);
+                if (collection->length > 0) stringbuf_append_char(sb, '\n');
+            } else if (strncmp(field_name, "keyframes", field_name_len) == 0) {
+                // @keyframes rules
+                format_css_rules(sb, collection, 0);
+                if (collection->length > 0) stringbuf_append_char(sb, '\n');
+            } else if (strncmp(field_name, "media", field_name_len) == 0) {
+                // @media rules
+                format_css_rules(sb, collection, 0);
+                if (collection->length > 0) stringbuf_append_char(sb, '\n');
+            } else if (strncmp(field_name, "supports", field_name_len) == 0) {
+                // @supports rules
+                format_css_rules(sb, collection, 0);
+                if (collection->length > 0) stringbuf_append_char(sb, '\n');
+            } else if (strncmp(field_name, "at_rules", field_name_len) == 0) {
+                // Other at-rules
+                format_css_rules(sb, collection, 0);
+                if (collection->length > 0) stringbuf_append_char(sb, '\n');
+            }
         }
 
         field = field->next;
@@ -314,6 +555,8 @@ String* format_css(Pool *pool, Item item) {
             TypeElmt* elmt_type = (TypeElmt*)element->type;
             if (elmt_type->name.length == 10 && strncmp(elmt_type->name.str, "stylesheet", 10) == 0) {
                 format_css_stylesheet(sb, element);
+            } else if (elmt_type->name.length == 7 && strncmp(elmt_type->name.str, "at-rule", 7) == 0) {
+                format_css_at_rule(sb, element, 0);
             } else {
                 // Handle single rule or other elements
                 format_css_rule(sb, element, 0);

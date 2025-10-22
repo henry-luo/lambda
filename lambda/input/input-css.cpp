@@ -483,6 +483,7 @@ static Item parse_css_qualified_rule(Input *input, const char **css) {
 
             // Parse property name
             StringBuf* sb = input->sb;
+            stringbuf_reset(sb);  // Reset the buffer before parsing each property
             while (**css && **css != ':' && **css != ';' && **css != '}' && !isspace(**css)) {
                 stringbuf_append_char(sb, **css);
                 (*css)++;
@@ -561,6 +562,7 @@ static Array* parse_css_selectors(Input *input, const char **css) {
 
 static Item parse_css_selector(Input* input, const char** css) {
     StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset the buffer before parsing each selector
 
     // Parse selector text until comma or opening brace
     // Handle complex selectors including attribute selectors, pseudo-classes, pseudo-elements
@@ -647,6 +649,7 @@ static Item parse_css_declaration(Input *input, const char **css) {
 
     // Parse property name
     StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset the buffer before parsing property name
     while (**css && **css != ':' && **css != ';' && **css != '}') {
         stringbuf_append_char(sb, **css);
         (*css)++;
@@ -699,6 +702,7 @@ static Item parse_css_string(Input *input, const char **css) {
     if (quote != '"' && quote != '\'') return {.item = ITEM_ERROR};
 
     StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset the buffer before parsing string
     (*css)++; // Skip opening quote
 
     while (**css && **css != quote) {
@@ -938,6 +942,7 @@ static Item parse_css_identifier(Input *input, const char **css) {
     if (!is_css_identifier_start(**css)) return {.item = ITEM_ERROR};
 
     StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset the buffer before parsing identifier
 
     // Handle CSS pseudo-elements (::) and pseudo-classes (:)
     if (**css == ':') {
@@ -1052,14 +1057,11 @@ static Item flatten_single_array(Array* arr) {
 
     // Debug: check what type we're flattening
     if (single_item .item != ITEM_ERROR) {
-        printf("Flattening single array item, type: %lu\n", single_item.item >> 56);
-
         // For container types (like Elements), the type is determined by the container's type_id field
         // Check if this is a direct pointer to a container
         if ((single_item.item >> 56) == 0) {
             Container* container = (Container*)single_item.item;
             if (container && container->type_id == LMD_TYPE_ELEMENT) {
-                printf("Single item is element container, keeping as-is\n");
                 return single_item;
             }
         }
@@ -1113,9 +1115,8 @@ static Item parse_css_function(Input *input, const char **css) {
 
     printf("Created function element '%s' with %ld parameters\n", func_name->chars, params ? params->length : 0);
 
-    // For container types like Element, return direct pointer (not tagged)
-    // The container's type_id field indicates it's an element
-    return {.item = (uint64_t)func_element};
+    // Return element with proper type tagging for LMD_TYPE_ELEMENT
+    return {.item = func_element ? ((((uint64_t)LMD_TYPE_ELEMENT)<<56) | (uint64_t)func_element) : ITEM_ERROR};
 }
 
 static Array* parse_css_value_list(Input *input, const char **css) {
