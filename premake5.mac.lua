@@ -483,7 +483,6 @@ project "lambda"
     targetextension ".exe"
     
     files {
-        "lambda/parse.c",
         "lib/strbuf.c",
         "lib/stringbuf.c",
         "lib/strview.c",
@@ -502,6 +501,7 @@ project "lambda"
         "lib/string.c",
         "lib/datetime.c",
         "lib/image.c",
+        "lambda/parse.c",
         "lambda/lambda-data.cpp",
         "lambda/lambda-data-runtime.cpp",
         "lambda/runner.cpp",
