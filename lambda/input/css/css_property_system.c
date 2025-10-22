@@ -1,9 +1,13 @@
-#include "css_property_system.h"
+#include "css_style.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
+
+// Forward declarations
+bool css_parse_length(const char* value_str, CssLength* length);
+bool css_parse_color(const char* value_str, CssColor* color);
 
 // ============================================================================
 // Global Property Database
@@ -319,7 +323,7 @@ void* css_property_get_initial_value(CssPropertyId property_id, Pool* pool) {
     return value;
 }
 
-bool css_property_validate_value(CssPropertyId property_id, 
+bool css_property_validate_value_from_string(CssPropertyId property_id, 
                                 const char* value_str, 
                                 void** parsed_value, 
                                 Pool* pool) {

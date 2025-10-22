@@ -1,8 +1,8 @@
 #include <criterion/criterion.h>
 #include <criterion/theories.h>
-#include "../lambda/input/css_tokenizer_enhanced.h"
-#include "../lambda/input/css_selector_parser.h"
-#include "../lambda/input/css_property_value_parser.h"
+#include "../lambda/input/css/css_tokenizer_enhanced.h"
+#include "../lambda/input/css/css_selector_parser.h"
+#include "../lambda/input/css/css_property_value_parser.h"
 #include "../lib/mempool.h"
 
 // Test fixture

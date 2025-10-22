@@ -1,8 +1,8 @@
 #ifndef CSS_STYLE_NODE_H
 #define CSS_STYLE_NODE_H
 
-#include "avl_tree.h"
-#include "css_property_system.h"
+#include "../../../lib/avl_tree.h"
+#include "css_style.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -19,51 +19,18 @@ extern "C" {
  */
 
 // ============================================================================
-// CSS Specificity and Cascade Types
-// ============================================================================
-
-/**
- * CSS Selector Specificity
- * Based on CSS specification: (inline, IDs, classes/attributes/pseudo-classes, elements)
- */
-typedef struct CssSpecificity {
-    uint8_t inline_style;     // 1 if inline style, 0 otherwise
-    uint8_t ids;              // Number of ID selectors
-    uint8_t classes;          // Number of class, attribute, and pseudo-class selectors
-    uint8_t elements;         // Number of type and pseudo-element selectors
-    bool important;           // !important flag
-} CssSpecificity;
-
-/**
- * CSS Declaration Origin
- * Determines the source of a CSS declaration for cascade ordering
- */
-typedef enum CssOrigin {
-    CSS_ORIGIN_USER_AGENT,    // Browser default styles
-    CSS_ORIGIN_USER,          // User stylesheet
-    CSS_ORIGIN_AUTHOR,        // Document stylesheet
-    CSS_ORIGIN_ANIMATION,     // CSS animations
-    CSS_ORIGIN_TRANSITION     // CSS transitions
-} CssOrigin;
-
-/**
- * CSS Declaration with metadata
- */
-typedef struct CssDeclaration {
-    CssPropertyId property_id;    // Property ID
-    void* value;                  // Parsed property value
-    CssSpecificity specificity;   // Selector specificity
-    CssOrigin origin;             // Declaration origin
-    int source_order;             // Source order (for tie-breaking)
-    bool valid;                   // Whether declaration is valid
-    
-    // Reference counting for shared declarations
-    int ref_count;
-} CssDeclaration;
-
-// ============================================================================
 // Weak Declaration List (for CSS Cascade)
 // ============================================================================
+
+/**
+ * CSS Style Node System
+ * 
+ * This system extends the basic AVL tree with CSS cascade support.
+ * Each style node represents a CSS property with its winning declaration
+ * and maintains a list of losing declarations for proper cascade resolution.
+ * 
+ * Types CssSpecificity, CssOrigin, and CssDeclaration are defined in css_style.h
+ */
 
 /**
  * Weak Declaration Node

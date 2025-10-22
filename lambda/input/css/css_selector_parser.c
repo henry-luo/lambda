@@ -150,7 +150,7 @@ CSSSpecificityDetail css_calculate_specificity_detailed(CSSComplexSelector* sele
                 case CSS_SELECTOR_TYPE_UNIVERSAL:
                 case CSS_SELECTOR_NESTING_PARENT:
                 case CSS_SELECTOR_NESTING_DESCENDANT:
-                case CSS_SELECTOR_NESTING_PSEUDO:
+                case CSS_SELECTOR_NESTING:
                     break;
                     
                 default:
@@ -169,7 +169,7 @@ CSSSpecificityDetail css_calculate_specificity_detailed(CSSComplexSelector* sele
 }
 
 // Convert detailed specificity to simple CssSpecificity structure
-CssSpecificity css_calculate_specificity(CSSComplexSelector* selector) {
+CssSpecificity css_calculate_complex_selector_specificity(CSSComplexSelector* selector) {
     CSSSpecificityDetail detail = css_calculate_specificity_detailed(selector);
     
     // :where() always has zero specificity
@@ -194,7 +194,7 @@ CssSpecificity css_selector_list_max_specificity(CSSSelectorList* list) {
     
     CSSComplexSelector* current = list->selectors;
     while (current) {
-        CssSpecificity spec = css_calculate_specificity(current);
+        CssSpecificity spec = css_calculate_complex_selector_specificity(current);
         if (css_specificity_compare(spec, max_spec) > 0) {
             max_spec = spec;
         }
