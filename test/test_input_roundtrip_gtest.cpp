@@ -9,7 +9,7 @@
 #include "../lib/arraylist.h"
 #include "../lib/num_stack.h"
 #include "../lib/strbuf.h"
-#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/mempool.h"
 #include "../lib/url.h"
 
 extern "C" {

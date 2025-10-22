@@ -58,7 +58,6 @@
         "lambda/input/css/css_selector_parser.c",
         "lambda/input/css/css_property_value_parser.c",
         "lambda/input/css/css_integration.c",
-        "lambda/input/css/css_property_system.c",
         "lambda/input/css/css_style_node.c",
         "radiant/dom.cpp",
         "radiant/ui_context.cpp",
@@ -336,9 +335,9 @@
                 "lambda/input/css/css_selector_parser.c",
                 "lambda/input/css/css_property_value_parser.c",
                 "lambda/input/css/css_integration.c",
-                "lambda/input/css/css_property_system.c",
                 "lambda/input/css/css_style_node.c",
                 "lib/arraylist.c",
+                "lib/avl_tree.c",
                 "lib/hashmap.c",
                 "lib/file.c",
                 "lib/log.c",
@@ -1139,8 +1138,9 @@
                         ],
                         "additional_sources": [
                             "lib/avl_tree.c",
-                            "lambda/input/css/css_property_system.c",
                             "lambda/input/css/css_style_node.c",
+                            "lambda/input/css/css_properties.c",
+                            "lambda/input/css/css_property_value_parser.c",
                             "lib/mempool.c"
                         ],
                         "binary": "test_css_style_node.exe"
@@ -1156,8 +1156,9 @@
                         ],
                         "additional_sources": [
                             "lib/avl_tree.c",
-                            "lambda/input/css/css_property_system.c",
                             "lambda/input/css/css_style_node.c",
+                            "lambda/input/css/css_properties.c",
+                            "lambda/input/css/css_property_value_parser.c",
                             "lib/mempool.c",
                             "lib/string.c",
                             "lib/hashmap.c"

@@ -268,7 +268,7 @@ static CssProperty* g_property_hash[PROPERTY_HASH_SIZE];
 // Custom property registry
 static CssProperty* g_custom_properties = NULL;
 static int g_custom_property_count = 0;
-static CssPropertyId g_next_custom_id = CSS_PROPERTY_CUSTOM;
+static CssPropertyId g_next_custom_id = CSS_PROPERTY_CUSTOM + 1;
 
 // ============================================================================
 // Property Value Validators
@@ -346,7 +346,7 @@ void css_property_system_cleanup(void) {
     g_property_count = 0;
     g_custom_properties = NULL;
     g_custom_property_count = 0;
-    g_next_custom_id = CSS_PROPERTY_CUSTOM;
+    g_next_custom_id = CSS_PROPERTY_CUSTOM + 1;
 }
 
 const CssProperty* css_property_get_by_id(CssPropertyId property_id) {
@@ -562,7 +562,7 @@ CssPropertyId css_property_get_custom_id(const char* name) {
 }
 
 bool css_property_is_custom(CssPropertyId property_id) {
-    return property_id >= CSS_PROPERTY_CUSTOM && property_id < CSS_PROPERTY_COUNT;
+    return property_id > CSS_PROPERTY_CUSTOM && property_id < g_next_custom_id;
 }
 
 // ============================================================================

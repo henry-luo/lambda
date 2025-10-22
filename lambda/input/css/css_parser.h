@@ -391,14 +391,14 @@ typedef struct CssCalcToken {
     union {
         double number;
         struct { double value; CssUnit unit; } dimension;
-        char operator;
+        char op;
         const char* function_name;
     } data;
 } CssCalcToken;
 
 // Calc() expression node (AST)
 typedef struct CssCalcNode {
-    CssCalcOperator operator;
+    CssCalcOperator op;
     CssValueType value_type;
     
     // Value data
@@ -498,8 +498,6 @@ CssSpecificity css_calculate_specificity(const CssSelector* selector);
 
 // Value parsing
 CssValue* css_parse_value(CssTokenStream* stream, CssPropertyId property_id, Pool* pool);
-CssValue* css_parse_color(CssTokenStream* stream, Pool* pool);
-CssValue* css_parse_length(CssTokenStream* stream, Pool* pool);
 CssValue* css_parse_number(CssTokenStream* stream, Pool* pool);
 CssValue* css_parse_percentage(CssTokenStream* stream, Pool* pool);
 CssValue* css_parse_string(CssTokenStream* stream, Pool* pool);

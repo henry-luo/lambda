@@ -608,13 +608,9 @@ void* style_node_compute_value(StyleNode* node, StyleTree* parent_tree) {
     
     CssDeclaration* decl = node->winning_decl;
     
-    // Use property system to compute value
-    void* parent_value = NULL;
-    if (parent_tree) {
-        parent_value = style_tree_get_computed_value(parent_tree, decl->property_id, NULL);
-    }
-    
-    return css_value_compute(decl->value, NULL, parent_tree ? parent_tree->pool : NULL);
+    // For basic properties, just return the declaration's value
+    // In a full implementation, this would handle value computation for inherit, initial, etc.
+    return decl->value;
 }
 
 void* style_node_get_computed_value(StyleNode* node, StyleTree* parent_tree) {
@@ -721,8 +717,12 @@ StyleTree* style_tree_clone(StyleTree* source, Pool* target_pool) {
     StyleTree* cloned = style_tree_create(target_pool);
     if (!cloned) return NULL;
     
+    // Create proper clone context
+    int cloned_count = 0;
+    struct CloneContext clone_context = { cloned, &cloned_count };
+    
     // Clone all declarations
-    style_tree_foreach(source, clone_tree_callback, cloned);
+    style_tree_foreach(source, clone_tree_callback, &clone_context);
     
     return cloned;
 }
@@ -880,9 +880,12 @@ static bool collect_selectors_callback(StyleNode* node, void* context) {
 static bool merge_tree_callback(StyleNode* node, void* context) {
     struct MergeContext* merge_ctx = (struct MergeContext*)context;
     
-    // Simplified merge - just count for now
-    if (node->winning_decl && merge_ctx->merged_count) {
-        (*(merge_ctx->merged_count))++;
+    // Merge the winning declaration from source to target
+    if (node && node->winning_decl && merge_ctx->target) {
+        style_tree_apply_declaration(merge_ctx->target, node->winning_decl);
+        if (merge_ctx->merged_count) {
+            (*(merge_ctx->merged_count))++;
+        }
     }
     
     return true;
@@ -891,9 +894,12 @@ static bool merge_tree_callback(StyleNode* node, void* context) {
 static bool clone_tree_callback(StyleNode* node, void* context) {
     struct CloneContext* ctx = (struct CloneContext*)context;
     
-    // Simplified clone - just count for now
-    if (node->winning_decl && ctx->cloned_count) {
-        (*(ctx->cloned_count))++;
+    // Clone the winning declaration if it exists
+    if (node && node->winning_decl && ctx->target) {
+        style_tree_apply_declaration(ctx->target, node->winning_decl);
+        if (ctx->cloned_count) {
+            (*(ctx->cloned_count))++;
+        }
     }
     return true;
 }

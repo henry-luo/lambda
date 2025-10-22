@@ -12,7 +12,7 @@
 
 #include "../lib/arraylist.h"
 #include "../lib/strbuf.h"
-#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/mempool.h"
 extern "C" {
     #include "../lib/url.h"
     #include <tree_sitter/api.h>

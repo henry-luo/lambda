@@ -5,7 +5,7 @@
 #include "../lambda/input/input.h"
 #include "../lambda/format/format.h"
 #include "../lib/string.h"
-#include "../lib/mem-pool/include/mem_pool.h"
+#include "../lib/mempool.h"
 
 extern "C" {
     Input* input_from_source(const char* source, Url* url, String* type, String* flavor);
