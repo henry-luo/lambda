@@ -2,7 +2,7 @@
 #include <string>
 #include "../lambda/input/css_parser.h"
 #include "../lambda/input/css_tokenizer.h"
-#include "../lambda/input/css_properties.h"
+#include "../lambda/input/css/css_style.h"
 #include "../lib/mempool.h"
 
 // Test fixture for CSS integration tests

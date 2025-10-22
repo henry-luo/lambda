@@ -1,5 +1,5 @@
 #include "css_style_node.h"
-#include "css_property_system.h"
+#include "css_style.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
