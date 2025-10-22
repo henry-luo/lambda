@@ -379,34 +379,92 @@ bool css_property_is_custom(CssPropertyId property_id);
 // Property Value Structures
 // ============================================================================
 
+// Enhanced CSS Unit Types
+typedef enum CssUnit {
+    // Basic CSS units
+    CSS_UNIT_PX,     // Pixels
+    CSS_UNIT_EM,     // Em units
+    CSS_UNIT_REM,    // Root em units
+    CSS_UNIT_PERCENT,// Percentage
+    CSS_UNIT_VW,     // Viewport width
+    CSS_UNIT_VH,     // Viewport height
+    CSS_UNIT_VMIN,   // Viewport minimum
+    CSS_UNIT_VMAX,   // Viewport maximum
+    CSS_UNIT_CM,     // Centimeters
+    CSS_UNIT_MM,     // Millimeters
+    CSS_UNIT_IN,     // Inches
+    CSS_UNIT_PT,     // Points
+    CSS_UNIT_PC,     // Picas
+    
+    // Enhanced CSS3+ units
+    CSS_UNIT_EX,     // Ex units (x-height)
+    CSS_UNIT_CH,     // Character units (0-width)
+    CSS_UNIT_Q,      // Quarter-millimeters
+    CSS_UNIT_LH,     // Line height
+    CSS_UNIT_RLH,    // Root line height
+    CSS_UNIT_VI,     // Viewport inline
+    CSS_UNIT_VB,     // Viewport block
+    CSS_UNIT_SVW,    // Small viewport width
+    CSS_UNIT_SVH,    // Small viewport height
+    CSS_UNIT_LVW,    // Large viewport width
+    CSS_UNIT_LVH,    // Large viewport height
+    CSS_UNIT_DVW,    // Dynamic viewport width
+    CSS_UNIT_DVH,    // Dynamic viewport height
+    
+    // Angle units
+    CSS_UNIT_DEG,    // Degrees
+    CSS_UNIT_GRAD,   // Gradians
+    CSS_UNIT_RAD,    // Radians
+    CSS_UNIT_TURN,   // Turns
+    
+    // Time units
+    CSS_UNIT_S,      // Seconds
+    CSS_UNIT_MS,     // Milliseconds
+    
+    // Frequency units
+    CSS_UNIT_HZ,     // Hertz
+    CSS_UNIT_KHZ,    // Kilohertz
+    
+    // Resolution units
+    CSS_UNIT_DPI,    // Dots per inch
+    CSS_UNIT_DPCM,   // Dots per centimeter
+    CSS_UNIT_DPPX,   // Dots per pixel
+    
+    // Grid units
+    CSS_UNIT_FR,     // Fractional units for CSS Grid
+    
+    // Special
+    CSS_UNIT_NONE    // No unit
+} CssUnit;
+
+// Enhanced CSS Color Types
+typedef enum CssColorType {
+    // Basic CSS colors
+    CSS_COLOR_RGB,           // RGB/RGBA color
+    CSS_COLOR_HSL,           // HSL/HSLA color
+    CSS_COLOR_KEYWORD,       // Named color
+    CSS_COLOR_CURRENT,       // currentColor keyword
+    CSS_COLOR_TRANSPARENT,   // transparent keyword
+    
+    // Enhanced CSS3+ colors
+    CSS_COLOR_HEX,           // #rrggbb, #rgb
+    CSS_COLOR_HWB,           // HWB color space
+    CSS_COLOR_LAB,           // LAB color space
+    CSS_COLOR_LCH,           // LCH color space
+    CSS_COLOR_OKLAB,         // OKLAB color space
+    CSS_COLOR_OKLCH,         // OKLCH color space
+    CSS_COLOR_COLOR,         // color() function
+    CSS_COLOR_SYSTEM         // System colors
+} CssColorType;
+
 typedef struct CssLength {
     double value;
-    enum {
-        CSS_UNIT_PX,     // Pixels
-        CSS_UNIT_EM,     // Em units
-        CSS_UNIT_REM,    // Root em units
-        CSS_UNIT_PERCENT,// Percentage
-        CSS_UNIT_VW,     // Viewport width
-        CSS_UNIT_VH,     // Viewport height
-        CSS_UNIT_VMIN,   // Viewport minimum
-        CSS_UNIT_VMAX,   // Viewport maximum
-        CSS_UNIT_CM,     // Centimeters
-        CSS_UNIT_MM,     // Millimeters
-        CSS_UNIT_IN,     // Inches
-        CSS_UNIT_PT,     // Points
-        CSS_UNIT_PC      // Picas
-    } unit;
+    CssUnit unit;
 } CssLength;
 
 typedef struct CssColor {
     uint8_t r, g, b, a;          // RGBA values
-    enum {
-        CSS_COLOR_RGB,           // RGB/RGBA color
-        CSS_COLOR_HSL,           // HSL/HSLA color
-        CSS_COLOR_KEYWORD,       // Named color
-        CSS_COLOR_CURRENT,       // currentColor keyword
-        CSS_COLOR_TRANSPARENT    // transparent keyword
-    } type;
+    CssColorType type;
     union {
         struct { double h, s, l; } hsl; // HSL values for HSL colors
         const char* keyword;            // Keyword name

@@ -9,93 +9,7 @@
 extern "C" {
 #endif
 
-// Enhanced CSS Value Types for CSS3+
-typedef enum {
-    // Basic types (from css_properties.h)
-    CSS_VALUE_ENHANCED_KEYWORD = 0,
-    CSS_VALUE_ENHANCED_LENGTH,
-    CSS_VALUE_ENHANCED_PERCENTAGE,
-    CSS_VALUE_ENHANCED_NUMBER,
-    CSS_VALUE_ENHANCED_COLOR,
-    CSS_VALUE_ENHANCED_STRING,
-    CSS_VALUE_ENHANCED_URL,
-    CSS_VALUE_ENHANCED_FUNCTION,
-    CSS_VALUE_ENHANCED_IDENTIFIER,
-    CSS_VALUE_ENHANCED_ANGLE,
-    CSS_VALUE_ENHANCED_TIME,
-    CSS_VALUE_ENHANCED_FREQUENCY,
-    CSS_VALUE_ENHANCED_RESOLUTION,
-    CSS_VALUE_ENHANCED_INTEGER,
-    CSS_VALUE_ENHANCED_GLOBAL,
-    
-    // CSS3+ enhanced types
-    CSS_VALUE_ENHANCED_CALC,           // calc() expressions
-    CSS_VALUE_ENHANCED_VAR,            // CSS custom properties var(--name, fallback)
-    CSS_VALUE_ENHANCED_ENV,            // env() environment variables
-    CSS_VALUE_ENHANCED_ATTR,           // attr() attribute references
-    CSS_VALUE_ENHANCED_CLAMP,          // clamp(min, preferred, max)
-    CSS_VALUE_ENHANCED_MIN,            // min() function
-    CSS_VALUE_ENHANCED_MAX,            // max() function
-    CSS_VALUE_ENHANCED_ABS,            // abs() mathematical function
-    CSS_VALUE_ENHANCED_SIGN,           // sign() mathematical function
-    CSS_VALUE_ENHANCED_MOD,            // mod() mathematical function
-    CSS_VALUE_ENHANCED_REM,            // rem() mathematical function
-    CSS_VALUE_ENHANCED_SIN,            // sin() trigonometric function
-    CSS_VALUE_ENHANCED_COS,            // cos() trigonometric function
-    CSS_VALUE_ENHANCED_TAN,            // tan() trigonometric function
-    CSS_VALUE_ENHANCED_ASIN,           // asin() trigonometric function
-    CSS_VALUE_ENHANCED_ACOS,           // acos() trigonometric function
-    CSS_VALUE_ENHANCED_ATAN,           // atan() trigonometric function
-    CSS_VALUE_ENHANCED_ATAN2,          // atan2() trigonometric function
-    CSS_VALUE_ENHANCED_POW,            // pow() exponential function
-    CSS_VALUE_ENHANCED_SQRT,           // sqrt() square root function
-    CSS_VALUE_ENHANCED_HYPOT,          // hypot() hypotenuse function
-    CSS_VALUE_ENHANCED_LOG,            // log() logarithm function
-    CSS_VALUE_ENHANCED_EXP,            // exp() exponential function
-    CSS_VALUE_ENHANCED_ROUND,          // round() rounding function
-    CSS_VALUE_ENHANCED_COLOR_MIX,      // color-mix() color blending
-    CSS_VALUE_ENHANCED_COLOR_CONTRAST, // color-contrast() accessibility
-    CSS_VALUE_ENHANCED_HWB,            // hwb() color space
-    CSS_VALUE_ENHANCED_LAB,            // lab() color space
-    CSS_VALUE_ENHANCED_LCH,            // lch() color space
-    CSS_VALUE_ENHANCED_OKLAB,          // oklab() color space
-    CSS_VALUE_ENHANCED_OKLCH,          // oklch() color space
-    CSS_VALUE_ENHANCED_LIGHT_DARK,     // light-dark() color scheme
-    CSS_VALUE_ENHANCED_LAYER,          // layer() function
-    CSS_VALUE_ENHANCED_SUPPORTS,       // supports() query
-    CSS_VALUE_ENHANCED_SELECTOR,       // selector() function
-    CSS_VALUE_ENHANCED_MEDIA,          // media() query function
-    CSS_VALUE_ENHANCED_CONTAINER,      // container() query
-    CSS_VALUE_ENHANCED_STYLE,          // style() query
-    CSS_VALUE_ENHANCED_FONT_TECH,      // font-tech() font feature
-    CSS_VALUE_ENHANCED_FONT_FORMAT,    // font-format() font feature
-    CSS_VALUE_ENHANCED_GRID_TEMPLATE,  // Grid template areas
-    CSS_VALUE_ENHANCED_FIT_CONTENT,    // fit-content() sizing
-    CSS_VALUE_ENHANCED_MINMAX,         // minmax() grid function
-    CSS_VALUE_ENHANCED_REPEAT,         // repeat() grid function
-    CSS_VALUE_ENHANCED_COUNTER,        // counter() function
-    CSS_VALUE_ENHANCED_COUNTERS,       // counters() function
-    CSS_VALUE_ENHANCED_SYMBOLS,        // symbols() function
-    CSS_VALUE_ENHANCED_IMAGE_SET,      // image-set() responsive images
-    CSS_VALUE_ENHANCED_CROSS_FADE,     // cross-fade() image blending
-    CSS_VALUE_ENHANCED_ELEMENT,        // element() function
-    CSS_VALUE_ENHANCED_PAINT,          // paint() worklet function
-    
-    // Composite types
-    CSS_VALUE_ENHANCED_LIST,           // Space/comma separated values
-    CSS_VALUE_ENHANCED_SEQUENCE,       // Ordered sequence of values
-    CSS_VALUE_ENHANCED_OPTIONAL,       // Optional value wrapper
-    CSS_VALUE_ENHANCED_ALTERNATIVES,   // One of multiple alternatives
-    
-    // Type constraints
-    CSS_VALUE_ENHANCED_LENGTH_PERCENTAGE, // <length-percentage>
-    CSS_VALUE_ENHANCED_FREQUENCY_PERCENTAGE, // <frequency-percentage>
-    CSS_VALUE_ENHANCED_ANGLE_PERCENTAGE,  // <angle-percentage>
-    CSS_VALUE_ENHANCED_TIME_PERCENTAGE,   // <time-percentage>
-    CSS_VALUE_ENHANCED_NUMBER_PERCENTAGE, // <number-percentage>
-    
-    CSS_VALUE_ENHANCED_UNKNOWN = 999
-} CSSValueEnhancedType;
+// Use CSS value types from css_tokenizer_enhanced.h to avoid conflicts
 
 // Calc() expression operators
 typedef enum {
@@ -128,7 +42,7 @@ typedef enum {
 // Calc() expression node
 typedef struct CSSCalcNode {
     CSSCalcOperator operator;
-    CSSValueEnhancedType value_type;
+    CSSValueTypeEnhanced value_type;
     
     // Value data
     union {
@@ -180,7 +94,7 @@ typedef struct CSSColorMix {
 
 // Enhanced CSS Value Structure
 typedef struct CSSValueEnhanced {
-    CSSValueEnhancedType type;
+    CSSValueTypeEnhanced type;
     
     union {
         // Basic types
@@ -221,6 +135,10 @@ typedef struct CSSValueEnhanced {
             struct CSSValueEnhanced** alternatives;
             int count;
         } alternatives;
+        
+        // Additional CSS3+ value types
+        const char* color_hex;      // Hex color values
+        const char* unicode_range;  // Unicode range values
         
     } data;
     
@@ -289,7 +207,7 @@ CSSValueEnhanced* css_parse_declaration_value_enhanced(CSSPropertyValueParser* p
                                                       const char* value_text);
 
 // Specific value type parsers
-CSSCalcNode* css_parse_calc_expression(CSSPropertyValueParser* parser, 
+CSSCalcNode* css_parse_calc_expression_enhanced(CSSPropertyValueParser* parser, 
                                       const CSSTokenEnhanced* tokens, 
                                       int token_count);
 
@@ -340,6 +258,16 @@ bool css_property_value_parser_set_env_variable(CSSPropertyValueParser* parser,
 CSSValueEnhanced* css_property_value_parser_get_env_variable(CSSPropertyValueParser* parser,
                                                             const char* name);
 
+// Value creation functions
+CSSValueEnhanced* css_value_enhanced_create_keyword(Pool* pool, const char* keyword);
+CSSValueEnhanced* css_value_enhanced_create_number(Pool* pool, double number);
+CSSValueEnhanced* css_value_enhanced_create_length(Pool* pool, double number, const char* unit);
+CSSValueEnhanced* css_value_enhanced_create_percentage(Pool* pool, double percentage);
+CSSValueEnhanced* css_value_enhanced_create_string(Pool* pool, const char* string);
+CSSValueEnhanced* css_value_enhanced_create_url(Pool* pool, const char* url);
+CSSValueEnhanced* css_value_enhanced_create_color_hex(Pool* pool, const char* hex);
+CSSValueEnhanced* css_value_enhanced_create_unicode_range(Pool* pool, const char* range);
+
 // Serialization and formatting
 char* css_value_enhanced_to_string(const CSSValueEnhanced* value, Pool* pool);
 char* css_calc_node_to_string(const CSSCalcNode* node, Pool* pool);
@@ -358,6 +286,49 @@ bool css_value_enhanced_is_color(const CSSValueEnhanced* value);
 bool css_value_enhanced_is_keyword(const CSSValueEnhanced* value, const char* keyword);
 bool css_value_enhanced_is_function(const CSSValueEnhanced* value, const char* function_name);
 
+// CSS Function parsing
+CSSValueEnhanced* css_parse_calc_function(CSSPropertyValueParser* parser,
+                                         const CSSTokenEnhanced* tokens,
+                                         int token_count);
+CSSValueEnhanced* css_parse_min_max_function(CSSPropertyValueParser* parser,
+                                            const CSSTokenEnhanced* tokens,
+                                            int token_count,
+                                            int op_type);
+CSSValueEnhanced* css_parse_clamp_function(CSSPropertyValueParser* parser,
+                                          const CSSTokenEnhanced* tokens,
+                                          int token_count);
+CSSValueEnhanced* css_parse_math_function(CSSPropertyValueParser* parser,
+                                         const CSSTokenEnhanced* tokens,
+                                         int token_count,
+                                         int op_type);
+CSSValueEnhanced* css_parse_rgb_function(CSSPropertyValueParser* parser,
+                                        const CSSTokenEnhanced* tokens,
+                                        int token_count);
+CSSValueEnhanced* css_parse_hsl_function(CSSPropertyValueParser* parser,
+                                        const CSSTokenEnhanced* tokens,
+                                        int token_count);
+CSSValueEnhanced* css_parse_hwb_function(CSSPropertyValueParser* parser,
+                                        const CSSTokenEnhanced* tokens,
+                                        int token_count);
+CSSValueEnhanced* css_parse_lab_function(CSSPropertyValueParser* parser,
+                                        const CSSTokenEnhanced* tokens,
+                                        int token_count);
+CSSValueEnhanced* css_parse_lch_function(CSSPropertyValueParser* parser,
+                                        const CSSTokenEnhanced* tokens,
+                                        int token_count);
+CSSValueEnhanced* css_parse_oklab_function(CSSPropertyValueParser* parser,
+                                          const CSSTokenEnhanced* tokens,
+                                          int token_count);
+CSSValueEnhanced* css_parse_oklch_function(CSSPropertyValueParser* parser,
+                                          const CSSTokenEnhanced* tokens,
+                                          int token_count);
+
+// Generic function parsing
+static CSSValueEnhanced* css_parse_generic_function(CSSPropertyValueParser* parser,
+                                                   const char* function_name,
+                                                   const CSSTokenEnhanced* tokens,
+                                                   int token_count);
+
 // Unit conversion and normalization
 double css_value_enhanced_to_pixels(const CSSValueEnhanced* value, double base_font_size, double viewport_width, double viewport_height);
 CSSValueEnhanced* css_value_enhanced_normalize_units(const CSSValueEnhanced* value, Pool* pool);
@@ -370,7 +341,7 @@ const char** css_property_value_parser_get_errors(CSSPropertyValueParser* parser
 
 // Debug utilities
 void css_value_enhanced_print_debug(const CSSValueEnhanced* value);
-const char* css_value_enhanced_type_to_string(CSSValueEnhancedType type);
+const char* css_value_enhanced_type_to_string(CSSValueTypeEnhanced type);
 
 #ifdef __cplusplus
 }

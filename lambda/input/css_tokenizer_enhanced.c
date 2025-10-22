@@ -282,7 +282,7 @@ bool css_parse_custom_property_name(const char* input, size_t length) {
 }
 
 // Enhanced color parsing
-CSSColorTypeEnhanced css_detect_color_type(const char* color_str) {
+CssColorType css_detect_color_type(const char* color_str) {
     if (!color_str) return CSS_COLOR_KEYWORD;
     
     size_t len = strlen(color_str);
@@ -362,7 +362,7 @@ const char* css_token_type_enhanced_to_str(CSSTokenTypeEnhanced type) {
     }
 }
 
-const char* css_unit_type_to_str(CSSUnitTypeEnhanced unit) {
+const char* css_unit_type_to_str(CssUnit unit) {
     switch (unit) {
         case CSS_UNIT_PX: return "px";
         case CSS_UNIT_EM: return "em";
@@ -407,7 +407,7 @@ const char* css_unit_type_to_str(CSSUnitTypeEnhanced unit) {
     }
 }
 
-const char* css_color_type_to_str(CSSColorTypeEnhanced type) {
+const char* css_color_type_to_str(CssColorType type) {
     switch (type) {
         case CSS_COLOR_HEX: return "hex";
         case CSS_COLOR_RGB: return "rgb";
@@ -460,4 +460,151 @@ void css_token_fix_common_errors(CSSTokenEnhanced* token, Pool* pool) {
             token->type = CSS_TOKEN_ENHANCED_URL;
         }
     }
+}
+// Basic CSS tokenizer compatibility functions
+CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* token_count) {
+    if (!input || !pool || !token_count) return NULL;
+    
+    // Use the enhanced tokenizer
+    CSSTokenizerEnhanced* enhanced = css_tokenizer_enhanced_create(pool);
+    if (!enhanced) return NULL;
+    
+    CSSTokenEnhanced* enhanced_tokens;
+    int enhanced_count = css_tokenizer_enhanced_tokenize(enhanced, input, length, &enhanced_tokens);
+    
+    if (enhanced_count <= 0) {
+        *token_count = 0;
+        return NULL;
+    }
+    
+    // Convert enhanced tokens to basic tokens for compatibility
+    CSSToken* basic_tokens = (CSSToken*)pool_calloc(pool, enhanced_count * sizeof(CSSToken));
+    if (!basic_tokens) {
+        *token_count = 0;
+        return NULL;
+    }
+    
+    for (int i = 0; i < enhanced_count; i++) {
+        CSSTokenEnhanced* src = &enhanced_tokens[i];
+        CSSToken* dst = &basic_tokens[i];
+        
+        // Basic type mapping
+        dst->type = CSS_TOKEN_IDENT; // Default fallback
+        dst->start = src->start;
+        dst->length = src->length;
+        dst->value = src->value;
+        dst->data.number_value = src->data.number_value;
+    }
+    
+    *token_count = enhanced_count;
+    return basic_tokens;
+}
+
+void css_free_tokens(CSSToken* tokens) {
+    // Memory is managed by pool, nothing to do
+    (void)tokens;
+}
+
+const char* css_token_type_to_str(CSSTokenType type) {
+    switch (type) {
+        case CSS_TOKEN_IDENT: return "IDENT";
+        case CSS_TOKEN_FUNCTION: return "FUNCTION";
+        case CSS_TOKEN_AT_KEYWORD: return "AT_KEYWORD";
+        case CSS_TOKEN_HASH: return "HASH";
+        case CSS_TOKEN_STRING: return "STRING";
+        case CSS_TOKEN_URL: return "URL";
+        case CSS_TOKEN_NUMBER: return "NUMBER";
+        case CSS_TOKEN_DIMENSION: return "DIMENSION";
+        case CSS_TOKEN_PERCENTAGE: return "PERCENTAGE";
+        case CSS_TOKEN_UNICODE_RANGE: return "UNICODE_RANGE";
+        default: return "UNKNOWN";
+    }
+}
+
+// Character classification helpers
+bool css_is_name_start_char(int c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c >= 0x80;
+}
+
+bool css_is_name_char(int c) {
+    return css_is_name_start_char(c) || css_is_digit(c) || c == '-';
+}
+
+bool css_is_non_printable(int c) {
+    return (c >= 0x0000 && c <= 0x0008) || c == 0x000B ||
+           (c >= 0x000E && c <= 0x001F) || c == 0x007F;
+}
+
+bool css_is_newline(int c) {
+    return c == '\n' || c == '\r' || c == '\f';
+}
+
+// Implementation of css_tokenize_enhanced
+CSSTokenEnhanced* css_tokenize_enhanced(const char* input, size_t length, 
+                                       Pool* pool, size_t* token_count) {
+    if (!input || !pool || !token_count) {
+        if (token_count) *token_count = 0;
+        return NULL;
+    }
+    
+    // Create a tokenizer and use it
+    CSSTokenizerEnhanced* tokenizer = css_tokenizer_enhanced_create(pool);
+    if (!tokenizer) {
+        *token_count = 0;
+        return NULL;
+    }
+    
+    CSSTokenEnhanced* tokens = NULL;
+    int count = css_tokenizer_enhanced_tokenize(tokenizer, input, length, &tokens);
+    *token_count = (size_t)count;
+    
+    css_tokenizer_enhanced_destroy(tokenizer);
+    return tokens;
+}
+
+// Enhanced tokenizer implementation
+CSSTokenizerEnhanced* css_tokenizer_enhanced_create(Pool* pool) {
+    if (!pool) return NULL;
+    
+    CSSTokenizerEnhanced* tokenizer = pool_alloc(pool, sizeof(CSSTokenizerEnhanced));
+    if (!tokenizer) return NULL;
+    
+    tokenizer->pool = pool;
+    tokenizer->input = NULL;
+    tokenizer->length = 0;
+    tokenizer->position = 0;
+    tokenizer->line = 1;
+    tokenizer->column = 1;
+    tokenizer->supports_unicode = true;
+    tokenizer->supports_css3 = true;
+    
+    return tokenizer;
+}
+
+void css_tokenizer_enhanced_destroy(CSSTokenizerEnhanced* tokenizer) {
+    // Memory managed by pool, no explicit cleanup needed
+    (void)tokenizer;
+}
+
+int css_tokenizer_enhanced_tokenize(CSSTokenizerEnhanced* tokenizer, 
+                                   const char* input, size_t length, 
+                                   CSSTokenEnhanced** tokens) {
+    if (!tokenizer || !input || !tokens) return 0;
+    
+    // For now, delegate to the existing css_tokenize_enhanced function
+    size_t count = 0;
+    *tokens = css_tokenize_enhanced(input, length, tokenizer->pool, &count);
+    return (int)count;
+}
+
+bool css_is_whitespace(int c) {
+    return c == ' ' || c == '\t' || css_is_newline(c);
+}
+
+bool css_is_digit(int c) {
+    return c >= '0' && c <= '9';
+}
+
+bool css_is_hex_digit(int c) {
+    return css_is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }

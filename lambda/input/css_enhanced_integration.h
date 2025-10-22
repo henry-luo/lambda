@@ -4,13 +4,16 @@
 #include "css_tokenizer_enhanced.h"
 #include "css_selector_parser.h"
 #include "css_property_value_parser.h"
-#include "../vibe/css_style_node.h"
-#include "../vibe/avl_tree.h"
+#include "../../lib/css_style_node.h"
 #include "../../lib/mempool.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Forward declarations for missing types (stubs for now)
+typedef StyleNode CssStyleNode;  // Alias for existing StyleNode
+typedef struct CssStyleEngine CssStyleEngine;  // Stub - to be implemented
 
 // Enhanced CSS Engine - Integrates all CSS3+ components
 typedef struct CSSEnhancedEngine {
@@ -73,6 +76,13 @@ typedef struct CSSEnhancedEngine {
     } stats;
     
 } CSSEnhancedEngine;
+
+// Stub definition for CssStyleEngine (to be implemented)
+struct CssStyleEngine {
+    Pool* pool;
+    AvlTree* style_tree;
+    int version;
+};
 
 // Enhanced CSS Rule representation
 typedef struct CSSEnhancedRule {
@@ -221,7 +231,7 @@ typedef struct CSSCascadeLayer {
     int priority;
     CSSEnhancedRule** rules;
     int rule_count;
-    CSSCascadeLayer** sublayers;
+    struct CSSCascadeLayer** sublayers;
     int sublayer_count;
 } CSSCascadeLayer;
 

@@ -61,6 +61,14 @@ void pool_free(Pool* pool, void* ptr);
 void* pool_realloc(Pool* pool, void* ptr, size_t size);
 
 /**
+ * Duplicate a string in a pool
+ * @param pool Pool to allocate from
+ * @param str String to duplicate
+ * @return Pointer to duplicated string, or NULL on failure
+ */
+char* pool_strdup(Pool* pool, const char* str);
+
+/**
  * Clean up mempool system (optional - called automatically at process exit)
  * This can be called to explicitly shut down rpmalloc if needed
  */

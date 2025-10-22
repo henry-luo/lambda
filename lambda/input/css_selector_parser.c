@@ -526,3 +526,5 @@ void css_print_selector_specificity(CSSComplexSelector* selector) {
     
     printf("\n");
 }
+
+// Specificity utility functions are defined in lib/css_style_node.c
