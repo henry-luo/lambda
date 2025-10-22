@@ -1421,6 +1421,19 @@
                         "binary": "test_css_frameworks_gtest.exe"
                     },
                     {
+                        "source": "test/test_css_all_files_gtest.cpp",
+                        "name": "🎨 CSS All Files Comprehensive Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_css_all_files_gtest.exe"
+                    },
+                    {
                         "source": "test/test_mdx_roundtrip_gtest.cpp",
                         "name": "📄 MDX Roundtrip Tests (GTest)",
                         "dependencies": [
