@@ -406,20 +406,15 @@ project "radiant"
         "/opt/homebrew/lib/libmpdec.a",
         "/opt/homebrew/lib/libutf8proc.a",
         "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
-        "/opt/homebrew/lib/libfontconfig.a",
+        "/opt/homebrew/lib/libfontconfig_minimal.a",
         "/opt/homebrew/lib/libglfw3.a",
         "/usr/local/lib/libthorvg.a",
         "/opt/homebrew/lib/libturbojpeg.a",
-        "/opt/homebrew/lib/libintl.a",
         "/opt/homebrew/opt/zlib/lib/libz.a",
         "/opt/homebrew/opt/bzip2/lib/libbz2.a",
         "/opt/homebrew/lib/libpng.a",
         "/opt/homebrew/opt/expat/lib/libexpat.a",
         "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
-    }
-    
-    links {
-        "iconv",
     }
     
     -- Automatically added C++ standard library
@@ -666,12 +661,11 @@ project "lambda"
         "/opt/homebrew/Cellar/freetype/2.13.3/lib/libfreetype.a",
         "/opt/homebrew/lib/libpng.a",
         "/opt/homebrew/opt/bzip2/lib/libbz2.a",
-        "/opt/homebrew/lib/libfontconfig.a",
+        "/opt/homebrew/lib/libfontconfig_minimal.a",
         "/opt/homebrew/opt/expat/lib/libexpat.a",
         "/usr/local/lib/libthorvg.a",
         "/opt/homebrew/lib/libglfw3.a",
         "/opt/homebrew/lib/libturbojpeg.a",
-        "/opt/homebrew/lib/libintl.a",
         "/opt/homebrew/lib/libmpdec.a",
         "/opt/homebrew/lib/libutf8proc.a",
         "/usr/local/lib/libmir.a",
@@ -683,7 +677,6 @@ project "lambda"
     -- Dynamic libraries
     filter "platforms:native"
         links {
-            "iconv",
         }
     
         linkoptions {
@@ -1281,6 +1274,136 @@ project "test_mempool_gtest"
     filter {}
     
 
+project "test_avl_tree"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_avl_tree.cpp",
+        "lib/avl_tree.c",
+        "lib/mempool.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_css_system"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_css_system.cpp",
+        "lib/avl_tree.c",
+        "lib/css_property_system.c",
+        "lib/css_style_node.c",
+        "lib/mempool.c",
+        "lib/string.c",
+        "lib/hashmap.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
 project "test_mime_detect_gtest"
     kind "ConsoleApp"
     language "C++"
@@ -1338,7 +1461,6 @@ project "test_mime_detect_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -1442,7 +1564,6 @@ project "test_math_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -1546,7 +1667,6 @@ project "test_math_ascii_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -1650,7 +1770,6 @@ project "test_markup_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -1754,7 +1873,6 @@ project "test_input_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -1857,7 +1975,6 @@ project "test_dir_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -1960,7 +2077,6 @@ project "test_http_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -2064,7 +2180,6 @@ project "test_sysinfo_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -2168,7 +2283,6 @@ project "test_jsx_roundtrip_new_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -2271,7 +2385,6 @@ project "test_mdx_roundtrip_new_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -2375,7 +2488,6 @@ project "test_css_tokenizer_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -2479,7 +2591,6 @@ project "test_css_parser_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -2583,7 +2694,6 @@ project "test_css_integration_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -2687,7 +2797,6 @@ project "test_css_files_safe_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -2791,7 +2900,6 @@ project "test_css_frameworks_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -2894,7 +3002,6 @@ project "test_mdx_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -2997,7 +3104,6 @@ project "test_jsx_roundtrip_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -3104,7 +3210,6 @@ project "test_latex_html_fixtures_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -3208,7 +3313,6 @@ project "test_validator_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
@@ -3311,7 +3415,6 @@ project "test_ast_validator_gtest"
     
     -- Add dynamic libraries
     links {
-        "iconv",
         "ncurses",
     }
     
