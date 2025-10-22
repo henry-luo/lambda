@@ -22,6 +22,10 @@ Item create_item_from_field_data(void* field_data, TypeId type_id) {
             return {.item = (uint64_t)*(void**)field_data};
         case LMD_TYPE_MAP:
             return {.item = (uint64_t)*(void**)field_data};
+        case LMD_TYPE_ELEMENT: {
+            Element* element = (Element*)*(void**)field_data;
+            return {.item = element ? ((((uint64_t)LMD_TYPE_ELEMENT)<<56) | (uint64_t)element) : ITEM_ERROR};
+        }
         case LMD_TYPE_NULL:
             return {.item = ITEM_NULL};
         default:
@@ -72,9 +76,6 @@ void format_number(StringBuf* sb, Item item) {
 }
 
 extern "C" String* format_data(Item item, String* type, String* flavor, Pool* pool) {
-    printf("DEBUG: format_data called with type='%s', flavor='%s'\n", 
-           type ? type->chars : "NULL", flavor ? flavor->chars : "NULL");
-    fflush(stdout);
     if (!type) return NULL;
     
     // If type is null, try to auto-detect from item type
