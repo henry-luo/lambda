@@ -404,6 +404,26 @@ static void format_item(StringBuf* sb, Item item, int depth, bool raw_text_mode)
                 break;
             }
 
+            // Special handling for XML declaration (tag name "?xml")
+            if (elmt_type->name.length == 4 &&
+                memcmp(elmt_type->name.str, "?xml", 4) == 0) {
+                // This is an XML declaration - output the stored text directly
+                if (elmt_type->content_length > 0) {
+                    List* list = (List*)element;
+                    if (list->length > 0) {
+                        Item child_item = list->items[0];
+                        if (get_type_id(child_item) == LMD_TYPE_STRING) {
+                            String* str = (String*)child_item.pointer;
+                            if (str && str->chars) {
+                                // Output XML declaration as-is
+                                stringbuf_append_format(sb, "%.*s", (int)str->len, str->chars);
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+
             // Format as proper HTML element
             stringbuf_append_char(sb, '<');
             stringbuf_append_format(sb, "%.*s", (int)elmt_type->name.length, elmt_type->name.str);
@@ -432,21 +452,17 @@ static void format_item(StringBuf* sb, Item item, int depth, bool raw_text_mode)
                             // Boolean attribute (bool value) - output name only
                             stringbuf_append_char(sb, ' ');
                             stringbuf_append_format(sb, "%.*s", field_name_len, field_name);
-                        } else if (field_type == LMD_TYPE_STRING) {
+                        } else if (field_type == LMD_TYPE_STRING || field_type == LMD_TYPE_NULL) {
+                            // String attribute or NULL (empty string like class="")
+                            // Always output as attribute="value" format
                             String* str = *(String**)data;
-                            if (str) {
-                                if (str->len == 0) {
-                                    // Boolean attribute (empty string) - output name only (backward compatibility)
-                                    stringbuf_append_char(sb, ' ');
-                                    stringbuf_append_format(sb, "%.*s", field_name_len, field_name);
-                                } else if (str->chars) {
-                                    // Regular attribute with value
-                                    stringbuf_append_char(sb, ' ');
-                                    stringbuf_append_format(sb, "%.*s=\"", field_name_len, field_name);
-                                    format_html_string(sb, str, true);  // true = is_attribute
-                                    stringbuf_append_char(sb, '"');
-                                }
+                            stringbuf_append_char(sb, ' ');
+                            stringbuf_append_format(sb, "%.*s=\"", field_name_len, field_name);
+                            if (str && str->chars) {
+                                format_html_string(sb, str, true);  // true = is_attribute
                             }
+                            // Always close the quote, even for NULL/empty strings
+                            stringbuf_append_char(sb, '"');
                         }
                     }
                     field = field->next;
