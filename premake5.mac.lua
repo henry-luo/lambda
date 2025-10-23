@@ -532,6 +532,8 @@ project "lambda"
         "lambda/input/css/css_property_value_parser.c",
         "lambda/input/css/css_integration.c",
         "lambda/input/css/css_style_node.c",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/selector_matcher.c",
         "radiant/dom.cpp",
         "radiant/ui_context.cpp",
         "radiant/parse_html.cpp",
@@ -578,7 +580,9 @@ project "lambda"
         "lambda/input/css/css_tokenizer.c",
         "lambda/input/css/css_integration.c",
         "lambda/input/css/css_selector_parser.c",
+        "lambda/input/css/dom_element.c",
         "lambda/input/css/css_style_node.c",
+        "lambda/input/css/selector_matcher.c",
         "lambda/input/css/css_property_value_parser.c",
         "lambda/input/css/css_properties.c",
         "lambda/input/input-jsx.cpp",
@@ -616,7 +620,9 @@ project "lambda"
         "lambda/input/css/css_tokenizer.c",
         "lambda/input/css/css_integration.c",
         "lambda/input/css/css_selector_parser.c",
+        "lambda/input/css/dom_element.c",
         "lambda/input/css/css_style_node.c",
+        "lambda/input/css/selector_matcher.c",
         "lambda/input/css/css_property_value_parser.c",
         "lambda/input/css/css_properties.c",
         "lambda/format/format-md.cpp",
@@ -1440,6 +1446,77 @@ project "test_css_system"
         "lib/mempool.c",
         "lib/string.c",
         "lib/hashmap.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
+project "test_dom_integration"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/test_dom_integration.cpp",
+        "lib/avl_tree.c",
+        "lambda/input/css/css_style_node.c",
+        "lambda/input/css/css_properties.c",
+        "lambda/input/css/css_property_value_parser.c",
+        "lambda/input/css/dom_element.c",
+        "lambda/input/css/selector_matcher.c",
+        "lib/mempool.c",
+        "lib/string.c",
+        "lib/hashmap.c",
+        "lib/arraylist.c",
     }
     
     includedirs {
