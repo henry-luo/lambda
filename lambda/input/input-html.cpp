@@ -345,6 +345,7 @@ static String* parse_attribute_value(Input *input, const char **html, const char
             (*html)++; // Skip closing quote
         }
 
+        // Empty attributes ("") return NULL
         return value;
     } else if (**html == '\'') {
         (*html)++; // Skip opening quote
@@ -357,6 +358,7 @@ static String* parse_attribute_value(Input *input, const char **html, const char
             (*html)++; // Skip closing quote
         }
 
+        // Empty attributes ('') return NULL
         return value;
     } else {
         // Unquoted attribute value
@@ -416,21 +418,17 @@ static bool parse_attributes(Input *input, Element *element, const char **html, 
             (*html)++; // Skip =
             skip_whitespace(html); // Skip whitespace after =
             String* str_value = parse_attribute_value(input, html, html_start);
-            if (str_value) {
-                attr_value = (Item){.item = s2it(str_value)};
-            } else {
-                attr_value = (Item){.item = ITEM_NULL};
-            }
+            // Store attribute value (NULL for empty strings like class="")
+            attr_value = (Item){.item = s2it(str_value)};
+            // Type will be LMD_TYPE_NULL if str_value is NULL, LMD_TYPE_STRING otherwise
         } else {
             // Boolean attribute (no value) - store as boolean true
             attr_value = (Item){.bool_val = true};
             attr_value.type_id = LMD_TYPE_BOOL;
         }
 
-        // Add attribute to element
-        if (attr_value.item != ITEM_NULL) {
-            elmt_put(element, attr_name, attr_value, input->pool);
-        }
+        // Add attribute to element (including NULL values for empty attributes)
+        elmt_put(element, attr_name, attr_value, input->pool);
 
         skip_whitespace(html);
     }
@@ -558,6 +556,55 @@ static Item parse_doctype(Input* input, const char **html, const char* html_star
     return {.element = element};
 }
 
+// Parse XML declaration and return it as an element with tag name "?xml"
+// Example: // Parse XML declaration and return it as an element with tag name "?xml"
+// Example: <?xml version="1.0" encoding="utf-8"?>
+static Item parse_xml_declaration(Input* input, const char **html, const char* html_start) {
+    if (strncmp(*html, "<?xml", 5) != 0) {
+        return {.item = ITEM_ERROR};
+    }
+
+    const char* decl_start = *html;
+    *html += 5; // Skip "<?xml"
+
+    // Find end of XML declaration
+    while (**html && strncmp(*html, "?>", 2) != 0) {
+        (*html)++;
+    }
+
+    if (!**html) {
+        log_parse_error(html_start, *html, "Unclosed XML declaration");
+        return {.item = ITEM_ERROR};
+    }
+
+    *html += 2; // Skip '?>'
+
+    // Extract the entire XML declaration including <?xml and ?>
+    size_t decl_len = *html - decl_start;
+
+    // Create element with tag name "?xml"
+    Element* element = input_create_element(input, "?xml");
+    if (!element) {
+        return {.item = ITEM_ERROR};
+    }
+
+    // Store the entire XML declaration as a text child (for easy roundtrip)
+    if (decl_len > 0) {
+        StringBuf* sb = input->sb;
+        stringbuf_reset(sb);
+        for (size_t i = 0; i < decl_len; i++) {
+            stringbuf_append_char(sb, decl_start[i]);
+        }
+        String* decl_text = stringbuf_to_string(sb);
+        Item text_item = {.item = s2it(decl_text)};
+        list_push((List*)element, text_item);
+    }
+
+    // Set content length
+    ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
+
+    return {.element = element};
+}
 static void skip_doctype(const char **html) {
     if (strncasecmp(*html, "<!doctype", 9) == 0) {
         while (**html && **html != '>') {
@@ -905,7 +952,16 @@ void parse_html(Input* input, const char* html_string) {
             continue;
         }
 
-        // Skip processing instructions
+        // Parse XML declaration
+        if (strncmp(html, "<?xml", 5) == 0) {
+            Item xml_decl_item = parse_xml_declaration(input, &html, html_string);
+            if (xml_decl_item.item != ITEM_ERROR) {
+                list_push(root_list, xml_decl_item);
+            }
+            continue;
+        }
+
+        // Skip other processing instructions (not XML declaration)
         if (strncmp(html, "<?", 2) == 0) {
             skip_processing_instruction(&html);
             continue;
