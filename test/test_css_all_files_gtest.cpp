@@ -116,6 +116,168 @@ protected:
         return normalized.substr(start, end - start + 1);
     }
 
+    // Structure to represent a CSS rule
+    struct CssRule {
+        std::string selector;
+        std::string declarations;
+        std::string full_rule;  // Original rule text for debugging
+        
+        CssRule(const std::string& sel, const std::string& decl, const std::string& full) 
+            : selector(sel), declarations(decl), full_rule(full) {}
+    };
+
+    // Split CSS content into individual rules
+    std::vector<CssRule> splitCssIntoRules(const std::string& css) {
+        std::vector<CssRule> rules;
+        
+        size_t pos = 0;
+        size_t len = css.length();
+        
+        while (pos < len) {
+            // Skip whitespace and comments
+            while (pos < len && (std::isspace(css[pos]) || css[pos] == '/')) {
+                if (css[pos] == '/' && pos + 1 < len && css[pos + 1] == '*') {
+                    // Skip comment block
+                    pos += 2;
+                    while (pos + 1 < len && !(css[pos] == '*' && css[pos + 1] == '/')) {
+                        pos++;
+                    }
+                    if (pos + 1 < len) pos += 2; // Skip */
+                } else {
+                    pos++;
+                }
+            }
+            
+            if (pos >= len) break;
+            
+            // Handle @-rules specially
+            if (css[pos] == '@') {
+                size_t rule_start = pos;
+                
+                // Find the end of @-rule (either ; or closing brace for block @-rules)
+                while (pos < len && css[pos] != ';' && css[pos] != '{') {
+                    pos++;
+                }
+                
+                if (pos < len && css[pos] == '{') {
+                    // Block @-rule like @media - find matching closing brace
+                    int brace_count = 1;
+                    pos++; // Skip opening brace
+                    
+                    while (pos < len && brace_count > 0) {
+                        if (css[pos] == '{') brace_count++;
+                        else if (css[pos] == '}') brace_count--;
+                        pos++;
+                    }
+                } else if (pos < len && css[pos] == ';') {
+                    pos++; // Skip semicolon
+                }
+                
+                std::string at_rule = css.substr(rule_start, pos - rule_start);
+                std::string normalized_rule = normalizeWhitespace(at_rule);
+                if (!normalized_rule.empty()) {
+                    rules.emplace_back("@rule", normalized_rule, at_rule);
+                }
+                continue;
+            }
+            
+            // Regular CSS rule: find selector
+            size_t selector_start = pos;
+            while (pos < len && css[pos] != '{') {
+                pos++;
+            }
+            
+            if (pos >= len) break; // No opening brace found
+            
+            std::string selector = css.substr(selector_start, pos - selector_start);
+            pos++; // Skip opening brace
+            
+            // Find declarations block
+            size_t decl_start = pos;
+            int brace_count = 1;
+            
+            while (pos < len && brace_count > 0) {
+                if (css[pos] == '{') brace_count++;
+                else if (css[pos] == '}') brace_count--;
+                pos++;
+            }
+            
+            if (brace_count == 0) {
+                // Found complete rule
+                std::string declarations = css.substr(decl_start, pos - decl_start - 1); // -1 to exclude closing brace
+                std::string full_rule = css.substr(selector_start, pos - selector_start);
+                
+                std::string norm_selector = normalizeWhitespace(selector);
+                std::string norm_declarations = normalizeCssDeclarations(declarations);
+                
+                if (!norm_selector.empty() && !norm_declarations.empty()) {
+                    rules.emplace_back(norm_selector, norm_declarations, full_rule);
+                }
+            }
+        }
+        
+        return rules;
+    }
+
+    // Normalize CSS declarations for comparison (sort properties, normalize values)
+    std::string normalizeCssDeclarations(const std::string& declarations) {
+        std::vector<std::string> properties;
+        
+        size_t pos = 0;
+        size_t len = declarations.length();
+        
+        while (pos < len) {
+            // Skip whitespace
+            while (pos < len && std::isspace(declarations[pos])) pos++;
+            if (pos >= len) break;
+            
+            // Find property name
+            size_t prop_start = pos;
+            while (pos < len && declarations[pos] != ':' && declarations[pos] != ';') {
+                pos++;
+            }
+            
+            if (pos >= len || declarations[pos] != ':') {
+                // Skip malformed property
+                while (pos < len && declarations[pos] != ';') pos++;
+                if (pos < len) pos++; // Skip semicolon
+                continue;
+            }
+            
+            std::string property = declarations.substr(prop_start, pos - prop_start);
+            pos++; // Skip colon
+            
+            // Find property value
+            size_t value_start = pos;
+            while (pos < len && declarations[pos] != ';') {
+                pos++;
+            }
+            
+            std::string value = declarations.substr(value_start, pos - value_start);
+            if (pos < len) pos++; // Skip semicolon
+            
+            // Normalize property and value
+            property = normalizeWhitespace(property);
+            value = normalizeWhitespace(value);
+            
+            if (!property.empty() && !value.empty()) {
+                properties.push_back(property + ": " + value);
+            }
+        }
+        
+        // Sort properties for consistent comparison
+        std::sort(properties.begin(), properties.end());
+        
+        // Join with semicolons
+        std::string result;
+        for (size_t i = 0; i < properties.size(); i++) {
+            if (i > 0) result += "; ";
+            result += properties[i];
+        }
+        
+        return result;
+    }
+
     // Discover all CSS files in the test/input directory
     void discoverCssFiles() {
         const char* input_dir = "./test/input";
@@ -293,32 +455,154 @@ protected:
                     printf("%.200s%s\n", formatted_css->chars, 
                            formatted_css->len > 200 ? "..." : "");
                     
-                    // Step 3: Basic round-trip validation
-                    // For CSS, we can't expect exact string matches due to:
-                    // - Whitespace normalization
-                    // - Comment handling  
-                    // - Property ordering
-                    // - Value canonicalization
+                    // Step 3: Enhanced rule-by-rule round-trip validation
+                    printf("🔄 Performing detailed rule-by-rule comparison...\n");
                     
-                    // Instead, validate structural equivalence
-                    std::string orig_normalized = normalizeWhitespace(original_css);
-                    std::string fmt_normalized = normalizeWhitespace(
-                        std::string(formatted_css->chars, formatted_css->len));
+                    // Split both original and formatted CSS into rules
+                    std::vector<CssRule> original_rules = splitCssIntoRules(std::string(original_css));
+                    std::vector<CssRule> formatted_rules = splitCssIntoRules(std::string(formatted_css->chars, formatted_css->len));
                     
-                    // Basic structural checks
-                    bool has_original_selectors = orig_normalized.find("{") != std::string::npos && 
-                                                 orig_normalized.find("}") != std::string::npos;
-                    bool has_formatted_selectors = fmt_normalized.find("{") != std::string::npos && 
-                                                  fmt_normalized.find("}") != std::string::npos;
+                    printf("📊 Original CSS: %zu rules, Formatted CSS: %zu rules\n", 
+                           original_rules.size(), formatted_rules.size());
                     
-                    bool has_original_properties = orig_normalized.find(":") != std::string::npos;
-                    bool has_formatted_properties = fmt_normalized.find(":") != std::string::npos;
+                    // Compare rules one by one
+                    int matching_rules = 0;
+                    int mismatched_rules = 0;
+                    std::vector<std::pair<size_t, size_t>> rule_mismatches; // (original_idx, formatted_idx)
                     
-                    // Check that basic CSS structure is preserved
-                    if (has_original_selectors && has_formatted_selectors &&
-                        has_original_properties && has_formatted_properties) {
-                        printf("✅ Round-trip structural validation passed for: %s\n", file_name);
+                    // Create maps for faster lookup
+                    std::map<std::string, std::vector<size_t>> original_selector_map;
+                    for (size_t i = 0; i < original_rules.size(); i++) {
+                        original_selector_map[original_rules[i].selector].push_back(i);
+                    }
+                    
+                    std::map<std::string, std::vector<size_t>> formatted_selector_map;
+                    for (size_t i = 0; i < formatted_rules.size(); i++) {
+                        formatted_selector_map[formatted_rules[i].selector].push_back(i);
+                    }
+                    
+                    // Track which formatted rules have been matched
+                    std::vector<bool> formatted_matched(formatted_rules.size(), false);
+                    
+                    // Match rules by selector and compare declarations
+                    for (size_t orig_idx = 0; orig_idx < original_rules.size(); orig_idx++) {
+                        const CssRule& orig_rule = original_rules[orig_idx];
+                        bool found_match = false;
+                        
+                        // Look for matching selector in formatted rules
+                        auto it = formatted_selector_map.find(orig_rule.selector);
+                        if (it != formatted_selector_map.end()) {
+                            for (size_t fmt_idx : it->second) {
+                                if (formatted_matched[fmt_idx]) continue; // Already matched
+                                
+                                const CssRule& fmt_rule = formatted_rules[fmt_idx];
+                                
+                                // Compare declarations
+                                if (orig_rule.declarations == fmt_rule.declarations) {
+                                    matching_rules++;
+                                    formatted_matched[fmt_idx] = true;
+                                    found_match = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (!found_match) {
+                            mismatched_rules++;
+                            // Find closest match for reporting
+                            size_t closest_fmt_idx = 0;
+                            bool found_selector_match = false;
+                            
+                            if (it != formatted_selector_map.end() && !it->second.empty()) {
+                                closest_fmt_idx = it->second[0]; // Use first unmatched rule with same selector
+                                found_selector_match = true;
+                            }
+                            
+                            rule_mismatches.emplace_back(orig_idx, found_selector_match ? closest_fmt_idx : SIZE_MAX);
+                        }
+                    }
+                    
+                    // Count unmatched formatted rules (new rules)
+                    int new_rules = 0;
+                    for (size_t i = 0; i < formatted_rules.size(); i++) {
+                        if (!formatted_matched[i]) {
+                            new_rules++;
+                        }
+                    }
+                    
+                    printf("📈 Rule comparison results:\n");
+                    printf("   ✅ Matching rules: %d\n", matching_rules);
+                    printf("   ❌ Mismatched rules: %d\n", mismatched_rules);
+                    printf("   ➕ New rules in formatted: %d\n", new_rules);
+                    
+                    // Report mismatched rules in detail
+                    if (mismatched_rules > 0 || new_rules > 0) {
+                        printf("\n🔍 DETAILED MISMATCH REPORT for %s:\n", file_name);
+                        printf("============================================\n");
+                        
+                        for (const auto& mismatch : rule_mismatches) {
+                            size_t orig_idx = mismatch.first;
+                            size_t fmt_idx = mismatch.second;
+                            
+                            printf("\n❌ MISMATCH #%zu:\n", orig_idx + 1);
+                            printf("📝 Original rule:\n");
+                            printf("   Selector: '%s'\n", original_rules[orig_idx].selector.c_str());
+                            printf("   Declarations: '%s'\n", original_rules[orig_idx].declarations.c_str());
+                            printf("   Full rule: '%.200s%s'\n", 
+                                   original_rules[orig_idx].full_rule.c_str(),
+                                   original_rules[orig_idx].full_rule.length() > 200 ? "..." : "");
+                            
+                            if (fmt_idx != SIZE_MAX) {
+                                printf("🔄 Formatted rule:\n");
+                                printf("   Selector: '%s'\n", formatted_rules[fmt_idx].selector.c_str());
+                                printf("   Declarations: '%s'\n", formatted_rules[fmt_idx].declarations.c_str());
+                                printf("   Full rule: '%.200s%s'\n", 
+                                       formatted_rules[fmt_idx].full_rule.c_str(),
+                                       formatted_rules[fmt_idx].full_rule.length() > 200 ? "..." : "");
+                            } else {
+                                printf("🔄 No matching formatted rule found\n");
+                            }
+                            printf("---\n");
+                        }
+                        
+                        // Report new rules in formatted CSS
+                        if (new_rules > 0) {
+                            printf("\n➕ NEW RULES in formatted CSS:\n");
+                            for (size_t i = 0; i < formatted_rules.size(); i++) {
+                                if (!formatted_matched[i]) {
+                                    printf("   New rule #%zu:\n", i + 1);
+                                    printf("     Selector: '%s'\n", formatted_rules[i].selector.c_str());
+                                    printf("     Declarations: '%s'\n", formatted_rules[i].declarations.c_str());
+                                    printf("     Full rule: '%.200s%s'\n", 
+                                           formatted_rules[i].full_rule.c_str(),
+                                           formatted_rules[i].full_rule.length() > 200 ? "..." : "");
+                                }
+                            }
+                        }
+                        printf("============================================\n");
+                    }
+                    
+                    // Determine success criteria
+                    double match_percentage = original_rules.size() > 0 ? 
+                        (double)matching_rules / original_rules.size() * 100.0 : 100.0;
+                    
+                    printf("📊 Match percentage: %.1f%% (%d/%zu rules)\n", 
+                           match_percentage, matching_rules, original_rules.size());
+                    
+                    // Consider round-trip successful if:
+                    // 1. At least 80% of rules match exactly, OR
+                    // 2. All rules match and there are only minor formatting differences
+                    bool roundTripSuccess = false;
+                    if (match_percentage >= 80.0) {
+                        printf("✅ Round-trip validation PASSED (%.1f%% match rate)\n", match_percentage);
                         roundTripSuccess = true;
+                    } else if (mismatched_rules <= 2 && original_rules.size() <= 5) {
+                        // Be more lenient for small CSS files
+                        printf("✅ Round-trip validation PASSED (small file with minor differences)\n");
+                        roundTripSuccess = true;
+                    } else {
+                        printf("❌ Round-trip validation FAILED (%.1f%% match rate, threshold: 80%%)\n", match_percentage);
+                    }
                         
                         // Optional: Test parse stability (parse formatted CSS again)
                         printf("🔄 Testing parse stability...\n");
@@ -340,15 +624,7 @@ protected:
                             free(formatted_copy);
                         }
                         
-                    } else {
-                        printf("❌ Round-trip structural validation failed for: %s\n", file_name);
-                        printf("   Original: selectors=%s, properties=%s\n", 
-                               has_original_selectors ? "yes" : "no",
-                               has_original_properties ? "yes" : "no");
-                        printf("   Formatted: selectors=%s, properties=%s\n", 
-                               has_formatted_selectors ? "yes" : "no", 
-                               has_formatted_properties ? "yes" : "no");
-                    }
+                        // Optional: Test parse stability (parse formatted CSS again)
                 }
                 
                 // Cleanup

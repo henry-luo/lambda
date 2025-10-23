@@ -1,5 +1,8 @@
 #include "input.h"
 
+// External declaration for thread-local input context
+extern __thread Context* input_context;
+
 // Forward declarations for CSS stylesheet parsing
 static Item parse_css_stylesheet(Input *input, const char **css);
 static Array* parse_css_rules(Input *input, const char **css);
@@ -796,11 +799,11 @@ static Item parse_css_url(Input *input, const char **css) {
     // Create url element with the URL as content
     Element* url_element = input_create_element(input, "url");
     if (url_element && url_value .item != ITEM_ERROR) {
-        // Add URL as content - for now just store as attribute
-        input_add_attribute_item_to_element(input, url_element, "href", url_value);
+        // Add URL as parameter so it shows up in formatting
+        list_push((List*)url_element, url_value);
     }
 
-    return url_element ? (Item){.item = (uint64_t)url_element} : (Item){.item = ITEM_ERROR};
+    return url_element ? (Item){.item = (((uint64_t)LMD_TYPE_ELEMENT)<<56) | (uint64_t)url_element} : (Item){.item = ITEM_ERROR};
 }
 
 static Item parse_css_color(Input *input, const char **css) {
@@ -1026,12 +1029,13 @@ static Array* parse_css_function_params(Input *input, const char **css) {
             // end of parameters
             break;
         } else if (**css != ')') {
-            // check for space-separated values within a function parameter
-            // some CSS functions use space separation (e.g., rgba(255 0 0 / 0.5))
+            // For space-separated values, don't automatically continue parsing as separate parameters
+            // Only continue if this is a space-separated multi-value context (not calc expressions)
             skip_css_whitespace(css);
 
             if (**css && **css != ',' && **css != ')' && **css != '/') {
-                // continue parsing more values in this parameter context
+                // Only continue parsing for rgba() style space separation, not calc() expressions
+                // For now, treat any remaining content as end of this parameter
                 continue;
             }
         }
@@ -1106,11 +1110,17 @@ static Item parse_css_function(Input *input, const char **css) {
     if (!func_element) return {.item = ITEM_ERROR};
 
     // Add parameters as child content using list_push
+    // Disable string merging to keep function parameters separate
     if (params && params->length > 0) {
+        bool prev_disable_string_merging = input_context->disable_string_merging;
+        input_context->disable_string_merging = true;
+        
         for (long i = 0; i < params->length; i++) {
             Item param = params->items[i];
             list_push((List*)func_element, param);
         }
+        
+        input_context->disable_string_merging = prev_disable_string_merging;
     }
 
     printf("Created function element '%s' with %ld parameters\n", func_name->chars, params ? params->length : 0);
