@@ -1168,7 +1168,7 @@
                         "binary": "test_css_system.exe"
                     },
                     {
-                        "source": "test_dom_integration.cpp",
+                        "source": "test_css_dom_integration.cpp",
                         "name": "🌐 DOM Integration & Selector Matching Tests (GTest)",
                         "dependencies": [],
                         "libraries": [
@@ -1188,7 +1188,25 @@
                             "lib/hashmap.c",
                             "lib/arraylist.c"
                         ],
-                        "binary": "test_dom_integration.exe"
+                        "binary": "test_css_dom_integration.exe"
+                    },
+                    {
+                        "source": "test_html_css_gtest.cpp",
+                        "name": "🌐 HTML to CSS End-to-End Integration Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lambda/input/css/dom_element.c",
+                            "lambda/input/css/selector_matcher.c",
+                            "lib/url_parser.c"
+                        ],
+                        "binary": "test_html_css_gtest.exe"
                     },
                     {
                         "_DISABLED_source": "test_mempool_simple_gtest.cpp",
@@ -1317,6 +1335,19 @@
                             "rpmalloc"
                         ],
                         "binary": "test_input_roundtrip_gtest.exe"
+                    },
+                    {
+                        "source": "test_html_roundtrip_gtest.cpp",
+                        "name": "🌐 HTML Roundtrip Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_html_roundtrip_gtest.exe"
                     },
                     {
                         "source": "test_dir_gtest.cpp",

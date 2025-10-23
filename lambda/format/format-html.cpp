@@ -5,19 +5,37 @@ void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
 static void format_item(StringBuf* sb, Item item, int depth);
 
+// HTML5 void elements (self-closing tags that should not have closing tags)
+static const char* void_elements[] = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr", "command",
+    "keygen", "menuitem", NULL
+};
+
+// Helper function to check if an element is a void element
+static bool is_void_element(const char* tag_name, size_t tag_len) {
+    for (int i = 0; void_elements[i]; i++) {
+        size_t void_len = strlen(void_elements[i]);
+        if (tag_len == void_len && strncasecmp(tag_name, void_elements[i], tag_len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Helper function to check if a type is simple (can be output as HTML attribute)
 static bool is_simple_type(TypeId type) {
-    return type == LMD_TYPE_STRING || type == LMD_TYPE_INT || 
-           type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT || 
+    return type == LMD_TYPE_STRING || type == LMD_TYPE_INT ||
+           type == LMD_TYPE_INT64 || type == LMD_TYPE_FLOAT ||
            type == LMD_TYPE_BOOL;
 }
 
 static void format_html_string(StringBuf* sb, String* str) {
     if (!str || !str->chars) return;
-    
+
     const char* s = str->chars;
     size_t len = str->len;
-    
+
     for (size_t i = 0; i < len; i++) {
         char c = s[i];
         switch (c) {
@@ -61,7 +79,7 @@ static void format_array(StringBuf* sb, Array* arr, int depth) {
         stringbuf_append_str(sb, "\n");
         format_indent(sb, depth + 1);
         stringbuf_append_str(sb, "<ul>\n");
-        
+
         for (long i = 0; i < arr->length; i++) {
             format_indent(sb, depth + 2);
             stringbuf_append_str(sb, "<li>");
@@ -69,7 +87,7 @@ static void format_array(StringBuf* sb, Array* arr, int depth) {
             format_item(sb, item, depth + 2);
             stringbuf_append_str(sb, "</li>\n");
         }
-        
+
         format_indent(sb, depth + 1);
         stringbuf_append_str(sb, "</ul>\n");
         format_indent(sb, depth);
@@ -78,18 +96,18 @@ static void format_array(StringBuf* sb, Array* arr, int depth) {
 
 static void format_map_attributes(StringBuf* sb, TypeMap* map_type, void* map_data) {
     if (!map_type || !map_data || !map_type->shape) return;
-    
+
     ShapeEntry* field = map_type->shape;
     for (int i = 0; i < map_type->length && field; i++) {
         if (field->name && field->type) {
             void* data = ((char*)map_data) + field->byte_offset;
-            
+
             // Only output simple types as attributes
             TypeId field_type = field->type->type_id;
             if (is_simple_type(field_type)) {
                 stringbuf_append_char(sb, ' ');
                 stringbuf_append_format(sb, "data-%.*s=\"", (int)field->name->length, field->name->str);
-                
+
                 if (field_type == LMD_TYPE_STRING) {
                     String* str = *(String**)data;
                     if (str) {
@@ -109,7 +127,7 @@ static void format_map_attributes(StringBuf* sb, TypeMap* map_type, void* map_da
                     bool bool_val = *(bool*)data;
                     stringbuf_append_str(sb, bool_val ? "true" : "false");
                 }
-                
+
                 stringbuf_append_char(sb, '"');
             }
         }
@@ -119,31 +137,31 @@ static void format_map_attributes(StringBuf* sb, TypeMap* map_type, void* map_da
 
 static void format_map_elements(StringBuf* sb, TypeMap* map_type, void* map_data, int depth) {
     if (!map_type || !map_data || !map_type->shape) return;
-    
+
     ShapeEntry* field = map_type->shape;
     for (int i = 0; i < map_type->length && field; i++) {
         if (field->name && field->type) {
             void* data = ((char*)map_data) + field->byte_offset;
-            
+
             TypeId field_type = field->type->type_id;
-            
+
             // Only handle complex types as child elements (simple types are attributes)
             if (!is_simple_type(field_type)) {
                 stringbuf_append_str(sb, "\n");
                 format_indent(sb, depth + 1);
-                
+
                 if (field_type == LMD_TYPE_NULL) {
                     // Create a div for null
-                    stringbuf_append_format(sb, "<div class=\"field-%.*s\">null</div>", 
+                    stringbuf_append_format(sb, "<div class=\"field-%.*s\">null</div>",
                                         (int)field->name->length, field->name->str);
                 } else {
                     // For complex types, create a div with class name
-                    stringbuf_append_format(sb, "<div class=\"field-%.*s\">", 
+                    stringbuf_append_format(sb, "<div class=\"field-%.*s\">",
                                         (int)field->name->length, field->name->str);
-                    
+
                     Item item_data = *(Item*)data;
                     format_item(sb, item_data, depth + 1);
-                    
+
                     stringbuf_append_str(sb, "</div>");
                 }
             }
@@ -154,21 +172,21 @@ static void format_map_elements(StringBuf* sb, TypeMap* map_type, void* map_data
 
 static void format_map(StringBuf* sb, Map* mp, int depth) {
     stringbuf_append_str(sb, "<div class=\"object\"");
-    
+
     if (mp && mp->type) {
         TypeMap* map_type = (TypeMap*)mp->type;
         // Add simple types as data attributes
         format_map_attributes(sb, map_type, mp->data);
     }
-    
+
     stringbuf_append_char(sb, '>');
-    
+
     if (mp && mp->type) {
         TypeMap* map_type = (TypeMap*)mp->type;
         // Add complex types as child elements
         format_map_elements(sb, map_type, mp->data, depth);
     }
-    
+
     stringbuf_append_str(sb, "\n");
     format_indent(sb, depth);
     stringbuf_append_str(sb, "</div>");
@@ -179,13 +197,13 @@ static void format_item(StringBuf* sb, Item item, int depth) {
     if (!sb) {
         return;
     }
-    
+
     // Check if item is null (0)
     if (!item.item) {
         stringbuf_append_str(sb, "null");
         return;
     }
-    
+
     // Additional safety check for Item structure
     if (item.type_id == 0 && item.raw_pointer == NULL) {
         stringbuf_append_str(sb, "null");
@@ -193,7 +211,7 @@ static void format_item(StringBuf* sb, Item item, int depth) {
     }
 
     TypeId type = get_type_id(item);
-    
+
     switch (type) {
     case LMD_TYPE_NULL:
         stringbuf_append_str(sb, "null");
@@ -247,11 +265,11 @@ static void format_item(StringBuf* sb, Item item, int depth) {
         Element* element = item.element;
         if (element && element->type) {
             TypeElmt* elmt_type = (TypeElmt*)element->type;
-            
+
             // Format as proper HTML element
             stringbuf_append_char(sb, '<');
             stringbuf_append_format(sb, "%.*s", (int)elmt_type->name.length, elmt_type->name.str);
-            
+
             // Add attributes if available
             if (elmt_type && elmt_type->length > 0 && element->data) {
                 TypeMap* map_type = (TypeMap*)elmt_type;
@@ -260,17 +278,17 @@ static void format_item(StringBuf* sb, Item item, int depth) {
                     if (field->name && field->type) {
                         void* data = ((char*)element->data) + field->byte_offset;
                         TypeId field_type = field->type->type_id;
-                        
+
                         // Check if this is a known HTML attribute
                         const char* field_name = field->name->str;
                         int field_name_len = field->name->length;
-                        
+
                         // Skip the "_" field (children)
                         if (field_name_len == 1 && field_name[0] == '_') {
                             field = field->next;
                             continue;
                         }
-                        
+
                         // Add attribute
                         if (field_type == LMD_TYPE_STRING) {
                             String* str = *(String**)data;
@@ -285,22 +303,30 @@ static void format_item(StringBuf* sb, Item item, int depth) {
                     field = field->next;
                 }
             }
-            
-            stringbuf_append_char(sb, '>');
-            
-            // Add children if available (same approach as JSON formatter)
-            if (elmt_type && elmt_type->content_length > 0) {
-                List* list = (List*)element;
-                for (long j = 0; j < list->length; j++) {
-                    Item child_item = list->items[j];
-                    format_item(sb, child_item, depth + 1);
+
+            // Check if this is a void element (self-closing)
+            bool is_void = is_void_element(elmt_type->name.str, elmt_type->name.length);
+
+            if (is_void) {
+                // Void elements don't have closing tags in HTML5
+                stringbuf_append_char(sb, '>');
+            } else {
+                stringbuf_append_char(sb, '>');
+
+                // Add children if available (same approach as JSON formatter)
+                if (elmt_type && elmt_type->content_length > 0) {
+                    List* list = (List*)element;
+                    for (long j = 0; j < list->length; j++) {
+                        Item child_item = list->items[j];
+                        format_item(sb, child_item, depth + 1);
+                    }
                 }
+
+                // Close tag (only for non-void elements)
+                stringbuf_append_str(sb, "</");
+                stringbuf_append_format(sb, "%.*s", (int)elmt_type->name.length, elmt_type->name.str);
+                stringbuf_append_char(sb, '>');
             }
-            
-            // Close tag
-            stringbuf_append_str(sb, "</");
-            stringbuf_append_format(sb, "%.*s", (int)elmt_type->name.length, elmt_type->name.str);
-            stringbuf_append_char(sb, '>');
         } else {
             stringbuf_append_str(sb, "<element/>");
         }
@@ -315,7 +341,7 @@ static void format_item(StringBuf* sb, Item item, int depth) {
 String* format_html(Pool* pool, Item root_item) {
     StringBuf* sb = stringbuf_new(pool);
     if (!sb) return NULL;
-    
+
     // Check if root is already an HTML element, if so, format as-is
     if (root_item.item) {
         TypeId type = get_type_id(root_item);
@@ -333,7 +359,7 @@ String* format_html(Pool* pool, Item root_item) {
                     if (element && element->type) {
                         TypeElmt* elmt_type = (TypeElmt*)element->type;
                         // Check if this is an HTML element
-                        if (elmt_type->name.length == 4 && 
+                        if (elmt_type->name.length == 4 &&
                             strncmp(elmt_type->name.str, "html", 4) == 0) {
                             // Format the HTML element directly without wrapping
                             stringbuf_append_str(sb, "<!DOCTYPE html>\n");
@@ -348,7 +374,7 @@ String* format_html(Pool* pool, Item root_item) {
             if (element && element->type) {
                 TypeElmt* elmt_type = (TypeElmt*)element->type;
                 // Check if this is an HTML element
-                if (elmt_type->name.length == 4 && 
+                if (elmt_type->name.length == 4 &&
                     strncmp(elmt_type->name.str, "html", 4) == 0) {
                     // Format the HTML element directly without wrapping
                     stringbuf_append_str(sb, "<!DOCTYPE html>\n");
@@ -358,17 +384,17 @@ String* format_html(Pool* pool, Item root_item) {
             }
         }
     }
-    
+
     // Add minimal HTML document structure for non-HTML root elements
     stringbuf_append_str(sb, "<!DOCTYPE html>\n<html>\n<head>");
     stringbuf_append_str(sb, "<meta charset=\"UTF-8\">");
     stringbuf_append_str(sb, "<title>Data</title>");
     stringbuf_append_str(sb, "</head>\n<body>\n");
-    
+
     format_item(sb, root_item, 0);
-    
+
     stringbuf_append_str(sb, "\n</body>\n</html>");
-    
+
     return stringbuf_to_string(sb);
 }
 
