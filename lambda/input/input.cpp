@@ -143,6 +143,8 @@ void map_put(Map* mp, String* key, Item value, Input *input) {
 Element* input_create_element(Input *input, const char* tag_name) {
     Element* element = elmt_pooled(input->pool);
     if (!element) return NULL;
+    printf("DEBUG input_create_element: After elmt_pooled, element=%p, type_id=%d\n", element, (int)element->type_id);
+    fflush(stdout);
 
     TypeElmt *element_type = (TypeElmt*)alloc_type(input->pool, LMD_TYPE_ELEMENT, sizeof(TypeElmt));
     if (!element_type) return NULL;
@@ -157,6 +159,8 @@ Element* input_create_element(Input *input, const char* tag_name) {
         element_type->name.str = name_str->chars;
         element_type->name.length = name_str->len;
     }
+    printf("DEBUG input_create_element: Before return, element=%p, type_id=%d\n", element, (int)element->type_id);
+    fflush(stdout);
     return element;
 }
 
