@@ -446,14 +446,110 @@ static String* parse_tag_name(Input *input, const char **html) {
     return stringbuf_to_string(sb);
 }
 
-static void skip_comment(const char **html) {
-    if (strncmp(*html, "<!--", 4) == 0) {
-        *html += 4;
-        while (**html && strncmp(*html, "-->", 3) != 0) {
-            (*html)++;
-        }
-        if (**html) *html += 3; // Skip -->
+// Parse HTML comment and return it as an element with tag name "!--"
+static Item parse_comment(Input* input, const char **html, const char* html_start) {
+    if (strncmp(*html, "<!--", 4) != 0) {
+        return {.item = ITEM_ERROR};
     }
+
+    *html += 4; // Skip <!--
+    const char* comment_start = *html;
+
+    // Find end of comment
+    while (**html && strncmp(*html, "-->", 3) != 0) {
+        (*html)++;
+    }
+
+    if (!**html) {
+        log_parse_error(html_start, *html, "Unclosed HTML comment");
+        return {.item = ITEM_ERROR};
+    }
+
+    // Extract comment content (preserve all whitespace)
+    size_t comment_len = *html - comment_start;
+
+    // Create element with tag name "!--"
+    Element* element = input_create_element(input, "!--");
+    if (!element) {
+        return {.item = ITEM_ERROR};
+    }
+
+    // Add comment content as a text node child (if not empty)
+    if (comment_len > 0) {
+        StringBuf* sb = input->sb;
+        stringbuf_reset(sb);
+        for (size_t i = 0; i < comment_len; i++) {
+            stringbuf_append_char(sb, comment_start[i]);
+        }
+        String* comment_text = stringbuf_to_string(sb);
+        Item text_item = {.item = s2it(comment_text)};
+        list_push((List*)element, text_item);
+    }
+
+    // Set content length
+    ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
+
+    *html += 3; // Skip -->
+
+    return {.element = element};
+}
+
+// Parse DOCTYPE declaration and return it as an element with tag name "!DOCTYPE" or "!doctype"
+static Item parse_doctype(Input* input, const char **html, const char* html_start) {
+    if (strncasecmp(*html, "<!doctype", 9) != 0) {
+        return {.item = ITEM_ERROR};
+    }
+
+    // Preserve the case of "doctype" from source
+    const char* doctype_start = *html + 2; // After "<!"
+    bool is_uppercase_DOCTYPE = (doctype_start[0] == 'D');
+
+    *html += 9; // Skip "<!doctype" or "<!DOCTYPE"
+
+    // Skip whitespace after doctype
+    while (**html && isspace(**html)) {
+        (*html)++;
+    }
+
+    const char* content_start = *html;
+
+    // Find end of doctype declaration
+    while (**html && **html != '>') {
+        (*html)++;
+    }
+
+    if (!**html) {
+        log_parse_error(html_start, *html, "Unclosed DOCTYPE declaration");
+        return {.item = ITEM_ERROR};
+    }
+
+    // Extract DOCTYPE content (e.g., "html" or "html PUBLIC ...")
+    size_t content_len = *html - content_start;
+
+    // Create element with tag name "!DOCTYPE" or "!doctype" to preserve source case
+    Element* element = input_create_element(input, is_uppercase_DOCTYPE ? "!DOCTYPE" : "!doctype");
+    if (!element) {
+        return {.item = ITEM_ERROR};
+    }
+
+    // Add DOCTYPE content as a text node child (if not empty)
+    if (content_len > 0) {
+        StringBuf* sb = input->sb;
+        stringbuf_reset(sb);
+        for (size_t i = 0; i < content_len; i++) {
+            stringbuf_append_char(sb, content_start[i]);
+        }
+        String* doctype_text = stringbuf_to_string(sb);
+        Item text_item = {.item = s2it(doctype_text)};
+        list_push((List*)element, text_item);
+    }
+
+    // Set content length
+    ((TypeElmt*)element->type)->content_length = ((List*)element)->length;
+
+    *html += 1; // Skip '>'
+
+    return {.element = element};
 }
 
 static void skip_doctype(const char **html) {
@@ -526,18 +622,11 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         return {.item = ITEM_ERROR};
     }
 
-    // Skip comments
+    // Parse comments as special elements
     if (strncmp(*html, "<!--", 4) == 0) {
-        skip_comment(html);
-        skip_whitespace(html);
-        if (**html) {
-            Item result = parse_element(input, html, html_start); // Try next element
-            parse_depth--;
-            return result;
-        }
+        Item comment = parse_comment(input, html, html_start);
         parse_depth--;
-        log_parse_error(html_start, *html, "Unexpected end of input after comment");
-        return {.item = ITEM_NULL};
+        return comment;
     }
 
     // Skip DOCTYPE
@@ -767,8 +856,84 @@ static Item parse_element(Input *input, const char **html, const char *html_star
 void parse_html(Input* input, const char* html_string) {
     input->sb = stringbuf_new(input->pool);
     const char *html = html_string;
-    // parse the root element (preserve leading whitespace)
-    if (*html) {
-        input->root = parse_element(input, &html, html_string);
+
+    // Create a root-level list to collect DOCTYPE, comments, and the main element
+    List* root_list = (List*)pool_calloc(input->pool, sizeof(List));
+    if (root_list) {
+        root_list->type_id = LMD_TYPE_LIST;
+        root_list->length = 0;
+        root_list->capacity = 0;
+        root_list->items = NULL;
+    }
+
+    // Skip leading whitespace (optional - could preserve as text node if needed)
+    while (*html && isspace(*html)) {
+        html++;
+    }
+
+    // Parse root-level items (DOCTYPE, comments, and elements)
+    while (*html) {
+        // Skip whitespace between root-level items
+        while (*html && isspace(*html)) {
+            html++;
+        }
+
+        if (!*html) break;
+
+        // Parse DOCTYPE
+        if (strncasecmp(html, "<!doctype", 9) == 0) {
+            Item doctype_item = parse_doctype(input, &html, html_string);
+            if (doctype_item.item != ITEM_ERROR) {
+                list_push(root_list, doctype_item);
+            }
+            continue;
+        }
+
+        // Parse comments
+        if (strncmp(html, "<!--", 4) == 0) {
+            Item comment_item = parse_comment(input, &html, html_string);
+            if (comment_item.item != ITEM_ERROR) {
+                list_push(root_list, comment_item);
+            }
+            continue;
+        }
+
+        // Skip processing instructions
+        if (strncmp(html, "<?", 2) == 0) {
+            skip_processing_instruction(&html);
+            continue;
+        }
+
+        // Skip CDATA (shouldn't appear at root level, but handle it)
+        if (strncmp(html, "<![CDATA[", 9) == 0) {
+            skip_cdata(&html);
+            continue;
+        }
+
+        // Parse regular element (should be <html> or similar)
+        if (*html == '<' && *(html + 1) != '/' && *(html + 1) != '!') {
+            Item element_item = parse_element(input, &html, html_string);
+            if (element_item.item != ITEM_ERROR && element_item.item != ITEM_NULL) {
+                list_push(root_list, element_item);
+            }
+            continue;
+        }
+
+        // If we get here, there's unexpected content - skip it
+        if (*html) {
+            html++;
+        }
+    }
+
+    // If list contains only one item, return that item and free the list
+    if (root_list->length == 1) {
+        input->root = root_list->items[0];
+        // Note: We could free the list here, but the pool will handle cleanup
+    } else if (root_list->length > 1) {
+        // Return the list as the root
+        input->root = (Item){.list = root_list};
+    } else {
+        // Empty document - return null
+        input->root = (Item){.item = ITEM_NULL};
     }
 }
