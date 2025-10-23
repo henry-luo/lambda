@@ -289,6 +289,60 @@ static void format_item(StringBuf* sb, Item item, int depth, bool raw_text_mode)
         if (element && element->type) {
             TypeElmt* elmt_type = (TypeElmt*)element->type;
 
+            // Special handling for HTML comments (tag name "!--")
+            if (elmt_type->name.length == 3 &&
+                memcmp(elmt_type->name.str, "!--", 3) == 0) {
+                // This is a comment element - format as <!--content-->
+                stringbuf_append_str(sb, "<!--");
+
+                // Output comment content (first child text node)
+                if (elmt_type->content_length > 0) {
+                    List* list = (List*)element;
+                    if (list->length > 0) {
+                        Item child_item = list->items[0];
+                        if (get_type_id(child_item) == LMD_TYPE_STRING) {
+                            String* str = (String*)child_item.pointer;
+                            if (str && str->chars) {
+                                // Output comment content as-is (no escaping)
+                                stringbuf_append_format(sb, "%.*s", (int)str->len, str->chars);
+                            }
+                        }
+                    }
+                }
+
+                stringbuf_append_str(sb, "-->");
+                break;
+            }
+
+            // Special handling for DOCTYPE (tag name "!DOCTYPE" or "!doctype")
+            if (elmt_type->name.length >= 8 &&
+                (memcmp(elmt_type->name.str, "!DOCTYPE", 8) == 0 ||
+                 memcmp(elmt_type->name.str, "!doctype", 8) == 0)) {
+                // This is a DOCTYPE element - format as <!DOCTYPE content>
+                stringbuf_append_str(sb, "<!");
+                // Preserve the case of "DOCTYPE" or "doctype"
+                stringbuf_append_format(sb, "%.*s", (int)(elmt_type->name.length - 1), elmt_type->name.str + 1);
+
+                // Output DOCTYPE content (first child text node)
+                if (elmt_type->content_length > 0) {
+                    List* list = (List*)element;
+                    if (list->length > 0) {
+                        Item child_item = list->items[0];
+                        if (get_type_id(child_item) == LMD_TYPE_STRING) {
+                            String* str = (String*)child_item.pointer;
+                            if (str && str->chars) {
+                                // Output DOCTYPE content as-is (no escaping)
+                                stringbuf_append_char(sb, ' ');
+                                stringbuf_append_format(sb, "%.*s", (int)str->len, str->chars);
+                            }
+                        }
+                    }
+                }
+
+                stringbuf_append_char(sb, '>');
+                break;
+            }
+
             // Format as proper HTML element
             stringbuf_append_char(sb, '<');
             stringbuf_append_format(sb, "%.*s", (int)elmt_type->name.length, elmt_type->name.str);
@@ -371,6 +425,22 @@ String* format_html(Pool* pool, Item root_item) {
     // Check if root is already an HTML element, if so, format as-is
     if (root_item.item) {
         TypeId type = get_type_id(root_item);
+
+        // Handle root-level List (Phase 3: may contain DOCTYPE, comments, and main element)
+        if (type == LMD_TYPE_LIST) {
+            List* list = root_item.list;
+            if (list && list->length > 0) {
+                // Format each item in the root list (DOCTYPE, comments, main element)
+                for (long i = 0; i < list->length; i++) {
+                    format_item(sb, list->items[i], 0, false);
+                    // Add newline after DOCTYPE or comments if not the last item
+                    if (i < list->length - 1) {
+                        stringbuf_append_char(sb, '\n');
+                    }
+                }
+                return stringbuf_to_string(sb);
+            }
+        }
 
         // Check if it's an array (most likely case for parsed HTML)
         if (type == LMD_TYPE_ARRAY) {
