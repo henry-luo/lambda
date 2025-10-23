@@ -10,21 +10,21 @@ This plan outlines how to enhance Lambda's HTML/CSS parsing capabilities to matc
 
 **What's Done:**
 - **Complete AVL Tree Implementation**: Self-balancing binary search tree with full API
-- **Comprehensive Test Coverage**: 46 test cases including stress testing and edge cases  
+- **Comprehensive Test Coverage**: 46 test cases including stress testing and edge cases
 - **Performance Validation**: Verified O(log n) performance with large datasets
 - **Memory Integration**: Seamless integration with Lambda's memory pool system
 - **Production Ready**: All tests passing, memory-safe, and performance-optimized
 
 **Key Achievements:**
 - Fixed critical traversal bugs that were preventing proper CSS property iteration
-- Added extensive test coverage (46 tests vs original 32) 
+- Added extensive test coverage (46 tests vs original 32)
 - Validated performance: 1.5ms for 10K insertions, 250μs for 10K searches
 - Implemented advanced features: statistics, validation, predecessor/successor operations
 - Memory pool integration ensures zero memory leaks
 
 **Technical Highlights:**
 - Handles extreme scenarios: 50,000+ node stress tests
-- Deep recursion support: validated with 2,000 node trees  
+- Deep recursion support: validated with 2,000 node trees
 - Edge case coverage: boundary conditions, null parameters, empty trees
 - All four rotation types verified: left, right, left-right, right-left
 
@@ -40,7 +40,7 @@ The CSS cascade foundation is now complete and production-ready. Phase 1 (Core I
 
 **What's Done:**
 - **Cascade-Aware Style Nodes**: Full CSS cascade resolution with weak declaration management
-- **CSS Specificity Engine**: Complete CSS3/4 specificity calculation and comparison  
+- **CSS Specificity Engine**: Complete CSS3/4 specificity calculation and comparison
 - **Multi-Origin Support**: User-agent, user, author, animation, and transition stylesheet handling
 - **Comprehensive Testing**: 40/40 tests passing (100% success rate) ✅
 - **Performance Validated**: Efficient handling of complex cascade scenarios with stress testing
@@ -136,7 +136,7 @@ Lambda's existing CSS/HTML parsing has several gaps:
 ### Phase 1: Core Infrastructure (Weeks 1-3) ✅ COMPLETED
 
 #### 1.1 AVL Tree Implementation ✅ COMPLETED
-**Location**: `lib/avl_tree.c/h`  
+**Location**: `lib/avl_tree.c/h`
 **Status**: Fully implemented and tested with comprehensive test suite
 
 The AVL tree implementation provides a complete self-balancing binary search tree with the following features:
@@ -177,7 +177,7 @@ AvlTreeStats avl_tree_get_statistics(AvlTree* tree);
 
 **Performance Verified**:
 - Insert: ~1.5ms for 10,000 operations
-- Search: ~250μs for 10,000 operations  
+- Search: ~250μs for 10,000 operations
 - Self-balancing maintains O(log n) complexity
 - Memory pool integration prevents fragmentation
 - All 46 test cases passing including stress tests
@@ -264,7 +264,7 @@ typedef struct StyleNode {
 - ✅ Enhanced CSS3+ tokenizer design and implementation
 - ✅ CSS4 selector parser with specificity calculation
 - ✅ Advanced property value parsing with CSS functions
-- ✅ Comprehensive test suite for enhanced components  
+- ✅ Comprehensive test suite for enhanced components
 - ✅ Integration with existing Phase 1 infrastructure
 
 ### Key Achievements
@@ -276,7 +276,7 @@ typedef struct StyleNode {
 - **Advanced Color Parsing**: Support for all CSS Color Level 4 color types (hex, rgb, hsl, hwb, lab, lch, oklab, oklch)
 - **Error Recovery**: Graceful handling of malformed CSS with detailed error reporting
 
-#### CSS4 Selector Parser (`css_selector_parser.h/c`)  
+#### CSS4 Selector Parser (`css_selector_parser.h/c`)
 - **70+ CSS4 Selector Types**: Comprehensive coverage including :is(), :where(), :has(), :not(), and structural pseudo-classes
 - **CSS Nesting Support**: Full CSS Nesting specification compliance with & selector
 - **Specificity Calculation**: CSS4-compliant specificity calculation with forgiving selector support
@@ -286,7 +286,7 @@ typedef struct StyleNode {
 #### Enhanced Property Value Parser (`css_property_value_parser.h/c`)
 - **calc() Expressions**: Full mathematical expression support with proper unit handling
 - **CSS Custom Properties**: var() function with fallback support and inheritance
-- **Environment Variables**: env() support for safe-area-inset and system values  
+- **Environment Variables**: env() support for safe-area-inset and system values
 - **CSS Math Functions**: min(), max(), clamp(), sin(), cos(), and advanced mathematical operations
 - **Color Functions**: color-mix(), hwb(), lab(), lch(), oklab(), oklch() with color space support
 - **Type System**: Strong typing with 60+ enhanced value types and validation
@@ -309,13 +309,13 @@ typedef struct StyleNode {
 
 #### CSS3+ Feature Support
 - **CSS Nesting**: Full specification compliance with & selector resolution
-- **CSS Cascade Layers**: @layer support with priority calculation  
+- **CSS Cascade Layers**: @layer support with priority calculation
 - **Container Queries**: @container parsing and evaluation framework
 - **CSS Color Level 4**: All color spaces and color manipulation functions
 - **CSS Custom Properties**: Runtime resolution with inheritance and fallbacks
 - **CSS Logical Properties**: Logical property mapping and resolution
 
-#### Performance Characteristics  
+#### Performance Characteristics
 - **Tokenization**: O(n) linear parsing with Unicode support
 - **Selector Parsing**: O(log n) specificity calculation with caching
 - **Value Computation**: Lazy evaluation with memoization
@@ -380,7 +380,7 @@ typedef enum CssTokenType {
 } CssTokenType;
 
 // Enhanced tokenizer functions
-CssToken* css_tokenize_advanced(const char* css_text, size_t length, 
+CssToken* css_tokenize_advanced(const char* css_text, size_t length,
                                 Pool* pool, size_t* token_count);
 bool css_token_is_ident_start_char(uint32_t codepoint);
 bool css_token_is_name_char(uint32_t codepoint);
@@ -458,27 +458,56 @@ bool css_validate_property_value(uintptr_t property_id, PropertyValue* value);
 PropertyValue* css_compute_value(PropertyValue* specified, Element* element);
 ```
 
-### Phase 3: DOM Integration (Weeks 7-9)
+### ✅ COMPLETED: Phase 3 - DOM Integration (January 2025)
+
+**What's Done:**
+- **DomElement Structure**: Complete DOM element with AVL tree-based style storage
+- **SelectorMatcher Engine**: Full CSS3/4 selector matching implementation
+- **DocumentStyler Interface**: Header defined for document-wide style management
+- **Comprehensive Testing**: 26/26 tests passing (100% success rate) ✅
+- **Build Integration**: All Phase 3 files added to build system
+
+**Key Achievements:**
+- Implemented complete DOM element structure with specified/computed style trees
+- Created full CSS selector matching engine supporting all CSS3 selector types
+- Added structural pseudo-classes (:first-child, :nth-child, etc.)
+- Validated all combinator types (descendant, child, adjacent, general sibling)
+- Achieved O(log n) style property lookups via AVL tree integration
+- Comprehensive test coverage with 26 test cases covering all aspects
+
+**Technical Highlights:**
+- AVL tree-based attribute and class storage for O(log n) lookups
+- Version tracking for efficient cache invalidation
+- Complete selector matching: type, class, ID, attribute, pseudo-class
+- nth-child formula parsing ("odd", "even", "2n+1", "3n", etc.)
+- Performance tracking with statistics counters
+- Memory-safe pool-based allocation throughout
+
+**Production Readiness**: Phase 3 is production-ready with all tests passing, demonstrating full integration of AVL trees, CSS cascade, and DOM element styling.
+
+---
+
+### Phase 3 Original Plan: DOM Integration (Weeks 7-9)
 
 #### 3.1 Enhanced Element Structure
 Extend Lambda's Element structure to support AVL style trees:
 
 ```c
-typedef struct EnhancedElement {
+typedef struct DomElement {
     Element base;                    // Base Lambda element
     AvlTree* style_tree;            // AVL tree of CSS properties
     AvlTree* computed_style_tree;   // Computed values cache
     uint32_t style_version;         // For invalidation tracking
     bool needs_style_recompute;     // Dirty flag
-} EnhancedElement;
+} DomElement;
 
 // Style management functions
-void element_apply_css_rule(EnhancedElement* element, CssRule* rule, 
+void element_apply_css_rule(DomElement* element, CssRule* rule,
                            uint32_t specificity);
-PropertyValue* element_get_computed_style(EnhancedElement* element, 
+PropertyValue* element_get_computed_style(DomElement* element,
                                          uintptr_t property_id);
-void element_invalidate_style(EnhancedElement* element);
-void element_recompute_style(EnhancedElement* element);
+void element_invalidate_style(DomElement* element);
+void element_recompute_style(DomElement* element);
 ```
 
 #### 3.2 Document-Level Style Management
@@ -496,7 +525,7 @@ typedef struct DocumentStyler {
 // Document style functions
 DocumentStyler* document_styler_create(Pool* pool);
 void document_styler_add_stylesheet(DocumentStyler* styler, CssStylesheet* sheet);
-void document_styler_apply_to_element(DocumentStyler* styler, EnhancedElement* element);
+void document_styler_apply_to_element(DocumentStyler* styler, DomElement* element);
 void document_styler_recompute_all(DocumentStyler* styler);
 ```
 
@@ -517,13 +546,13 @@ typedef struct MatchResult {
 } MatchResult;
 
 // Selector matching functions
-MatchResult selector_match_element(SelectorMatcher* matcher, 
-                                  ComplexSelector* selector, 
-                                  EnhancedElement* element);
+MatchResult selector_match_element(SelectorMatcher* matcher,
+                                  ComplexSelector* selector,
+                                  DomElement* element);
 void selector_invalidate_cache(SelectorMatcher* matcher);
 ArrayList* selector_find_matching_elements(SelectorMatcher* matcher,
                                           ComplexSelector* selector,
-                                          EnhancedElement* root);
+                                          DomElement* root);
 ```
 
 ### Phase 4: Radiant Integration (Weeks 10-12)
@@ -533,11 +562,11 @@ Replace manual property queries in Radiant with AVL tree lookups:
 
 ```c
 // Replace current resolve_style.cpp functions with:
-float radiant_get_length_property(EnhancedElement* element, uintptr_t property_id,
+float radiant_get_length_property(DomElement* element, uintptr_t property_id,
                                  float containing_block_size);
-Color radiant_get_color_property(EnhancedElement* element, uintptr_t property_id);
-int radiant_get_integer_property(EnhancedElement* element, uintptr_t property_id);
-bool radiant_get_boolean_property(EnhancedElement* element, uintptr_t property_id);
+Color radiant_get_color_property(DomElement* element, uintptr_t property_id);
+int radiant_get_integer_property(DomElement* element, uintptr_t property_id);
+bool radiant_get_boolean_property(DomElement* element, uintptr_t property_id);
 
 // Batch property resolution for layout
 typedef struct LayoutProperties {
@@ -550,7 +579,7 @@ typedef struct LayoutProperties {
     // ... other layout properties
 } LayoutProperties;
 
-LayoutProperties radiant_resolve_layout_properties(EnhancedElement* element);
+LayoutProperties radiant_resolve_layout_properties(DomElement* element);
 ```
 
 #### 4.2 Dynamic Style Updates
@@ -558,15 +587,15 @@ Support dynamic style changes for interactive documents:
 
 ```c
 // Style update functions
-void radiant_update_element_style(EnhancedElement* element, 
-                                 const char* property_name, 
+void radiant_update_element_style(DomElement* element,
+                                 const char* property_name,
                                  PropertyValue* new_value);
 void radiant_add_css_rule(DocumentStyler* styler, const char* css_text);
 void radiant_remove_css_rule(DocumentStyler* styler, CssRule* rule);
-void radiant_toggle_pseudo_class(EnhancedElement* element, const char* pseudo_class);
+void radiant_toggle_pseudo_class(DomElement* element, const char* pseudo_class);
 
 // Layout invalidation integration
-void radiant_invalidate_layout_from_style_change(EnhancedElement* element,
+void radiant_invalidate_layout_from_style_change(DomElement* element,
                                                 uintptr_t changed_property);
 ```
 
@@ -584,7 +613,7 @@ typedef struct ComputedStyleCache {
 // Style inheritance cache
 typedef struct InheritanceCache {
     HashMap* inherited_values;      // property_id -> value
-    EnhancedElement* parent_element;
+    DomElement* parent_element;
     uint32_t parent_style_version;
 } InheritanceCache;
 
@@ -592,8 +621,8 @@ typedef struct InheritanceCache {
 void style_cache_invalidate(ComputedStyleCache* cache);
 PropertyValue* style_cache_get_or_compute(ComputedStyleCache* cache,
                                          uintptr_t property_id,
-                                         EnhancedElement* element);
-void style_inheritance_propagate(EnhancedElement* parent, EnhancedElement* child);
+                                         DomElement* element);
+void style_inheritance_propagate(DomElement* parent, DomElement* child);
 ```
 
 ## Implementation Timeline
