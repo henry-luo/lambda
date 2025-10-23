@@ -7,6 +7,9 @@ static Item parse_element(Input *input, const char **html, const char *html_star
 
 static Item parse_element(Input *input, const char **html, const char *html_start);
 
+// Global length limit for text content, strings, and raw text elements
+static const int MAX_CONTENT_CHARS = 256 * 1024; // 256KB
+
 // Position tracking helper functions
 static void get_line_col(const char *html_start, const char *current, int *line, int *col) {
     *line = 1;
@@ -218,14 +221,13 @@ static void to_lowercase(char* str) {
 static String* parse_string_content(Input *input, const char **html, char end_char) {
     StringBuf* sb = input->sb;
     int char_count = 0;
-    const int max_string_chars = 100000; // Safety limit
 
     // Handle empty string case - if we immediately encounter the end_char, just return empty string
     if (**html == end_char) {
         return stringbuf_to_string(sb);
     }
 
-    while (**html && **html != end_char && char_count < max_string_chars) {
+    while (**html && **html != end_char && char_count < MAX_CONTENT_CHARS) {
         if (**html == '&') {
             (*html)++; // Skip &
 
@@ -361,18 +363,17 @@ static String* parse_attribute_value(Input *input, const char **html, const char
         StringBuf* sb = input->sb;
         stringbuf_reset(sb); // Reset buffer before parsing unquoted value
         int char_count = 0;
-        const int max_unquoted_chars = 100000; // Safety limit
 
         while (**html && **html != ' ' && **html != '\t' && **html != '\n' &&
                **html != '\r' && **html != '>' && **html != '/' && **html != '=' &&
-               char_count < max_unquoted_chars) {
+               char_count < MAX_CONTENT_CHARS) {
             stringbuf_append_char(sb, **html);
             (*html)++;
             char_count++;
         }
 
-        if (char_count >= max_unquoted_chars) {
-            log_warn("Hit unquoted attribute value limit (%d)", max_unquoted_chars);
+        if (char_count >= MAX_CONTENT_CHARS) {
+            log_warn("Hit unquoted attribute value limit (%d)", MAX_CONTENT_CHARS);
         }
 
         return stringbuf_to_string(sb);
@@ -742,10 +743,9 @@ static Item parse_element(Input *input, const char **html, const char *html_star
             // For raw text elements, we need to find the exact closing tag
             // and preserve all content as-is, including HTML tags within
             int content_chars = 0;
-            const int max_content_chars = 10000; // Reduced safety limit
             size_t closing_tag_len = strlen(closing_tag);
 
-            while (**html && content_chars < max_content_chars) {
+            while (**html && content_chars < MAX_CONTENT_CHARS) {
                 // Check if we found the closing tag (case-insensitive for robustness)
                 if (strncasecmp(*html, closing_tag, closing_tag_len) == 0) {
                     break;
@@ -757,10 +757,13 @@ static Item parse_element(Input *input, const char **html, const char *html_star
             }
 
             // Check if we hit the safety limit
-            if (content_chars < max_content_chars && content_sb->length > 0) {
+            if (content_chars < MAX_CONTENT_CHARS && content_sb->length > 0) {
                 String *content_string = stringbuf_to_string(content_sb);
                 Item content_item = {.item = s2it(content_string)};
                 list_push((List*)element, content_item);
+            } else if (content_chars >= MAX_CONTENT_CHARS) {
+                log_warn("Raw text content exceeded limit (%d chars) in <%s> element", MAX_CONTENT_CHARS, tag_name->chars);
+                stringbuf_reset(content_sb);
             } else {
                 stringbuf_reset(content_sb);
             }
@@ -818,8 +821,7 @@ static Item parse_element(Input *input, const char **html, const char *html_star
 
                     // Collect text until we hit '<' or closing tag
                     int text_chars = 0;
-                    const int max_text_chars = 10000; // Limit text content size
-                    while (**html && **html != '<' && text_chars < max_text_chars &&
+                    while (**html && **html != '<' && text_chars < MAX_CONTENT_CHARS &&
                            strncasecmp(*html, closing_tag, closing_tag_len) != 0) {
                         stringbuf_append_char(text_sb, **html);
                         (*html)++;
