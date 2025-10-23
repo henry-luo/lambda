@@ -47,7 +47,7 @@ static bool is_simple_type(TypeId type) {
            type == LMD_TYPE_BOOL;
 }
 
-static void format_html_string(StringBuf* sb, String* str) {
+static void format_html_string(StringBuf* sb, String* str, bool is_attribute) {
     if (!str || !str->chars) return;
 
     const char* s = str->chars;
@@ -116,7 +116,12 @@ static void format_html_string(StringBuf* sb, String* str) {
                 stringbuf_append_str(sb, "&gt;");
                 break;
             case '"':
-                stringbuf_append_str(sb, "&quot;");
+                // Only encode quotes when inside attribute values
+                if (is_attribute) {
+                    stringbuf_append_str(sb, "&quot;");
+                } else {
+                    stringbuf_append_char(sb, '"');
+                }
                 break;
             case '\'':
                 // Apostrophes don't need to be encoded in text content (only in attributes)
@@ -184,7 +189,7 @@ static void format_map_attributes(StringBuf* sb, TypeMap* map_type, void* map_da
                 if (field_type == LMD_TYPE_STRING) {
                     String* str = *(String**)data;
                     if (str) {
-                        format_html_string(sb, str);
+                        format_html_string(sb, str, true);  // true = is_attribute
                     }
                 } else if (field_type == LMD_TYPE_INT || field_type == LMD_TYPE_INT64) {
                     int64_t int_val = *(int64_t*)data;
@@ -307,7 +312,7 @@ static void format_item(StringBuf* sb, Item item, int depth, bool raw_text_mode)
                 stringbuf_append_format(sb, "%.*s", (int)str->len, str->chars);
             } else {
                 // In normal mode, escape HTML entities
-                format_html_string(sb, str);
+                format_html_string(sb, str, false);  // false = text content, not attribute
             }
         }
         break;
@@ -438,7 +443,7 @@ static void format_item(StringBuf* sb, Item item, int depth, bool raw_text_mode)
                                     // Regular attribute with value
                                     stringbuf_append_char(sb, ' ');
                                     stringbuf_append_format(sb, "%.*s=\"", field_name_len, field_name);
-                                    format_html_string(sb, str);
+                                    format_html_string(sb, str, true);  // true = is_attribute
                                     stringbuf_append_char(sb, '"');
                                 }
                             }
