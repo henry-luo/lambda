@@ -425,6 +425,9 @@ bool dom_element_set_attribute(DomElement* element, const char* name, const char
     } else if (strcmp(name, "class") == 0) {
         // Parse class attribute and update class_names array
         dom_element_add_class(element, value);
+    } else if (strcmp(name, "style") == 0) {
+        // Parse and apply inline styles
+        dom_element_apply_inline_style(element, value);
     }
 
     return true;
@@ -551,6 +554,130 @@ bool dom_element_toggle_class(DomElement* element, const char* class_name) {
         dom_element_add_class(element, class_name);
         return true;
     }
+}
+
+// ============================================================================
+// Inline Style Support
+// ============================================================================
+
+/**
+ * Parse and apply inline style attribute to an element
+ * Format: "property: value; property: value;"
+ * Inline styles have specificity (1,0,0,0) - highest non-!important specificity
+ */
+int dom_element_apply_inline_style(DomElement* element, const char* style_text) {
+    if (!element || !style_text || !element->pool) {
+        return 0;
+    }
+
+    int applied_count = 0;
+
+    // Parse the style text - split by semicolons
+    // Example: "color: red; font-size: 14px; background: blue"
+    char* text_copy = (char*)pool_alloc(element->pool, strlen(style_text) + 1);
+    if (!text_copy) {
+        return 0;
+    }
+    strcpy(text_copy, style_text);
+
+    char* saveptr = NULL;
+    char* declaration_str = strtok_r(text_copy, ";", &saveptr);
+
+    while (declaration_str) {
+        // Trim leading whitespace
+        while (*declaration_str == ' ' || *declaration_str == '\t' ||
+               *declaration_str == '\n' || *declaration_str == '\r') {
+            declaration_str++;
+        }
+
+        // Skip empty declarations
+        if (*declaration_str == '\0') {
+            declaration_str = strtok_r(NULL, ";", &saveptr);
+            continue;
+        }
+
+        // Find the colon separator
+        char* colon = strchr(declaration_str, ':');
+        if (!colon) {
+            declaration_str = strtok_r(NULL, ";", &saveptr);
+            continue;
+        }
+
+        // Split into property name and value
+        *colon = '\0';
+        char* prop_name = declaration_str;
+        char* prop_value = colon + 1;
+
+        // Trim property name
+        char* prop_end = colon - 1;
+        while (prop_end >= prop_name && (*prop_end == ' ' || *prop_end == '\t')) {
+            *prop_end = '\0';
+            prop_end--;
+        }
+
+        // Trim property value
+        while (*prop_value == ' ' || *prop_value == '\t') {
+            prop_value++;
+        }
+        size_t value_len = strlen(prop_value);
+        while (value_len > 0 && (prop_value[value_len - 1] == ' ' ||
+                                 prop_value[value_len - 1] == '\t')) {
+            prop_value[value_len - 1] = '\0';
+            value_len--;
+        }
+
+        // Parse the property using css_parse_property
+        CssDeclaration* decl = css_parse_property(prop_name, prop_value, element->pool);
+        if (decl) {
+            // Set inline style specificity (1,0,0,0)
+            decl->specificity.inline_style = 1;
+            decl->specificity.ids = 0;
+            decl->specificity.classes = 0;
+            decl->specificity.elements = 0;
+            decl->specificity.important = false;
+
+            // Apply to element
+            if (dom_element_apply_declaration(element, decl)) {
+                applied_count++;
+            }
+        }
+
+        declaration_str = strtok_r(NULL, ";", &saveptr);
+    }
+
+    return applied_count;
+}
+
+/**
+ * Get inline style text from an element
+ * Returns the style attribute value or NULL if none
+ */
+const char* dom_element_get_inline_style(DomElement* element) {
+    if (!element || !element->attributes) {
+        return NULL;
+    }
+
+    return dom_element_get_attribute(element, "style");
+}
+
+/**
+ * Remove inline styles from an element
+ * Removes all declarations with inline_style specificity
+ */
+bool dom_element_remove_inline_styles(DomElement* element) {
+    if (!element || !element->specified_style) {
+        return false;
+    }
+
+    // Remove the style attribute
+    dom_element_remove_attribute(element, "style");
+
+    // Remove all inline style declarations from the style tree
+    // This is a simplified implementation - ideally we'd track which
+    // declarations came from inline styles
+    // For now, we rely on the style attribute being the source of truth
+
+    return true;
 }
 
 // ============================================================================

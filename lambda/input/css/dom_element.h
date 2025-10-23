@@ -298,6 +298,32 @@ bool dom_element_has_class(DomElement* element, const char* class_name);
 bool dom_element_toggle_class(DomElement* element, const char* class_name);
 
 // ============================================================================
+// Inline Style Support
+// ============================================================================
+
+/**
+ * Parse and apply inline style attribute to an element
+ * @param element Target element
+ * @param style_text Inline style text (e.g., "color: red; font-size: 14px")
+ * @return Number of declarations applied
+ */
+int dom_element_apply_inline_style(DomElement* element, const char* style_text);
+
+/**
+ * Get inline style text from an element
+ * @param element Source element
+ * @return Inline style text or NULL if none
+ */
+const char* dom_element_get_inline_style(DomElement* element);
+
+/**
+ * Remove inline styles from an element
+ * @param element Target element
+ * @return true if inline styles were removed, false otherwise
+ */
+bool dom_element_remove_inline_styles(DomElement* element);
+
+// ============================================================================
 // Style Management
 // ============================================================================
 

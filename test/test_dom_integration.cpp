@@ -2233,6 +2233,279 @@ TEST_F(DomIntegrationTest, AdvancedSelector_TableStructure) {
     EXPECT_EQ(td1->next_sibling, td2);
 }
 
+// ============================================================================
+// Inline Style Tests
+// ============================================================================
+
+TEST_F(DomIntegrationTest, InlineStyle_SingleProperty) {
+    // Test: Single inline style property
+    DomElement* element = dom_element_create(pool, "div", nullptr);
+
+    dom_element_set_attribute(element, "style", "color: red");
+
+    // Verify the declaration was applied
+    CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
+    ASSERT_NE(color, nullptr);
+    ASSERT_NE(color->value, nullptr);
+    EXPECT_EQ(color->value->type, CSS_VALUE_KEYWORD);
+    EXPECT_STREQ(color->value->data.keyword, "red");
+
+    // Verify inline style specificity (1,0,0,0)
+    EXPECT_EQ(color->specificity.inline_style, 1);
+    EXPECT_EQ(color->specificity.ids, 0);
+    EXPECT_EQ(color->specificity.classes, 0);
+    EXPECT_EQ(color->specificity.elements, 0);
+}
+
+TEST_F(DomIntegrationTest, InlineStyle_MultipleProperties) {
+    // Test: Multiple inline style properties
+    DomElement* element = dom_element_create(pool, "div", nullptr);
+
+    int applied = dom_element_apply_inline_style(element, "color: blue; font-size: 16px; background-color: yellow");
+    EXPECT_EQ(applied, 3);
+
+    // Verify all declarations
+    CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
+    ASSERT_NE(color, nullptr);
+    ASSERT_NE(color->value, nullptr);
+    EXPECT_STREQ(color->value->data.keyword, "blue");
+    EXPECT_EQ(color->specificity.inline_style, 1);
+
+    CssDeclaration* font_size = dom_element_get_specified_value(element, CSS_PROPERTY_FONT_SIZE);
+    ASSERT_NE(font_size, nullptr);
+    ASSERT_NE(font_size->value, nullptr);
+    EXPECT_STREQ(font_size->value->data.keyword, "16px");
+    EXPECT_EQ(font_size->specificity.inline_style, 1);
+
+    CssDeclaration* bg = dom_element_get_specified_value(element, CSS_PROPERTY_BACKGROUND_COLOR);
+    ASSERT_NE(bg, nullptr);
+    ASSERT_NE(bg->value, nullptr);
+    EXPECT_STREQ(bg->value->data.keyword, "yellow");
+    EXPECT_EQ(bg->specificity.inline_style, 1);
+}
+
+TEST_F(DomIntegrationTest, InlineStyle_OverridesStylesheet) {
+    // Test: Inline style overrides stylesheet rules
+    DomElement* element = dom_element_create(pool, "div", nullptr);
+    dom_element_add_class(element, "box");
+
+    // Apply stylesheet rule with class selector (0,1,0)
+    CssDeclaration* css_decl = create_declaration(CSS_PROPERTY_COLOR, "green", 0, 1, 0);
+    dom_element_apply_declaration(element, css_decl);
+
+    // Apply inline style (1,0,0,0) - should override
+    dom_element_set_attribute(element, "style", "color: red");
+
+    // Inline style should win
+    CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
+    ASSERT_NE(color, nullptr);
+    ASSERT_NE(color->value, nullptr);
+    EXPECT_STREQ(color->value->data.keyword, "red");
+    EXPECT_EQ(color->specificity.inline_style, 1);
+}
+
+TEST_F(DomIntegrationTest, InlineStyle_OverridesIDSelector) {
+    // Test: Inline style overrides even ID selectors
+    DomElement* element = dom_element_create(pool, "div", nullptr);
+    dom_element_set_attribute(element, "id", "unique");
+
+    // Apply ID selector rule (1,0,0)
+    CssDeclaration* id_decl = create_declaration(CSS_PROPERTY_WIDTH, "100px", 1, 0, 0);
+    dom_element_apply_declaration(element, id_decl);
+
+    // Apply inline style (1,0,0,0) - should override ID
+    dom_element_set_attribute(element, "style", "width: 200px");
+
+    // Inline style should win (inline_style=1 beats ids=1)
+    CssDeclaration* width = dom_element_get_specified_value(element, CSS_PROPERTY_WIDTH);
+    ASSERT_NE(width, nullptr);
+    ASSERT_NE(width->value, nullptr);
+    EXPECT_STREQ(width->value->data.keyword, "200px");
+    EXPECT_EQ(width->specificity.inline_style, 1);
+}
+
+TEST_F(DomIntegrationTest, InlineStyle_WhitespaceHandling) {
+    // Test: Inline style with various whitespace
+    DomElement* element = dom_element_create(pool, "div", nullptr);
+
+    // Extra spaces, tabs, newlines
+    int applied = dom_element_apply_inline_style(element,
+        "  color  :  red  ;  font-size:16px;background-color:blue  ");
+    EXPECT_EQ(applied, 3);
+
+    CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
+    ASSERT_NE(color, nullptr);
+    ASSERT_NE(color->value, nullptr);
+    EXPECT_STREQ(color->value->data.keyword, "red");
+}
+
+TEST_F(DomIntegrationTest, InlineStyle_EmptyValue) {
+    // Test: Empty inline style
+    DomElement* element = dom_element_create(pool, "div", nullptr);
+
+    int applied = dom_element_apply_inline_style(element, "");
+    EXPECT_EQ(applied, 0);
+
+    // No declarations should be applied
+    EXPECT_EQ(dom_element_get_specified_value(element, CSS_PROPERTY_COLOR), nullptr);
+}
+
+TEST_F(DomIntegrationTest, InlineStyle_InvalidDeclarations) {
+    // Test: Invalid declarations should be skipped
+    DomElement* element = dom_element_create(pool, "div", nullptr);
+
+    // Mix of valid and invalid
+    int applied = dom_element_apply_inline_style(element,
+        "color: red; invalid; font-size: 16px; : novalue; width: 100px");
+
+    // Only valid declarations should be applied
+    EXPECT_GE(applied, 2); // At least color and one other valid property
+
+    CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
+    ASSERT_NE(color, nullptr);
+    ASSERT_NE(color->value, nullptr);
+    EXPECT_STREQ(color->value->data.keyword, "red");
+}
+
+TEST_F(DomIntegrationTest, InlineStyle_UpdateAttribute) {
+    // Test: Updating style attribute replaces inline styles
+    DomElement* element = dom_element_create(pool, "div", nullptr);
+
+    // Set initial inline style
+    dom_element_set_attribute(element, "style", "color: red");
+    CssDeclaration* color1 = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
+    ASSERT_NE(color1, nullptr);
+    ASSERT_NE(color1->value, nullptr);
+    EXPECT_STREQ(color1->value->data.keyword, "red");
+
+    // Update with new inline style
+    dom_element_set_attribute(element, "style", "color: blue; font-size: 14px");
+
+    // Should have new values
+    CssDeclaration* color2 = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
+    ASSERT_NE(color2, nullptr);
+    ASSERT_NE(color2->value, nullptr);
+    EXPECT_STREQ(color2->value->data.keyword, "blue");
+
+    CssDeclaration* font_size = dom_element_get_specified_value(element, CSS_PROPERTY_FONT_SIZE);
+    ASSERT_NE(font_size, nullptr);
+    ASSERT_NE(font_size->value, nullptr);
+    EXPECT_STREQ(font_size->value->data.keyword, "14px");
+}
+
+TEST_F(DomIntegrationTest, InlineStyle_GetInlineStyle) {
+    // Test: Retrieving inline style text
+    DomElement* element = dom_element_create(pool, "div", nullptr);
+
+    // No inline style initially
+    EXPECT_EQ(dom_element_get_inline_style(element), nullptr);
+
+    // Set inline style
+    const char* style_text = "color: red; font-size: 16px";
+    dom_element_set_attribute(element, "style", style_text);
+
+    // Should retrieve the same text
+    const char* retrieved = dom_element_get_inline_style(element);
+    ASSERT_NE(retrieved, nullptr);
+    EXPECT_STREQ(retrieved, style_text);
+}
+
+TEST_F(DomIntegrationTest, InlineStyle_RemoveInlineStyles) {
+    // Test: Removing inline styles
+    DomElement* element = dom_element_create(pool, "div", nullptr);
+
+    // Set inline style
+    dom_element_set_attribute(element, "style", "color: red; font-size: 16px");
+    EXPECT_NE(dom_element_get_inline_style(element), nullptr);
+
+    // Remove inline styles
+    bool removed = dom_element_remove_inline_styles(element);
+    EXPECT_TRUE(removed);
+
+    // Style attribute should be gone
+    EXPECT_EQ(dom_element_get_inline_style(element), nullptr);
+}
+
+TEST_F(DomIntegrationTest, InlineStyle_ComplexSpecificity) {
+    // Test: Inline style in complex specificity scenario
+    DomElement* element = dom_element_create(pool, "div", nullptr);
+    dom_element_set_attribute(element, "id", "main");
+    dom_element_add_class(element, "container");
+
+    // Apply rules with different specificities
+    // Element selector (0,0,1)
+    dom_element_apply_declaration(element,
+        create_declaration(CSS_PROPERTY_MARGIN, "10px", 0, 0, 1));
+
+    // Class selector (0,1,0)
+    dom_element_apply_declaration(element,
+        create_declaration(CSS_PROPERTY_MARGIN, "20px", 0, 1, 0));
+
+    // ID selector (1,0,0)
+    dom_element_apply_declaration(element,
+        create_declaration(CSS_PROPERTY_MARGIN, "30px", 1, 0, 0));
+
+    // Inline style (1,0,0,0) - should win over all
+    dom_element_set_attribute(element, "style", "margin: 40px");
+
+    CssDeclaration* margin = dom_element_get_specified_value(element, CSS_PROPERTY_MARGIN);
+    ASSERT_NE(margin, nullptr);
+    ASSERT_NE(margin->value, nullptr);
+    EXPECT_STREQ(margin->value->data.keyword, "40px");
+    EXPECT_EQ(margin->specificity.inline_style, 1);
+}
+
+TEST_F(DomIntegrationTest, InlineStyle_MultipleElements) {
+    // Test: Inline styles on multiple elements are independent
+    DomElement* elem1 = dom_element_create(pool, "div", nullptr);
+    DomElement* elem2 = dom_element_create(pool, "span", nullptr);
+    DomElement* elem3 = dom_element_create(pool, "p", nullptr);
+
+    dom_element_set_attribute(elem1, "style", "color: red");
+    dom_element_set_attribute(elem2, "style", "color: blue");
+    dom_element_set_attribute(elem3, "style", "color: green");
+
+    // Each element should have its own color
+    CssDeclaration* color1 = dom_element_get_specified_value(elem1, CSS_PROPERTY_COLOR);
+    ASSERT_NE(color1, nullptr);
+    ASSERT_NE(color1->value, nullptr);
+    EXPECT_STREQ(color1->value->data.keyword, "red");
+
+    CssDeclaration* color2 = dom_element_get_specified_value(elem2, CSS_PROPERTY_COLOR);
+    ASSERT_NE(color2, nullptr);
+    ASSERT_NE(color2->value, nullptr);
+    EXPECT_STREQ(color2->value->data.keyword, "blue");
+
+    CssDeclaration* color3 = dom_element_get_specified_value(elem3, CSS_PROPERTY_COLOR);
+    ASSERT_NE(color3, nullptr);
+    ASSERT_NE(color3->value, nullptr);
+    EXPECT_STREQ(color3->value->data.keyword, "green");
+}
+
+TEST_F(DomIntegrationTest, InlineStyle_MixedWithOtherAttributes) {
+    // Test: Inline style works alongside other attributes
+    DomElement* element = dom_element_create(pool, "div", nullptr);
+
+    dom_element_set_attribute(element, "id", "box");
+    dom_element_set_attribute(element, "class", "container");
+    dom_element_set_attribute(element, "data-value", "123");
+    dom_element_set_attribute(element, "style", "color: red; width: 100px");
+    dom_element_set_attribute(element, "title", "Test Element");
+
+    // All attributes should be set
+    EXPECT_STREQ(dom_element_get_attribute(element, "id"), "box");
+    EXPECT_STREQ(dom_element_get_attribute(element, "class"), "container");
+    EXPECT_STREQ(dom_element_get_attribute(element, "data-value"), "123");
+    EXPECT_STREQ(dom_element_get_attribute(element, "style"), "color: red; width: 100px");
+    EXPECT_STREQ(dom_element_get_attribute(element, "title"), "Test Element");
+
+    // Inline styles should be applied
+    CssDeclaration* color = dom_element_get_specified_value(element, CSS_PROPERTY_COLOR);
+    ASSERT_NE(color, nullptr);
+    ASSERT_NE(color->value, nullptr);
+    EXPECT_STREQ(color->value->data.keyword, "red");
+}
+
 // Run all tests
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
