@@ -1128,142 +1128,6 @@
                             "lib/mempool.c"
                         ],
                         "binary": "test_avl_tree.exe"
-                    },
-                    {
-                        "source": "test_css_style_node.cpp",
-                        "name": "🎨 CSS Style Node & Cascade Tests (GTest)",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "additional_sources": [
-                            "lib/avl_tree.c",
-                            "lambda/input/css/css_style_node.c",
-                            "lambda/input/css/css_properties.c",
-                            "lambda/input/css/css_property_value_parser.c",
-                            "lib/mempool.c"
-                        ],
-                        "binary": "test_css_style_node.exe"
-                    },
-                    {
-                        "source": "test_css_system.cpp",
-                        "name": "🎨 CSS Property System & Style Node Tests (GTest)",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "additional_sources": [
-                            "lib/avl_tree.c",
-                            "lambda/input/css/css_style_node.c",
-                            "lambda/input/css/css_properties.c",
-                            "lambda/input/css/css_property_value_parser.c",
-                            "lib/mempool.c",
-                            "lib/string.c",
-                            "lib/hashmap.c"
-                        ],
-                        "binary": "test_css_system.exe"
-                    },
-                    {
-                        "source": "test_css_dom_integration.cpp",
-                        "name": "🌐 DOM Integration & Selector Matching Tests (GTest)",
-                        "dependencies": [],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "additional_sources": [
-                            "lib/avl_tree.c",
-                            "lambda/input/css/css_style_node.c",
-                            "lambda/input/css/css_properties.c",
-                            "lambda/input/css/css_property_value_parser.c",
-                            "lambda/input/css/dom_element.c",
-                            "lambda/input/css/selector_matcher.c",
-                            "lib/mempool.c",
-                            "lib/string.c",
-                            "lib/hashmap.c",
-                            "lib/arraylist.c"
-                        ],
-                        "binary": "test_css_dom_integration.exe"
-                    },
-                    {
-                        "source": "test_html_css_gtest.cpp",
-                        "name": "🌐 HTML to CSS End-to-End Integration Tests (GTest)",
-                        "dependencies": [
-                            "lambda-input-full"
-                        ],
-                        "libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "additional_sources": [
-                            "lambda/input/css/dom_element.c",
-                            "lambda/input/css/selector_matcher.c",
-                            "lib/url_parser.c"
-                        ],
-                        "binary": "test_html_css_gtest.exe"
-                    },
-                    {
-                        "_DISABLED_source": "test_mempool_simple_gtest.cpp",
-                        "_DISABLED_name": "🏊 Simple Memory Pool Tests (GTest)",
-                        "_DISABLED_dependencies": [],
-                        "_DISABLED_libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "_DISABLED_additional_sources": [
-                            "lib/mempool.c"
-                        ],
-                        "_DISABLED_binary": "test_mempool_simple_gtest.exe",
-                        "_comment": "DISABLED - replaced by unified test_mempool.c"
-                    },
-                    {
-                        "_DISABLED_source": "test_mempool_standalone.c",
-                        "_DISABLED_name": "🧪 Standalone Mempool Test (C)",
-                        "_DISABLED_dependencies": [],
-                        "_DISABLED_libraries": [
-                            "rpmalloc"
-                        ],
-                        "_DISABLED_additional_sources": [
-                            "lib/mempool.c"
-                        ],
-                        "_DISABLED_binary": "test_mempool_standalone.exe",
-                        "_comment": "DISABLED - replaced by unified test_mempool.c"
-                    },
-                    {
-                        "_DISABLED_source": "test_mempool_comprehensive_gtest.cpp",
-                        "_DISABLED_name": "🚀 Comprehensive Memory Pool Tests (GTest)",
-                        "_DISABLED_dependencies": [],
-                        "_DISABLED_libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "_DISABLED_additional_sources": [
-                            "lib/mempool.c"
-                        ],
-                        "_DISABLED_binary": "test_mempool_comprehensive_gtest.exe",
-                        "_comment": "DISABLED - replaced by unified test_mempool.c"
-                    },
-                    {
-                        "_DISABLED_source": "test_mempool_gtest.cpp",
-                        "_DISABLED_name": "🏊 Memory Pool Tests (GTest)",
-                        "_DISABLED_dependencies": [
-                            "lambda-lib"
-                        ],
-                        "_DISABLED_libraries": [
-                            "gtest",
-                            "gtest_main",
-                            "rpmalloc"
-                        ],
-                        "_DISABLED_binary": "test_mempool_gtest.exe",
-                        "_comment": "DISABLED - old complex mempool API"
                     }
                 ],
                 "type": "library"
@@ -1410,6 +1274,85 @@
                             "gtest_main"
                         ],
                         "binary": "test_mdx_roundtrip_new_gtest.exe"
+                    },
+                    {
+                        "source": "test_css_style_node.cpp",
+                        "name": "🎨 CSS Style Node & Cascade Tests (GTest)",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/avl_tree.c",
+                            "lambda/input/css/css_style_node.c",
+                            "lambda/input/css/css_properties.c",
+                            "lambda/input/css/css_property_value_parser.c",
+                            "lib/mempool.c"
+                        ],
+                        "binary": "test_css_style_node.exe"
+                    },
+                    {
+                        "source": "test_css_system.cpp",
+                        "name": "🎨 CSS Property System & Style Node Tests (GTest)",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/avl_tree.c",
+                            "lambda/input/css/css_style_node.c",
+                            "lambda/input/css/css_properties.c",
+                            "lambda/input/css/css_property_value_parser.c",
+                            "lib/mempool.c",
+                            "lib/string.c",
+                            "lib/hashmap.c"
+                        ],
+                        "binary": "test_css_system.exe"
+                    },
+                    {
+                        "source": "test_css_dom_integration.cpp",
+                        "name": "🌐 DOM Integration & Selector Matching Tests (GTest)",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/avl_tree.c",
+                            "lambda/input/css/css_style_node.c",
+                            "lambda/input/css/css_properties.c",
+                            "lambda/input/css/css_property_value_parser.c",
+                            "lambda/input/css/dom_element.c",
+                            "lambda/input/css/selector_matcher.c",
+                            "lib/mempool.c",
+                            "lib/string.c",
+                            "lib/hashmap.c",
+                            "lib/arraylist.c"
+                        ],
+                        "binary": "test_css_dom_integration.exe"
+                    },
+                    {
+                        "source": "test_html_css_gtest.cpp",
+                        "name": "🌐 HTML to CSS End-to-End Integration Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lambda/input/css/dom_element.c",
+                            "lambda/input/css/selector_matcher.c",
+                            "lib/url_parser.c"
+                        ],
+                        "binary": "test_html_css_gtest.exe"
                     },
                     {
                         "source": "test/test_css_tokenizer_gtest.cpp",
