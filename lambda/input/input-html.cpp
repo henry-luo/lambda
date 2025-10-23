@@ -410,20 +410,25 @@ static bool parse_attributes(Input *input, Element *element, const char **html, 
         String *attr_name = stringbuf_to_string(sb);
         skip_whitespace(html);
 
-        String* attr_value;
+        Item attr_value;
         if (**html == '=') {
             (*html)++; // Skip =
             skip_whitespace(html); // Skip whitespace after =
-            attr_value = parse_attribute_value(input, html, html_start);
+            String* str_value = parse_attribute_value(input, html, html_start);
+            if (str_value) {
+                attr_value = (Item){.item = s2it(str_value)};
+            } else {
+                attr_value = (Item){.item = ITEM_NULL};
+            }
         } else {
-            // Boolean attribute (no value)
-            attr_value = NULL;
+            // Boolean attribute (no value) - store as boolean true
+            attr_value = (Item){.bool_val = true};
+            attr_value.type_id = LMD_TYPE_BOOL;
         }
 
-        // Double-check that attr_value is not NULL before using it
-        if (attr_value) {
-            Item value = {.item = s2it(attr_value)};
-            elmt_put(element, attr_name, value, input->pool);
+        // Add attribute to element
+        if (attr_value.item != ITEM_NULL) {
+            elmt_put(element, attr_name, attr_value, input->pool);
         }
 
         skip_whitespace(html);

@@ -920,3 +920,27 @@ TEST_F(Html5SemanticTests, Html5SemanticElementsRoundtrip) {
 
     printf("HTML5 semantic elements roundtrip completed\n");
 }
+
+TEST_F(Html5SemanticTests, HtmlWithBooleanAttributesRoundtrip) {
+    const char* html_with_boolean_attrs = "<!DOCTYPE html>\n"
+        "<html>\n"
+        "<head><title>Boolean Attributes</title></head>\n"
+        "<body>\n"
+        "<input type=\"text\" name=\"username\" required>\n"
+        "<input type=\"checkbox\" checked>\n"
+        "<input type=\"text\" disabled>\n"
+        "<select>\n"
+        "<option value=\"1\">One</option>\n"
+        "<option value=\"2\" selected>Two</option>\n"
+        "</select>\n"
+        "<textarea readonly>Read-only text</textarea>\n"
+        "<button autofocus>Click me</button>\n"
+        "</body>\n"
+        "</html>";
+
+    auto result = test_html_string_roundtrip_cli(html_with_boolean_attrs, "HtmlWithBooleanAttributesRoundtrip");
+
+    ASSERT_TRUE(result.success) << "Failed: " << (result.error_message ? result.error_message : "unknown error");
+
+    printf("HTML with boolean attributes roundtrip completed\n");
+}

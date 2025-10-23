@@ -55,32 +55,83 @@ static void format_html_string(StringBuf* sb, String* str) {
 
     for (size_t i = 0; i < len; i++) {
         char c = s[i];
-        switch (c) {
-        case '<':
-            stringbuf_append_str(sb, "&lt;");
-            break;
-        case '>':
-            stringbuf_append_str(sb, "&gt;");
-            break;
-        case '&':
-            stringbuf_append_str(sb, "&amp;");
-            break;
-        case '"':
-            stringbuf_append_str(sb, "&quot;");
-            break;
-        case '\'':
-            stringbuf_append_str(sb, "&#39;");
-            break;
-        default:
-            if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
-                // Control characters - encode as numeric character reference
-                char hex_buf[10];
-                snprintf(hex_buf, sizeof(hex_buf), "&#x%02x;", (unsigned char)c);
-                stringbuf_append_str(sb, hex_buf);
+
+        // Check if this is an already-encoded entity (starts with & and ends with ;)
+        // This prevents double-encoding of entities like &lt; -> &amp;lt;
+        if (c == '&') {
+            // Look ahead to see if this is an entity reference
+            size_t j = i + 1;
+            bool is_entity = false;
+
+            // Check for numeric entity: &#123; or &#xAB;
+            if (j < len && s[j] == '#') {
+                j++;
+                if (j < len && (s[j] == 'x' || s[j] == 'X')) {
+                    j++; // hex entity
+                    while (j < len && ((s[j] >= '0' && s[j] <= '9') ||
+                                       (s[j] >= 'a' && s[j] <= 'f') ||
+                                       (s[j] >= 'A' && s[j] <= 'F'))) {
+                        j++;
+                    }
+                } else {
+                    // decimal entity
+                    while (j < len && s[j] >= '0' && s[j] <= '9') {
+                        j++;
+                    }
+                }
+                if (j < len && s[j] == ';') {
+                    is_entity = true;
+                }
             } else {
-                stringbuf_append_char(sb, c);
+                // Check for named entity: &nbsp; &lt; &gt; etc.
+                while (j < len && ((s[j] >= 'a' && s[j] <= 'z') ||
+                                   (s[j] >= 'A' && s[j] <= 'Z'))) {
+                    j++;
+                }
+                if (j < len && s[j] == ';' && j > i + 1) {
+                    is_entity = true;
+                }
             }
-            break;
+
+            if (is_entity) {
+                // Copy the entire entity as-is (already encoded)
+                while (i <= j && i < len) {
+                    stringbuf_append_char(sb, s[i]);
+                    i++;
+                }
+                i--; // Adjust because loop will increment
+                continue;
+            } else {
+                // Not an entity, encode the ampersand
+                stringbuf_append_str(sb, "&amp;");
+            }
+        } else {
+            switch (c) {
+            case '<':
+                stringbuf_append_str(sb, "&lt;");
+                break;
+            case '>':
+                stringbuf_append_str(sb, "&gt;");
+                break;
+            case '"':
+                stringbuf_append_str(sb, "&quot;");
+                break;
+            case '\'':
+                // Apostrophes don't need to be encoded in text content (only in attributes)
+                // For HTML5, apostrophes in text are safe and don't need encoding
+                stringbuf_append_char(sb, '\'');
+                break;
+            default:
+                if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
+                    // Control characters - encode as numeric character reference
+                    char hex_buf[10];
+                    snprintf(hex_buf, sizeof(hex_buf), "&#x%02x;", (unsigned char)c);
+                    stringbuf_append_str(sb, hex_buf);
+                } else {
+                    stringbuf_append_char(sb, c);
+                }
+                break;
+            }
         }
     }
 }
@@ -367,13 +418,24 @@ static void format_item(StringBuf* sb, Item item, int depth, bool raw_text_mode)
                         }
 
                         // Add attribute
-                        if (field_type == LMD_TYPE_STRING) {
+                        if (field_type == LMD_TYPE_BOOL) {
+                            // Boolean attribute (bool value) - output name only
+                            stringbuf_append_char(sb, ' ');
+                            stringbuf_append_format(sb, "%.*s", field_name_len, field_name);
+                        } else if (field_type == LMD_TYPE_STRING) {
                             String* str = *(String**)data;
-                            if (str && str->chars) {
-                                stringbuf_append_char(sb, ' ');
-                                stringbuf_append_format(sb, "%.*s=\"", field_name_len, field_name);
-                                format_html_string(sb, str);
-                                stringbuf_append_char(sb, '"');
+                            if (str) {
+                                if (str->len == 0) {
+                                    // Boolean attribute (empty string) - output name only (backward compatibility)
+                                    stringbuf_append_char(sb, ' ');
+                                    stringbuf_append_format(sb, "%.*s", field_name_len, field_name);
+                                } else if (str->chars) {
+                                    // Regular attribute with value
+                                    stringbuf_append_char(sb, ' ');
+                                    stringbuf_append_format(sb, "%.*s=\"", field_name_len, field_name);
+                                    format_html_string(sb, str);
+                                    stringbuf_append_char(sb, '"');
+                                }
                             }
                         }
                     }
@@ -458,7 +520,7 @@ String* format_html(Pool* pool, Item root_item) {
                         if (elmt_type->name.length == 4 &&
                             strncmp(elmt_type->name.str, "html", 4) == 0) {
                             // Format the HTML element directly without wrapping
-                            stringbuf_append_str(sb, "<!DOCTYPE html>\n");
+                            // Note: DOCTYPE should come from parsed root list, not added here
                             format_item(sb, first_item, 0, false);
                             return stringbuf_to_string(sb);
                         }
@@ -473,7 +535,7 @@ String* format_html(Pool* pool, Item root_item) {
                 if (elmt_type->name.length == 4 &&
                     strncmp(elmt_type->name.str, "html", 4) == 0) {
                     // Format the HTML element directly without wrapping
-                    stringbuf_append_str(sb, "<!DOCTYPE html>\n");
+                    // Note: DOCTYPE should come from parsed root list, not added here
                     format_item(sb, root_item, 0, false);
                     return stringbuf_to_string(sb);
                 }
