@@ -1,6 +1,39 @@
 #include "input.h"
 
-static Item parse_element(Input *input, const char **html);
+static Item parse_element(Input *input, const char **html, const char *html_start);
+
+#include "input.h"
+#include <stdarg.h>
+
+static Item parse_element(Input *input, const char **html, const char *html_start);
+
+// Position tracking helper functions
+static void get_line_col(const char *html_start, const char *current, int *line, int *col) {
+    *line = 1;
+    *col = 1;
+
+    for (const char *p = html_start; p < current; p++) {
+        if (*p == '\n') {
+            (*line)++;
+            *col = 1;
+        } else {
+            (*col)++;
+        }
+    }
+}
+
+static void log_parse_error(const char *html_start, const char *current, const char *format, ...) {
+    int line, col;
+    get_line_col(html_start, current, &line, &col);
+
+    char msg[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(msg, sizeof(msg), format, args);
+    va_end(args);
+
+    log_error("HTML parse error at line %d, column %d: %s", line, col, msg);
+}
 
 // HTML5 entity definitions for better compatibility
 typedef struct {
@@ -74,7 +107,7 @@ static void skip_whitespace(const char **html) {
     }
 
     if (whitespace_count >= max_whitespace) {
-        printf("WARNING: Hit whitespace limit, possible infinite loop in skip_whitespace\n");
+        log_warn("Hit whitespace limit, possible infinite loop in skip_whitespace");
     }
 }
 
@@ -335,7 +368,7 @@ static String* parse_attribute_value(Input *input, const char **html) {
         }
 
         if (char_count >= max_unquoted_chars) {
-            printf("WARNING: Hit unquoted attribute value limit (%d)\n", max_unquoted_chars);
+            log_debug("WARNING: Hit unquoted attribute value limit (%d)", max_unquoted_chars);
         }
 
         return stringbuf_to_string(sb);
@@ -388,7 +421,7 @@ static bool parse_attributes(Input *input, Element *element, const char **html) 
     }
 
     if (attr_count >= max_attributes) {
-        printf("WARNING: Hit attribute limit (%d), possible infinite loop\n", max_attributes);
+        log_warn("Hit attribute limit (%d), possible infinite loop", max_attributes);
     }
 
     return true;
@@ -474,17 +507,13 @@ static bool is_aria_attribute(const char* attr_name) {
     return strncmp(attr_name, "aria-", 5) == 0;
 }
 
-static Item parse_element(Input *input, const char **html) {
+static Item parse_element(Input *input, const char **html, const char *html_start) {
     static int parse_depth = 0;
     parse_depth++;
 
-    if (parse_depth > 15) {  // Reduced limit for better debugging
-        parse_depth--;
-        return {.item = ITEM_ERROR};
-    }
-
     if (**html != '<') {
         parse_depth--;
+        log_parse_error(html_start, *html, "Unexpected character '%c' at beginning of element", **html);
         return {.item = ITEM_ERROR};
     }
 
@@ -493,11 +522,12 @@ static Item parse_element(Input *input, const char **html) {
         skip_comment(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(input, html); // Try next element
+            Item result = parse_element(input, html, html_start); // Try next element
             parse_depth--;
             return result;
         }
         parse_depth--;
+        log_parse_error(html_start, *html, "Unexpected end of input after comment");
         return {.item = ITEM_NULL};
     }
 
@@ -506,11 +536,12 @@ static Item parse_element(Input *input, const char **html) {
         skip_doctype(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(input, html); // Try next element
+            Item result = parse_element(input, html, html_start); // Try next element
             parse_depth--;
             return result;
         }
         parse_depth--;
+        log_parse_error(html_start, *html, "Unexpected end of input after doctype");
         return {.item = ITEM_NULL};
     }
 
@@ -519,11 +550,12 @@ static Item parse_element(Input *input, const char **html) {
         skip_processing_instruction(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(input, html); // Try next element
+            Item result = parse_element(input, html, html_start); // Try next element
             parse_depth--;
             return result;
         }
         parse_depth--;
+        log_parse_error(html_start, *html, "Unexpected end of input after processing instruction");
         return {.item = ITEM_NULL};
     }
 
@@ -532,14 +564,16 @@ static Item parse_element(Input *input, const char **html) {
         skip_cdata(html);
         skip_whitespace(html);
         if (**html) {
-            Item result = parse_element(input, html); // Try next element
+            Item result = parse_element(input, html, html_start); // Try next element
             parse_depth--;
             return result;
         }
         parse_depth--;
+        log_parse_error(html_start, *html, "Unexpected end of input after cdata");
         return {.item = ITEM_NULL};
     }
 
+    log_debug("Parsing element at depth %d", parse_depth);
     (*html)++; // Skip <
 
     // Check for closing tag
@@ -550,12 +584,14 @@ static Item parse_element(Input *input, const char **html) {
         }
         if (**html) (*html)++; // Skip >
         parse_depth--;
+        log_parse_error(html_start, *html, "Unexpected end of input after end tag");
         return {.item = ITEM_NULL};
     }
 
     String* tag_name = parse_tag_name(input, html);
     if (!tag_name || tag_name->len == 0) {
         parse_depth--;
+        log_parse_error(html_start, *html, "Unexpected end of input after start tag");
         return {.item = ITEM_ERROR};
     }
 
@@ -563,12 +599,14 @@ static Item parse_element(Input *input, const char **html) {
     Element* element = input_create_element(input, tag_name->chars);
     if (!element) {
         parse_depth--;
+        log_parse_error(html_start, *html, "Unexpected end of input");
         return {.item = ITEM_ERROR};
     }
 
     // Parse attributes directly into the element
     if (!parse_attributes(input, element, html)) {
         parse_depth--;
+        log_parse_error(html_start, *html, "Failed to parse attribute");
         return {.item = ITEM_ERROR};
     }
 
@@ -581,6 +619,7 @@ static Item parse_element(Input *input, const char **html) {
 
     if (**html != '>') {
         parse_depth--;
+        log_parse_error(html_start, *html, "Unexpected character '%c' while parsing element", **html);
         return {.item = ITEM_ERROR};
     }
     (*html)++; // Skip >
@@ -650,13 +689,14 @@ static Item parse_element(Input *input, const char **html) {
                     } else {
                         // Parse child element
                         const char* before_child_parse = *html;
-                        Item child = parse_element(input, html);
+                        Item child = parse_element(input, html, html_start);
 
-                        if (child.item == ITEM_ERROR) {
+                        if (child.type_id == LMD_TYPE_ERROR) {
                             // If we hit an error, try to recover by skipping this character
                             if (**html) (*html)++;
                             break;
-                        } else if (child .item != ITEM_NULL) {
+                        }
+                        else if (child.type_id != LMD_TYPE_NULL) {
                             list_push((List*)element, child);
                         }
 
@@ -665,7 +705,8 @@ static Item parse_element(Input *input, const char **html) {
                             (*html)++;
                         }
                     }
-                } else {
+                }
+                else {
                     // Parse text content including whitespace
                     // Start building text content
                     StringBuf* text_sb = input->sb;
@@ -710,8 +751,7 @@ static Item parse_element(Input *input, const char **html) {
     }
 
     parse_depth--;
-
-    return {.item = (uint64_t)element};
+    return {.element = element};
 }
 
 void parse_html(Input* input, const char* html_string) {
@@ -719,6 +759,6 @@ void parse_html(Input* input, const char* html_string) {
     const char *html = html_string;
     // parse the root element (preserve leading whitespace)
     if (*html) {
-        input->root = parse_element(input, &html);
+        input->root = parse_element(input, &html, html_string);
     }
 }

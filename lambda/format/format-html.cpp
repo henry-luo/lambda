@@ -3,7 +3,7 @@
 
 void print_named_items(StringBuf *strbuf, TypeMap *map_type, void* map_data);
 
-static void format_item(StringBuf* sb, Item item, int depth);
+static void format_item(StringBuf* sb, Item item, int depth, bool raw_text_mode);
 
 // HTML5 void elements (self-closing tags that should not have closing tags)
 static const char* void_elements[] = {
@@ -12,11 +12,28 @@ static const char* void_elements[] = {
     "keygen", "menuitem", NULL
 };
 
+// HTML5 elements that contain raw text (like script, style)
+static const char* raw_text_elements[] = {
+    "script", "style", "textarea", "title", "xmp", "iframe", "noembed",
+    "noframes", "noscript", "plaintext", NULL
+};
+
 // Helper function to check if an element is a void element
 static bool is_void_element(const char* tag_name, size_t tag_len) {
     for (int i = 0; void_elements[i]; i++) {
         size_t void_len = strlen(void_elements[i]);
         if (tag_len == void_len && strncasecmp(tag_name, void_elements[i], tag_len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Helper function to check if an element is a raw text element
+static bool is_raw_text_element(const char* tag_name, size_t tag_len) {
+    for (int i = 0; raw_text_elements[i]; i++) {
+        size_t raw_len = strlen(raw_text_elements[i]);
+        if (tag_len == raw_len && strncasecmp(tag_name, raw_text_elements[i], tag_len) == 0) {
             return true;
         }
     }
@@ -84,7 +101,7 @@ static void format_array(StringBuf* sb, Array* arr, int depth) {
             format_indent(sb, depth + 2);
             stringbuf_append_str(sb, "<li>");
             Item item = arr->items[i];
-            format_item(sb, item, depth + 2);
+            format_item(sb, item, depth + 2, false);
             stringbuf_append_str(sb, "</li>\n");
         }
 
@@ -160,7 +177,7 @@ static void format_map_elements(StringBuf* sb, TypeMap* map_type, void* map_data
                                         (int)field->name->length, field->name->str);
 
                     Item item_data = *(Item*)data;
-                    format_item(sb, item_data, depth + 1);
+                    format_item(sb, item_data, depth + 1, false);
 
                     stringbuf_append_str(sb, "</div>");
                 }
@@ -192,7 +209,7 @@ static void format_map(StringBuf* sb, Map* mp, int depth) {
     stringbuf_append_str(sb, "</div>");
 }
 
-static void format_item(StringBuf* sb, Item item, int depth) {
+static void format_item(StringBuf* sb, Item item, int depth, bool raw_text_mode) {
     // Safety check for null pointer
     if (!sb) {
         return;
@@ -229,7 +246,13 @@ static void format_item(StringBuf* sb, Item item, int depth) {
     case LMD_TYPE_STRING: {
         String* str = (String*)item.pointer;
         if (str) {
-            format_html_string(sb, str);
+            if (raw_text_mode) {
+                // In raw text mode (script, style, etc.), output string as-is without escaping
+                stringbuf_append_format(sb, "%.*s", (int)str->len, str->chars);
+            } else {
+                // In normal mode, escape HTML entities
+                format_html_string(sb, str);
+            }
         }
         break;
     }
@@ -240,7 +263,7 @@ static void format_item(StringBuf* sb, Item item, int depth) {
             for (long i = 0; i < arr->length; i++) {
                 stringbuf_append_str(sb, "<li>");
                 Item array_item = arr->items[i];
-                format_item(sb, array_item, depth + 1);
+                format_item(sb, array_item, depth + 1, raw_text_mode);
                 stringbuf_append_str(sb, "</li>");
             }
             stringbuf_append_str(sb, "</ul>");
@@ -313,12 +336,15 @@ static void format_item(StringBuf* sb, Item item, int depth) {
             } else {
                 stringbuf_append_char(sb, '>');
 
+                // Check if this is a raw text element (script, style, etc.)
+                bool is_raw = is_raw_text_element(elmt_type->name.str, elmt_type->name.length);
+
                 // Add children if available (same approach as JSON formatter)
                 if (elmt_type && elmt_type->content_length > 0) {
                     List* list = (List*)element;
                     for (long j = 0; j < list->length; j++) {
                         Item child_item = list->items[j];
-                        format_item(sb, child_item, depth + 1);
+                        format_item(sb, child_item, depth + 1, is_raw);
                     }
                 }
 
@@ -363,7 +389,7 @@ String* format_html(Pool* pool, Item root_item) {
                             strncmp(elmt_type->name.str, "html", 4) == 0) {
                             // Format the HTML element directly without wrapping
                             stringbuf_append_str(sb, "<!DOCTYPE html>\n");
-                            format_item(sb, first_item, 0);
+                            format_item(sb, first_item, 0, false);
                             return stringbuf_to_string(sb);
                         }
                     }
@@ -378,7 +404,7 @@ String* format_html(Pool* pool, Item root_item) {
                     strncmp(elmt_type->name.str, "html", 4) == 0) {
                     // Format the HTML element directly without wrapping
                     stringbuf_append_str(sb, "<!DOCTYPE html>\n");
-                    format_item(sb, root_item, 0);
+                    format_item(sb, root_item, 0, false);
                     return stringbuf_to_string(sb);
                 }
             }
@@ -391,7 +417,7 @@ String* format_html(Pool* pool, Item root_item) {
     stringbuf_append_str(sb, "<title>Data</title>");
     stringbuf_append_str(sb, "</head>\n<body>\n");
 
-    format_item(sb, root_item, 0);
+    format_item(sb, root_item, 0, false);
 
     stringbuf_append_str(sb, "\n</body>\n</html>");
 
@@ -400,5 +426,5 @@ String* format_html(Pool* pool, Item root_item) {
 
 // Convenience function that formats HTML to a provided StringBuf
 void format_html_to_strbuf(StringBuf* sb, Item root_item) {
-    format_item(sb, root_item, 0);
+    format_item(sb, root_item, 0, false);
 }
