@@ -75,8 +75,29 @@ static void format_css_value(StringBuf* sb, Item value) {
         case LMD_TYPE_ARRAY: {
             Array* arr = (Array*)value.pointer;
             if (arr && arr->length > 0) {
+                // Use comma separation for font-related arrays (font-family values are typically Symbol strings)
+                bool likely_font_family = false;
+                if (arr->length >= 2) {
+                    // Check if this looks like a font-family array (Symbol values)
+                    for (int j = 0; j < arr->length && j < 3; j++) {
+                        if (get_type_id(arr->items[j]) == LMD_TYPE_SYMBOL) {
+                            String* sym = (String*)arr->items[j].pointer;
+                            if (sym && sym->chars && sym->len > 0) {
+                                // Common font names suggest font-family
+                                if (strstr(sym->chars, "sans") || strstr(sym->chars, "serif") ||
+                                    strstr(sym->chars, "Arial") || strstr(sym->chars, "Times") ||
+                                    strstr(sym->chars, "Helvetica") || strstr(sym->chars, "monospace")) {
+                                    likely_font_family = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                const char* separator = likely_font_family ? ", " : " ";
                 for (int i = 0; i < arr->length; i++) {
-                    if (i > 0) stringbuf_append_char(sb, ' ');
+                    if (i > 0) stringbuf_append_str(sb, separator);
                     format_css_value(sb, arr->items[i]);
                 }
             }
