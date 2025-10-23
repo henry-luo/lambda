@@ -5,39 +5,13 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <ctype.h>
-#include "../lambda/lambda-data.hpp"
-#include "../lib/arraylist.h"
-#include "../lib/num_stack.h"
-#include "../lib/strbuf.h"
-#include "../lib/mempool.h"
-#include "../lib/url.h"
+#include <sys/stat.h>
+#include <libgen.h>
 
-extern "C" {
-    Input* input_from_source(char* source, Url* abs_url, String* type, String* flavor);
-    Input* input_from_url(String* url, String* type, String* flavor, Url* cwd);
-    String* format_data(Item item, String* type, String* flavor, Pool *pool);
-
-    // Use actual URL library functions
-    Url* url_parse(const char* input);
-    Url* url_parse_with_base(const char* input, const Url* base);
-    void url_destroy(Url* url);
-}
-
-// Helper function to create a Lambda String from C string
-String* create_lambda_string(const char* text) {
-    if (!text) return NULL;
-
-    size_t len = strlen(text);
-    // Allocate String struct + space for the null-terminated string
-    String* result = (String*)malloc(sizeof(String) + len + 1);
-    if (!result) return NULL;
-
-    result->len = len;
-    result->ref_cnt = 1;
-    // Copy the string content to the chars array at the end of the struct
-    strcpy(result->chars, text);
-
-    return result;
+// Helper function to check if a file exists
+bool file_exists(const char* filepath) {
+    struct stat buffer;
+    return (stat(filepath, &buffer) == 0);
 }
 
 // Helper function to read file contents
@@ -65,201 +39,206 @@ char* read_file_content(const char* filepath) {
     return content;
 }
 
-// Helper function to check if a string is valid
-bool is_valid_string_content(const char* content) {
-    if (!content) return false;
+// Helper function to execute a shell command and capture output
+int execute_command(const char* command, char** output) {
+    FILE* pipe = popen(command, "r");
+    if (!pipe) {
+        return -1;
+    }
 
-    // Basic validation - check for null bytes and reasonable length
-    size_t len = strlen(content);
-    if (len == 0 || len > 1000000) return false;  // Reject empty or huge strings
+    // Read command output
+    char buffer[1024];
+    size_t total_size = 0;
+    char* result = NULL;
 
-    return true;
-}
-
-// Helper function to normalize whitespace for comparison
-char* normalize_whitespace(const char* input) {
-    if (!input) return NULL;
-
-    size_t len = strlen(input);
-    char* result = (char*)malloc(len + 1);
-    if (!result) return NULL;
-
-    size_t write_pos = 0;
-    bool in_whitespace = false;
-
-    for (size_t i = 0; i < len; i++) {
-        if (isspace(input[i])) {
-            if (!in_whitespace && write_pos > 0) {
-                result[write_pos++] = ' ';
-                in_whitespace = true;
-            }
-        } else {
-            result[write_pos++] = input[i];
-            in_whitespace = false;
+    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+        size_t len = strlen(buffer);
+        char* new_result = (char*)realloc(result, total_size + len + 1);
+        if (!new_result) {
+            free(result);
+            pclose(pipe);
+            return -1;
         }
+        result = new_result;
+        memcpy(result + total_size, buffer, len);
+        total_size += len;
     }
 
-    // Remove trailing whitespace
-    while (write_pos > 0 && isspace(result[write_pos - 1])) {
-        write_pos--;
+    if (result) {
+        result[total_size] = '\0';
     }
 
-    result[write_pos] = '\0';
-    return result;
+    if (output) {
+        *output = result;
+    } else {
+        free(result);
+    }
+
+    int status = pclose(pipe);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
-// Helper function to compare strings with normalized whitespace
-bool strings_equal_normalized(const char* str1, const char* str2) {
-    if (!str1 && !str2) return true;
-    if (!str1 || !str2) return false;
+// Helper function to compare two files
+bool files_are_identical(const char* file1, const char* file2) {
+    char* content1 = read_file_content(file1);
+    char* content2 = read_file_content(file2);
 
-    char* norm1 = normalize_whitespace(str1);
-    char* norm2 = normalize_whitespace(str2);
-
-    bool equal = false;
-    if (norm1 && norm2) {
-        equal = (strcmp(norm1, norm2) == 0);
+    if (!content1 || !content2) {
+        free(content1);
+        free(content2);
+        return false;
     }
 
-    free(norm1);
-    free(norm2);
-    return equal;
+    bool identical = (strcmp(content1, content2) == 0);
+
+    free(content1);
+    free(content2);
+
+    return identical;
 }
 
-// Test fixture class for HTML roundtrip tests
+// Test fixture class for HTML roundtrip tests using CLI
 class HtmlRoundtripTest : public ::testing::Test {
 protected:
+    const char* lambda_exe = "./lambda.exe";
+    const char* temp_output = "/tmp/test_html_roundtrip_output.html";
+
     void SetUp() override {
-        // Initialize test environment
+        // Clean up any leftover temp files
+        unlink(temp_output);
     }
 
     void TearDown() override {
-        // Clean up any test files or resources
+        // Clean up temp files
+        unlink(temp_output);
     }
 
-    // Core roundtrip function: parse HTML string, format back, verify result
-    // Returns: {success, formatted_string, formatted_length}
+    // Core roundtrip function: use CLI to convert HTML -> HTML
+    // Returns: {success, error_message}
     struct RoundtripResult {
         bool success;
-        String* formatted;
         const char* error_message;
     };
 
-    RoundtripResult test_html_source_roundtrip(const char* html_source, const char* source_name = "inline") {
-        printf("\n=== Testing HTML roundtrip: %s ===\n", source_name);
-        printf("Original content length: %zu\n", strlen(html_source));
+    RoundtripResult test_html_file_roundtrip_cli(const char* input_file, const char* test_name) {
+        printf("\n=== Testing HTML roundtrip via CLI: %s ===\n", test_name);
+        printf("Input file: %s\n", input_file);
 
-        // Create Lambda strings for input parameters
-        String* type_str = create_lambda_string("html");
-        String* flavor_str = NULL;
-
-        // Get current directory for URL resolution
-        Url* cwd = url_parse("file://./");
-        Url* dummy_url = url_parse_with_base("test.html", cwd);
-
-        printf("Parsing HTML with input_from_source...\n");
-
-        // Make a mutable copy of the content
-        char* content_copy = strdup(html_source);
-
-        // Parse the HTML content
-        Input* parsed_input = input_from_source(content_copy, dummy_url, type_str, flavor_str);
-
-        if (!parsed_input) {
-            printf("ERROR: Failed to parse HTML content\n");
-            free(content_copy);
-            url_destroy(dummy_url);
-            url_destroy(cwd);
-            return {false, nullptr, "Failed to parse HTML content"};
+        // Check if input file exists
+        if (!file_exists(input_file)) {
+            printf("ERROR: Input file does not exist: %s\n", input_file);
+            return {false, "Input file does not exist"};
         }
 
-        printf("HTML parsed successfully\n");
+        // Read original content for comparison
+        char* original_content = read_file_content(input_file);
+        if (!original_content) {
+            printf("ERROR: Failed to read input file\n");
+            return {false, "Failed to read input file"};
+        }
+        size_t original_len = strlen(original_content);
+        printf("Original content length: %zu\n", original_len);
 
-        // Get the root item from the parsed input
-        Item root_item = parsed_input->root;
+        // Build the CLI command
+        char command[2048];
+        snprintf(command, sizeof(command),
+                "%s convert -f html -t html -o %s %s 2>&1",
+                lambda_exe, temp_output, input_file);
 
-        printf("Formatting back to HTML...\n");
+        printf("Executing: %s\n", command);
 
-        // Format the parsed data back to HTML
-        String* formatted = format_data(root_item, type_str, flavor_str, parsed_input->pool);
+        // Execute the command
+        char* cmd_output = NULL;
+        int exit_code = execute_command(command, &cmd_output);
 
-        if (!formatted) {
-            printf("ERROR: Failed to format HTML data\n");
-            free(content_copy);
-            url_destroy(dummy_url);
-            url_destroy(cwd);
-            return {false, nullptr, "Failed to format HTML data"};
+        if (exit_code != 0) {
+            printf("ERROR: Command failed with exit code %d\n", exit_code);
+            if (cmd_output) {
+                printf("Command output:\n%s\n", cmd_output);
+            }
+            free(cmd_output);
+            free(original_content);
+            return {false, "CLI command failed"};
         }
 
-        printf("Formatted content length: %u\n", formatted->len);
+        if (cmd_output && strlen(cmd_output) > 0) {
+            printf("Command output:\n%s\n", cmd_output);
+        }
+        free(cmd_output);
 
-        // Validate the formatted content
-        bool is_valid = (formatted->len > 0 && is_valid_string_content(formatted->chars));
-
-        printf("Content validation result: %s\n", is_valid ? "VALID" : "INVALID");
-
-        if (!is_valid) {
-            printf("ERROR: Invalid formatted output\n");
-            free(content_copy);
-            url_destroy(dummy_url);
-            url_destroy(cwd);
-            return {false, formatted, "Invalid formatted output"};
+        // Check if output file was created
+        if (!file_exists(temp_output)) {
+            printf("ERROR: Output file was not created: %s\n", temp_output);
+            free(original_content);
+            return {false, "Output file not created"};
         }
 
-        // Verify exact roundtrip: input should match output
-        size_t original_len = strlen(html_source);
-        bool exact_match = (original_len == formatted->len &&
-                           strcmp(html_source, formatted->chars) == 0);
+        // Read the output file
+        char* output_content = read_file_content(temp_output);
+        if (!output_content) {
+            printf("ERROR: Failed to read output file\n");
+            free(original_content);
+            return {false, "Failed to read output file"};
+        }
+
+        size_t output_len = strlen(output_content);
+        printf("Output content length: %zu\n", output_len);
+
+        // Compare original and output
+        bool exact_match = (original_len == output_len &&
+                           strcmp(original_content, output_content) == 0);
 
         printf("Roundtrip exact match: %s\n", exact_match ? "YES" : "NO");
 
         if (!exact_match) {
-            printf("ERROR: Roundtrip mismatch!\n");
+            printf("WARNING: Roundtrip mismatch!\n");
             printf("  Original length: %zu\n", original_len);
-            printf("  Formatted length: %u\n", formatted->len);
-            printf("  Original (first 200 chars):\n%.200s\n", html_source);
-            printf("  Formatted (first 200 chars):\n%.200s\n", formatted->chars);
+            printf("  Output length: %zu\n", output_len);
+            printf("  Original (first 200 chars):\n%.200s\n", original_content);
+            printf("  Output (first 200 chars):\n%.200s\n", output_content);
 
             // Show where the difference occurs
-            size_t min_len = (original_len < formatted->len) ? original_len : formatted->len;
+            size_t min_len = (original_len < output_len) ? original_len : output_len;
             for (size_t i = 0; i < min_len; i++) {
-                if (html_source[i] != formatted->chars[i]) {
+                if (original_content[i] != output_content[i]) {
                     printf("  First difference at position %zu:\n", i);
-                    printf("    Original: '%c' (0x%02X)\n", html_source[i], (unsigned char)html_source[i]);
-                    printf("    Formatted: '%c' (0x%02X)\n", formatted->chars[i], (unsigned char)formatted->chars[i]);
+                    printf("    Original: '%c' (0x%02X)\n",
+                           original_content[i], (unsigned char)original_content[i]);
+                    printf("    Output: '%c' (0x%02X)\n",
+                           output_content[i], (unsigned char)output_content[i]);
                     break;
                 }
             }
         } else {
-            printf("Formatted output (first 200 chars):\n%.200s\n", formatted->chars);
+            printf("✅ Roundtrip successful!\n");
+            printf("Output (first 200 chars):\n%.200s\n", output_content);
         }
 
-        // Clean up
-        free(content_copy);
-        url_destroy(dummy_url);
-        url_destroy(cwd);
+        free(original_content);
+        free(output_content);
 
-        return {exact_match, formatted, exact_match ? nullptr : "Roundtrip content mismatch"};
+        return {exact_match, exact_match ? nullptr : "Roundtrip content mismatch"};
     }
 
-    // Convenience wrapper for file-based tests
-    bool test_html_file_roundtrip(const char* test_file, const char* test_name) {
-        printf("\n=== Testing HTML file roundtrip: %s ===\n", test_name);
+    // Test a simple HTML string by writing it to a temp file first
+    RoundtripResult test_html_string_roundtrip_cli(const char* html_content, const char* test_name) {
+        const char* temp_input = "/tmp/test_html_roundtrip_input.html";
 
-        // Read the test file
-        char* original_content = read_file_content(test_file);
-        if (!original_content) {
-            printf("ERROR: Failed to read test file: %s\n", test_file);
-            return false;
+        // Write content to temp file
+        FILE* f = fopen(temp_input, "w");
+        if (!f) {
+            return {false, "Failed to create temp input file"};
         }
+        fprintf(f, "%s", html_content);
+        fclose(f);
 
-        // Use the core roundtrip function
-        auto result = test_html_source_roundtrip(original_content, test_name);
+        // Test the file
+        auto result = test_html_file_roundtrip_cli(temp_input, test_name);
 
-        // Clean up
-        free(original_content);
+        // Clean up temp input file
+        unlink(temp_input);
 
-        return result.success;
+        return result;
     }
 };
 
@@ -276,15 +255,11 @@ TEST_F(BasicHtmlTests, SimpleHtmlRoundtrip) {
         "</body>\n"
         "</html>";
 
-    auto result = test_html_source_roundtrip(simple_html, "SimpleHtmlRoundtrip");
+    auto result = test_html_string_roundtrip_cli(simple_html, "SimpleHtmlRoundtrip");
 
     ASSERT_TRUE(result.success) << "Failed: " << (result.error_message ? result.error_message : "unknown error");
-    ASSERT_NE(result.formatted, nullptr) << "Formatted HTML should not be null";
-    ASSERT_GT(result.formatted->len, 0U) << "Formatted HTML should not be empty";
 
     printf("Simple HTML roundtrip completed successfully\n");
-    printf("Original length: %zu, Formatted length: %u\n",
-           strlen(simple_html), result.formatted->len);
 }
 
 TEST_F(BasicHtmlTests, HtmlWithAttributesRoundtrip) {
@@ -302,11 +277,9 @@ TEST_F(BasicHtmlTests, HtmlWithAttributesRoundtrip) {
         "</body>\n"
         "</html>";
 
-    auto result = test_html_source_roundtrip(html_with_attrs, "HtmlWithAttributesRoundtrip");
+    auto result = test_html_string_roundtrip_cli(html_with_attrs, "HtmlWithAttributesRoundtrip");
 
     ASSERT_TRUE(result.success) << "Failed: " << (result.error_message ? result.error_message : "unknown error");
-    ASSERT_NE(result.formatted, nullptr) << "Formatted HTML should not be null";
-    ASSERT_GT(result.formatted->len, 0U) << "Formatted HTML should not be empty";
 
     printf("HTML with attributes roundtrip completed successfully\n");
 }
@@ -331,11 +304,9 @@ TEST_F(BasicHtmlTests, NestedElementsRoundtrip) {
         "</body>\n"
         "</html>";
 
-    auto result = test_html_source_roundtrip(nested_html, "NestedElementsRoundtrip");
+    auto result = test_html_string_roundtrip_cli(nested_html, "NestedElementsRoundtrip");
 
     ASSERT_TRUE(result.success) << "Failed: " << (result.error_message ? result.error_message : "unknown error");
-    ASSERT_NE(result.formatted, nullptr) << "Formatted HTML should not be null";
-    ASSERT_GT(result.formatted->len, 0U) << "Formatted HTML should not be empty";
 
     printf("Nested HTML roundtrip completed successfully\n");
 }
@@ -347,217 +318,217 @@ TEST_F(BasicHtmlTests, NestedElementsRoundtrip) {
 class SimpleHtmlFileTests : public HtmlRoundtripTest {};
 
 TEST_F(SimpleHtmlFileTests, TestWhitespace) {
-    bool result = test_html_file_roundtrip("./test/html/test_whitespace.html", "test_whitespace");
-    EXPECT_TRUE(result) << "Whitespace test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_whitespace.html", "test_whitespace");
+    EXPECT_TRUE(result.success) << "Whitespace test HTML should succeed";
 }
 
 TEST_F(SimpleHtmlFileTests, TestClearSimple) {
-    bool result = test_html_file_roundtrip("./test/html/test_clear_simple.html", "test_clear_simple");
-    EXPECT_TRUE(result) << "Simple clear test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_clear_simple.html", "test_clear_simple");
+    EXPECT_TRUE(result.success) << "Simple clear test HTML should succeed";
 }
 
 TEST_F(SimpleHtmlFileTests, SimpleBoxTest) {
-    bool result = test_html_file_roundtrip("./test/html/simple_box_test.html", "simple_box_test");
-    EXPECT_TRUE(result) << "Simple box test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/simple_box_test.html", "simple_box_test");
+    EXPECT_TRUE(result.success) << "Simple box test HTML should succeed";
 }
 
 TEST_F(SimpleHtmlFileTests, SimpleTableTest) {
-    bool result = test_html_file_roundtrip("./test/html/simple_table_test.html", "simple_table_test");
-    EXPECT_TRUE(result) << "Simple table test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/simple_table_test.html", "simple_table_test");
+    EXPECT_TRUE(result.success) << "Simple table test HTML should succeed";
 }
 
 TEST_F(SimpleHtmlFileTests, TableSimple) {
-    bool result = test_html_file_roundtrip("./test/html/table_simple.html", "table_simple");
-    EXPECT_TRUE(result) << "Simple table HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/table_simple.html", "table_simple");
+    EXPECT_TRUE(result.success) << "Simple table HTML should succeed";
 }
 
 TEST_F(SimpleHtmlFileTests, TableBasic) {
-    bool result = test_html_file_roundtrip("./test/html/table_basic.html", "table_basic");
-    EXPECT_TRUE(result) << "Basic table HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/table_basic.html", "table_basic");
+    EXPECT_TRUE(result.success) << "Basic table HTML should succeed";
 }
 
 // ==== INTERMEDIATE HTML FILES (CSS styling, basic layouts) ====
 class IntermediateHtmlFileTests : public HtmlRoundtripTest {};
 
 TEST_F(IntermediateHtmlFileTests, Sample2) {
-    bool result = test_html_file_roundtrip("./test/html/sample2.html", "sample2");
-    EXPECT_TRUE(result) << "Sample2 HTML with flexbox should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/sample2.html", "sample2");
+    EXPECT_TRUE(result.success) << "Sample2 HTML with flexbox should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, Sample3) {
-    bool result = test_html_file_roundtrip("./test/html/sample3.html", "sample3");
-    EXPECT_TRUE(result) << "Sample3 HTML with navigation should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/sample3.html", "sample3");
+    EXPECT_TRUE(result.success) << "Sample3 HTML with navigation should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, Sample4) {
-    bool result = test_html_file_roundtrip("./test/html/sample4.html", "sample4");
-    EXPECT_TRUE(result) << "Sample4 landing page HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/sample4.html", "sample4");
+    EXPECT_TRUE(result.success) << "Sample4 landing page HTML should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, SampleHtml) {
-    bool result = test_html_file_roundtrip("./test/html/sample.html", "sample");
-    EXPECT_TRUE(result) << "Sample HTML file should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/sample.html", "sample");
+    EXPECT_TRUE(result.success) << "Sample HTML file should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, TestFloatBasic) {
-    bool result = test_html_file_roundtrip("./test/html/test_float_basic.html", "test_float_basic");
-    EXPECT_TRUE(result) << "Basic float test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_float_basic.html", "test_float_basic");
+    EXPECT_TRUE(result.success) << "Basic float test HTML should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, TestClearLeft) {
-    bool result = test_html_file_roundtrip("./test/html/test_clear_left.html", "test_clear_left");
-    EXPECT_TRUE(result) << "Clear left test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_clear_left.html", "test_clear_left");
+    EXPECT_TRUE(result.success) << "Clear left test HTML should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, TestClearRight) {
-    bool result = test_html_file_roundtrip("./test/html/test_clear_right.html", "test_clear_right");
-    EXPECT_TRUE(result) << "Clear right test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_clear_right.html", "test_clear_right");
+    EXPECT_TRUE(result.success) << "Clear right test HTML should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, TestClearProperty) {
-    bool result = test_html_file_roundtrip("./test/html/test_clear_property.html", "test_clear_property");
-    EXPECT_TRUE(result) << "Clear property test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_clear_property.html", "test_clear_property");
+    EXPECT_TRUE(result.success) << "Clear property test HTML should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, TestLineHeight) {
-    bool result = test_html_file_roundtrip("./test/html/test_line_height.html", "test_line_height");
-    EXPECT_TRUE(result) << "Line height test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_line_height.html", "test_line_height");
+    EXPECT_TRUE(result.success) << "Line height test HTML should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, TestLineBoxAdjustment) {
-    bool result = test_html_file_roundtrip("./test/html/test_line_box_adjustment.html", "test_line_box_adjustment");
-    EXPECT_TRUE(result) << "Line box adjustment test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_line_box_adjustment.html", "test_line_box_adjustment");
+    EXPECT_TRUE(result.success) << "Line box adjustment test HTML should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, TestMarginCollapse) {
-    bool result = test_html_file_roundtrip("./test/html/test_margin_collapse.html", "test_margin_collapse");
-    EXPECT_TRUE(result) << "Margin collapse test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_margin_collapse.html", "test_margin_collapse");
+    EXPECT_TRUE(result.success) << "Margin collapse test HTML should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, TestOverflow) {
-    bool result = test_html_file_roundtrip("./test/html/test_overflow.html", "test_overflow");
-    EXPECT_TRUE(result) << "Overflow test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_overflow.html", "test_overflow");
+    EXPECT_TRUE(result.success) << "Overflow test HTML should succeed";
 }
 
 TEST_F(IntermediateHtmlFileTests, TestPercentage) {
-    bool result = test_html_file_roundtrip("./test/html/test_percentage.html", "test_percentage");
-    EXPECT_TRUE(result) << "Percentage test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_percentage.html", "test_percentage");
+    EXPECT_TRUE(result.success) << "Percentage test HTML should succeed";
 }
 
 // ==== ADVANCED HTML FILES (Complex layouts, positioning, grid/flex) ====
 class AdvancedHtmlFileTests : public HtmlRoundtripTest {};
 
 TEST_F(AdvancedHtmlFileTests, BoxHtml) {
-    bool result = test_html_file_roundtrip("./test/html/box.html", "box");
-    EXPECT_TRUE(result) << "Box HTML file should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/box.html", "box");
+    EXPECT_TRUE(result.success) << "Box HTML file should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, FlexHtml) {
-    bool result = test_html_file_roundtrip("./test/html/flex.html", "flex");
-    EXPECT_TRUE(result) << "Flex HTML file should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/flex.html", "flex");
+    EXPECT_TRUE(result.success) << "Flex HTML file should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, TestPositioningSimple) {
-    bool result = test_html_file_roundtrip("./test/html/test_positioning_simple.html", "test_positioning_simple");
-    EXPECT_TRUE(result) << "Simple positioning test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_positioning_simple.html", "test_positioning_simple");
+    EXPECT_TRUE(result.success) << "Simple positioning test HTML should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, TestPositioningBasic) {
-    bool result = test_html_file_roundtrip("./test/html/test_positioning_basic.html", "test_positioning_basic");
-    EXPECT_TRUE(result) << "Basic positioning test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_positioning_basic.html", "test_positioning_basic");
+    EXPECT_TRUE(result.success) << "Basic positioning test HTML should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, TestCompletePositioning) {
-    bool result = test_html_file_roundtrip("./test/html/test_complete_positioning.html", "test_complete_positioning");
-    EXPECT_TRUE(result) << "Complete positioning test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_complete_positioning.html", "test_complete_positioning");
+    EXPECT_TRUE(result.success) << "Complete positioning test HTML should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, PositionHtml) {
-    bool result = test_html_file_roundtrip("./test/html/position.html", "position");
-    EXPECT_TRUE(result) << "Position HTML file should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/position.html", "position");
+    EXPECT_TRUE(result.success) << "Position HTML file should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, DebugPosition) {
-    bool result = test_html_file_roundtrip("./test/html/debug_position.html", "debug_position");
-    EXPECT_TRUE(result) << "Debug position HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/debug_position.html", "debug_position");
+    EXPECT_TRUE(result.success) << "Debug position HTML should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, TestGridBasic) {
-    bool result = test_html_file_roundtrip("./test/html/test_grid_basic.html", "test_grid_basic");
-    EXPECT_TRUE(result) << "Basic grid test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_grid_basic.html", "test_grid_basic");
+    EXPECT_TRUE(result.success) << "Basic grid test HTML should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, TestGridAreas) {
-    bool result = test_html_file_roundtrip("./test/html/test_grid_areas.html", "test_grid_areas");
-    EXPECT_TRUE(result) << "Grid areas test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_grid_areas.html", "test_grid_areas");
+    EXPECT_TRUE(result.success) << "Grid areas test HTML should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, TestGridAdvanced) {
-    bool result = test_html_file_roundtrip("./test/html/test_grid_advanced.html", "test_grid_advanced");
-    EXPECT_TRUE(result) << "Advanced grid test HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/test_grid_advanced.html", "test_grid_advanced");
+    EXPECT_TRUE(result.success) << "Advanced grid test HTML should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, GridHtml) {
-    bool result = test_html_file_roundtrip("./test/html/grid.html", "grid");
-    EXPECT_TRUE(result) << "Grid HTML file should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/grid.html", "grid");
+    EXPECT_TRUE(result.success) << "Grid HTML file should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, TableHtml) {
-    bool result = test_html_file_roundtrip("./test/html/table.html", "table");
-    EXPECT_TRUE(result) << "Table HTML file should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/table.html", "table");
+    EXPECT_TRUE(result.success) << "Table HTML file should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, IndexHtml) {
-    bool result = test_html_file_roundtrip("./test/html/index.html", "index");
-    EXPECT_TRUE(result) << "Index HTML file should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/index.html", "index");
+    EXPECT_TRUE(result.success) << "Index HTML file should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, LayoutHtm) {
-    bool result = test_html_file_roundtrip("./test/html/layout.htm", "layout");
-    EXPECT_TRUE(result) << "Layout HTM file should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/layout.htm", "layout");
+    EXPECT_TRUE(result.success) << "Layout HTM file should succeed";
 }
 
 TEST_F(AdvancedHtmlFileTests, CssListHtm) {
-    bool result = test_html_file_roundtrip("./test/html/css-list.htm", "css-list");
-    EXPECT_TRUE(result) << "CSS list HTM file should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/css-list.htm", "css-list");
+    EXPECT_TRUE(result.success) << "CSS list HTM file should succeed";
 }
 
 // ==== COMPLEX HTML FILES (Multiple features, real-world pages) ====
 class ComplexHtmlFileTests : public HtmlRoundtripTest {};
 
 TEST_F(ComplexHtmlFileTests, Sample5) {
-    bool result = test_html_file_roundtrip("./test/html/sample5.html", "sample5");
-    EXPECT_TRUE(result) << "Sample5 AI CodeX landing page should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/sample5.html", "sample5");
+    EXPECT_TRUE(result.success) << "Sample5 AI CodeX landing page should succeed";
 }
 
 TEST_F(ComplexHtmlFileTests, SampleList) {
-    bool result = test_html_file_roundtrip("./test/html/sample_list.htm", "sample_list");
-    EXPECT_TRUE(result) << "Sample list HTM should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/sample_list.htm", "sample_list");
+    EXPECT_TRUE(result.success) << "Sample list HTM should succeed";
 }
 
 TEST_F(ComplexHtmlFileTests, SampleOverflow) {
-    bool result = test_html_file_roundtrip("./test/html/sample_overflow.htm", "sample_overflow");
-    EXPECT_TRUE(result) << "Sample overflow HTM should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/sample_overflow.htm", "sample_overflow");
+    EXPECT_TRUE(result.success) << "Sample overflow HTM should succeed";
 }
 
 TEST_F(ComplexHtmlFileTests, SampleSpanBoundary) {
-    bool result = test_html_file_roundtrip("./test/html/sample_span_boundary.htm", "sample_span_boundary");
-    EXPECT_TRUE(result) << "Sample span boundary HTM should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/sample_span_boundary.htm", "sample_span_boundary");
+    EXPECT_TRUE(result.success) << "Sample span boundary HTM should succeed";
 }
 
 TEST_F(ComplexHtmlFileTests, PixeRatio) {
-    bool result = test_html_file_roundtrip("./test/html/pixe_ratio.htm", "pixe_ratio");
-    EXPECT_TRUE(result) << "Pixel ratio HTM should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/pixe_ratio.htm", "pixe_ratio");
+    EXPECT_TRUE(result.success) << "Pixel ratio HTM should succeed";
 }
 
 TEST_F(ComplexHtmlFileTests, Facatology) {
-    bool result = test_html_file_roundtrip("./test/html/Facatology.html", "Facatology");
-    EXPECT_TRUE(result) << "Facatology HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/Facatology.html", "Facatology");
+    EXPECT_TRUE(result.success) << "Facatology HTML should succeed";
 }
 
 TEST_F(ComplexHtmlFileTests, Facatology0) {
-    bool result = test_html_file_roundtrip("./test/html/Facatology0.html", "Facatology0");
-    EXPECT_TRUE(result) << "Facatology0 HTML should succeed";
+    auto result = test_html_file_roundtrip_cli("./test/html/Facatology0.html", "Facatology0");
+    EXPECT_TRUE(result.success) << "Facatology0 HTML should succeed";
 }
 
 // Advanced HTML Features Tests
@@ -577,11 +548,9 @@ TEST_F(AdvancedHtmlTests, HtmlWithCommentsRoundtrip) {
         "</body>\n"
         "</html>";
 
-    auto result = test_html_source_roundtrip(html_with_comments, "HtmlWithCommentsRoundtrip");
+    auto result = test_html_string_roundtrip_cli(html_with_comments, "HtmlWithCommentsRoundtrip");
 
     ASSERT_TRUE(result.success) << "Failed: " << (result.error_message ? result.error_message : "unknown error");
-    ASSERT_NE(result.formatted, nullptr) << "Formatted HTML should not be null";
-    ASSERT_GT(result.formatted->len, 0U) << "Formatted HTML should not be empty";
 
     printf("HTML with comments roundtrip completed\n");
 }
@@ -597,11 +566,9 @@ TEST_F(AdvancedHtmlTests, HtmlWithEntitiesRoundtrip) {
         "</body>\n"
         "</html>";
 
-    auto result = test_html_source_roundtrip(html_with_entities, "HtmlWithEntitiesRoundtrip");
+    auto result = test_html_string_roundtrip_cli(html_with_entities, "HtmlWithEntitiesRoundtrip");
 
     ASSERT_TRUE(result.success) << "Failed: " << (result.error_message ? result.error_message : "unknown error");
-    ASSERT_NE(result.formatted, nullptr) << "Formatted HTML should not be null";
-    ASSERT_GT(result.formatted->len, 0U) << "Formatted HTML should not be empty";
 
     printf("HTML with entities roundtrip completed\n");
 }
@@ -625,11 +592,9 @@ TEST_F(AdvancedHtmlTests, HtmlWithFormElementsRoundtrip) {
         "</body>\n"
         "</html>";
 
-    auto result = test_html_source_roundtrip(html_with_forms, "HtmlWithFormElementsRoundtrip");
+    auto result = test_html_string_roundtrip_cli(html_with_forms, "HtmlWithFormElementsRoundtrip");
 
     ASSERT_TRUE(result.success) << "Failed: " << (result.error_message ? result.error_message : "unknown error");
-    ASSERT_NE(result.formatted, nullptr) << "Formatted HTML should not be null";
-    ASSERT_GT(result.formatted->len, 0U) << "Formatted HTML should not be empty";
 
     printf("HTML with form elements roundtrip completed\n");
 }
@@ -651,11 +616,9 @@ TEST_F(AdvancedHtmlTests, HtmlWithSelfClosingTagsRoundtrip) {
         "</body>\n"
         "</html>";
 
-    auto result = test_html_source_roundtrip(html_with_self_closing, "HtmlWithSelfClosingTagsRoundtrip");
+    auto result = test_html_string_roundtrip_cli(html_with_self_closing, "HtmlWithSelfClosingTagsRoundtrip");
 
     ASSERT_TRUE(result.success) << "Failed: " << (result.error_message ? result.error_message : "unknown error");
-    ASSERT_NE(result.formatted, nullptr) << "Formatted HTML should not be null";
-    ASSERT_GT(result.formatted->len, 0U) << "Formatted HTML should not be empty";
 
     printf("HTML with self-closing tags roundtrip completed\n");
 }
@@ -691,11 +654,9 @@ TEST_F(Html5SemanticTests, Html5SemanticElementsRoundtrip) {
         "</body>\n"
         "</html>";
 
-    auto result = test_html_source_roundtrip(html5_semantic, "Html5SemanticElementsRoundtrip");
+    auto result = test_html_string_roundtrip_cli(html5_semantic, "Html5SemanticElementsRoundtrip");
 
     ASSERT_TRUE(result.success) << "Failed: " << (result.error_message ? result.error_message : "unknown error");
-    ASSERT_NE(result.formatted, nullptr) << "Formatted HTML should not be null";
-    ASSERT_GT(result.formatted->len, 0U) << "Formatted HTML should not be empty";
 
     printf("HTML5 semantic elements roundtrip completed\n");
 }
