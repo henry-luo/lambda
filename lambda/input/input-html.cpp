@@ -328,12 +328,14 @@ static String* parse_string_content(Input *input, const char **html, char end_ch
     return stringbuf_to_string(sb);
 }
 
-static String* parse_attribute_value(Input *input, const char **html) {
+static String* parse_attribute_value(Input *input, const char **html, const char *html_start) {
     skip_whitespace(html);
 
+    log_debug("Parsing attr value at char: %d, '%c'", (int)(*html - html_start), **html);
     if (**html == '"') {
         (*html)++; // Skip opening quote
 
+        stringbuf_reset(input->sb); // Reset buffer before parsing quoted content
         String* value = parse_string_content(input, html, '"');
 
         // CRITICAL FIX: Always skip the closing quote after parsing quoted content
@@ -345,6 +347,7 @@ static String* parse_attribute_value(Input *input, const char **html) {
     } else if (**html == '\'') {
         (*html)++; // Skip opening quote
 
+        stringbuf_reset(input->sb); // Reset buffer before parsing quoted content
         String* value = parse_string_content(input, html, '\'');
 
         // CRITICAL FIX: Always skip the closing quote after parsing quoted content
@@ -356,8 +359,9 @@ static String* parse_attribute_value(Input *input, const char **html) {
     } else {
         // Unquoted attribute value
         StringBuf* sb = input->sb;
+        stringbuf_reset(sb); // Reset buffer before parsing unquoted value
         int char_count = 0;
-        const int max_unquoted_chars = 1000; // Safety limit
+        const int max_unquoted_chars = 10000; // Safety limit
 
         while (**html && **html != ' ' && **html != '\t' && **html != '\n' &&
                **html != '\r' && **html != '>' && **html != '/' && **html != '=' &&
@@ -368,34 +372,38 @@ static String* parse_attribute_value(Input *input, const char **html) {
         }
 
         if (char_count >= max_unquoted_chars) {
-            log_debug("WARNING: Hit unquoted attribute value limit (%d)", max_unquoted_chars);
+            log_warn("Hit unquoted attribute value limit (%d)", max_unquoted_chars);
         }
 
         return stringbuf_to_string(sb);
     }
 }
 
-static bool parse_attributes(Input *input, Element *element, const char **html) {
+static bool parse_attributes(Input *input, Element *element, const char **html, const char *html_start) {
     skip_whitespace(html);
 
     int attr_count = 0;
-    const int max_attributes = 50; // Safety limit
+    const int max_attributes = 500; // Safety limit
+    log_debug("Parsing attributes at char: %d, '%c'", (int)(*html - html_start), **html);
 
     while (**html && **html != '>' && **html != '/' && attr_count < max_attributes) {
         attr_count++;
+        log_debug("Parsing attribute %d, at char: %d, '%c'", attr_count, (int)(*html - html_start), **html);
 
         // Parse attribute name
         StringBuf* sb = input->sb;
+        stringbuf_reset(sb); // Reset buffer before parsing attribute name
         const char* attr_start = *html;
         const char* name_start = *html;
 
         while (**html && **html != '=' && **html != ' ' && **html != '\t' &&
-               **html != '\n' && **html != '\r' && **html != '>' && **html != '/') {
+            **html != '\n' && **html != '\r' && **html != '>' && **html != '/') {
             stringbuf_append_char(sb, tolower(**html));
             (*html)++;
         }
 
-        if (sb->length == sizeof(uint32_t)) { // No attribute name found
+        if (!sb->length) { // No attribute name found
+            log_error("No attribute name found at char: %d, '%c'", (int)(*html - html_start), **html);
             break;
         }
 
@@ -405,7 +413,8 @@ static bool parse_attributes(Input *input, Element *element, const char **html) 
         String* attr_value;
         if (**html == '=') {
             (*html)++; // Skip =
-            attr_value = parse_attribute_value(input, html);
+            skip_whitespace(html); // Skip whitespace after =
+            attr_value = parse_attribute_value(input, html, html_start);
         } else {
             // Boolean attribute (no value)
             attr_value = NULL;
@@ -421,7 +430,7 @@ static bool parse_attributes(Input *input, Element *element, const char **html) 
     }
 
     if (attr_count >= max_attributes) {
-        log_warn("Hit attribute limit (%d), possible infinite loop", max_attributes);
+        log_error("Hit attribute limit (%d), possible infinite loop", max_attributes);
     }
 
     return true;
@@ -573,7 +582,8 @@ static Item parse_element(Input *input, const char **html, const char *html_star
         return {.item = ITEM_NULL};
     }
 
-    log_debug("Parsing element at depth %d", parse_depth);
+    log_debug("Parsing element at depth %d, at char: %d, '%c'",
+        parse_depth, (int)(*html - html_start), **html);
     (*html)++; // Skip <
 
     // Check for closing tag
@@ -604,7 +614,7 @@ static Item parse_element(Input *input, const char **html, const char *html_star
     }
 
     // Parse attributes directly into the element
-    if (!parse_attributes(input, element, html)) {
+    if (!parse_attributes(input, element, html, html_start)) {
         parse_depth--;
         log_parse_error(html_start, *html, "Failed to parse attribute");
         return {.item = ITEM_ERROR};
