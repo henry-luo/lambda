@@ -83,9 +83,11 @@ static void format_html_string(StringBuf* sb, String* str) {
                     is_entity = true;
                 }
             } else {
-                // Check for named entity: &nbsp; &lt; &gt; etc.
+                // Check for named entity: &nbsp; &lt; &gt; &frac12; etc.
+                // Entity names can contain letters and digits
                 while (j < len && ((s[j] >= 'a' && s[j] <= 'z') ||
-                                   (s[j] >= 'A' && s[j] <= 'Z'))) {
+                                   (s[j] >= 'A' && s[j] <= 'Z') ||
+                                   (s[j] >= '0' && s[j] <= '9'))) {
                     j++;
                 }
                 if (j < len && s[j] == ';' && j > i + 1) {
@@ -122,12 +124,15 @@ static void format_html_string(StringBuf* sb, String* str) {
                 stringbuf_append_char(sb, '\'');
                 break;
             default:
-                if (c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
+                // Use unsigned char for comparison to handle UTF-8 multibyte sequences correctly
+                // UTF-8 continuation bytes (0x80-0xBF) and start bytes (0xC0-0xF7) should pass through
+                if ((unsigned char)c < 0x20 && c != '\n' && c != '\r' && c != '\t') {
                     // Control characters - encode as numeric character reference
                     char hex_buf[10];
                     snprintf(hex_buf, sizeof(hex_buf), "&#x%02x;", (unsigned char)c);
                     stringbuf_append_str(sb, hex_buf);
                 } else {
+                    // Pass through as-is (including UTF-8 multibyte sequences)
                     stringbuf_append_char(sb, c);
                 }
                 break;

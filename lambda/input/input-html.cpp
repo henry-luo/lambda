@@ -218,7 +218,7 @@ static void to_lowercase(char* str) {
 static String* parse_string_content(Input *input, const char **html, char end_char) {
     StringBuf* sb = input->sb;
     int char_count = 0;
-    const int max_string_chars = 10000; // Safety limit
+    const int max_string_chars = 100000; // Safety limit
 
     // Handle empty string case - if we immediately encounter the end_char, just return empty string
     if (**html == end_char) {
@@ -361,7 +361,7 @@ static String* parse_attribute_value(Input *input, const char **html, const char
         StringBuf* sb = input->sb;
         stringbuf_reset(sb); // Reset buffer before parsing unquoted value
         int char_count = 0;
-        const int max_unquoted_chars = 10000; // Safety limit
+        const int max_unquoted_chars = 100000; // Safety limit
 
         while (**html && **html != ' ' && **html != '\t' && **html != '\n' &&
                **html != '\r' && **html != '>' && **html != '/' && **html != '=' &&
