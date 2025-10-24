@@ -1,5 +1,6 @@
 #include "layout.hpp"
 #include "layout_flex.hpp"
+#include "layout_flex_measurement.hpp"
 #include "layout_positioned.hpp"
 #include "font_face.h"
 
@@ -262,8 +263,8 @@ void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     log_debug("layout node %s, advance_y: %f", node->name(), lycon->block.advance_y);
     if (node->is_element()) {
         log_debug("Element: %s", node->name());
-        lxb_html_element_t *elmt = node->as_element();
-        DisplayValue display = resolve_display(elmt);
+        // Use resolve_display_value which handles both Lexbor and Lambda CSS nodes
+        DisplayValue display = resolve_display_value(node);
 
         // Debug: print display values for all elements to diagnose grid issue
         log_debug("DEBUG: Element %s - outer=%d, inner=%d", node->name(), display.outer, display.inner);
@@ -328,7 +329,13 @@ void load_style(LayoutContext* lycon, unsigned char* style_source) {
 }
 
 void apply_header_style(LayoutContext* lycon) {
-    // apply header styles
+    // apply header styles - only for Lexbor documents
+    // Lambda CSS documents have CSS already applied during load_lambda_html_doc()
+    if (lycon->doc->doc_type != DOC_TYPE_LEXBOR) {
+        log_debug("Skipping apply_header_style for non-Lexbor document");
+        return;
+    }
+
     lxb_html_head_element_t *head = lxb_html_document_head_element(lycon->doc->dom_tree);
     if (head) {
         lxb_dom_node_t *child = lxb_dom_node_first_child(lxb_dom_interface_node(head));
@@ -389,9 +396,13 @@ void apply_header_style(LayoutContext* lycon) {
 
 void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     log_debug("layout html root");
+    log_debug("DEBUG: elmt=%p, type=%d", (void*)elmt, elmt ? elmt->type : -1);
+    log_debug("DEBUG: About to call apply_header_style");
     apply_header_style(lycon);
+    log_debug("DEBUG: apply_header_style complete");
 
     // init context
+    log_debug("DEBUG: Initializing layout context");
     lycon->elmt = elmt;
     lycon->root_font_size = lycon->font.current_font_size = -1;  // unresolved yet
     lycon->block.max_width = lycon->block.width = lycon->ui_context->window_width;
@@ -429,16 +440,39 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     lycon->block.init_ascender = lycon->font.ft_face->size->metrics.ascender / 64.0;
     lycon->block.init_descender = (-lycon->font.ft_face->size->metrics.descender) / 64.0;
 
-    // layout body content
-    lxb_dom_element_t *lexbor_body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);
-    if (lexbor_body) {
-        // CRITICAL FIX: Allocate DomNode dynamically to avoid dangling pointer
-        DomNode* body_node = (DomNode*)malloc(sizeof(DomNode));
-        memset(body_node, 0, sizeof(DomNode));
-        body_node->type = LEXBOR_ELEMENT;
-        body_node->lxb_node = (lxb_dom_node_t*)lexbor_body;
+    // layout body content - handle both Lexbor and Lambda CSS documents
+    DomNode* body_node = nullptr;
 
-        log_debug("Created proper body DOM node: %p", (void*)body_node);
+    if (lycon->doc->doc_type == DOC_TYPE_LEXBOR) {
+        // Lexbor document - use Lexbor API to find body
+        lxb_dom_element_t *lexbor_body = (lxb_dom_element_t*)lxb_html_document_body_element(lycon->doc->dom_tree);
+        if (lexbor_body) {
+            body_node = (DomNode*)malloc(sizeof(DomNode));
+            memset(body_node, 0, sizeof(DomNode));
+            body_node->type = LEXBOR_ELEMENT;
+            body_node->lxb_node = (lxb_dom_node_t*)lexbor_body;
+            log_debug("Found Lexbor body element");
+        }
+    } else if (lycon->doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
+        // Lambda CSS document - navigate DomNode tree to find body
+        log_debug("Searching for body element in Lambda CSS document");
+        DomNode* child = elmt->first_child();
+        while (child) {
+            if (child->is_element()) {
+                const char* tag_name = child->name();
+                log_debug("  Checking child element: %s", tag_name);
+                if (strcmp(tag_name, "body") == 0) {
+                    body_node = child;
+                    log_debug("Found Lambda CSS body element");
+                    break;
+                }
+            }
+            child = child->next_sibling();
+        }
+    }
+
+    if (body_node) {
+        log_debug("Laying out body element: %p", (void*)body_node);
         layout_block(lycon, body_node,
             (DisplayValue){.outer = LXB_CSS_VALUE_BLOCK, .inner = LXB_CSS_VALUE_FLOW});
     } else {
@@ -547,13 +581,19 @@ void layout_init(LayoutContext* lycon, Document* doc, UiContext* uicon) {
 
     // Process @font-face rules before layout begins
     // This is a simplified implementation - in a full system, this would be done during CSS parsing
-    if (doc && doc->dom_tree) {
-        doc->view_tree->html_version = detect_html_version(doc->dom_tree);
-
-        clog_info(font_log, "Processing @font-face rules for document");
-        // For now, we'll create a hardcoded @font-face descriptor for Liberation Sans
-        // This should be replaced with actual CSS parsing
-        parse_font_face_rule(lycon, NULL); // NULL rule for hardcoded implementation
+    if (doc) {
+        // Detect HTML version based on document type
+        if (doc->doc_type == DOC_TYPE_LEXBOR && doc->dom_tree) {
+            doc->view_tree->html_version = detect_html_version(doc->dom_tree);
+            clog_info(font_log, "Processing @font-face rules for document");
+            parse_font_face_rule(lycon, NULL); // NULL rule for hardcoded implementation
+        } else if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
+            // Lambda CSS documents are HTML5
+            doc->view_tree->html_version = HTML5;
+            clog_info(font_log, "Lambda CSS document - using HTML5 defaults");
+        } else {
+            doc->view_tree->html_version = HTML5;
+        }
     } else {
         doc->view_tree->html_version = HTML5;
     }
@@ -576,7 +616,7 @@ void layout_cleanup(LayoutContext* lycon) {
 void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     LayoutContext lycon;
     if (!doc) return;
-    log_debug("layout html doc");
+    log_debug("layout html doc - start");
     if (is_reflow) {
         // free existing view tree
         log_debug("free existing views");
@@ -584,29 +624,54 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
         view_pool_destroy(doc->view_tree);
     } else {
         doc->view_tree = (ViewTree*)calloc(1, sizeof(ViewTree));
+        log_debug("allocated view tree");
     }
     view_pool_init(doc->view_tree);
-    log_debug("start to layout DOM tree");
+    log_debug("initialized view pool");
+    log_debug("calling layout_init...");
     layout_init(&lycon, doc, uicon);
+    log_debug("layout_init complete");
 
-    lxb_html_element_t *lexbor_root = (lxb_html_element_t *)doc->dom_tree->dom_document.element;
-    // Create DomNode wrapper for root
+    // Create DomNode wrapper for root based on document type
     DomNode root_node;
     memset(&root_node, 0, sizeof(DomNode));
-    root_node.type = LEXBOR_ELEMENT;
-    root_node.lxb_node = (lxb_dom_node_t*)lexbor_root;
-    log_debug("layout html root %s", root_node.name());
 
+    if (doc->doc_type == DOC_TYPE_LEXBOR) {
+        // Lexbor HTML document
+        lxb_html_element_t *lexbor_root = (lxb_html_element_t *)doc->dom_tree->dom_document.element;
+        root_node.type = LEXBOR_ELEMENT;
+        root_node.lxb_node = (lxb_dom_node_t*)lexbor_root;
+        log_debug("layout lexbor html root %s", root_node.name());
+    } else if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
+        // Lambda CSS document - use Lambda Element with DomElement styling
+        root_node.type = MARK_ELEMENT;
+        root_node.mark_element = doc->lambda_html_root;
+        root_node.style = (Style*)doc->lambda_dom_root;  // Link to DomElement for CSS access
+        log_debug("layout lambda css html root %s", root_node.name());
+    } else {
+        log_error("Unknown document type: %d", doc->doc_type);
+        return;
+    }
+
+    log_debug("calling layout_html_root...");
     layout_html_root(&lycon, &root_node);
+    log_debug("layout_html_root complete");
 
     log_debug("end layout");
+    log_debug("calling layout_cleanup...");
     layout_cleanup(&lycon);
+    log_debug("layout_cleanup complete");
 
     // Print view tree (existing functionality)
+    log_debug("checking view tree: %p, root: %p", (void*)doc->view_tree,
+              doc->view_tree ? (void*)doc->view_tree->root : NULL);
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("DOM tree: html version %d", doc->view_tree->html_version);
+        log_debug("calling print_view_tree...");
         print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, uicon->pixel_ratio);
+        log_debug("print_view_tree complete");
     } else {
         log_debug("Warning: No view tree generated");
     }
+    log_debug("layout_html_doc complete");
 }

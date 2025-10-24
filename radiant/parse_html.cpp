@@ -144,6 +144,7 @@ Document* load_html_doc(lxb_url_t *base, char* doc_url) {
     }
     // parse the html document
     Document* doc = (Document*)calloc(1, sizeof(Document));
+    doc->doc_type = DOC_TYPE_LEXBOR;  // Mark as Lexbor document
     doc->url = url;
     parse_html_doc(doc);
     return doc;

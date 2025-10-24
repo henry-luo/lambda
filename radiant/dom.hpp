@@ -153,9 +153,21 @@ typedef struct DomNode {
     DomNode* next_sibling();
 } DomNode;
 
+typedef enum {
+    DOC_TYPE_LEXBOR,      // Parsed with Lexbor
+    DOC_TYPE_LAMBDA_CSS   // Parsed with Lambda CSS system
+} DocumentType;
+
+typedef struct DomElement DomElement;  // Forward declaration for Lambda CSS DOM
+
 typedef struct {
     lxb_url_t* url;  // document URL
-    lxb_html_document_t* dom_tree;  // current HTML document DOM tree
+    DocumentType doc_type;  // document source type
+    union {
+        lxb_html_document_t* dom_tree;     // Lexbor HTML document DOM tree
+        DomElement* lambda_dom_root;        // Lambda CSS DOM root element
+    };
+    Element* lambda_html_root;  // Lambda HTML parser root (for Lambda CSS docs)
     ViewTree* view_tree;
     StateStore* state;
 } Document;
@@ -165,4 +177,5 @@ typedef unsigned short PropValue;
 lxb_url_t* parse_lexbor_url(lxb_url_t *base, const char* doc_url);
 char* url_to_local_path(lxb_url_t *url);
 Document* load_html_doc(lxb_url_t *base, char* doc_filename);
+Document* load_lambda_html_doc(const char* html_filename, const char* css_filename, int viewport_width, int viewport_height, Pool* pool);
 void free_document(Document* doc);
