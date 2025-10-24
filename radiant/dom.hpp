@@ -47,6 +47,7 @@ extern "C" {
 #include "../lib/utf.h"
 #include "../lib/file.h"
 #include "../lambda/lambda.h"
+#include "../lambda/lambda-data.hpp"
 #ifdef __cplusplus
 }
 #endif
@@ -93,10 +94,11 @@ typedef struct DomNode {
             return (char*)"#text";
         }
         else if (type == MARK_ELEMENT && mark_element) {
-            return (char*)"#mark-element";
+            TypeElmt* elem_type = (TypeElmt*)mark_element->type;
+            return (char*)elem_type->name.str;  // Cast away const
         }
         else if (type == MARK_TEXT && mark_text) {
-            return (char*)"#mark-text";
+            return (char*)"#text";
         }
         return (char*)"#null";
     }

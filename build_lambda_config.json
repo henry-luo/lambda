@@ -1214,6 +1214,23 @@
                         "binary": "test_html_roundtrip_gtest.exe"
                     },
                     {
+                        "source": "test_lambda_domnode_gtest.cpp",
+                        "name": "🔗 Lambda DomNode Tests (GTest)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc",
+                            "lexbor"
+                        ],
+                        "additional_sources": [
+                            "radiant/dom.cpp"
+                        ],
+                        "binary": "test_lambda_domnode_gtest.exe"
+                    },
+                    {
                         "source": "test_dir_gtest.cpp",
                         "name": "📁 Directory Listing Tests (GTest)",
                         "dependencies": [
