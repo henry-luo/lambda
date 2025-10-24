@@ -817,8 +817,8 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                 }
                 break;
             default:
-                if (isdigit(ch) || ch == '.') {
-                    // Number or dimension (for cases starting with digit or decimal)
+                if (isdigit(ch)) {
+                    // Number or dimension starting with digit
                     size_t start = pos;
 
                     // Parse integer part
@@ -832,6 +832,40 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                         while (pos < length && isdigit(input[pos])) {
                             pos++;
                         }
+                    }
+
+                    // Check for dimension unit or percentage
+                    size_t number_end = pos;
+                    if (pos < length && input[pos] == '%') {
+                        pos++;
+                        token->type = CSS_TOKEN_PERCENTAGE;
+                    } else if (pos < length && (isalpha(input[pos]) || input[pos] == '_')) {
+                        // Parse unit
+                        while (pos < length && (isalnum(input[pos]) || input[pos] == '_' || input[pos] == '-')) {
+                            pos++;
+                        }
+                        token->type = CSS_TOKEN_DIMENSION;
+                    } else {
+                        token->type = CSS_TOKEN_NUMBER;
+                    }
+
+                    token->length = pos - start;
+
+                    // Parse number value
+                    char* num_str = pool_alloc(tokenizer->pool, number_end - start + 1);
+                    if (num_str) {
+                        strncpy(num_str, token->start, number_end - start);
+                        num_str[number_end - start] = '\0';
+                        token->data.number_value = atof(num_str);
+                    }
+                } else if (ch == '.' && pos + 1 < length && isdigit(input[pos + 1])) {
+                    // Decimal number starting with . (e.g., .5)
+                    size_t start = pos;
+                    pos++; // Skip the '.'
+
+                    // Parse decimal digits
+                    while (pos < length && isdigit(input[pos])) {
+                        pos++;
                     }
 
                     // Check for dimension unit or percentage

@@ -364,13 +364,40 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
         } else {
             // Failed to parse, skip to next rule
             fprintf(stderr, "[CSS Integration] ERROR: Failed to parse rule, searching for next rule\n");
-            // Look for the next closing brace or semicolon
-            while (token_index < token_count &&
-                   tokens[token_index].type != CSS_TOKEN_RIGHT_BRACE &&
-                   tokens[token_index].type != CSS_TOKEN_SEMICOLON) {
+
+            // We need to skip to the end of this failed rule's declaration block
+            // Look for the opening brace first (in case we failed before it)
+            int brace_depth = 0;
+            bool found_open_brace = false;
+
+            // Search for opening brace
+            while (token_index < token_count && !found_open_brace) {
+                if (tokens[token_index].type == CSS_TOKEN_LEFT_BRACE) {
+                    found_open_brace = true;
+                    brace_depth = 1;
+                    token_index++;
+                    break;
+                } else if (tokens[token_index].type == CSS_TOKEN_SEMICOLON) {
+                    // Hit a semicolon before opening brace, might be @-rule
+                    token_index++;
+                    break;
+                }
                 token_index++;
             }
-            if (token_index < token_count) token_index++; // skip the terminator
+
+            // If we found an opening brace, skip to matching closing brace
+            if (found_open_brace) {
+                while (token_index < token_count && brace_depth > 0) {
+                    if (tokens[token_index].type == CSS_TOKEN_LEFT_BRACE) {
+                        brace_depth++;
+                    } else if (tokens[token_index].type == CSS_TOKEN_RIGHT_BRACE) {
+                        brace_depth--;
+                    }
+                    token_index++;
+                }
+                fprintf(stderr, "[CSS Integration] Skipped to end of failed rule block\n");
+            }
+
             rules_skipped++;
         }
     }

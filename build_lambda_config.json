@@ -1390,6 +1390,19 @@
                         "binary": "test_css_tokenizer_gtest.exe"
                     },
                     {
+                        "source": "test/css/unit/test_css_tokenizer_unit.cpp",
+                        "name": "🎨 CSS Tokenizer Unit Tests (Comprehensive)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_css_tokenizer_unit.exe"
+                    },
+                    {
                         "source": "test/test_css_parser_gtest.cpp",
                         "name": "🎨 CSS Parser Tests (GTest)",
                         "dependencies": [
