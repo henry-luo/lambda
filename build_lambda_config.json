@@ -101,7 +101,8 @@
         "typeset/output/pdf_renderer.c",
         "typeset/output/pdf_renderer_enhanced.c",
         "lambda/main-repl.cpp",
-        "lambda/main.cpp"
+        "lambda/main.cpp",
+        "lambda/cmd_layout.cpp"
     ],
     "includes": [
         ".",

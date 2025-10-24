@@ -2,6 +2,7 @@
 #define CSS_STYLE_H
 
 #include "../../../lib/mempool.h"
+#include "../../../lib/log.h"
 #include "../../../lib/avl_tree.h"
 #include <stdint.h>
 #include <stdbool.h>
@@ -18,7 +19,7 @@ extern "C" {
 
 /**
  * CSS Style System
- * 
+ *
  * This file contains the final CSS style types, properties, and values
  * that are used after parsing is complete. These are the types needed
  * for the final styling and rendering system.
@@ -30,7 +31,7 @@ extern "C" {
 
 typedef enum CssUnit {
     CSS_UNIT_NONE,            // no unit (for numbers)
-    
+
     // Length units (absolute)
     CSS_UNIT_PX,              // pixels
     CSS_UNIT_CM,              // centimeters
@@ -39,7 +40,7 @@ typedef enum CssUnit {
     CSS_UNIT_PT,              // points (1/72 inch)
     CSS_UNIT_PC,              // picas (12 points)
     CSS_UNIT_Q,               // quarter-millimeters
-    
+
     // Length units (relative)
     CSS_UNIT_EM,              // relative to font size of element
     CSS_UNIT_EX,              // relative to x-height of font
@@ -55,15 +56,15 @@ typedef enum CssUnit {
     CSS_UNIT_VB,              // viewport block size percentage
     CSS_UNIT_VMIN,            // minimum of vw and vh
     CSS_UNIT_VMAX,            // maximum of vw and vh
-    
+
     // Small, large, and dynamic viewport units
     CSS_UNIT_SVW,             // small viewport width
-    CSS_UNIT_SVH,             // small viewport height  
+    CSS_UNIT_SVH,             // small viewport height
     CSS_UNIT_LVW,             // large viewport width
     CSS_UNIT_LVH,             // large viewport height
     CSS_UNIT_DVW,             // dynamic viewport width
     CSS_UNIT_DVH,             // dynamic viewport height
-    
+
     // Container query units
     CSS_UNIT_CQW,             // container query width
     CSS_UNIT_CQH,             // container query height
@@ -71,33 +72,33 @@ typedef enum CssUnit {
     CSS_UNIT_CQB,             // container query block size
     CSS_UNIT_CQMIN,           // container query minimum
     CSS_UNIT_CQMAX,           // container query maximum
-    
+
     // Angle units
     CSS_UNIT_DEG,             // degrees
     CSS_UNIT_GRAD,            // gradians
     CSS_UNIT_RAD,             // radians
     CSS_UNIT_TURN,            // turns
-    
+
     // Time units
     CSS_UNIT_S,               // seconds
     CSS_UNIT_MS,              // milliseconds
-    
+
     // Frequency units
     CSS_UNIT_HZ,              // hertz
     CSS_UNIT_KHZ,             // kilohertz
-    
+
     // Resolution units
     CSS_UNIT_DPI,             // dots per inch
     CSS_UNIT_DPCM,            // dots per centimeter
     CSS_UNIT_DPPX,            // dots per pixel
-    
+
     // Flex units
     CSS_UNIT_FR,              // flexible length for grid layouts
-    
+
     // Percentage and numbers
     CSS_UNIT_PERCENT,         // percentage
     CSS_UNIT_NUMBER,          // unitless number
-    
+
     // Special values
     CSS_UNIT_AUTO,            // auto keyword
     CSS_UNIT_INHERIT,         // inherit keyword
@@ -105,7 +106,7 @@ typedef enum CssUnit {
     CSS_UNIT_UNSET,           // unset keyword
     CSS_UNIT_REVERT,          // revert keyword
     CSS_UNIT_REVERT_LAYER,    // revert-layer keyword
-    
+
     CSS_UNIT_UNKNOWN          // unknown or invalid unit
 } CssUnit;
 
@@ -172,7 +173,7 @@ typedef enum CssValueType {
     CSS_VALUE_LIST,           // list of values
     CSS_VALUE_FUNCTION,       // function values
     CSS_VALUE_VAR,            // var() function
-    CSS_VALUE_ENV,            // env() function  
+    CSS_VALUE_ENV,            // env() function
     CSS_VALUE_ATTR,           // attr() function
     CSS_VALUE_ENHANCED_VAR,   // enhanced var() function
     CSS_VALUE_ENHANCED_CALC,  // enhanced calc() function
@@ -228,7 +229,7 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_CLIP,
     CSS_PROPERTY_CLIP_PATH,
     CSS_PROPERTY_VISIBILITY,
-    
+
     // Box Model Properties
     CSS_PROPERTY_WIDTH,
     CSS_PROPERTY_HEIGHT,
@@ -237,7 +238,7 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_MAX_WIDTH,
     CSS_PROPERTY_MAX_HEIGHT,
     CSS_PROPERTY_BOX_SIZING,
-    
+
     // Margin Properties
     CSS_PROPERTY_MARGIN,
     CSS_PROPERTY_MARGIN_TOP,
@@ -250,7 +251,7 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_MARGIN_INLINE,
     CSS_PROPERTY_MARGIN_INLINE_START,
     CSS_PROPERTY_MARGIN_INLINE_END,
-    
+
     // Padding Properties
     CSS_PROPERTY_PADDING,
     CSS_PROPERTY_PADDING_TOP,
@@ -263,7 +264,7 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_PADDING_INLINE,
     CSS_PROPERTY_PADDING_INLINE_START,
     CSS_PROPERTY_PADDING_INLINE_END,
-    
+
     // Border Properties
     CSS_PROPERTY_BORDER,
     CSS_PROPERTY_BORDER_WIDTH,
@@ -273,31 +274,31 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_BORDER_RIGHT,
     CSS_PROPERTY_BORDER_BOTTOM,
     CSS_PROPERTY_BORDER_LEFT,
-    
+
     // Individual border width properties
     CSS_PROPERTY_BORDER_TOP_WIDTH,
     CSS_PROPERTY_BORDER_RIGHT_WIDTH,
     CSS_PROPERTY_BORDER_BOTTOM_WIDTH,
     CSS_PROPERTY_BORDER_LEFT_WIDTH,
-    
+
     // Individual border style properties
     CSS_PROPERTY_BORDER_TOP_STYLE,
     CSS_PROPERTY_BORDER_RIGHT_STYLE,
     CSS_PROPERTY_BORDER_BOTTOM_STYLE,
     CSS_PROPERTY_BORDER_LEFT_STYLE,
-    
+
     // Individual border color properties
     CSS_PROPERTY_BORDER_TOP_COLOR,
     CSS_PROPERTY_BORDER_RIGHT_COLOR,
     CSS_PROPERTY_BORDER_BOTTOM_COLOR,
     CSS_PROPERTY_BORDER_LEFT_COLOR,
-    
+
     CSS_PROPERTY_BORDER_RADIUS,
     CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS,
     CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS,
     CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS,
     CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS,
-    
+
     // Background Properties
     CSS_PROPERTY_BACKGROUND,
     CSS_PROPERTY_BACKGROUND_COLOR,
@@ -308,7 +309,7 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_BACKGROUND_ATTACHMENT,
     CSS_PROPERTY_BACKGROUND_ORIGIN,
     CSS_PROPERTY_BACKGROUND_CLIP,
-    
+
     // Typography Properties
     CSS_PROPERTY_FONT,
     CSS_PROPERTY_FONT_FAMILY,
@@ -330,7 +331,7 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_COLOR,
     CSS_PROPERTY_OPACITY,
     CSS_PROPERTY_CURSOR,
-    
+
     // Flexbox Properties
     CSS_PROPERTY_FLEX,
     CSS_PROPERTY_FLEX_DIRECTION,
@@ -344,7 +345,7 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_FLEX_SHRINK,
     CSS_PROPERTY_FLEX_BASIS,
     CSS_PROPERTY_ORDER,
-    
+
     // Grid Properties
     CSS_PROPERTY_GRID,
     CSS_PROPERTY_GRID_TEMPLATE,
@@ -361,15 +362,15 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_GRID_ROW_END,
     CSS_PROPERTY_GRID_COLUMN_START,
     CSS_PROPERTY_GRID_COLUMN_END,
-    
-    // Grid gap properties 
+
+    // Grid gap properties
     CSS_PROPERTY_GRID_ROW_GAP,
     CSS_PROPERTY_GRID_COLUMN_GAP,
     CSS_PROPERTY_GRID_GAP,
     CSS_PROPERTY_GAP,
     CSS_PROPERTY_ROW_GAP,
     CSS_PROPERTY_COLUMN_GAP,
-    
+
     // Transform Properties
     CSS_PROPERTY_TRANSFORM,
     CSS_PROPERTY_TRANSFORM_ORIGIN,
@@ -377,7 +378,7 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_PERSPECTIVE,
     CSS_PROPERTY_PERSPECTIVE_ORIGIN,
     CSS_PROPERTY_BACKFACE_VISIBILITY,
-    
+
     // Animation Properties
     CSS_PROPERTY_ANIMATION,
     CSS_PROPERTY_ANIMATION_NAME,
@@ -388,18 +389,18 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_ANIMATION_DIRECTION,
     CSS_PROPERTY_ANIMATION_FILL_MODE,
     CSS_PROPERTY_ANIMATION_PLAY_STATE,
-    
+
     // Transition Properties
     CSS_PROPERTY_TRANSITION,
     CSS_PROPERTY_TRANSITION_PROPERTY,
     CSS_PROPERTY_TRANSITION_DURATION,
     CSS_PROPERTY_TRANSITION_TIMING_FUNCTION,
     CSS_PROPERTY_TRANSITION_DELAY,
-    
+
     // Filter Properties
     CSS_PROPERTY_FILTER,
     CSS_PROPERTY_BACKDROP_FILTER,
-    
+
     // Logical Properties
     CSS_PROPERTY_BLOCK_SIZE,
     CSS_PROPERTY_INLINE_SIZE,
@@ -414,15 +415,15 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_INSET_INLINE,
     CSS_PROPERTY_INSET_INLINE_START,
     CSS_PROPERTY_INSET_INLINE_END,
-    
+
     // Container Queries
     CSS_PROPERTY_CONTAINER,
     CSS_PROPERTY_CONTAINER_TYPE,
     CSS_PROPERTY_CONTAINER_NAME,
-    
+
     // CSS Nesting
     CSS_PROPERTY_NESTING,
-    
+
     // Multi-column Layout Properties
     CSS_PROPERTY_COLUMN_WIDTH,
     CSS_PROPERTY_COLUMN_COUNT,
@@ -433,8 +434,8 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_COLUMN_RULE_COLOR,
     CSS_PROPERTY_COLUMN_SPAN,
     CSS_PROPERTY_COLUMN_FILL,
-    
-    // Text Effects Properties  
+
+    // Text Effects Properties
     CSS_PROPERTY_TEXT_DECORATION_LINE,
     CSS_PROPERTY_TEXT_DECORATION_STYLE,
     CSS_PROPERTY_TEXT_DECORATION_COLOR,
@@ -454,20 +455,20 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_TEXT_JUSTIFY,
     CSS_PROPERTY_TEXT_ALIGN_ALL,
     CSS_PROPERTY_TEXT_ALIGN_LAST,
-    
+
     // List Properties
     CSS_PROPERTY_LIST_STYLE,
     CSS_PROPERTY_LIST_STYLE_TYPE,
     CSS_PROPERTY_LIST_STYLE_POSITION,
     CSS_PROPERTY_LIST_STYLE_IMAGE,
-    
+
     // Table Properties
     CSS_PROPERTY_BORDER_COLLAPSE,
     CSS_PROPERTY_BORDER_SPACING,
     CSS_PROPERTY_CAPTION_SIDE,
     CSS_PROPERTY_EMPTY_CELLS,
     CSS_PROPERTY_TABLE_LAYOUT,
-    
+
     // User Interface Properties
     CSS_PROPERTY_RESIZE,
     CSS_PROPERTY_CARET_COLOR,
@@ -478,7 +479,7 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_NAV_LEFT,
     CSS_PROPERTY_APPEARANCE,
     CSS_PROPERTY_USER_SELECT,
-    
+
     // Paged Media Properties
     CSS_PROPERTY_PAGE_BREAK_BEFORE,
     CSS_PROPERTY_PAGE_BREAK_AFTER,
@@ -488,14 +489,14 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_BREAK_BEFORE,
     CSS_PROPERTY_BREAK_AFTER,
     CSS_PROPERTY_BREAK_INSIDE,
-    
+
     // Generated Content Properties
     CSS_PROPERTY_CONTENT,
     CSS_PROPERTY_QUOTES,
     CSS_PROPERTY_COUNTER_RESET,
     CSS_PROPERTY_COUNTER_INCREMENT,
     CSS_PROPERTY_MARKER_OFFSET,
-    
+
     // Miscellaneous Properties
     CSS_PROPERTY_ISOLATION,
     CSS_PROPERTY_MIX_BLEND_MODE,
@@ -504,22 +505,22 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_IMAGE_RENDERING,
     CSS_PROPERTY_IMAGE_ORIENTATION,
     CSS_PROPERTY_MASK_TYPE,
-    
+
     // Writing Modes Properties
     CSS_PROPERTY_DIRECTION,
     CSS_PROPERTY_UNICODE_BIDI,
     CSS_PROPERTY_WRITING_MODE,
     CSS_PROPERTY_TEXT_ORIENTATION,
     CSS_PROPERTY_TEXT_COMBINE_UPRIGHT,
-    
+
     // Overflow Properties
     CSS_PROPERTY_OVERFLOW_BLOCK,
     CSS_PROPERTY_OVERFLOW_INLINE,
     CSS_PROPERTY_OVERFLOW_CLIP_MARGIN,
-    
+
     // Pointer Events
     CSS_PROPERTY_POINTER_EVENTS,
-    
+
     // Scrolling Properties
     CSS_PROPERTY_SCROLL_BEHAVIOR,
     CSS_PROPERTY_OVERSCROLL_BEHAVIOR,
@@ -527,11 +528,11 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_SCROLL_SNAP_ALIGN,
     CSS_PROPERTY_SCROLL_MARGIN,
     CSS_PROPERTY_SCROLL_PADDING,
-    
+
     // Ruby Annotation Properties
     CSS_PROPERTY_RUBY_ALIGN,
     CSS_PROPERTY_RUBY_POSITION,
-    
+
     // Additional Font Properties
     CSS_PROPERTY_FONT_SIZE_ADJUST,
     CSS_PROPERTY_FONT_KERNING,
@@ -545,12 +546,12 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_FONT_OPTICAL_SIZING,
     CSS_PROPERTY_FONT_VARIATION_SETTINGS,
     CSS_PROPERTY_FONT_DISPLAY,
-    
+
     // Background Properties (additional)
     CSS_PROPERTY_BACKGROUND_POSITION_X,
     CSS_PROPERTY_BACKGROUND_POSITION_Y,
     CSS_PROPERTY_BACKGROUND_BLEND_MODE,
-    
+
     // Border Properties (additional)
     CSS_PROPERTY_BORDER_IMAGE,
     CSS_PROPERTY_BORDER_IMAGE_SOURCE,
@@ -563,26 +564,26 @@ typedef enum CssPropertyId {
     CSS_PROPERTY_OUTLINE_WIDTH,
     CSS_PROPERTY_OUTLINE_COLOR,
     CSS_PROPERTY_OUTLINE_OFFSET,
-    
+
     // Box Shadow
     CSS_PROPERTY_BOX_SHADOW,
-    
+
     // Float Properties (additional)
     CSS_PROPERTY_FLOAT_REFERENCE,
     CSS_PROPERTY_FLOAT_DEFER,
     CSS_PROPERTY_FLOAT_OFFSET,
     CSS_PROPERTY_WRAP_FLOW,
     CSS_PROPERTY_WRAP_THROUGH,
-    
+
     // Baseline Properties
     CSS_PROPERTY_DOMINANT_BASELINE,
     CSS_PROPERTY_ALIGNMENT_BASELINE,
     CSS_PROPERTY_BASELINE_SHIFT,
     CSS_PROPERTY_BASELINE_SOURCE,
-    
+
     // Custom Properties (CSS Variables)
     CSS_PROPERTY_CUSTOM,
-    
+
     CSS_PROPERTY_COUNT,
     CSS_PROPERTY_UNKNOWN = -1
 } CssPropertyId;
@@ -633,19 +634,19 @@ typedef struct CssValue {
             double value;
             CssUnit unit;
         } length;
-        
+
         struct {
             double value;
         } percentage;
-        
+
         struct {
             double value;
         } number;
-        
+
         struct {
             int value;
         } integer;
-        
+
         // Color value
         struct {
             CssColorType type;
@@ -658,54 +659,54 @@ typedef struct CssValue {
                 const char* keyword;
             } data;
         } color;
-        
+
         // String value
         const char* string;
-        
+
         // URL value
         const char* url;
-        
+
         // Keyword value
         const char* keyword;
-        
+
         // Color hex value (legacy support)
         const char* color_hex;
-        
+
         // Unicode range value
         const char* unicode_range;
-        
+
         // Custom property reference
         struct {
             const char* name;
             struct CssValue* fallback;
         } custom_property;
-        
+
         // List of values
         struct {
             struct CssValue** values;
             size_t count;
             bool comma_separated;
         } list;
-        
+
         // Function value
         struct {
             const char* name;
             struct CssValue** args;
             size_t arg_count;
         } function;
-        
+
         // CSS Variable reference
         CSSVarRef* var_ref;
-        
+
         // Environment variable reference
         CSSEnvRef* env_ref;
-        
+
         // Attribute reference
         CSSAttrRef* attr_ref;
-        
+
         // Color mix function
         CSSColorMix* color_mix;
-        
+
         // Calc expression
         CssCalcNode* calc_expression;
     } data;
@@ -743,7 +744,7 @@ typedef struct CssDeclaration {
     bool important;           // !important flag
     const char* source_file;  // Source file (for debugging)
     int source_line;          // Source line (for debugging)
-    
+
     // Memory management and validation
     bool valid;               // Validation flag
     int ref_count;            // Reference counting for memory management
@@ -764,7 +765,7 @@ typedef struct CssStyleNode {
 typedef struct CssComputedStyle {
     AvlTree* properties;      // Tree of CssStyleNode
     Pool* pool;               // Memory pool for allocations
-    
+
     // Cached frequently accessed properties
     CssValue* display;
     CssValue* position;
@@ -774,7 +775,7 @@ typedef struct CssComputedStyle {
     CssValue* background_color;
     CssValue* font_size;
     CssValue* font_family;
-    
+
     // Inheritance chain
     struct CssComputedStyle* parent;
     bool is_root;
@@ -812,10 +813,10 @@ typedef enum CssRuleType {
 typedef struct CssRule {
     CssRuleType type;
     Pool* pool;
-    
+
     // Common rule members (for compatibility with parsing code)
     struct CSSComplexSelector* selector_list;  // List of selectors for this rule
-    
+
     // Rule content varies by type
     union {
         struct {
@@ -823,40 +824,40 @@ typedef struct CssRule {
             CssDeclaration** declarations;
             size_t declaration_count;
         } style_rule;
-        
+
         struct {
             const char* condition;
             CssRule** rules;
             size_t rule_count;
         } conditional_rule; // For @media, @supports, @container, etc.
-        
+
         struct {
             const char* url;
             const char* media;
         } import_rule;
-        
+
         struct {
             const char* charset;
         } charset_rule;
-        
+
         struct {
             const char* prefix;
             const char* namespace_url;
         } namespace_rule;
     } data;
-    
+
     // Source information
     CssOrigin origin;
     uint32_t source_order;
-    
+
     // Parent rule (for nested rules)
     CssRule* parent;
-    
+
     // Legacy compatibility fields (for older code that expects these)
     size_t property_count;       // Number of properties in this rule
     CssValue** property_values;  // Array of property values
     const char** property_names; // Array of property names
-    
+
     // Specificity caching for performance
     bool specificity_computed;   // Whether specificity has been calculated
     uint32_t cached_specificity; // Cached specificity value
@@ -865,12 +866,12 @@ typedef struct CssRule {
 // CSS Stylesheet structure
 typedef struct CssStylesheet {
     Pool* pool;
-    
+
     // Rules in the stylesheet
     CssRule** rules;
     size_t rule_count;
     size_t rule_capacity;
-    
+
     // Stylesheet metadata
     const char* title;
     const char* href;
@@ -878,26 +879,26 @@ typedef struct CssStylesheet {
     const char* origin_url;      // URL where stylesheet was loaded from
     CssOrigin origin;
     bool disabled;
-    
+
     // Source information
     const char* source_text;
     size_t source_length;
-    
+
     // Performance metrics
     double parse_time;           // Time taken to parse the stylesheet
-    
+
     // Import information
     struct CssStylesheet* parent_stylesheet;
     struct CssStylesheet** imported_stylesheets;
     size_t imported_count;
-    
+
     // Namespace declarations
     struct {
         const char* prefix;
         const char* url;
     }* namespaces;
     size_t namespace_count;
-    
+
     // Feature flags
     bool uses_nesting;           // Whether the stylesheet uses CSS nesting
     bool uses_custom_properties; // Whether the stylesheet uses custom properties
@@ -982,7 +983,7 @@ void css_inherit_properties(CssComputedStyle* style, const CssComputedStyle* par
 
 /**
  * CSS Property System
- * 
+ *
  * This system provides a comprehensive database of CSS properties with their
  * types, validation rules, inheritance behavior, and initial values.
  * It's designed to integrate with the AVL tree style system.
@@ -1034,10 +1035,10 @@ typedef struct CssProperty {
     bool shorthand;              // Whether this is a shorthand property
     CssPropertyId* longhand_props; // Array of longhand properties (for shorthands)
     int longhand_count;          // Number of longhand properties
-    
+
     // Validation function pointer
     bool (*validate_value)(const char* value_str, void** parsed_value, Pool* pool);
-    
+
     // Value computation function
     void* (*compute_value)(void* specified_value, void* parent_value, Pool* pool);
 } CssProperty;
@@ -1114,8 +1115,8 @@ bool css_property_is_shorthand(CssPropertyId property_id);
  * @param max_count Maximum number of longhand properties to return
  * @return Number of longhand properties returned
  */
-int css_property_get_longhand_properties(CssPropertyId shorthand_id, 
-                                        CssPropertyId* longhand_ids, 
+int css_property_get_longhand_properties(CssPropertyId shorthand_id,
+                                        CssPropertyId* longhand_ids,
                                         int max_count);
 
 /**
@@ -1134,9 +1135,9 @@ void* css_property_get_initial_value(CssPropertyId property_id, Pool* pool);
  * @param pool Memory pool for allocations
  * @return true if valid, false otherwise
  */
-bool css_property_validate_and_parse(CssPropertyId property_id, 
-                                     const char* value_str, 
-                                     void** parsed_value, 
+bool css_property_validate_and_parse(CssPropertyId property_id,
+                                     const char* value_str,
+                                     void** parsed_value,
                                      Pool* pool);
 
 /**
@@ -1245,7 +1246,7 @@ int css_property_get_count(void);
  * @param context User context passed to callback
  * @return Number of properties processed
  */
-int css_property_foreach(bool (*callback)(const CssProperty* prop, void* context), 
+int css_property_foreach(bool (*callback)(const CssProperty* prop, void* context),
                         void* context);
 
 // ============================================================================
@@ -1254,7 +1255,7 @@ int css_property_foreach(bool (*callback)(const CssProperty* prop, void* context
 
 /**
  * CSS Properties Compatibility
- * 
+ *
  * This section provides compatibility aliases for legacy code
  * that may be using older property type names or function signatures.
  */
@@ -1264,7 +1265,7 @@ typedef CssPropertyId CSSPropertyID;
 typedef CssValue CSSPropertyValue;
 typedef CssValueType CSSPropertyType;
 
-// Legacy enum aliases for property types 
+// Legacy enum aliases for property types
 #define CSS_PROP_TYPE_KEYWORD CSS_VALUE_KEYWORD
 #define CSS_PROP_TYPE_LENGTH CSS_VALUE_LENGTH
 #define CSS_PROP_TYPE_PERCENTAGE CSS_VALUE_PERCENTAGE
@@ -1276,7 +1277,7 @@ typedef CssValueType CSSPropertyType;
 #define CSS_PROP_TYPE_CUSTOM CSS_VALUE_CUSTOM
 #define CSS_PROP_TYPE_UNKNOWN CSS_VALUE_UNKNOWN
 
-// Legacy property ID aliases  
+// Legacy property ID aliases
 #define CSS_PROP_COLOR CSS_PROPERTY_COLOR
 #define CSS_PROP_BACKGROUND_COLOR CSS_PROPERTY_BACKGROUND_COLOR
 #define CSS_PROP_FONT_SIZE CSS_PROPERTY_FONT_SIZE
@@ -1315,9 +1316,9 @@ CssPropertyId css_property_id_from_name(const char* name);
 const char* css_property_name_from_id(CssPropertyId id);
 CssValueType css_property_get_expected_type(CssPropertyId id);
 bool css_property_validate_value(CssPropertyId id, CssValue* value);
-bool css_property_validate_value_from_string(CssPropertyId property_id, 
-                                            const char* value_str, 
-                                            void** parsed_value, 
+bool css_property_validate_value_from_string(CssPropertyId property_id,
+                                            const char* value_str,
+                                            void** parsed_value,
                                             Pool* pool);
 
 // Property parsing functions

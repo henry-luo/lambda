@@ -575,6 +575,7 @@ project "lambda"
         "typeset/output/pdf_renderer_enhanced.c",
         "lambda/main-repl.cpp",
         "lambda/main.cpp",
+        "lambda/cmd_layout.cpp",
         "lambda/input/mime-types.c",
         "lambda/input/mime-detect.c",
         "lambda/input/css/css_tokenizer.c",
