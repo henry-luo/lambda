@@ -13,7 +13,7 @@ extern "C" {
 
 /**
  * CSS Parser System
- * 
+ *
  * This file contains types, structures, and functions that are only needed
  * during CSS parsing. These include tokenizer types, selector parsing,
  * calc() expression parsing, and other intermediate parsing structures.
@@ -57,7 +57,7 @@ typedef enum CssTokenType {
     CSS_TOKEN_BAD_URL,         // malformed URL
     CSS_TOKEN_IDENTIFIER,      // alias for CSS_TOKEN_IDENT
     CSS_TOKEN_MATCH,           // generic match tokenization error
-    
+
     // CSS3+ specific tokens
     CSS_TOKEN_CDO,             // <!--
     CSS_TOKEN_CDC,             // -->
@@ -106,7 +106,7 @@ typedef struct CssToken {
         CssHashType hash_type; // for HASH tokens
         char delimiter;        // for DELIM tokens
     } data;
-    
+
     // Parse location metadata
     int line;
     int column;
@@ -171,7 +171,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_TYPE_CLASS,        // .classname
     CSS_SELECTOR_TYPE_ID,           // #identifier
     CSS_SELECTOR_TYPE_UNIVERSAL,    // *
-    
+
     // Attribute selectors
     CSS_SELECTOR_ATTR_EXACT,        // [attr="value"]
     CSS_SELECTOR_ATTR_CONTAINS,     // [attr~="value"]
@@ -182,7 +182,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_ATTR_EXISTS,       // [attr]
     CSS_SELECTOR_ATTR_CASE_INSENSITIVE, // [attr="value" i]
     CSS_SELECTOR_ATTR_CASE_SENSITIVE,   // [attr="value" s]
-    
+
     // Pseudo-classes (structural)
     CSS_SELECTOR_PSEUDO_ROOT,           // :root
     CSS_SELECTOR_PSEUDO_EMPTY,          // :empty
@@ -196,7 +196,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_NTH_LAST_CHILD, // :nth-last-child(an+b)
     CSS_SELECTOR_PSEUDO_NTH_OF_TYPE,    // :nth-of-type(an+b)
     CSS_SELECTOR_PSEUDO_NTH_LAST_OF_TYPE, // :nth-last-of-type(an+b)
-    
+
     // Pseudo-classes (user interaction)
     CSS_SELECTOR_PSEUDO_HOVER,         // :hover
     CSS_SELECTOR_PSEUDO_ACTIVE,        // :active
@@ -211,7 +211,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_INDETERMINATE, // :indeterminate
     CSS_SELECTOR_PSEUDO_VALID,         // :valid
     CSS_SELECTOR_PSEUDO_INVALID,       // :invalid
-    
+
     // Pseudo-classes (CSS4+)
     CSS_SELECTOR_PSEUDO_HAS,            // :has()
     CSS_SELECTOR_PSEUDO_IS,             // :is()
@@ -227,7 +227,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_TARGET,         // :target
     CSS_SELECTOR_PSEUDO_TARGET_WITHIN,  // :target-within
     CSS_SELECTOR_PSEUDO_SCOPE,          // :scope
-    
+
     // Form-related pseudo-classes (CSS4)
     CSS_SELECTOR_PSEUDO_REQUIRED,       // :required
     CSS_SELECTOR_PSEUDO_OPTIONAL,       // :optional
@@ -238,7 +238,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_IN_RANGE,       // :in-range
     CSS_SELECTOR_PSEUDO_OUT_OF_RANGE,   // :out-of-range
     CSS_SELECTOR_PSEUDO_FULLSCREEN,     // :fullscreen
-    
+
     // Pseudo-elements
     CSS_SELECTOR_PSEUDO_ELEMENT_BEFORE,     // ::before
     CSS_SELECTOR_PSEUDO_ELEMENT_AFTER,      // ::after
@@ -258,14 +258,14 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_ELEMENT_VIEW_TRANSITION_IMAGE_PAIR, // ::view-transition-image-pair
     CSS_SELECTOR_PSEUDO_ELEMENT_VIEW_TRANSITION_OLD, // ::view-transition-old
     CSS_SELECTOR_PSEUDO_ELEMENT_VIEW_TRANSITION_NEW, // ::view-transition-new
-    
+
     // Combinators
     CSS_SELECTOR_COMBINATOR_DESCENDANT,     // space
     CSS_SELECTOR_COMBINATOR_CHILD,          // >
     CSS_SELECTOR_COMBINATOR_NEXT_SIBLING,   // +
     CSS_SELECTOR_COMBINATOR_SUBSEQUENT_SIBLING, // ~
     CSS_SELECTOR_COMBINATOR_COLUMN,         // ||
-    
+
     // CSS4 additional pseudo-classes
     CSS_SELECTOR_PSEUDO_PLAYING,            // :playing
     CSS_SELECTOR_PSEUDO_PAUSED,             // :paused
@@ -277,7 +277,7 @@ typedef enum CssSelectorType {
     CSS_SELECTOR_PSEUDO_PICTURE_IN_PICTURE, // :picture-in-picture
     CSS_SELECTOR_PSEUDO_USER_INVALID,       // :user-invalid
     CSS_SELECTOR_PSEUDO_USER_VALID,         // :user-valid
-    
+
     // CSS Nesting
     CSS_SELECTOR_NESTING,                    // &
     CSS_SELECTOR_NESTING_PARENT,             // & (parent selector)
@@ -306,20 +306,20 @@ typedef struct CssNthFormula {
 typedef struct CssSimpleSelector {
     CssSelectorType type;
     const char* value;          // element name, class, id, etc.
-    
+
     // Attribute selector data
     struct {
         const char* name;
         const char* value;
         bool case_insensitive;
     } attribute;
-    
+
     // nth-child/nth-of-type data
     CssNthFormula nth_formula;
-    
+
     // Pseudo-class argument (for :lang(), :dir(), etc.)
     const char* argument;
-    
+
     // Function selectors (:is(), :where(), :has(), :not())
     struct CssSelector** function_selectors;
     size_t function_selector_count;
@@ -400,7 +400,7 @@ typedef struct CssCalcToken {
 typedef struct CssCalcNode {
     CssCalcOperator op;
     CssValueType value_type;
-    
+
     // Value data
     union {
         double number;
@@ -408,16 +408,16 @@ typedef struct CssCalcNode {
             double value;
             CssUnit unit;
         } dimension;
-        
+
         // For binary operators
         struct {
             struct CssCalcNode* left;
             struct CssCalcNode* right;
         } binary;
-        
+
         // For unary operators
         struct CssCalcNode* operand;
-        
+
         // For function calls
         struct {
             struct CssCalcNode** args;
@@ -565,14 +565,34 @@ void css_token_fix_common_errors(CssToken* token, Pool* pool);
 // Tokenizer creation and management
 CssTokenizer* css_tokenizer_enhanced_create(Pool* pool);
 void css_tokenizer_enhanced_destroy(CssTokenizer* tokenizer);
-int css_tokenizer_enhanced_tokenize(CssTokenizer* tokenizer, 
-                                   const char* input, size_t length, 
+int css_tokenizer_enhanced_tokenize(CssTokenizer* tokenizer,
+                                   const char* input, size_t length,
                                    CssToken** tokens);
 
 // Tokenizer aliases for compatibility
 #define css_tokenizer_create css_tokenizer_enhanced_create
 #define css_tokenizer_destroy css_tokenizer_enhanced_destroy
 #define css_tokenizer_tokenize css_tokenizer_enhanced_tokenize
+
+// ============================================================================
+// CSS Rule Parsing Functions (from css_parser.c)
+// ============================================================================
+
+// Token navigation helpers
+int css_skip_whitespace_tokens(const CssToken* tokens, int start, int token_count);
+
+// Selector parsing
+CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool);
+
+// Declaration parsing
+CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool);
+
+// Rule parsing
+int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count, Pool* pool, CssRule** out_rule);
+CssRule* css_parse_rule_from_tokens(const CssToken* tokens, int token_count, Pool* pool);
+
+// Backward compatibility wrapper
+CssRule* css_enhanced_parse_rule_from_tokens(const CssToken* tokens, int token_count, Pool* pool);
 
 #ifdef __cplusplus
 }

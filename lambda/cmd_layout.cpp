@@ -27,6 +27,7 @@ extern "C" {
 #include "input/css/css_style_node.h"
 #include "input/css/dom_element.h"
 #include "input/css/selector_matcher.h"
+#include "input/css/document_styler.h"
 }
 
 #include "../radiant/dom.hpp"
@@ -298,11 +299,19 @@ int cmd_layout(int argc, char** argv) {
     log_debug("Created DOM element wrapper for styling");
 
     // Apply CSS stylesheet if available
-    if (stylesheet && css_dom->specified_style) {
-        log_debug("Applying CSS stylesheet...");
+    if (stylesheet) {
+        log_debug("CSS stylesheet parsed: %d rules", stylesheet->rule_count);
 
-        // Apply styles - this would normally involve selector matching
-        // For now, just report that the stylesheet was parsed
+        // TODO: Implement CSS rule application to DOM tree
+        // This requires:
+        // 1. Walking the DOM tree recursively
+        // 2. For each element, matching selectors from the stylesheet
+        // 3. Applying matched CSS declarations to the element's computed style
+        // 4. Handling cascading and specificity
+        //
+        // For now, the stylesheet is parsed but not yet applied to elements.
+        // The selector_matcher.c provides the matching logic that needs to be used here.
+
         CssEngineStats stats = css_engine_get_stats(css_engine);
         log_debug("CSS Statistics:");
         log_debug("  Rules processed: %zu", stats.rules_processed);
@@ -311,6 +320,8 @@ int cmd_layout(int argc, char** argv) {
         if (stats.parse_errors > 0) {
             log_debug("  Parse errors: %zu", stats.parse_errors);
         }
+    } else {
+        log_debug("No stylesheet to apply (CSS file not provided or parsing failed)");
     }
 
     // Create DomNode wrapper for layout computation
