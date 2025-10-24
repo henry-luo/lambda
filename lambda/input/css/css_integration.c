@@ -258,9 +258,16 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 
     clock_t start_time = clock();
 
+    fprintf(stderr, "[CSS Integration] Starting enhanced CSS parsing\n");
+    fprintf(stderr, "[CSS Integration] Input length: %zu chars\n", strlen(css_text));
+    fprintf(stderr, "[CSS Integration] Base URL: %s\n", base_url ? base_url : "(none)");
     log_debug("Starting enhanced CSS parsing");
+
     CssStylesheet* stylesheet = (CssStylesheet*)pool_calloc(engine->pool, sizeof(CssStylesheet));
-    if (!stylesheet) return NULL;
+    if (!stylesheet) {
+        fprintf(stderr, "[CSS Integration] ERROR: Failed to allocate stylesheet\n");
+        return NULL;
+    }
 
     // Set stylesheet metadata
     if (base_url) {
@@ -278,29 +285,45 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 
     // Tokenize the CSS
     CssToken* tokens;
+    fprintf(stderr, "[CSS Integration] Starting tokenization...\n");
     log_debug("Tokenizing CSS input");
     int token_count = css_tokenizer_enhanced_tokenize(engine->tokenizer, css_text, strlen(css_text), &tokens);
 
     if (token_count <= 0) {
+        fprintf(stderr, "[CSS Integration] WARNING: Tokenization returned %d tokens\n", token_count);
         clock_t end_time = clock();
         stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
         return stylesheet;
     }
 
+    fprintf(stderr, "[CSS Integration] Tokenization complete: %d tokens\n", token_count);
+
     // Parse rules from tokens
-    fprintf(stderr, "[DEBUG] Parsing CSS rules from %d tokens\n", token_count);
+    fprintf(stderr, "[CSS Integration] Parsing CSS rules from %d tokens\n", token_count);
     log_debug("Parsing CSS rules from %d tokens", token_count);
 
     int token_index = 0;
+    int rules_parsed = 0;
+    int rules_skipped = 0;
+
     while (token_index < token_count) {
         // Skip whitespace between rules
+        int whitespace_start = token_index;
         while (token_index < token_count &&
                (tokens[token_index].type == CSS_TOKEN_WHITESPACE ||
                 tokens[token_index].type == CSS_TOKEN_COMMENT)) {
             token_index++;
         }
 
+        if (token_index > whitespace_start) {
+            fprintf(stderr, "[CSS Integration] Skipped %d whitespace/comment tokens\n",
+                    token_index - whitespace_start);
+        }
+
         if (token_index >= token_count) break;
+
+        fprintf(stderr, "[CSS Integration] Parsing rule starting at token %d (type=%d)\n",
+                token_index, tokens[token_index].type);
 
         // Parse a rule
         CssRule* rule = NULL;
@@ -308,13 +331,18 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
             tokens + token_index, token_count - token_index, engine->pool, &rule);
 
         if (tokens_consumed > 0) {
+            fprintf(stderr, "[CSS Integration] Consumed %d tokens, rule=%p\n",
+                    tokens_consumed, (void*)rule);
             token_index += tokens_consumed;
 
             if (rule) {
+                rules_parsed++;
                 // Add rule to stylesheet
                 if (stylesheet->rule_count >= stylesheet->rule_capacity) {
                     // Expand capacity
                     stylesheet->rule_capacity *= 2;
+                    fprintf(stderr, "[CSS Integration] Expanding rule capacity to %zu\n",
+                            stylesheet->rule_capacity);
                     CssRule** new_rules = (CssRule**)pool_alloc(engine->pool,
                                                                              stylesheet->rule_capacity * sizeof(CssRule*));
                     if (new_rules) {
@@ -329,9 +357,13 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
                     // Update feature usage flags
                     css_enhanced_detect_features_in_rule(stylesheet, rule);
                 }
+            } else {
+                rules_skipped++;
+                fprintf(stderr, "[CSS Integration] Rule was NULL (likely @-rule, skipped)\n");
             }
         } else {
             // Failed to parse, skip to next rule
+            fprintf(stderr, "[CSS Integration] ERROR: Failed to parse rule, searching for next rule\n");
             // Look for the next closing brace or semicolon
             while (token_index < token_count &&
                    tokens[token_index].type != CSS_TOKEN_RIGHT_BRACE &&
@@ -339,10 +371,12 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
                 token_index++;
             }
             if (token_index < token_count) token_index++; // skip the terminator
+            rules_skipped++;
         }
     }
 
-    fprintf(stderr, "[DEBUG] Parsed %zu CSS rules\n", stylesheet->rule_count);
+    fprintf(stderr, "[CSS Integration] Parsed %d CSS rules (%d skipped)\n", rules_parsed, rules_skipped);
+    fprintf(stderr, "[CSS Integration] Total rules in stylesheet: %zu\n", stylesheet->rule_count);
     log_debug("Parsed %zu CSS rules", stylesheet->rule_count);
 
     clock_t end_time = clock();
