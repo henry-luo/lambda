@@ -293,6 +293,7 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
         fprintf(stderr, "[CSS Integration] WARNING: Tokenization returned %d tokens\n", token_count);
         clock_t end_time = clock();
         stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
+        engine->stats.stylesheets_parsed++;
         return stylesheet;
     }
 
@@ -411,6 +412,7 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
 
     // Update engine statistics
     engine->stats.rules_parsed += stylesheet->rule_count;
+    engine->stats.stylesheets_parsed++;
     engine->stats.parse_time += stylesheet->parse_time;
     log_debug("Finished enhanced CSS parsing");
 

@@ -138,6 +138,12 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     // Expect property name (identifier)
     if (tokens[*pos].type != CSS_TOKEN_IDENT) {
         fprintf(stderr, "[CSS Parser] Expected IDENT for property, got token type %d\n", tokens[*pos].type);
+        // Skip to next semicolon or right brace to avoid infinite loop
+        while (*pos < token_count &&
+               tokens[*pos].type != CSS_TOKEN_SEMICOLON &&
+               tokens[*pos].type != CSS_TOKEN_RIGHT_BRACE) {
+            (*pos)++;
+        }
         return NULL;
     }
 
