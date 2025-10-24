@@ -39,7 +39,10 @@ extern "C" {
 extern "C" AstValidationResult* exec_validation(int argc, char* argv[]);
 int exec_convert(int argc, char* argv[]);
 
-// Layout function from radiant (available since radiant sources are included in lambda.exe)
+// Layout command implementation (Lambda HTML/CSS layout with Radiant engine)
+int cmd_layout(int argc, char** argv);
+
+// Legacy layout function from radiant (for backward compatibility)
 int run_layout(const char* html_file);
 
 // SVG rendering function from radiant (available since radiant sources are included in lambda.exe)
@@ -767,45 +770,34 @@ int main(int argc, char *argv[]) {
 
         // Check for help first
         if (argc >= 3 && (strcmp(argv[2], "--help") == 0 || strcmp(argv[2], "-h") == 0)) {
-            printf("Lambda HTML/CSS Layout Engine v1.0\n\n");
-            printf("Usage: %s layout <file.html>\n", argv[0]);
+            printf("Lambda HTML/CSS Layout Engine v2.0 (Lambda CSS)\n\n");
+            printf("Usage: %s layout <file.html> [options]\n", argv[0]);
             printf("\nDescription:\n");
-            printf("  The 'layout' command performs HTML/CSS layout analysis on an HTML file.\n");
-            printf("  It parses the HTML, applies CSS styles, calculates layout, and displays\n");
-            printf("  the resulting view tree structure for debugging and analysis.\n");
+            printf("  The 'layout' command performs HTML/CSS layout analysis using Lambda's\n");
+            printf("  CSS system (separate from Lexbor-based layout). It parses HTML with\n");
+            printf("  Lambda parser, applies CSS using Lambda CSS engine, and outputs layout.\n");
             printf("\nOptions:\n");
-            printf("  -h, --help     Show this help message\n");
+            printf("  -o, --output FILE    Output file for layout results (default: stdout)\n");
+            printf("  -c, --css FILE       External CSS file to apply\n");
+            printf("  -w, --width WIDTH    Viewport width in pixels (default: 800)\n");
+            printf("  -h, --height HEIGHT  Viewport height in pixels (default: 600)\n");
+            printf("  --debug              Enable debug output\n");
+            printf("  --help               Show this help message\n");
             printf("\nExamples:\n");
-            printf("  %s layout index.html              # Analyze layout of HTML file\n", argv[0]);
-            printf("  %s layout test/sample.html        # Analyze relative path HTML file\n", argv[0]);
+            printf("  %s layout index.html              # Basic layout analysis\n", argv[0]);
+            printf("  %s layout test.html --debug       # With debug output\n", argv[0]);
+            printf("  %s layout page.html -c styles.css # With external CSS\n", argv[0]);
+            printf("  %s layout doc.html -w 1024 -h 768 # Custom viewport\n", argv[0]);
+            printf("  %s layout index.html -o layout.json # Save to file\n", argv[0]);
             log_finish();  // Cleanup logging before exit
             return 0;
         }
 
-        // Validate arguments
-        if (argc < 3) {
-            printf("Error: layout command requires an HTML file\n");
-            printf("Usage: %s layout <file.html>\n", argv[0]);
-            printf("Use '%s layout --help' for more information\n", argv[0]);
-            log_finish();
-            return 1;
-        }
+        // Call the new Lambda CSS-based layout command
+        // Pass argc-2 and argv+2 to skip both "./lambda.exe" and "layout" arguments
+        int exit_code = cmd_layout(argc - 2, argv + 2);
 
-        const char* html_file = argv[2];
-
-        // Check if HTML file exists
-        if (access(html_file, F_OK) != 0) {
-            printf("Error: HTML file '%s' does not exist\n", html_file);
-            log_finish();
-            return 1;
-        }
-
-        log_debug("Running layout analysis on '%s'", html_file);
-
-        // Call the layout function (same as radiant's layout subcommand)
-        int exit_code = run_layout(html_file);
-
-        log_debug("layout analysis completed with result: %d", exit_code);
+        log_debug("layout command completed with result: %d", exit_code);
         log_finish();  // Cleanup logging before exit
         return exit_code;
     }
