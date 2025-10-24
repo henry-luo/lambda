@@ -71,16 +71,21 @@ static const KeywordMapping keyword_map[] = {
     // Font styles
     {"italic", 0x013b},    // LXB_CSS_VALUE_ITALIC
 
+    // Text alignment
+    {"justify", 0x0152},   // LXB_CSS_VALUE_JUSTIFY
+
     // Alignment
     {"left", 0x002f},      // LXB_CSS_VALUE_LEFT
     {"line-through", 0x0159}, // LXB_CSS_VALUE_LINE_THROUGH
 
     // Vertical alignment
     {"middle", 0x0010},    // LXB_CSS_VALUE_MIDDLE
+    {"move", 0x00ec},      // LXB_CSS_VALUE_MOVE
 
     // Display and text
     {"none", 0x001f},      // LXB_CSS_VALUE_NONE
     {"normal", 0x0132},    // LXB_CSS_VALUE_NORMAL
+    {"nowrap", 0x0111},    // LXB_CSS_VALUE_NOWRAP
 
     // Font styles
     {"oblique", 0x013c},   // LXB_CSS_VALUE_OBLIQUE
@@ -91,6 +96,8 @@ static const KeywordMapping keyword_map[] = {
 
     // Colors
     {"pink", 0x00a7},      // LXB_CSS_VALUE_PINK
+    {"pointer", 0x00e6},   // LXB_CSS_VALUE_POINTER
+    {"pre", 0x016e},       // LXB_CSS_VALUE_PRE
     {"purple", 0x00aa},    // LXB_CSS_VALUE_PURPLE
 
     // Colors
@@ -104,10 +111,13 @@ static const KeywordMapping keyword_map[] = {
     {"solid", 0x0023},     // LXB_CSS_VALUE_SOLID
     {"static", 0x014d},    // LXB_CSS_VALUE_STATIC
     {"sticky", 0x0150},    // LXB_CSS_VALUE_STICKY
+    {"sub", 0x0016},       // LXB_CSS_VALUE_SUB
+    {"super", 0x0017},     // LXB_CSS_VALUE_SUPER
 
     // Vertical alignment
     {"text-bottom", 0x000d}, // LXB_CSS_VALUE_TEXT_BOTTOM
     {"text-top", 0x0013},    // LXB_CSS_VALUE_TEXT_TOP
+    {"text", 0x00e7},        // LXB_CSS_VALUE_TEXT (cursor)
     {"top", 0x0018},         // LXB_CSS_VALUE_TOP
     {"transparent", 0x0032}, // LXB_CSS_VALUE_TRANSPARENT
 
@@ -607,6 +617,83 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 // 'normal' keyword - typically 1.2 × font-size
                 log_debug("[CSS] Line height keyword: normal");
+            }
+            break;
+        }
+
+        // ===== GROUP 5: Text Properties =====
+
+        case CSS_PROPERTY_TEXT_ALIGN: {
+            log_debug("[CSS] Processing text-align property");
+            if (!block || !block->blk) {
+                if (block) {
+                    block->blk = alloc_block_prop(lycon);
+                } else {
+                    break; // inline elements don't have text-align
+                }
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int align_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (align_value > 0) {
+                    block->blk->text_align = align_value;
+                    log_debug("[CSS] Text-align: %s -> 0x%04X", value->data.keyword, align_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TEXT_DECORATION: {
+            log_debug("[CSS] Processing text-decoration property");
+            if (!span->font) {
+                span->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int deco_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (deco_value > 0) {
+                    span->font->text_deco = deco_value;
+                    log_debug("[CSS] Text-decoration: %s -> 0x%04X", value->data.keyword, deco_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_VERTICAL_ALIGN: {
+            log_debug("[CSS] Processing vertical-align property");
+            if (!span->in_line) {
+                span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int valign_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (valign_value > 0) {
+                    span->in_line->vertical_align = valign_value;
+                    log_debug("[CSS] Vertical-align: %s -> 0x%04X", value->data.keyword, valign_value);
+                }
+            } else if (value->type == CSS_VALUE_LENGTH) {
+                // Length values for vertical-align (e.g., 10px, -5px)
+                // Store as offset - will need to extend PropValue to support length offsets
+                log_debug("[CSS] Vertical-align length: %.2f px (not yet fully supported)", value->data.length.value);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                // Percentage values relative to line-height
+                log_debug("[CSS] Vertical-align percentage: %.2f%% (not yet fully supported)", value->data.percentage.value);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_CURSOR: {
+            log_debug("[CSS] Processing cursor property");
+            if (!span->in_line) {
+                span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int cursor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (cursor_value > 0) {
+                    span->in_line->cursor = cursor_value;
+                    log_debug("[CSS] Cursor: %s -> 0x%04X", value->data.keyword, cursor_value);
+                }
             }
             break;
         }
