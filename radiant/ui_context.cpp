@@ -114,16 +114,31 @@ int ui_context_init(UiContext* uicon, bool headless) {
 }
 
 void free_document(Document* doc) {
-    if (doc->dom_tree) {
-        lxb_html_document_destroy(doc->dom_tree);
+    if (doc->doc_type == DOC_TYPE_LEXBOR) {
+        // Lexbor document - free dom_tree
+        if (doc->dom_tree) {
+            lxb_html_document_destroy(doc->dom_tree);
+        }
+    } else if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
+        // Lambda CSS document - free lambda structures
+        // Note: lambda_dom_root and lambda_html_root are managed by Pool
+        // so we don't free them here
+        log_debug("Skipping Lambda CSS DOM tree cleanup (managed by Pool)");
     }
+
     if (doc->view_tree) {
         view_pool_destroy(doc->view_tree);
         free(doc->view_tree);
     }
+
     if (doc->url) {
-        lxb_url_destroy(doc->url);
+        // Free the path data we manually allocated
+        if (doc->url->path.str.data) {
+            free(doc->url->path.str.data);
+        }
+        free(doc->url);  // Just free the struct, don't call lxb_url_destroy
     }
+
     free(doc);
 }
 

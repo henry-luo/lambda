@@ -31,9 +31,17 @@ extern "C" {
 
 #include "input/input.h"
 #include "../radiant/dom.hpp"
+#include "../radiant/view.hpp"
+#include "../radiant/layout.hpp"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+
+// External C++ function declarations from Radiant
+int ui_context_init(UiContext* uicon, bool headless);
+void ui_context_cleanup(UiContext* uicon);
+void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
+void layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
 
 // Forward declarations
 Element* get_html_root_element(Input* input);
@@ -44,6 +52,8 @@ void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* ba
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
 void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
+DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* pool);
+ViewGroup* compute_layout_tree(DomNode* root_node, LayoutContext* lycon);
 
 /**
  * Extract string attribute from Lambda Element
@@ -441,6 +451,229 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
 }
 
 /**
+ * Build Radiant DomNode tree from CSS DomElement tree
+ * Creates MARK_ELEMENT nodes that wrap Lambda Elements and link to DomElement for styling
+ */
+DomNode* build_radiant_dom_node(DomElement* css_elem, Element* html_elem, Pool* pool) {
+    if (!css_elem || !html_elem) return nullptr;
+
+    // Create Radiant DomNode wrapping the Lambda Element
+    DomNode* node = DomNode::create_mark_element(html_elem);
+    if (!node) return nullptr;
+
+    // Store reference to DomElement for style access (using Style* field)
+    node->style = (Style*)css_elem;
+
+    fprintf(stderr, "[Layout] Created DomNode for <%s>\n", css_elem->tag_name);
+
+    // Recursively build children
+    DomElement* css_child = css_elem->first_child;
+    Element* html_child_elem = nullptr;
+
+    // Find matching HTML children
+    for (int64_t i = 0; i < html_elem->length && css_child; i++) {
+        Item child_item = html_elem->items[i];
+
+        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+            Element* child_elem = (Element*)child_item.pointer;
+            TypeElmt* child_type = (TypeElmt*)child_elem->type;
+
+            // Skip non-element nodes
+            if (child_type &&
+                strcmp(child_type->name.str, "!DOCTYPE") != 0 &&
+                strcmp(child_type->name.str, "!--") != 0) {
+
+                // Build child node
+                DomNode* child_node = build_radiant_dom_node(css_child, child_elem, pool);
+                if (child_node) {
+                    child_node->parent = node;
+                }
+
+                css_child = css_child->next_sibling;
+            }
+        }
+    }
+
+    return node;
+}
+
+/**
+ * Load HTML document with Lambda CSS system
+ * Parses HTML, applies CSS cascade, builds DOM tree, returns Document for layout
+ *
+ * @param html_filename Path to HTML file
+ * @param css_filename Optional external CSS file (can be NULL)
+ * @param viewport_width Viewport width for layout
+ * @param viewport_height Viewport height for layout
+ * @param pool Memory pool for allocations
+ * @return Document structure with Lambda CSS DOM, ready for layout
+ */
+Document* load_lambda_html_doc(const char* html_filename, const char* css_filename,
+                                int viewport_width, int viewport_height, Pool* pool) {
+    if (!html_filename || !pool) {
+        log_error("load_lambda_html_doc: invalid parameters");
+        return nullptr;
+    }
+
+    fprintf(stderr, "[Lambda CSS] Loading HTML document: %s\n", html_filename);
+
+    // Step 1: Parse HTML with Lambda parser
+    char* html_content = read_text_file(html_filename);
+    if (!html_content) {
+        log_error("Failed to read HTML file: %s", html_filename);
+        return nullptr;
+    }
+
+    // Create type string for HTML
+    String* type_str = (String*)malloc(sizeof(String) + 5);
+    type_str->len = 4;
+    strcpy(type_str->chars, "html");
+
+    Url* url = url_parse(html_filename);
+    Input* input = input_from_source(html_content, url, type_str, nullptr);
+    free(html_content);
+
+    if (!input) {
+        log_error("Failed to create input for file: %s", html_filename);
+        return nullptr;
+    }
+
+    Element* html_root = get_html_root_element(input);
+    if (!html_root) {
+        log_error("Failed to get HTML root element");
+        return nullptr;
+    }
+
+    // Step 2: Build DomElement tree from Lambda Element tree
+    fprintf(stderr, "[Lambda CSS] Building DOM tree...\n");
+    DomElement* dom_root = build_dom_tree_from_element(html_root, pool, nullptr);
+    if (!dom_root) {
+        log_error("Failed to build DOM tree");
+        return nullptr;
+    }
+
+    // Step 3: Initialize CSS engine
+    CssEngine* css_engine = css_engine_create(pool);
+    if (!css_engine) {
+        log_error("Failed to create CSS engine");
+        return nullptr;
+    }
+
+    css_engine_set_viewport(css_engine, viewport_width, viewport_height);
+
+    // Step 4: Load external CSS if provided
+    CssStylesheet* external_stylesheet = nullptr;
+    if (css_filename) {
+        fprintf(stderr, "[Lambda CSS] Loading external CSS: %s\n", css_filename);
+        char* css_content = read_text_file(css_filename);
+        if (css_content) {
+            size_t css_len = strlen(css_content);
+            char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+            if (css_pool_copy) {
+                strcpy(css_pool_copy, css_content);
+                free(css_content);
+                external_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
+                if (external_stylesheet) {
+                    fprintf(stderr, "[Lambda CSS] Loaded external stylesheet with %zu rules\n",
+                            external_stylesheet->rule_count);
+                } else {
+                    log_warn("Failed to parse CSS file: %s", css_filename);
+                }
+            } else {
+                free(css_content);
+            }
+        } else {
+            log_warn("Failed to load CSS file: %s", css_filename);
+        }
+    }
+
+    // Step 5: Extract and parse <style> elements
+    fprintf(stderr, "[Lambda CSS] Extracting inline <style> elements...\n");
+    int inline_stylesheet_count = 0;
+    CssStylesheet** inline_stylesheets = extract_and_collect_css(
+        html_root, css_engine, html_filename, pool, &inline_stylesheet_count);
+
+    // Step 6: Apply CSS cascade (external + <style> elements)
+    fprintf(stderr, "[Lambda CSS] Applying CSS cascade...\n");
+    SelectorMatcher* matcher = selector_matcher_create(pool);
+
+    // Apply external stylesheet first (lower priority)
+    if (external_stylesheet && external_stylesheet->rule_count > 0) {
+        apply_stylesheet_to_dom_tree(dom_root, external_stylesheet, matcher, pool);
+    }
+
+    // Apply inline stylesheets (higher priority)
+    for (int i = 0; i < inline_stylesheet_count; i++) {
+        if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
+            apply_stylesheet_to_dom_tree(dom_root, inline_stylesheets[i], matcher, pool);
+        }
+    }
+
+    // Step 7: Apply inline style="" attributes (highest priority)
+    fprintf(stderr, "[Lambda CSS] Applying inline style attributes...\n");
+    apply_inline_styles_to_tree(dom_root, html_root, pool);
+
+    fprintf(stderr, "[Lambda CSS] CSS cascade complete\n");
+
+    // Step 8: Create Document structure
+    Document* doc = (Document*)calloc(1, sizeof(Document));
+    if (!doc) {
+        log_error("Failed to allocate Document");
+        return nullptr;
+    }
+
+    doc->doc_type = DOC_TYPE_LAMBDA_CSS;
+    doc->lambda_dom_root = dom_root;
+    doc->lambda_html_root = html_root;
+
+    // Create a minimal URL structure for print_view_tree
+    doc->url = (lxb_url_t*)calloc(1, sizeof(lxb_url_t));
+    if (doc->url) {
+        // Just set the path field which is what print_view_tree uses
+        const char* path = html_filename ? html_filename : "lambda_css_doc.html";
+        size_t len = strlen(path);
+        doc->url->path.str.data = (lxb_char_t*)malloc(len + 1);
+        if (doc->url->path.str.data) {
+            memcpy(doc->url->path.str.data, path, len + 1);
+            doc->url->path.str.length = len;
+        }
+    }
+
+    doc->view_tree = nullptr;  // Will be created during layout
+    doc->state = nullptr;
+
+    fprintf(stderr, "[Lambda CSS] Document loaded and styled\n");
+    return doc;
+}
+
+/**
+ * Compute layout using Radiant layout engine (simplified for Lambda)
+ * Returns the root ViewGroup with computed layout
+ *
+ * Note: This is a simplified version that doesn't initialize the full Radiant
+ * subsystems (fonts, images, etc.). For full layout with text rendering,
+ * use the Radiant window system.
+ */
+ViewGroup* compute_layout_tree(DomNode* root_node, int viewport_width, int viewport_height, Pool* pool) {
+    if (!root_node) return nullptr;
+
+    fprintf(stderr, "[Layout] Radiant layout computation currently requires full UI context\n");
+    fprintf(stderr, "[Layout] CSS styling complete - layout computation pending\n");
+    fprintf(stderr, "[Layout] For full layout, run: ./radiant.exe %s\n", "(html_file)");
+
+    // TODO: Implement minimal layout computation without full UiContext
+    // This requires:
+    // 1. Implementing view_pool_init(), layout_init(), layout_cleanup() as standalone
+    // 2. Creating minimal font subsystem for text measurement
+    // 3. Implementing basic box model computation
+    //
+    // For now, return nullptr to indicate layout not computed
+    // The CSS styling is still fully functional and applied
+
+    return nullptr;
+}
+
+/**
  * Parse command-line arguments
  */
 struct LayoutOptions {
@@ -513,240 +746,147 @@ bool parse_layout_args(int argc, char** argv, LayoutOptions* opts) {
 }
 
 /**
- * Main layout command implementation using Lambda CSS
+ * Main layout command implementation using Lambda CSS and Radiant layout
  */
 int cmd_layout(int argc, char** argv) {
+    // Initialize logging system
+    FILE *file = fopen("log.txt", "w");
+    if (file) { fclose(file); }
+    log_parse_config_file("log.conf");
+
     // Parse command-line options
     LayoutOptions opts;
     if (!parse_layout_args(argc, argv, &opts)) {
         return 1;
     }
 
+    log_debug("Lambda Layout Command");
     log_debug("  Input: %s", opts.input_file);
     log_debug("  Output: %s", opts.output_file ? opts.output_file : "(stdout)");
     log_debug("  CSS: %s", opts.css_file ? opts.css_file : "(inline only)");
     log_debug("  Viewport: %dx%d", opts.viewport_width, opts.viewport_height);
 
-    // Debug: Check pointers
-    log_debug("DEBUG: opts structure:");
-    log_debug("  input_file ptr: %p = %s", (void*)opts.input_file, opts.input_file);
-    log_debug("  css_file ptr: %p = %s", (void*)opts.css_file, opts.css_file ? opts.css_file : "NULL");
-    log_debug("  output_file ptr: %p = %s", (void*)opts.output_file, opts.output_file ? opts.output_file : "NULL");
-
-
-    // Save CSS filename before creating pool (avoid any potential issues)
-    const char* css_filename = opts.css_file;
-
-    // Debug: Check opts structure integrity
-    log_debug("  opts.viewport_width = %d", opts.viewport_width);
-    log_debug("  opts.viewport_height = %d", opts.viewport_height);
-    log_debug("  css_filename = %p -> %s", (void*)css_filename, css_filename ? css_filename : "NULL");
-
     // Create memory pool for this operation
     Pool* pool = pool_create();
+    if (!pool) {
+        log_error("Failed to create memory pool");
+        return 1;
+    }
 
-    log_debug("DEBUG after pool_create:");
-    log_debug("  &opts = %p", (void*)&opts);
-    log_debug("  opts.input_file = %p -> %s", (void*)opts.input_file, opts.input_file ? opts.input_file : "NULL");
-    log_debug("  opts.css_file = %p -> %s", (void*)opts.css_file, opts.css_file ? opts.css_file : "NULL");
-    log_debug("  css_filename = %p -> %s", (void*)css_filename, css_filename ? css_filename : "NULL");
+    // Load HTML document with Lambda CSS system
+    Document* doc = load_lambda_html_doc(
+        opts.input_file,
+        opts.css_file,
+        opts.viewport_width,
+        opts.viewport_height,
+        pool
+    );
 
-    log_debug("Created memory pool");
-
-    // Read input HTML file
-    char* html_content = read_text_file(opts.input_file);
-    if (!html_content) {
-        log_error("Failed to read input file: %s", opts.input_file);
+    if (!doc) {
+        log_error("Failed to load HTML document");
         pool_destroy(pool);
         return 1;
     }
 
-    log_debug("Read HTML file: %zu bytes", strlen(html_content));
+    // Initialize UI context in headless mode for layout computation
+    fprintf(stderr, "[Layout] Initializing UI context (headless mode)...\n");
+    UiContext ui_context;
+    memset(&ui_context, 0, sizeof(UiContext));
 
-    // Parse HTML using Lambda parser
-    String* type_str = (String*)malloc(sizeof(String) + 5);
-    type_str->len = 4;
-    strcpy(type_str->chars, "html");
-
-    log_debug("Created type string");
-
-    Url* url = url_parse(opts.input_file);
-
-    log_debug("Parsed URL");
-    log_debug("Parsed URL, about to call input_from_source");
-
-    Input* input = input_from_source(html_content, url, type_str, nullptr);
-
-    free(html_content);
-    if (!input) {
-        log_error("Failed to parse HTML");
-        pool_destroy(pool);
-        return 1;
-    }
-    else {
-        log_debug("Parsed HTML successfully");
-    }
-
-    // Get root HTML element
-    Element* root = get_html_root_element(input);
-    if (!root) {
-        log_error("No HTML root element found");
-        pool_destroy(pool);
-        return 1;
-    }
-    log_debug("Parsed HTML root: <%s>", ((TypeElmt*)root->type)->name.str);
-
-    // Create CSS Engine
-    CssEngine* css_engine = css_engine_create(pool);
-    if (!css_engine) {
-        log_error("Failed to create CSS engine");
+    if (ui_context_init(&ui_context, true) != 0) {
+        log_error("Failed to initialize UI context");
+        free_document(doc);
         pool_destroy(pool);
         return 1;
     }
 
-    // Configure CSS engine
-    css_engine_set_viewport(css_engine, opts.viewport_width, opts.viewport_height);
+    // Set viewport dimensions
+    ui_context.window_width = opts.viewport_width;
+    ui_context.window_height = opts.viewport_height;
 
-    // Build complete DomElement tree from Lambda Element tree
-    fprintf(stderr, "[DEBUG] Building DOM tree from Element tree...\n");
-    DomElement* dom_root = build_dom_tree_from_element(root, pool, nullptr);
-    if (!dom_root) {
-        log_error("Failed to build DOM tree");
-        css_engine_destroy(css_engine);
-        pool_destroy(pool);
-        return 1;
-    }
+    // Create surface for layout calculations
+    fprintf(stderr, "[Layout] Creating surface for layout calculations...\n");
+    ui_context_create_surface(&ui_context, opts.viewport_width, opts.viewport_height);
+    fprintf(stderr, "[Layout] Surface created\n");
 
-    fprintf(stderr, "[DEBUG] Built DOM tree: root=<%s>\n", dom_root->tag_name);
+    // Perform layout computation
+    fprintf(stderr, "[Layout] About to call layout_html_doc...\n");
+    fprintf(stderr, "[Layout] doc=%p, doc_type=%d\n", (void*)doc, doc->doc_type);
+    fprintf(stderr, "[Layout] lambda_html_root=%p, lambda_dom_root=%p\n",
+            (void*)doc->lambda_html_root, (void*)doc->lambda_dom_root);
 
-    // === NEW APPROACH: Comprehensive CSS extraction and application ===
-    // This mimics browser behavior:
-    // 1. Parse external CSS from -c flag (if provided)
-    // 2. Extract and parse <link> stylesheets
-    // 3. Extract and parse <style> elements
-    // 4. Apply all stylesheets to DOM
-    // 5. Apply inline style attributes
+    layout_html_doc(&ui_context, doc, false);
 
-    // Step 1: External CSS from command line (highest priority for development)
-    CssStylesheet* external_stylesheet = nullptr;
-    if (css_filename) {
-        char* css_content = read_text_file(css_filename);
-        if (css_content) {
-            fprintf(stderr, "[CSS] Parsing external CSS file: %s\n", css_filename);
+    fprintf(stderr, "[Layout] layout_html_doc returned\n");
 
-            size_t css_len = strlen(css_content);
-            char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
-            if (css_pool_copy) {
-                strcpy(css_pool_copy, css_content);
-                free(css_content);
-
-                external_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
-                if (external_stylesheet) {
-                    fprintf(stderr, "[CSS] Parsed external CSS: %zu rules\n", external_stylesheet->rule_count);
-                }
-            } else {
-                free(css_content);
-            }
-        }
-    }
-
-    // Step 2 & 3: Extract CSS from HTML (linked stylesheets and <style> elements)
-    int inline_stylesheet_count = 0;
-    CssStylesheet** inline_stylesheets = extract_and_collect_css(root, css_engine, opts.input_file, pool, &inline_stylesheet_count);
-
-    // Step 4: Apply all stylesheets to DOM tree
-    // Apply in cascade order: external -> inline <style> -> inline attributes
-    if ((external_stylesheet && external_stylesheet->rule_count > 0) || inline_stylesheet_count > 0) {
-        fprintf(stderr, "[CSS] Applying stylesheets to DOM tree...\n");
-
-        // Create selector matcher
-        SelectorMatcher* matcher = selector_matcher_create(pool);
-        if (!matcher) {
-            log_error("Failed to create selector matcher");
-            css_engine_destroy(css_engine);
-            pool_destroy(pool);
-            return 1;
-        }
-
-        // Apply external stylesheet first (lower priority)
-        if (external_stylesheet && external_stylesheet->rule_count > 0) {
-            fprintf(stderr, "[CSS] Applying external stylesheet (%zu rules)...\n", external_stylesheet->rule_count);
-            apply_stylesheet_to_dom_tree(dom_root, external_stylesheet, matcher, pool);
-        }
-
-        // Apply inline stylesheets (higher priority)
-        for (int i = 0; i < inline_stylesheet_count; i++) {
-            if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
-                fprintf(stderr, "[CSS] Applying inline stylesheet %d (%zu rules)...\n",
-                        i + 1, inline_stylesheets[i]->rule_count);
-                apply_stylesheet_to_dom_tree(dom_root, inline_stylesheets[i], matcher, pool);
-            }
-        }
-
-        fprintf(stderr, "[CSS] All CSS stylesheets applied to DOM tree\n");
-
-        CssEngineStats stats = css_engine_get_stats(css_engine);
-        log_debug("CSS Statistics:");
-        log_debug("  Rules processed: %zu", stats.rules_processed);
-        log_debug("  Selectors processed: %zu", stats.selectors_processed);
-        log_debug("  Properties processed: %zu", stats.properties_processed);
-        if (stats.parse_errors > 0) {
-            log_debug("  Parse errors: %zu", stats.parse_errors);
-        }
+    if (!doc->view_tree || !doc->view_tree->root) {
+        log_warn("Layout computation did not produce view tree");
     } else {
-        fprintf(stderr, "[CSS] No external stylesheet to apply\n");
+        fprintf(stderr, "[Layout] Layout computed successfully!\n");
     }
-
-    // Step 5: Apply inline style attributes (highest specificity)
-    fprintf(stderr, "[CSS] Applying inline style attributes to DOM tree...\n");
-    apply_inline_styles_to_tree(dom_root, root, pool);
-    fprintf(stderr, "[CSS] Inline style attributes applied\n");
-
-    // Create DomNode wrapper for layout computation
-    // Note: Full layout engine integration would go here
-    // For now, output the structure with computed styles
-
-    log_debug("Layout computation complete");
-    log_debug("Note: Full layout engine integration pending");
 
     // Write output
+    fprintf(stderr, "[Layout] Preparing output...\n");
     FILE* out = stdout;
     if (opts.output_file) {
         out = fopen(opts.output_file, "w");
         if (!out) {
             log_error("Error: failed to open output file: %s", opts.output_file);
-            css_engine_destroy(css_engine);
+            ui_context_cleanup(&ui_context);
+            free_document(doc);
             pool_destroy(pool);
             return 1;
         }
     }
 
-    // Output basic structure
-    TypeElmt* root_type = (TypeElmt*)root->type;
+    // Output layout results
+    fprintf(stderr, "[Layout] Accessing lambda_html_root...\n");
+    TypeElmt* root_type = (TypeElmt*)doc->lambda_html_root->type;
+    fprintf(stderr, "[Layout] root_type=%p, name=%s\n", (void*)root_type, root_type ? root_type->name.str : "NULL");
     fprintf(out, "{\n");
-    fprintf(out, "  \"engine\": \"lambda-css\",\n");
+    fprintf(out, "  \"engine\": \"lambda-css-radiant\",\n");
+    fprintf(out, "  \"css_applied\": true,\n");
+    fprintf(out, "  \"layout_computed\": %s,\n",
+            (doc->view_tree && doc->view_tree->root) ? "true" : "false");
     fprintf(out, "  \"viewport\": {\"width\": %d, \"height\": %d},\n",
             opts.viewport_width, opts.viewport_height);
-    fprintf(out, "  \"root\": {\n");
 
-    fprintf(out, "    \"tag\": \"%s\",\n", root_type->name.str);
-    fprintf(out, "    \"x\": 0,\n");
-    fprintf(out, "    \"y\": 0,\n");
-    fprintf(out, "    \"width\": %d,\n", opts.viewport_width);
-    fprintf(out, "    \"height\": %d\n", opts.viewport_height);
-    fprintf(out, "  }\n");
+    fprintf(stderr, "[Layout] Outputting root info...\n");
+    if (doc->view_tree && doc->view_tree->root) {
+        ViewGroup* root_view = (ViewGroup*)doc->view_tree->root;
+        fprintf(out, "  \"root\": {\n");
+        fprintf(out, "    \"tag\": \"%s\",\n", root_type->name.str);
+        fprintf(out, "    \"type\": \"view-group\",\n");
+        fprintf(out, "    \"x\": %.2f,\n", root_view->x);
+        fprintf(out, "    \"y\": %.2f,\n", root_view->y);
+        fprintf(out, "    \"width\": %.2f,\n", root_view->width);
+        fprintf(out, "    \"height\": %.2f\n", root_view->height);
+        fprintf(out, "  }\n");
+    } else {
+        fprintf(out, "  \"root\": {\n");
+        fprintf(out, "    \"tag\": \"%s\",\n", root_type->name.str);
+        fprintf(out, "    \"viewport_width\": %d,\n", opts.viewport_width);
+        fprintf(out, "    \"viewport_height\": %d,\n", opts.viewport_height);
+        fprintf(out, "    \"note\": \"Layout computation failed or not completed\"\n");
+        fprintf(out, "  }\n");
+    }
+
     fprintf(out, "}\n");
 
     if (opts.output_file) {
         fclose(out);
-        if (opts.debug) {
-            printf("Layout written to: %s\n", opts.output_file);
-        }
+        fprintf(stderr, "[Output] Layout written to: %s\n", opts.output_file);
     }
 
     // Cleanup
-    css_engine_destroy(css_engine);
+    fprintf(stderr, "[Cleanup] Starting cleanup...\n");
+    fprintf(stderr, "[Cleanup] Cleaning up UI context...\n");
+    ui_context_cleanup(&ui_context);
+    fprintf(stderr, "[Cleanup] Freeing document...\n");
+    free_document(doc);
+    fprintf(stderr, "[Cleanup] Destroying pool...\n");
     pool_destroy(pool);
+    fprintf(stderr, "[Cleanup] Complete\n");
 
     return 0;
 }

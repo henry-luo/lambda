@@ -202,8 +202,79 @@ DisplayValue resolve_display_value(DomNode* child) {
     DisplayValue display = {LXB_CSS_VALUE_BLOCK, LXB_CSS_VALUE_FLOW};
 
     if (child && child->is_element()) {
-        lxb_html_element_t* elmt = child->as_element();
-        display = resolve_display(elmt);
+        if (child->type == LEXBOR_ELEMENT) {
+            // Lexbor element - use existing resolve_display
+            lxb_html_element_t* elmt = child->as_element();
+            if (elmt) {
+                display = resolve_display(elmt);
+            }
+        } else if (child->type == MARK_ELEMENT) {
+            // Lambda CSS element - resolve display based on tag name
+            const char* tag_name = child->name();
+
+            // Default display values based on tag name
+            if (strcmp(tag_name, "body") == 0 || strcmp(tag_name, "h1") == 0 ||
+                strcmp(tag_name, "h2") == 0 || strcmp(tag_name, "h3") == 0 ||
+                strcmp(tag_name, "h4") == 0 || strcmp(tag_name, "h5") == 0 ||
+                strcmp(tag_name, "h6") == 0 || strcmp(tag_name, "p") == 0 ||
+                strcmp(tag_name, "div") == 0 || strcmp(tag_name, "center") == 0 ||
+                strcmp(tag_name, "ul") == 0 || strcmp(tag_name, "ol") == 0 ||
+                strcmp(tag_name, "header") == 0 || strcmp(tag_name, "main") == 0 ||
+                strcmp(tag_name, "section") == 0 || strcmp(tag_name, "footer") == 0 ||
+                strcmp(tag_name, "article") == 0 || strcmp(tag_name, "aside") == 0 ||
+                strcmp(tag_name, "nav") == 0 || strcmp(tag_name, "address") == 0 ||
+                strcmp(tag_name, "blockquote") == 0 || strcmp(tag_name, "details") == 0 ||
+                strcmp(tag_name, "dialog") == 0 || strcmp(tag_name, "figure") == 0 ||
+                strcmp(tag_name, "menu") == 0) {
+                display.outer = LXB_CSS_VALUE_BLOCK;
+                display.inner = LXB_CSS_VALUE_FLOW;
+            } else if (strcmp(tag_name, "li") == 0 || strcmp(tag_name, "summary") == 0) {
+                display.outer = LXB_CSS_VALUE_LIST_ITEM;
+                display.inner = LXB_CSS_VALUE_FLOW;
+            } else if (strcmp(tag_name, "img") == 0 || strcmp(tag_name, "video") == 0 ||
+                       strcmp(tag_name, "input") == 0 || strcmp(tag_name, "select") == 0 ||
+                       strcmp(tag_name, "textarea") == 0 || strcmp(tag_name, "button") == 0 ||
+                       strcmp(tag_name, "iframe") == 0) {
+                display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
+                display.inner = RDT_DISPLAY_REPLACED;
+            } else if (strcmp(tag_name, "hr") == 0) {
+                display.outer = LXB_CSS_VALUE_BLOCK;
+                display.inner = RDT_DISPLAY_REPLACED;
+            } else if (strcmp(tag_name, "script") == 0 || strcmp(tag_name, "style") == 0 ||
+                       strcmp(tag_name, "svg") == 0) {
+                display.outer = LXB_CSS_VALUE_NONE;
+                display.inner = LXB_CSS_VALUE_NONE;
+            } else if (strcmp(tag_name, "table") == 0) {
+                display.outer = LXB_CSS_VALUE_BLOCK;
+                display.inner = LXB_CSS_VALUE_TABLE;
+            } else if (strcmp(tag_name, "caption") == 0) {
+                display.outer = LXB_CSS_VALUE_BLOCK;
+                display.inner = LXB_CSS_VALUE_FLOW;
+            } else if (strcmp(tag_name, "thead") == 0 || strcmp(tag_name, "tbody") == 0 ||
+                       strcmp(tag_name, "tfoot") == 0) {
+                display.outer = LXB_CSS_VALUE_BLOCK;
+                display.inner = LXB_CSS_VALUE_TABLE_ROW_GROUP;
+            } else if (strcmp(tag_name, "tr") == 0) {
+                display.outer = LXB_CSS_VALUE_BLOCK;
+                display.inner = LXB_CSS_VALUE_TABLE_ROW;
+            } else if (strcmp(tag_name, "th") == 0 || strcmp(tag_name, "td") == 0) {
+                display.outer = LXB_CSS_VALUE_TABLE_CELL;
+                display.inner = LXB_CSS_VALUE_TABLE_CELL;
+            } else if (strcmp(tag_name, "colgroup") == 0) {
+                display.outer = LXB_CSS_VALUE_BLOCK;
+                display.inner = LXB_CSS_VALUE_TABLE_COLUMN_GROUP;
+            } else if (strcmp(tag_name, "col") == 0) {
+                display.outer = LXB_CSS_VALUE_BLOCK;
+                display.inner = LXB_CSS_VALUE_TABLE_COLUMN;
+            } else {
+                // Default for unknown elements (inline)
+                display.outer = LXB_CSS_VALUE_INLINE;
+                display.inner = LXB_CSS_VALUE_FLOW;
+            }
+
+            // TODO: Check for CSS display property in child->style (DomElement)
+            // For now, using tag-based defaults is sufficient
+        }
     }
 
     return display;
