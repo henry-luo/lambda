@@ -1403,6 +1403,32 @@
                         "binary": "test_css_tokenizer_unit.exe"
                     },
                     {
+                        "source": "test/css/unit/test_css_parser_unit.cpp",
+                        "name": "🎨 CSS Parser Unit Tests (Comprehensive)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_css_parser_unit.exe"
+                    },
+                    {
+                        "source": "test/css/unit/test_css_integration_unit.cpp",
+                        "name": "🎨 CSS Integration Unit Tests (Comprehensive)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_css_integration_unit.exe"
+                    },
+                    {
                         "source": "test/test_css_parser_gtest.cpp",
                         "name": "🎨 CSS Parser Tests (GTest)",
                         "dependencies": [
