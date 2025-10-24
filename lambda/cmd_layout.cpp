@@ -22,7 +22,6 @@ extern "C" {
 #include "../lib/string.h"
 #include "../lib/url.h"
 #include "../lib/log.h"
-#include "input/input.h"
 #include "input/css/css_integration.h"
 #include "input/css/css_style_node.h"
 #include "input/css/dom_element.h"
@@ -30,6 +29,7 @@ extern "C" {
 #include "input/css/document_styler.h"
 }
 
+#include "input/input.h"
 #include "../radiant/dom.hpp"
 #include <stdio.h>
 #include <string.h>
@@ -43,6 +43,7 @@ CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, c
 void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool);
 void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
 void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
+void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool);
 
 /**
  * Extract string attribute from Lambda Element
@@ -58,7 +59,8 @@ const char* extract_element_attribute(Element* elem, const char* attr_name, Pool
     key_str->len = strlen(attr_name);
     strcpy(key_str->chars, attr_name);
 
-    Item key = s2it((uint64_t)key_str);
+    Item key;
+    key.item = s2it(key_str);
 
     // Get the attribute value using elmt_get_typed
     TypedItem attr_value = elmt_get_typed(elem, key);
@@ -283,19 +285,6 @@ void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool) {
             collect_inline_styles((Element*)child_item.pointer, engine, pool);
         }
     }
-}
-
-/**
- * Apply inline style attribute to a single DOM element
- * Inline styles have highest specificity
- */
-void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool) {
-    if (!dom_elem || !html_elem || !pool) return;
-
-    // TODO: Extract 'style' attribute from html_elem
-    // Parse as CSS declarations
-    // Apply with inline specificity (1,0,0,0)
-    // For now, this is a placeholder
 }
 
 /**
@@ -709,7 +698,9 @@ int cmd_layout(int argc, char** argv) {
     }
 
     // Step 5: Apply inline style attributes (highest specificity)
-    // TODO: Implement inline style attribute parsing and application
+    fprintf(stderr, "[CSS] Applying inline style attributes to DOM tree...\n");
+    apply_inline_styles_to_tree(dom_root, root, pool);
+    fprintf(stderr, "[CSS] Inline style attributes applied\n");
 
     // Create DomNode wrapper for layout computation
     // Note: Full layout engine integration would go here
