@@ -820,7 +820,8 @@ typedef struct CssRule {
     // Rule content varies by type
     union {
         struct {
-            struct CssSelector* selector;
+            struct CssSelector* selector;          // Single selector (for backward compatibility)
+            struct CssSelectorGroup* selector_group; // Selector group (comma-separated selectors)
             CssDeclaration** declarations;
             size_t declaration_count;
         } style_rule;

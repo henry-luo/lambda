@@ -1429,6 +1429,32 @@
                         "binary": "test_css_integration_unit.exe"
                     },
                     {
+                        "source": "test/css/test_compound_descendant_selectors.cpp",
+                        "name": "🎨 CSS Compound & Descendant Selector Tests",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_compound_descendant_selectors.exe"
+                    },
+                    {
+                        "source": "test/css/test_selector_groups.cpp",
+                        "name": "🎨 CSS Selector Groups Tests (Comma-separated)",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_selector_groups.exe"
+                    },
+                    {
                         "source": "test/test_css_parser_gtest.cpp",
                         "name": "🎨 CSS Parser Tests (GTest)",
                         "dependencies": [

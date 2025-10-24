@@ -29,6 +29,271 @@ int css_skip_whitespace_tokens(const CssToken* tokens, int start, int token_coun
     return pos;
 }
 
+// Helper: Parse a compound selector (e.g., "p.intro" or "div#main.content")
+// A compound selector is a sequence of simple selectors with no whitespace
+CssCompoundSelector* css_parse_compound_selector_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
+    if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
+
+    // Skip leading whitespace
+    *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+    if (*pos >= token_count) return NULL;
+
+    CssCompoundSelector* compound = (CssCompoundSelector*)pool_calloc(pool, sizeof(CssCompoundSelector));
+    if (!compound) return NULL;
+
+    // Allocate initial array for simple selectors
+    int capacity = 4;
+    compound->simple_selectors = (CssSimpleSelector**)pool_calloc(pool, capacity * sizeof(CssSimpleSelector*));
+    if (!compound->simple_selectors) return NULL;
+    compound->simple_selector_count = 0;
+
+    // Parse simple selectors until we hit whitespace, combinator, comma, or brace
+    while (*pos < token_count) {
+        const CssToken* token = &tokens[*pos];
+
+        // Stop at structural tokens (whitespace, combinators, commas, braces)
+        if (token->type == CSS_TOKEN_WHITESPACE ||
+            token->type == CSS_TOKEN_COMMA ||
+            token->type == CSS_TOKEN_LEFT_BRACE ||
+            token->type == CSS_TOKEN_RIGHT_BRACE) {
+            break;
+        }
+
+        // Stop at combinator delimiters (>, +, ~)
+        if (token->type == CSS_TOKEN_DELIM) {
+            char delim = token->data.delimiter;
+            if (delim == '>' || delim == '+' || delim == '~') {
+                break;
+            }
+        }
+
+        // Try to parse a simple selector (element, class, id, etc.)
+        int start_pos = *pos;
+        CssSimpleSelector* simple = css_parse_simple_selector_from_tokens(tokens, pos, token_count, pool);
+
+        if (!simple) {
+            // If we haven't parsed any selectors yet, this is an error
+            if (compound->simple_selector_count == 0) {
+                return NULL;
+            }
+            // Otherwise, we've finished the compound selector
+            break;
+        }
+
+        // Add the simple selector to the compound
+        if (compound->simple_selector_count >= capacity) {
+            // Expand array
+            capacity *= 2;
+            CssSimpleSelector** new_array = (CssSimpleSelector**)pool_calloc(pool, capacity * sizeof(CssSimpleSelector*));
+            if (!new_array) return NULL;
+            memcpy(new_array, compound->simple_selectors, compound->simple_selector_count * sizeof(CssSimpleSelector*));
+            compound->simple_selectors = new_array;
+        }
+
+        compound->simple_selectors[compound->simple_selector_count++] = simple;
+
+        fprintf(stderr, "[CSS Parser] Added simple selector to compound (count=%zu)\n", compound->simple_selector_count);
+
+        // Check if position actually advanced
+        if (*pos == start_pos) {
+            // Position didn't advance, prevent infinite loop
+            break;
+        }
+    }
+
+    if (compound->simple_selector_count == 0) {
+        return NULL;
+    }
+
+    fprintf(stderr, "[CSS Parser] Parsed compound selector with %zu simple selectors\n", compound->simple_selector_count);
+    return compound;
+}
+
+// Helper: Parse a full selector with combinators (e.g., "div p.intro" or "nav > ul li")
+CssSelector* css_parse_selector_with_combinators(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
+    if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
+
+    CssSelector* selector = (CssSelector*)pool_calloc(pool, sizeof(CssSelector));
+    if (!selector) return NULL;
+
+    // Allocate arrays
+    int capacity = 4;
+    selector->compound_selectors = (CssCompoundSelector**)pool_calloc(pool, capacity * sizeof(CssCompoundSelector*));
+    selector->combinators = (CssCombinator*)pool_calloc(pool, capacity * sizeof(CssCombinator));
+    if (!selector->compound_selectors || !selector->combinators) return NULL;
+    selector->compound_selector_count = 0;
+
+    // Parse first compound selector
+    CssCompoundSelector* compound = css_parse_compound_selector_from_tokens(tokens, pos, token_count, pool);
+    if (!compound) return NULL;
+
+    selector->compound_selectors[0] = compound;
+    selector->compound_selector_count = 1;
+
+    // Parse combinators and subsequent compound selectors
+    while (*pos < token_count) {
+        int saved_pos = *pos;
+
+        // Check for combinators
+        CssCombinator combinator = CSS_COMBINATOR_NONE;
+        bool has_whitespace = false;
+
+        // Skip whitespace and detect descendant combinator
+        while (*pos < token_count && tokens[*pos].type == CSS_TOKEN_WHITESPACE) {
+            has_whitespace = true;
+            (*pos)++;
+        }
+
+        if (*pos >= token_count) break;
+
+        // Check for explicit combinators (>, +, ~)
+        const CssToken* token = &tokens[*pos];
+        if (token->type == CSS_TOKEN_DELIM) {
+            char delim = token->data.delimiter;
+            if (delim == '>') {
+                combinator = CSS_COMBINATOR_CHILD;
+                (*pos)++;
+                fprintf(stderr, "[CSS Parser] Found child combinator '>'\n");
+            } else if (delim == '+') {
+                combinator = CSS_COMBINATOR_NEXT_SIBLING;
+                (*pos)++;
+                fprintf(stderr, "[CSS Parser] Found next-sibling combinator '+'\n");
+            } else if (delim == '~') {
+                combinator = CSS_COMBINATOR_SUBSEQUENT_SIBLING;
+                (*pos)++;
+                fprintf(stderr, "[CSS Parser] Found subsequent-sibling combinator '~'\n");
+            }
+        }
+
+        // If no explicit combinator but we had whitespace, it's a descendant combinator
+        if (combinator == CSS_COMBINATOR_NONE && has_whitespace) {
+            // Check if the next token could start a selector
+            if (*pos < token_count) {
+                const CssToken* next = &tokens[*pos];
+                if (next->type == CSS_TOKEN_IDENT ||
+                    (next->type == CSS_TOKEN_DELIM && (next->data.delimiter == '.' || next->data.delimiter == '*')) ||
+                    next->type == CSS_TOKEN_HASH) {
+                    combinator = CSS_COMBINATOR_DESCENDANT;
+                    fprintf(stderr, "[CSS Parser] Detected descendant combinator (whitespace)\n");
+                }
+            }
+        }
+
+        // If we found a combinator, parse the next compound selector
+        if (combinator != CSS_COMBINATOR_NONE) {
+            // Skip whitespace after combinator
+            *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+
+            // Parse next compound selector
+            CssCompoundSelector* next_compound = css_parse_compound_selector_from_tokens(tokens, pos, token_count, pool);
+            if (!next_compound) {
+                // Restore position if parsing failed
+                *pos = saved_pos;
+                break;
+            }
+
+            // Expand arrays if needed
+            if (selector->compound_selector_count >= capacity) {
+                capacity *= 2;
+                CssCompoundSelector** new_compounds = (CssCompoundSelector**)pool_calloc(pool, capacity * sizeof(CssCompoundSelector*));
+                CssCombinator* new_combinators = (CssCombinator*)pool_calloc(pool, capacity * sizeof(CssCombinator));
+                if (!new_compounds || !new_combinators) break;
+
+                memcpy(new_compounds, selector->compound_selectors, selector->compound_selector_count * sizeof(CssCompoundSelector*));
+                memcpy(new_combinators, selector->combinators, selector->compound_selector_count * sizeof(CssCombinator));
+
+                selector->compound_selectors = new_compounds;
+                selector->combinators = new_combinators;
+            }
+
+            // Add combinator and compound selector
+            selector->combinators[selector->compound_selector_count - 1] = combinator;
+            selector->compound_selectors[selector->compound_selector_count] = next_compound;
+            selector->compound_selector_count++;
+
+            fprintf(stderr, "[CSS Parser] Added compound selector with combinator (total count=%zu)\n",
+                    selector->compound_selector_count);
+        } else {
+            // No combinator found, restore position and stop
+            *pos = saved_pos;
+            break;
+        }
+    }
+
+    fprintf(stderr, "[CSS Parser] Completed selector with %zu compound parts\n", selector->compound_selector_count);
+    return selector;
+}
+
+// Parse comma-separated selector group (e.g., "h1, h2, h3" or "p.intro, div.outro")
+CssSelectorGroup* css_parse_selector_group_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
+    if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
+
+    fprintf(stderr, "[CSS Parser] Parsing selector group at position %d\n", *pos);
+
+    // Initial capacity for selector array
+    size_t capacity = 4;
+    CssSelector** selectors = (CssSelector**)pool_calloc(pool, capacity * sizeof(CssSelector*));
+    if (!selectors) return NULL;
+
+    size_t count = 0;
+
+    // Parse first selector
+    CssSelector* first = css_parse_selector_with_combinators(tokens, pos, token_count, pool);
+    if (!first) {
+        fprintf(stderr, "[CSS Parser] ERROR: Failed to parse first selector in group\n");
+        return NULL;
+    }
+    selectors[count++] = first;
+    fprintf(stderr, "[CSS Parser] Parsed selector %zu in group\n", count);
+
+    // Skip whitespace after selector
+    *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+
+    // Parse additional selectors separated by commas
+    while (*pos < token_count && tokens[*pos].type == CSS_TOKEN_COMMA) {
+        fprintf(stderr, "[CSS Parser] Found comma, parsing next selector in group\n");
+        (*pos)++; // consume comma
+
+        // Skip whitespace after comma
+        *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+
+        // Parse next selector
+        CssSelector* next = css_parse_selector_with_combinators(tokens, pos, token_count, pool);
+        if (!next) {
+            fprintf(stderr, "[CSS Parser] WARNING: Failed to parse selector after comma, stopping group\n");
+            break;
+        }
+
+        // Expand array if needed
+        if (count >= capacity) {
+            capacity *= 2;
+            CssSelector** new_selectors = (CssSelector**)pool_calloc(pool, capacity * sizeof(CssSelector*));
+            if (!new_selectors) {
+                fprintf(stderr, "[CSS Parser] ERROR: Failed to expand selector array\n");
+                break;
+            }
+            memcpy(new_selectors, selectors, count * sizeof(CssSelector*));
+            selectors = new_selectors;
+        }
+
+        selectors[count++] = next;
+        fprintf(stderr, "[CSS Parser] Parsed selector %zu in group\n", count);
+
+        // Skip whitespace after selector
+        *pos = css_skip_whitespace_tokens(tokens, *pos, token_count);
+    }
+
+    // Create selector group
+    CssSelectorGroup* group = (CssSelectorGroup*)pool_calloc(pool, sizeof(CssSelectorGroup));
+    if (!group) return NULL;
+
+    group->selectors = selectors;
+    group->selector_count = count;
+
+    fprintf(stderr, "[CSS Parser] Completed selector group with %zu selectors\n", count);
+    return group;
+}
+
 // Helper: Parse a simple CSS selector from tokens (simplified for now)
 CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens, int* pos, int token_count, Pool* pool) {
     if (!tokens || !pos || *pos >= token_count || !pool) return NULL;
@@ -90,7 +355,10 @@ CssSimpleSelector* css_parse_simple_selector_from_tokens(const CssToken* tokens,
         // ID selector: #identifier
         selector->type = CSS_SELECTOR_TYPE_ID;
         // Extract ID value from token (skip the # character)
-        if (token->value) {
+        if (token->value && token->value[0] == '#') {
+            // Hash token value includes the #, skip it
+            selector->value = pool_strdup(pool, token->value + 1);
+        } else if (token->value) {
             selector->value = pool_strdup(pool, token->value);
         } else if (token->start && token->length > 0) {
             // Hash token includes the #, skip it
@@ -321,82 +589,20 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
         return pos - start_pos; // Return tokens consumed
     }
 
-    // Parse selector(s) - handle multiple comma-separated selectors
+    // Parse selector(s) using enhanced parser (supports compound, descendant, and comma-separated selectors)
     fprintf(stderr, "[CSS Parser] Parsing selectors at position %d\n", pos);
 
-    // Parse first selector
-    CssSimpleSelector* simple_sel = css_parse_simple_selector_from_tokens(tokens, &pos, token_count, pool);
-    if (!simple_sel) {
-        fprintf(stderr, "[CSS Parser] ERROR: Failed to parse selector\n");
+    // Parse selector group (handles single selectors and comma-separated groups)
+    CssSelectorGroup* selector_group = css_parse_selector_group_from_tokens(tokens, &pos, token_count, pool);
+    if (!selector_group) {
+        fprintf(stderr, "[CSS Parser] ERROR: Failed to parse selector group\n");
         return 0;
     }
 
-    fprintf(stderr, "[CSS Parser] Parsed selector: type=%d, value='%s'\n",
-            simple_sel->type, simple_sel->value ? simple_sel->value : "(null)");
-
-    // Create compound selector
-    CssCompoundSelector* compound = (CssCompoundSelector*)pool_calloc(pool, sizeof(CssCompoundSelector));
-    if (!compound) return 0;
-
-    compound->simple_selectors = (CssSimpleSelector**)pool_calloc(pool, sizeof(CssSimpleSelector*));
-    compound->simple_selectors[0] = simple_sel;
-    compound->simple_selector_count = 1;
-
-    // Create full selector
-    CssSelector* selector = (CssSelector*)pool_calloc(pool, sizeof(CssSelector));
-    if (!selector) return 0;
-
-    selector->compound_selectors = (CssCompoundSelector**)pool_calloc(pool, sizeof(CssCompoundSelector*));
-    selector->compound_selectors[0] = compound;
-    selector->compound_selector_count = 1;
-    selector->combinators = NULL;
+    fprintf(stderr, "[CSS Parser] Parsed selector group with %zu selector(s)\n", selector_group->selector_count);
 
     // Skip whitespace
     pos = css_skip_whitespace_tokens(tokens, pos, token_count);
-
-    // Check for additional selectors (comma-separated: "h1, h2, h3")
-    while (pos < token_count && tokens[pos].type == CSS_TOKEN_COMMA) {
-        fprintf(stderr, "[CSS Parser] Found comma, parsing additional selector\n");
-        pos++;  // Skip comma
-
-        // Skip whitespace after comma
-        pos = css_skip_whitespace_tokens(tokens, pos, token_count);
-
-        // Parse next selector
-        CssSimpleSelector* next_sel = css_parse_simple_selector_from_tokens(tokens, &pos, token_count, pool);
-        if (!next_sel) {
-            fprintf(stderr, "[CSS Parser] WARNING: Failed to parse selector after comma\n");
-            break;
-        }
-
-        fprintf(stderr, "[CSS Parser] Parsed additional selector: type=%d, value='%s'\n",
-                next_sel->type, next_sel->value ? next_sel->value : "(null)");
-
-        // Create compound selector for this additional selector
-        CssCompoundSelector* next_compound = (CssCompoundSelector*)pool_calloc(pool, sizeof(CssCompoundSelector));
-        if (!next_compound) break;
-
-        next_compound->simple_selectors = (CssSimpleSelector**)pool_calloc(pool, sizeof(CssSimpleSelector*));
-        next_compound->simple_selectors[0] = next_sel;
-        next_compound->simple_selector_count = 1;
-
-        // Expand selector's compound_selectors array
-        int new_count = selector->compound_selector_count + 1;
-        CssCompoundSelector** new_array = (CssCompoundSelector**)pool_calloc(pool,
-                                                                               new_count * sizeof(CssCompoundSelector*));
-        if (new_array) {
-            memcpy(new_array, selector->compound_selectors,
-                   selector->compound_selector_count * sizeof(CssCompoundSelector*));
-            new_array[selector->compound_selector_count] = next_compound;
-            selector->compound_selectors = new_array;
-            selector->compound_selector_count = new_count;
-        }
-
-        // Skip whitespace after selector
-        pos = css_skip_whitespace_tokens(tokens, pos, token_count);
-    }
-
-    fprintf(stderr, "[CSS Parser] Total selectors in rule: %d\n", selector->compound_selector_count);
 
     // Expect opening brace
     if (pos >= token_count || tokens[pos].type != CSS_TOKEN_LEFT_BRACE) {
@@ -449,7 +655,12 @@ int css_parse_rule_from_tokens_internal(const CssToken* tokens, int token_count,
 
     rule->type = CSS_RULE_STYLE;
     rule->pool = pool;
-    rule->data.style_rule.selector = selector;
+    rule->data.style_rule.selector_group = selector_group;
+    // For backward compatibility, store the first selector in the single selector field
+    rule->data.style_rule.selector = (selector_group->selector_count > 0) ? selector_group->selectors[0] : NULL;
+    // Note: selector_list is legacy and uses CSSComplexSelector* (linked list format)
+    // Our new CssSelector* uses arrays, so we leave selector_list NULL for now
+    rule->selector_list = NULL;
     rule->data.style_rule.declarations = declarations;
     rule->data.style_rule.declaration_count = decl_count;
 

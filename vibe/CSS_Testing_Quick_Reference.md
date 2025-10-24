@@ -52,15 +52,11 @@ Layer 5: Property Validation Tests (50+ tests)
 
 ```
 test/css/
-├── unit/                                    # Comprehensive unit tests
+├── unit/                                   # Comprehensive unit tests
 │   ├── test_css_tokenizer_unit.cpp         # 100+ tokenizer tests
 │   ├── test_css_parser_unit.cpp            # 80+ parser tests
-│   ├── test_css_integration_unit.cpp       # 60+ integration tests
 │   ├── test_css_properties.cpp             # 50+ property tests
-│   └── test_css_regression.cpp             # Bug regression tests
-├── fixtures/                                # Test data files
-│   ├── valid/                              # Valid CSS samples
-│   └── invalid/                            # Invalid CSS samples
+│   └── test_css_integration_unit.cpp       # 60+ integration tests
 └── helpers/
     └── css_test_helpers.hpp                # Shared test utilities
 ```
