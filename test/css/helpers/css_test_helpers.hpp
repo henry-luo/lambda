@@ -223,7 +223,17 @@ public:
     }
 
     CssToken* tokens() { return tokens_; }
-    size_t count() const { return count_; }
+
+    // Get count excluding EOF token
+    size_t count() const {
+        if (count_ > 0 && tokens_[count_ - 1].type == CSS_TOKEN_EOF) {
+            return count_ - 1;
+        }
+        return count_;
+    }
+
+    // Get total count including EOF token
+    size_t total_count() const { return count_; }
 
     // Get token at index (with bounds checking)
     const CssToken* operator[](size_t index) const {

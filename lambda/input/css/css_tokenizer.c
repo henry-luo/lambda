@@ -488,8 +488,8 @@ CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* tok
         CssToken* src = &enhanced_tokens[i];
         CSSToken* dst = &basic_tokens[i];
 
-        // Basic type mapping
-        dst->type = CSS_TOKEN_IDENT; // Default fallback
+        // Copy all fields from enhanced token
+        dst->type = src->type;
         dst->start = src->start;
         dst->length = src->length;
         dst->value = src->value;
@@ -563,6 +563,23 @@ void css_tokenizer_enhanced_destroy(CSSTokenizer* tokenizer) {
     (void)tokenizer;
 }
 
+/**
+ * Extract and store the token value as a null-terminated string
+ */
+static void css_token_set_value(CssToken* token, Pool* pool) {
+    if (!token || !pool || token->length == 0 || !token->start) {
+        return;
+    }
+
+    // Allocate space for value + null terminator
+    char* value = (char*)pool_alloc(pool, token->length + 1);
+    if (value) {
+        memcpy(value, token->start, token->length);
+        value[token->length] = '\0';
+        token->value = value;
+    }
+}
+
 int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                                    const char* input, size_t length,
                                    CssToken** tokens) {
@@ -595,19 +612,22 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
 
         // Create whitespace token if we found any
         if (pos > ws_start) {
-            CssToken* token = &token_array[token_count++];
+            CssToken* token = &token_array[token_count];
             token->type = CSS_TOKEN_WHITESPACE;
             token->start = input + ws_start;
             token->length = pos - ws_start;
-            token->value = NULL; // Will be set when needed
+            token->value = NULL;
+            css_token_set_value(token, tokenizer->pool);
+            token_count++;
         }
 
         if (pos >= length) break;
 
         char ch = input[pos];
-        CssToken* token = &token_array[token_count++];
+        CssToken* token = &token_array[token_count];
         token->start = input + pos;
         token->length = 1;
+        token->value = NULL;
         token->value = NULL;
 
         // Basic character classification
@@ -893,7 +913,7 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                         token->data.number_value = atof(num_str);
                     }
                 } else if (isalpha(ch) || ch == '_' || (ch == '-' && pos + 1 < length && isalpha(input[pos + 1]))) {
-                    // Identifier or function
+                    // Identifier or function - check for ASCII start
                     size_t start = pos;
                     while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
                         pos++;
@@ -907,6 +927,44 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                         token->type = CSS_TOKEN_IDENT;
                     }
                     token->length = pos - start;
+                } else if ((unsigned char)ch >= 0x80) {
+                    // Potential UTF-8 multi-byte character - check if it's a valid name start
+                    UnicodeChar uc = css_parse_unicode_char(input + pos, length - pos);
+                    if (uc.byte_length > 0 && css_is_name_start_char_unicode(uc.codepoint)) {
+                        // Valid UTF-8 identifier start
+                        size_t start = pos;
+                        pos += uc.byte_length;
+
+                        // Continue parsing identifier with UTF-8 support
+                        while (pos < length) {
+                            if (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_') {
+                                pos++;
+                            } else if ((unsigned char)input[pos] >= 0x80) {
+                                UnicodeChar next = css_parse_unicode_char(input + pos, length - pos);
+                                if (next.byte_length > 0 && css_is_name_char_unicode(next.codepoint)) {
+                                    pos += next.byte_length;
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+
+                        // Check for function
+                        if (pos < length && input[pos] == '(') {
+                            token->type = CSS_TOKEN_FUNCTION;
+                            pos++;
+                        } else {
+                            token->type = CSS_TOKEN_IDENT;
+                        }
+                        token->length = pos - start;
+                    } else {
+                        // Invalid UTF-8 or not a name character - treat as delimiter
+                        token->type = CSS_TOKEN_DELIM;
+                        token->data.delimiter = ch;
+                        pos++;
+                    }
                 } else {
                     // Delimiter
                     token->type = CSS_TOKEN_DELIM;
@@ -915,15 +973,20 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                 }
                 break;
         }
+
+        // Set token value and increment count
+        css_token_set_value(token, tokenizer->pool);
+        token_count++;
     }
 
     // Add EOF token
     if (token_count < max_tokens) {
-        CssToken* eof_token = &token_array[token_count++];
+        CssToken* eof_token = &token_array[token_count];
         eof_token->type = CSS_TOKEN_EOF;
         eof_token->start = input + length;
         eof_token->length = 0;
-        eof_token->value = NULL;
+        eof_token->value = "";  // Empty string instead of NULL
+        token_count++;
     }
 
     fprintf(stderr, "[CSS Tokenizer] Tokenization complete: %zu tokens generated\n", token_count);
