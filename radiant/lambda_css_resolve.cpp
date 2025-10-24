@@ -1,0 +1,652 @@
+#include "lambda_css_resolve.h"
+#include "view.hpp"
+#include <string.h>
+#include <strings.h>
+#include <ctype.h>
+
+extern "C" {
+#include <lexbor/css/css.h>
+}
+
+// ============================================================================
+// CSS Keyword to Lexbor Enum Mapping
+// ============================================================================
+
+/**
+ * Comprehensive mapping table for CSS keyword strings to Lexbor enum values
+ * Extracted from lexbor/source/lexbor/css/value/const.h
+ */
+struct KeywordMapping {
+    const char* keyword;
+    int lexbor_value;
+};
+
+// note: keywords are sorted alphabetically for binary search optimization
+static const KeywordMapping keyword_map[] = {
+    // Display and layout values
+    {"absolute", 0x014f},  // LXB_CSS_VALUE_ABSOLUTE
+    {"auto", 0x000c},      // LXB_CSS_VALUE_AUTO
+    {"baseline", 0x000b},  // LXB_CSS_VALUE_BASELINE
+    {"block", 0x00ef},     // LXB_CSS_VALUE_BLOCK
+    {"border-box", 0x002a}, // LXB_CSS_VALUE_BORDER_BOX
+    {"both", 0x0174},      // LXB_CSS_VALUE_BOTH
+    {"bottom", 0x0019},    // LXB_CSS_VALUE_BOTTOM
+
+    // Font and text values
+    {"bold", 0x013d},      // LXB_CSS_VALUE_BOLD
+    {"bolder", 0x013e},    // LXB_CSS_VALUE_BOLDER
+
+    // Positioning and alignment
+    {"center", 0x0007},    // LXB_CSS_VALUE_CENTER
+    {"content-box", 0x0029}, // LXB_CSS_VALUE_CONTENT_BOX
+    {"currentcolor", 0x0031}, // LXB_CSS_VALUE_CURRENTCOLOR
+
+    // Border styles
+    {"dashed", 0x0022},    // LXB_CSS_VALUE_DASHED
+    {"dotted", 0x0021},    // LXB_CSS_VALUE_DOTTED
+    {"double", 0x0024},    // LXB_CSS_VALUE_DOUBLE
+
+    // Display types
+    {"flex", 0x00f5},      // LXB_CSS_VALUE_FLEX
+    {"fixed", 0x0151},     // LXB_CSS_VALUE_FIXED
+
+    // Colors - Common colors
+    {"black", 0x003b},     // LXB_CSS_VALUE_BLACK
+    {"blue", 0x003d},      // LXB_CSS_VALUE_BLUE
+    {"brown", 0x003f},     // LXB_CSS_VALUE_BROWN
+    {"gold", 0x0067},      // LXB_CSS_VALUE_GOLD
+    {"gray", 0x0069},      // LXB_CSS_VALUE_GRAY
+    {"green", 0x006a},     // LXB_CSS_VALUE_GREEN
+    {"grid", 0x00f6},      // LXB_CSS_VALUE_GRID
+
+    // Visibility and overflow
+    {"hidden", 0x0020},    // LXB_CSS_VALUE_HIDDEN
+
+    // Layout display
+    {"inline", 0x00f0},    // LXB_CSS_VALUE_INLINE
+    {"inline-block", 0x00f1}, // LXB_CSS_VALUE_INLINE_BLOCK
+    {"inline-flex", 0x00f2},  // LXB_CSS_VALUE_INLINE_FLEX
+    {"inline-grid", 0x00f3},  // LXB_CSS_VALUE_INLINE_GRID
+
+    // Font styles
+    {"italic", 0x013b},    // LXB_CSS_VALUE_ITALIC
+
+    // Alignment
+    {"left", 0x002f},      // LXB_CSS_VALUE_LEFT
+    {"line-through", 0x0159}, // LXB_CSS_VALUE_LINE_THROUGH
+
+    // Vertical alignment
+    {"middle", 0x0010},    // LXB_CSS_VALUE_MIDDLE
+
+    // Display and text
+    {"none", 0x001f},      // LXB_CSS_VALUE_NONE
+    {"normal", 0x0132},    // LXB_CSS_VALUE_NORMAL
+
+    // Font styles
+    {"oblique", 0x013c},   // LXB_CSS_VALUE_OBLIQUE
+
+    // Colors
+    {"orange", 0x009d},    // LXB_CSS_VALUE_ORANGE
+    {"overline", 0x0158},  // LXB_CSS_VALUE_OVERLINE
+
+    // Colors
+    {"pink", 0x00a7},      // LXB_CSS_VALUE_PINK
+    {"purple", 0x00aa},    // LXB_CSS_VALUE_PURPLE
+
+    // Colors
+    {"red", 0x00ac},       // LXB_CSS_VALUE_RED
+    {"relative", 0x014e},  // LXB_CSS_VALUE_RELATIVE
+    {"right", 0x0030},     // LXB_CSS_VALUE_RIGHT
+
+    // Overflow
+    {"scroll", 0x014b},    // LXB_CSS_VALUE_SCROLL
+    {"silver", 0x00b5},    // LXB_CSS_VALUE_SILVER
+    {"solid", 0x0023},     // LXB_CSS_VALUE_SOLID
+    {"static", 0x014d},    // LXB_CSS_VALUE_STATIC
+    {"sticky", 0x0150},    // LXB_CSS_VALUE_STICKY
+
+    // Vertical alignment
+    {"text-bottom", 0x000d}, // LXB_CSS_VALUE_TEXT_BOTTOM
+    {"text-top", 0x0013},    // LXB_CSS_VALUE_TEXT_TOP
+    {"top", 0x0018},         // LXB_CSS_VALUE_TOP
+    {"transparent", 0x0032}, // LXB_CSS_VALUE_TRANSPARENT
+
+    // Text decoration
+    {"underline", 0x0157},   // LXB_CSS_VALUE_UNDERLINE
+
+    // Overflow
+    {"visible", 0x0149},     // LXB_CSS_VALUE_VISIBLE
+
+    // Colors
+    {"white", 0x00c4},       // LXB_CSS_VALUE_WHITE
+    {"yellow", 0x00c6},      // LXB_CSS_VALUE_YELLOW
+};
+
+static const size_t keyword_map_size = sizeof(keyword_map) / sizeof(keyword_map[0]);
+
+/**
+ * Binary search for keyword in sorted mapping table
+ */
+static int keyword_compare(const void* a, const void* b) {
+    const char* key = (const char*)a;
+    const KeywordMapping* mapping = (const KeywordMapping*)b;
+    return strcasecmp(key, mapping->keyword);
+}
+
+int map_css_keyword_to_lexbor(const char* keyword) {
+    if (!keyword) return 0;
+
+    // binary search in sorted keyword table
+    const KeywordMapping* result = (const KeywordMapping*)bsearch(
+        keyword,
+        keyword_map,
+        keyword_map_size,
+        sizeof(KeywordMapping),
+        keyword_compare
+    );
+
+    if (result) {
+        return result->lexbor_value;
+    }
+
+    // unknown keyword, return 0
+    // TODO: log warning for debugging
+    return 0;
+}
+
+// ============================================================================
+// Value Conversion Functions
+// ============================================================================
+
+float convert_lambda_length_to_px(const CssValue* value, LayoutContext* lycon,
+                                   CssPropertyId prop_id) {
+    if (!value) return 0.0f;
+
+    switch (value->type) {
+        case CSS_VALUE_LENGTH: {
+            float num = value->data.length.value;
+
+            switch (value->data.length.unit) {
+                case CSS_UNIT_PX:
+                    return num;
+
+                case CSS_UNIT_EM:
+                    // relative to current font size
+                    if (lycon) {
+                        return num * lycon->font.current_font_size;
+                    }
+                    return num * 16.0f; // default font size
+
+                case CSS_UNIT_REM:
+                    // relative to root font size
+                    return num * 16.0f; // TODO: get from root element
+
+                case CSS_UNIT_PT:
+                    return num * (96.0f / 72.0f); // 1pt = 1/72 inch, 96dpi
+
+                case CSS_UNIT_PC:
+                    return num * 16.0f; // 1pc = 12pt = 16px
+
+                case CSS_UNIT_IN:
+                    return num * 96.0f; // 96dpi
+
+                case CSS_UNIT_CM:
+                    return num * 37.795f; // 1cm = 37.795px at 96dpi
+
+                case CSS_UNIT_MM:
+                    return num * 3.7795f; // 1mm = 3.7795px at 96dpi
+
+                case CSS_UNIT_VW:
+                    // viewport width percentage
+                    if (lycon && lycon->width > 0) {
+                        return (num / 100.0f) * lycon->width;
+                    }
+                    return 0.0f;
+
+                case CSS_UNIT_VH:
+                    // viewport height percentage
+                    if (lycon && lycon->height > 0) {
+                        return (num / 100.0f) * lycon->height;
+                    }
+                    return 0.0f;
+
+                default:
+                    return num; // assume pixels for unknown units
+            }
+        }
+
+        case CSS_VALUE_PERCENTAGE: {
+            // percentage resolution depends on property context
+            // for now, return raw percentage (needs parent context)
+            return (float)value->data.percentage.value;
+        }
+
+        case CSS_VALUE_NUMBER: {
+            // unitless number, treat as pixels for most properties
+            return (float)value->data.number.value;
+        }
+
+        default:
+            return 0.0f;
+    }
+}
+
+Color convert_lambda_color(const CssValue* value) {
+    Color result;
+    result.r = 0;
+    result.g = 0;
+    result.b = 0;
+    result.a = 255; // default black, opaque
+
+    if (!value) return result;
+
+    switch (value->type) {
+        case CSS_VALUE_COLOR: {
+            // Access color data from CssValue anonymous struct
+            switch (value->data.color.type) {
+                case CSS_COLOR_RGB:
+                    result.r = value->data.color.data.rgba.r;
+                    result.g = value->data.color.data.rgba.g;
+                    result.b = value->data.color.data.rgba.b;
+                    result.a = value->data.color.data.rgba.a;
+                    break;
+
+                case CSS_COLOR_HSL:
+                    // TODO: convert HSL to RGB
+                    // for now, leave as black
+                    break;
+
+                default:
+                    break;
+            }
+            break;
+        }
+
+        case CSS_VALUE_KEYWORD: {
+            // map color keyword to RGB
+            // TODO: implement color keyword lookup table
+            const char* keyword = value->data.keyword;
+
+            if (strcasecmp(keyword, "black") == 0) {
+                result.r = 0; result.g = 0; result.b = 0; result.a = 255;
+            } else if (strcasecmp(keyword, "white") == 0) {
+                result.r = 255; result.g = 255; result.b = 255; result.a = 255;
+            } else if (strcasecmp(keyword, "red") == 0) {
+                result.r = 255; result.g = 0; result.b = 0; result.a = 255;
+            } else if (strcasecmp(keyword, "green") == 0) {
+                result.r = 0; result.g = 128; result.b = 0; result.a = 255;
+            } else if (strcasecmp(keyword, "blue") == 0) {
+                result.r = 0; result.g = 0; result.b = 255; result.a = 255;
+            } else if (strcasecmp(keyword, "transparent") == 0) {
+                result.r = 0; result.g = 0; result.b = 0; result.a = 0;
+            }
+            // TODO: add more color keywords
+            break;
+        }
+
+        default:
+            break;
+    }
+
+    return result;
+}
+
+// ============================================================================
+// Keyword Mapping Functions
+// ============================================================================
+
+uint32_t map_lambda_color_keyword(const char* keyword) {
+    if (!keyword) return 0x000000FF; // default black
+
+    // Map CSS color keywords to RGBA values
+    // Format: 0xRRGGBBAA
+    if (strcasecmp(keyword, "black") == 0) return 0x000000FF;
+    if (strcasecmp(keyword, "white") == 0) return 0xFFFFFFFF;
+    if (strcasecmp(keyword, "red") == 0) return 0xFF0000FF;
+    if (strcasecmp(keyword, "green") == 0) return 0x008000FF;
+    if (strcasecmp(keyword, "blue") == 0) return 0x0000FFFF;
+    if (strcasecmp(keyword, "yellow") == 0) return 0xFFFF00FF;
+    if (strcasecmp(keyword, "cyan") == 0) return 0x00FFFFFF;
+    if (strcasecmp(keyword, "magenta") == 0) return 0xFF00FFFF;
+    if (strcasecmp(keyword, "gray") == 0) return 0x808080FF;
+    if (strcasecmp(keyword, "grey") == 0) return 0x808080FF;
+    if (strcasecmp(keyword, "silver") == 0) return 0xC0C0C0FF;
+    if (strcasecmp(keyword, "maroon") == 0) return 0x800000FF;
+    if (strcasecmp(keyword, "purple") == 0) return 0x800080FF;
+    if (strcasecmp(keyword, "fuchsia") == 0) return 0xFF00FFFF;
+    if (strcasecmp(keyword, "lime") == 0) return 0x00FF00FF;
+    if (strcasecmp(keyword, "olive") == 0) return 0x808000FF;
+    if (strcasecmp(keyword, "navy") == 0) return 0x000080FF;
+    if (strcasecmp(keyword, "teal") == 0) return 0x008080FF;
+    if (strcasecmp(keyword, "aqua") == 0) return 0x00FFFFFF;
+    if (strcasecmp(keyword, "transparent") == 0) return 0x00000000;
+
+    // TODO: Add more color keywords (148 total CSS3 colors)
+
+    return 0x000000FF; // default to black
+}
+
+float map_lambda_font_size_keyword(const char* keyword) {
+    if (!keyword) return 16.0f;
+
+    // Map font-size keywords to pixel values
+    if (strcasecmp(keyword, "xx-small") == 0) return 9.0f;
+    if (strcasecmp(keyword, "x-small") == 0) return 10.0f;
+    if (strcasecmp(keyword, "small") == 0) return 13.0f;
+    if (strcasecmp(keyword, "medium") == 0) return 16.0f;
+    if (strcasecmp(keyword, "large") == 0) return 18.0f;
+    if (strcasecmp(keyword, "x-large") == 0) return 24.0f;
+    if (strcasecmp(keyword, "xx-large") == 0) return 32.0f;
+    if (strcasecmp(keyword, "smaller") == 0) return -1.0f;  // relative to parent
+    if (strcasecmp(keyword, "larger") == 0) return -1.0f;   // relative to parent
+
+    return 16.0f; // default medium size
+}
+
+int map_lambda_font_weight_keyword(const char* keyword) {
+    if (!keyword) return 400;
+
+    // Map font-weight keywords to numeric values
+    if (strcasecmp(keyword, "normal") == 0) return 400;
+    if (strcasecmp(keyword, "bold") == 0) return 700;
+    if (strcasecmp(keyword, "bolder") == 0) return 900;  // simplified
+    if (strcasecmp(keyword, "lighter") == 0) return 300; // simplified
+
+    return 400; // default normal
+}
+
+const char* map_lambda_font_family_keyword(const char* keyword) {
+    if (!keyword) return "sans-serif";
+
+    // Map generic font family keywords to system fonts
+    if (strcasecmp(keyword, "serif") == 0) return "serif";
+    if (strcasecmp(keyword, "sans-serif") == 0) return "sans-serif";
+    if (strcasecmp(keyword, "monospace") == 0) return "monospace";
+    if (strcasecmp(keyword, "cursive") == 0) return "cursive";
+    if (strcasecmp(keyword, "fantasy") == 0) return "fantasy";
+
+    return "sans-serif"; // default
+}
+
+// ============================================================================
+// Specificity Calculation
+// ============================================================================
+
+int32_t get_lambda_specificity(const CssDeclaration* decl) {
+    if (!decl) return 0;
+
+    // Lambda CssSpecificity is a struct with (a, b, c) components
+    // Convert to Lexbor-compatible int32_t by packing:
+    // specificity = (a << 16) | (b << 8) | c
+    // TODO: verify Lambda CssSpecificity structure
+
+    return 0; // placeholder - needs proper implementation
+}
+
+// ============================================================================
+// Main Style Resolution
+// ============================================================================
+
+// Callback for AVL tree traversal
+static bool resolve_property_callback(AvlNode* node, void* context) {
+    LayoutContext* lycon = (LayoutContext*)context;
+
+    // Get StyleNode from AvlNode->declaration field (not by casting)
+    // AvlNode stores a pointer to StyleNode in its declaration field
+    StyleNode* style_node = (StyleNode*)node->declaration;
+
+    // get property ID from node
+    CssPropertyId prop_id = (CssPropertyId)node->property_id;
+
+    log_debug("  Processing property ID: %d", prop_id);
+
+    // get the CSS declaration for this property
+    CssDeclaration* decl = style_node ? style_node->winning_decl : NULL;
+    if (!decl) {
+        log_debug("  No declaration found for property %d", prop_id);
+        return true; // continue iteration
+    }
+
+    // resolve this property
+    resolve_lambda_css_property(prop_id, decl, lycon);
+
+    return true; // continue iteration
+}
+
+void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
+    if (!dom_elem || !lycon) {
+        log_debug("[Lambda CSS] resolve_lambda_css_styles: null input (dom_elem=%p, lycon=%p)", dom_elem, lycon);
+        return;
+    }
+
+    log_debug("[Lambda CSS] Resolving styles for element");
+
+    // iterate through specified_style AVL tree
+    StyleTree* style_tree = dom_elem->specified_style;
+    if (!style_tree) {
+        log_debug("[Lambda CSS] No style tree found for element");
+        return;
+    }
+
+    if (!style_tree->tree) {
+        log_debug("[Lambda CSS] Style tree has no AVL tree");
+        return;
+    }
+
+    log_debug("[Lambda CSS] Style tree has %d nodes", style_tree->tree->node_count);
+
+    // Traverse the AVL tree and resolve each property
+    int processed = avl_tree_foreach_inorder(style_tree->tree, resolve_property_callback, lycon);
+
+    log_debug("[Lambda CSS] Processed %d style properties", processed);
+}
+
+void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl,
+                                  LayoutContext* lycon) {
+    log_debug("[Lambda CSS Property] resolve_lambda_css_property called: prop_id=%d", prop_id);
+
+    if (!decl || !lycon || !lycon->view) {
+        log_debug("[Lambda CSS Property] Early return: decl=%p, lycon=%p, view=%p",
+                  decl, lycon, lycon ? lycon->view : NULL);
+        return;
+    }
+
+    const CssValue* value = decl->value;
+    if (!value) {
+        log_debug("[Lambda CSS Property] No value in declaration");
+        return;
+    }
+
+    log_debug("[Lambda CSS Property] Processing property %d, value type=%d", prop_id, value->type);
+
+    int32_t specificity = get_lambda_specificity(decl);
+    log_debug("[Lambda CSS Property] Specificity: %d", specificity);
+
+    // Dispatch based on property ID
+    // Parallel implementation to resolve_element_style() in resolve_style.cpp
+    ViewSpan* span = (ViewSpan*)lycon->view;
+    ViewBlock* block = lycon->view->type != RDT_VIEW_INLINE ? (ViewBlock*)lycon->view : NULL;
+
+    switch (prop_id) {
+        // ===== GROUP 1: Core Typography & Color =====
+
+        case CSS_PROPERTY_COLOR: {
+            log_debug("[CSS] Processing color property");
+            if (!span->in_line) {
+                span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+            }
+
+            Color color_val = {0};
+            if (value->type == CSS_VALUE_KEYWORD) {
+                // Map keyword to color (e.g., "red", "blue")
+                color_val.c = map_lambda_color_keyword(value->data.keyword);
+                log_debug("[CSS] Color keyword: %s -> 0x%08X", value->data.keyword, color_val.c);
+            } else if (value->type == CSS_VALUE_COLOR) {
+                // Direct RGBA color value from color struct
+                if (value->data.color.type == CSS_COLOR_RGB) {
+                    color_val.r = value->data.color.data.rgba.r;
+                    color_val.g = value->data.color.data.rgba.g;
+                    color_val.b = value->data.color.data.rgba.b;
+                    color_val.a = value->data.color.data.rgba.a;
+                    log_debug("[CSS] Color RGBA: (%d,%d,%d,%d) -> 0x%08X",
+                             color_val.r, color_val.g, color_val.b, color_val.a, color_val.c);
+                }
+            }
+
+            if (color_val.c != 0) {
+                span->in_line->color = color_val;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_FONT_SIZE: {
+            log_debug("[CSS] Processing font-size property");
+            if (!span->font) {
+                span->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+            }
+
+            float font_size = 0.0f;
+            if (value->type == CSS_VALUE_LENGTH) {
+                font_size = value->data.length.value; // Use struct accessor
+                log_debug("[CSS] Font size length: %.2f px", font_size);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                // Percentage of parent font size
+                float parent_size = span->font->font_size > 0 ? span->font->font_size : 16.0f;
+                font_size = parent_size * (value->data.percentage.value / 100.0f);
+                log_debug("[CSS] Font size percentage: %.2f%% -> %.2f px", value->data.percentage.value, font_size);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // Named font sizes: small, medium, large, etc.
+                font_size = map_lambda_font_size_keyword(value->data.keyword);
+                log_debug("[CSS] Font size keyword: %s -> %.2f px", value->data.keyword, font_size);
+            }
+
+            if (font_size > 0) {
+                span->font->font_size = font_size;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_FONT_WEIGHT: {
+            log_debug("[CSS] Processing font-weight property");
+            if (!span->font) {
+                span->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+            }
+
+            int weight = 0;
+            if (value->type == CSS_VALUE_NUMBER || value->type == CSS_VALUE_INTEGER) {
+                // Numeric weight: 100, 200, ..., 900
+                weight = (int)value->data.number.value;
+                log_debug("[CSS] Font weight number: %d", weight);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // Keyword: normal (400), bold (700), lighter, bolder
+                weight = map_lambda_font_weight_keyword(value->data.keyword);
+                log_debug("[CSS] Font weight keyword: %s -> %d", value->data.keyword, weight);
+            }
+
+            if (weight >= 100 && weight <= 900) {
+                span->font->font_weight = weight;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_FONT_FAMILY: {
+            log_debug("[CSS] Processing font-family property");
+            if (!span->font) {
+                span->font = (FontProp*)alloc_prop(lycon, sizeof(FontProp));
+            }
+
+            if (value->type == CSS_VALUE_STRING) {
+                // Font family name as string
+                const char* family = value->data.string;
+                if (family && strlen(family) > 0) {
+                    span->font->family = strdup(family);
+                    log_debug("[CSS] Font family: %s", family);
+                }
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // Generic family: serif, sans-serif, monospace, etc.
+                const char* family = map_lambda_font_family_keyword(value->data.keyword);
+                if (family) {
+                    span->font->family = strdup(family);
+                    log_debug("[CSS] Font family keyword: %s -> %s", value->data.keyword, family);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_LINE_HEIGHT: {
+            log_debug("[CSS] Processing line-height property");
+            if (!block || !block->blk) {
+                if (block) {
+                    block->blk = alloc_block_prop(lycon);
+                } else {
+                    break; // inline elements don't have line-height in our model
+                }
+            }
+
+            // Line height can be number (multiplier), length, percentage, or 'normal'
+            // Store as-is for later computation
+            if (value->type == CSS_VALUE_NUMBER) {
+                // Unitless number - multiply by font size
+                float multiplier = value->data.number.value;
+                log_debug("[CSS] Line height number: %.2f", multiplier);
+                // Store for later: line_height = font_size * multiplier
+                // For now, store the multiplier (need to update BlockProp structure)
+            } else if (value->type == CSS_VALUE_LENGTH) {
+                float line_height = value->data.length.value;
+                log_debug("[CSS] Line height length: %.2f px", line_height);
+                // TODO: Store line_height in block->blk
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Line height percentage: %.2f%%", percentage);
+                // line_height = font_size * (percentage / 100)
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // 'normal' keyword - typically 1.2 × font-size
+                log_debug("[CSS] Line height keyword: normal");
+            }
+            break;
+        }
+
+        // ===== TODO: More property groups to be added =====
+
+        case CSS_PROPERTY_DISPLAY: {
+            // handle display property
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                // TODO: set display property on lycon->view
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_POSITION: {
+            // handle position property
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                // TODO: set position on lycon->view
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_WIDTH: {
+            if (value->type == CSS_VALUE_LENGTH) {
+                float width = value->data.length.value;
+                // TODO: set width on lycon->view
+                log_debug("[CSS] Width: %.2f px", width);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_HEIGHT: {
+            if (value->type == CSS_VALUE_LENGTH) {
+                float height = value->data.length.value;
+                // TODO: set height on lycon->view
+                log_debug("[CSS] Height: %.2f px", height);
+            }
+            break;
+        }
+
+        default:
+            // Unknown or unimplemented property
+            log_debug("[CSS] Unimplemented property: %d", prop_id);
+            break;
+    }
+}

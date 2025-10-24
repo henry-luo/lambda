@@ -1,5 +1,9 @@
 #include "dom.hpp"
 
+extern "C" {
+#include "../lambda/input/css/dom_element.h"
+}
+
 // DomNode member function implementations
 
 unsigned char* DomNode::text_data() {
@@ -86,6 +90,15 @@ DomNode* DomNode::first_child() {
 
         if (first_type == LMD_TYPE_ELEMENT) {
             child_node = create_mark_element((Element*)first_item.pointer);
+
+            // CRITICAL: Link to DomElement for CSS access
+            // Navigate parallel DomElement tree to get styling
+            if (this->style) {
+                DomElement* parent_dom = (DomElement*)this->style;
+                if (parent_dom->first_child) {
+                    child_node->style = (Style*)parent_dom->first_child;
+                }
+            }
         } else if (first_type == LMD_TYPE_STRING) {
             child_node = create_mark_text((String*)first_item.pointer);
         }
@@ -139,6 +152,15 @@ DomNode* DomNode::next_sibling() {
 
             if (next_type == LMD_TYPE_ELEMENT) {
                 sibling_node = create_mark_element((Element*)next_item.pointer);
+
+                // CRITICAL: Link to DomElement for CSS access
+                // Navigate parallel DomElement tree to get styling
+                if (this->style) {
+                    DomElement* current_dom = (DomElement*)this->style;
+                    if (current_dom->next_sibling) {
+                        sibling_node->style = (Style*)current_dom->next_sibling;
+                    }
+                }
             } else if (next_type == LMD_TYPE_STRING) {
                 sibling_node = create_mark_text((String*)next_item.pointer);
             }

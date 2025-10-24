@@ -60,10 +60,10 @@ typedef struct ViewTree ViewTree;
 typedef struct StateStore StateStore;
 
 typedef enum {
-    MARK_ELEMENT,
-    MARK_TEXT,
-    LEXBOR_ELEMENT,
-    LEXBOR_NODE,
+    LEXBOR_ELEMENT,   // 0 - Lexbor HTML element
+    MARK_ELEMENT,     // 1 - Lambda markup element
+    LEXBOR_NODE,      // 2 - Lexbor text/other nodes
+    MARK_TEXT,        // 3 - Lambda mark text/string
 } NodeType;
 
 typedef struct Style {

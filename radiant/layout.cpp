@@ -2,6 +2,7 @@
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
 #include "layout_positioned.hpp"
+#include "lambda_css_resolve.h"
 #include "font_face.h"
 
 #include <ft2build.h>
@@ -110,12 +111,22 @@ float inherit_line_height(LayoutContext* lycon, ViewBlock* block) {
 void dom_node_resolve_style(DomNode* node, LayoutContext* lycon) {
     log_debug("resolving style for elment '%s' of type %d", node->name(), node ? node->type : -1);
     log_enter();
+
     if (node && node->type == LEXBOR_ELEMENT && node->lxb_elmt && node->lxb_elmt->element.style) {
+        // Lexbor CSS path - use existing resolution
         lexbor_avl_foreach_recursion(NULL, node->lxb_elmt->element.style, resolve_element_style, lycon);
         log_debug("resolved element style for: %s", node->name());
-    } else {
+    }
+    else if (node && node->type == MARK_ELEMENT && node->style) {
+        // Lambda CSS path - use parallel resolution function
+        DomElement* dom_elem = (DomElement*)node->style;
+        resolve_lambda_css_styles(dom_elem, lycon);
+        log_debug("resolved lambda css style for: %s", node->name());
+    }
+    else {
         log_debug("element has no style: %s", node->name());
     }
+
     log_leave();
 }
 
@@ -428,7 +439,9 @@ void layout_html_root(LayoutContext* lycon, DomNode *elmt) {
     // CRITICAL FIX: Don't force HTML height to viewport - let it auto-size to content
     lycon->block.given_height = -1;  // -1 means auto-size to content
     // load CSS stylesheets
+    log_debug("DEBUG: About to resolve style for elmt, type=%d, name=%s", elmt->type, elmt->name());
     dom_node_resolve_style(elmt, lycon);
+    log_debug("DEBUG: After resolve style");
 
     if (html->font) {
         setup_font(lycon->ui_context, &lycon->font, lycon->font.ft_face->family_name, html->font);
@@ -644,9 +657,11 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
         log_debug("layout lexbor html root %s", root_node.name());
     } else if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
         // Lambda CSS document - use Lambda Element with DomElement styling
+        log_debug("DEBUG: Setting root_node.type to MARK_ELEMENT (%d)", MARK_ELEMENT);
         root_node.type = MARK_ELEMENT;
         root_node.mark_element = doc->lambda_html_root;
         root_node.style = (Style*)doc->lambda_dom_root;  // Link to DomElement for CSS access
+        log_debug("DEBUG: root_node.type is now %d", root_node.type);
         log_debug("layout lambda css html root %s", root_node.name());
     } else {
         log_error("Unknown document type: %d", doc->doc_type);
@@ -668,7 +683,7 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     if (doc->view_tree && doc->view_tree->root) {
         log_debug("DOM tree: html version %d", doc->view_tree->html_version);
         log_debug("calling print_view_tree...");
-        print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, uicon->pixel_ratio);
+        print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, uicon->pixel_ratio, doc->doc_type);
         log_debug("print_view_tree complete");
     } else {
         log_debug("Warning: No view tree generated");
