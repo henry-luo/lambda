@@ -98,6 +98,8 @@ static const KeywordMapping keyword_map[] = {
     {"pink", 0x00a7},      // LXB_CSS_VALUE_PINK
     {"pointer", 0x00e6},   // LXB_CSS_VALUE_POINTER
     {"pre", 0x016e},       // LXB_CSS_VALUE_PRE
+    {"pre-line", 0x0171},  // LXB_CSS_VALUE_PRE_LINE
+    {"pre-wrap", 0x016f},  // LXB_CSS_VALUE_PRE_WRAP
     {"purple", 0x00aa},    // LXB_CSS_VALUE_PURPLE
 
     // Colors
@@ -1308,6 +1310,262 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 // 'auto' keyword
                 log_debug("[CSS] Left: auto");
                 block->position->has_left = false;
+            }
+            break;
+        }
+
+        // ===== GROUP 6: Remaining Position Properties =====
+
+        case CSS_PROPERTY_RIGHT: {
+            log_debug("[CSS] Processing right property");
+            if (!block) break;
+            if (!block->position) {
+                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float right = value->data.length.value;
+                block->position->right = right;
+                block->position->has_right = true;
+                log_debug("[CSS] Right: %.2f px", right);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Right: %.2f%% (percentage not yet fully supported)", percentage);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // 'auto' keyword
+                log_debug("[CSS] Right: auto");
+                block->position->has_right = false;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BOTTOM: {
+            log_debug("[CSS] Processing bottom property");
+            if (!block) break;
+            if (!block->position) {
+                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float bottom = value->data.length.value;
+                block->position->bottom = bottom;
+                block->position->has_bottom = true;
+                log_debug("[CSS] Bottom: %.2f px", bottom);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Bottom: %.2f%% (percentage not yet fully supported)", percentage);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // 'auto' keyword
+                log_debug("[CSS] Bottom: auto");
+                block->position->has_bottom = false;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_Z_INDEX: {
+            log_debug("[CSS] Processing z-index property");
+            if (!block) break;
+            if (!block->position) {
+                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+            }
+
+            if (value->type == CSS_VALUE_NUMBER || value->type == CSS_VALUE_INTEGER) {
+                int z = (int)value->data.number.value;
+                block->position->z_index = z;
+                log_debug("[CSS] Z-index: %d", z);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // 'auto' keyword - typically means z-index = 0
+                log_debug("[CSS] Z-index: auto");
+                block->position->z_index = 0;
+            }
+            break;
+        }
+
+        // ===== GROUP 7: Float and Clear =====
+
+        case CSS_PROPERTY_FLOAT: {
+            log_debug("[CSS] Processing float property");
+            if (!block) break;
+            if (!block->position) {
+                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int float_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (float_value > 0) {
+                    block->position->float_prop = float_value;
+                    log_debug("[CSS] Float: %s -> 0x%04X", value->data.keyword, float_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_CLEAR: {
+            log_debug("[CSS] Processing clear property");
+            if (!block) break;
+            if (!block->position) {
+                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int clear_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (clear_value > 0) {
+                    block->position->clear = clear_value;
+                    log_debug("[CSS] Clear: %s -> 0x%04X", value->data.keyword, clear_value);
+                }
+            }
+            break;
+        }
+
+        // ===== GROUP 8: Overflow Properties =====
+
+        case CSS_PROPERTY_OVERFLOW: {
+            log_debug("[CSS] Processing overflow property (sets both x and y)");
+            if (!block) break;
+            if (!block->scroller) {
+                block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int overflow_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (overflow_value > 0) {
+                    block->scroller->overflow_x = overflow_value;
+                    block->scroller->overflow_y = overflow_value;
+                    log_debug("[CSS] Overflow: %s -> 0x%04X (both x and y)", value->data.keyword, overflow_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_OVERFLOW_X: {
+            log_debug("[CSS] Processing overflow-x property");
+            if (!block) break;
+            if (!block->scroller) {
+                block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int overflow_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (overflow_value > 0) {
+                    block->scroller->overflow_x = overflow_value;
+                    log_debug("[CSS] Overflow-x: %s -> 0x%04X", value->data.keyword, overflow_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_OVERFLOW_Y: {
+            log_debug("[CSS] Processing overflow-y property");
+            if (!block) break;
+            if (!block->scroller) {
+                block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int overflow_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (overflow_value > 0) {
+                    block->scroller->overflow_y = overflow_value;
+                    log_debug("[CSS] Overflow-y: %s -> 0x%04X", value->data.keyword, overflow_value);
+                }
+            }
+            break;
+        }
+
+        // ===== GROUP 9: White-space Property =====
+
+        case CSS_PROPERTY_WHITE_SPACE: {
+            log_debug("[CSS] Processing white-space property");
+            if (!block || !block->blk) {
+                if (block) {
+                    block->blk = alloc_block_prop(lycon);
+                } else {
+                    break; // inline elements don't have white-space
+                }
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int whitespace_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (whitespace_value > 0) {
+                    block->blk->white_space = whitespace_value;
+                    log_debug("[CSS] White-space: %s -> 0x%04X", value->data.keyword, whitespace_value);
+                }
+            }
+            break;
+        }
+
+        // ===== GROUP 10: Visibility and Opacity =====
+
+        case CSS_PROPERTY_VISIBILITY: {
+            log_debug("[CSS] Processing visibility property");
+            // Visibility applies to all elements, stored in ViewSpan
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int visibility_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (visibility_value > 0) {
+                    span->visibility = visibility_value;
+                    log_debug("[CSS] Visibility: %s -> 0x%04X", value->data.keyword, visibility_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_OPACITY: {
+            log_debug("[CSS] Processing opacity property");
+            if (!span->in_line) {
+                span->in_line = (InlineProp*)alloc_prop(lycon, sizeof(InlineProp));
+            }
+
+            if (value->type == CSS_VALUE_NUMBER) {
+                float opacity = value->data.number.value;
+                // Clamp opacity to 0.0 - 1.0 range
+                if (opacity < 0.0f) opacity = 0.0f;
+                if (opacity > 1.0f) opacity = 1.0f;
+                span->in_line->opacity = opacity;
+                log_debug("[CSS] Opacity: %.2f", opacity);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float opacity = value->data.percentage.value / 100.0f;
+                // Clamp opacity to 0.0 - 1.0 range
+                if (opacity < 0.0f) opacity = 0.0f;
+                if (opacity > 1.0f) opacity = 1.0f;
+                span->in_line->opacity = opacity;
+                log_debug("[CSS] Opacity: %.2f%% -> %.2f", value->data.percentage.value, opacity);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_CLIP: {
+            log_debug("[CSS] Processing clip property");
+            if (!block) break;
+            if (!block->scroller) {
+                block->scroller = (ScrollProp*)alloc_prop(lycon, sizeof(ScrollProp));
+            }
+
+            // CSS clip property uses rect(top, right, bottom, left) syntax
+            // For now, just log that it's present. Full rect parsing would be complex.
+            // The clip field exists in ScrollProp as a Bound structure
+            log_debug("[CSS] Clip property detected (rect parsing not yet implemented)");
+            block->scroller->has_clip = true;
+            // TODO: Parse rect() values and set block->scroller->clip bounds
+            break;
+        }
+
+        // ===== GROUP 11: Box Sizing =====
+
+        case CSS_PROPERTY_BOX_SIZING: {
+            log_debug("[CSS] Processing box-sizing property");
+            if (!block || !block->blk) {
+                if (block) {
+                    block->blk = alloc_block_prop(lycon);
+                } else {
+                    break; // inline elements don't have box-sizing
+                }
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int boxsizing_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (boxsizing_value > 0) {
+                    block->blk->box_sizing = boxsizing_value;
+                    log_debug("[CSS] Box-sizing: %s -> 0x%04X", value->data.keyword, boxsizing_value);
+                }
             }
             break;
         }

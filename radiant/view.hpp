@@ -162,6 +162,7 @@ typedef struct {
     PropValue cursor;
     Color color;
     PropValue vertical_align;
+    float opacity;  // CSS opacity value (0.0 to 1.0)
 } InlineProp;
 
 typedef struct Spacing {
@@ -217,6 +218,7 @@ typedef struct {
     float given_min_height, given_max_height;  // non-negative
     PropValue list_style_type;
     PropValue box_sizing;  // LXB_CSS_VALUE_CONTENT_BOX or LXB_CSS_VALUE_BORDER_BOX
+    PropValue white_space;  // LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NOWRAP, LXB_CSS_VALUE_PRE, etc.
     float given_width, given_height;  // CSS specified width/height values
     lxb_css_value_type_t given_width_type;
     PropValue clear;          // clear property for floats
