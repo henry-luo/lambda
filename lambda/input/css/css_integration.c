@@ -1,5 +1,6 @@
 #include "css_integration.h"
 #include "css_property_value_parser.h"
+#include "css_parser.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -123,24 +124,6 @@ static void css_enhanced_sort_rules_by_cascade(CssRule** rules, int rule_count) 
 static void css_enhanced_apply_rule_to_element(CssRule* rule, CssStyleNode* element, Pool* pool) {
     // Stub: rule application would be implemented here
     if (!rule || !element || !pool) return;
-}
-
-// Parse CSS rule from tokens (stub implementation)
-static CssRule* css_parse_rule_from_tokens(const CssToken* tokens,
-                                           int token_count, Pool* pool) {
-    // Stub implementation for enhanced rule parsing
-    if (!tokens || token_count <= 0 || !pool) {
-        return NULL;
-    }
-
-    CssRule* rule = pool_calloc(pool, sizeof(CssRule));
-    if (!rule) {
-        return NULL;
-    }
-
-    // Basic stub initialization
-    // Note: Rule type is implicit - this is a style rule
-    return rule;
 }
 
 // Enhanced CSS Engine creation
@@ -305,41 +288,62 @@ CssStylesheet* css_enhanced_parse_stylesheet(CssEngine* engine,
     }
 
     // Parse rules from tokens
-    // NOTE: Current implementation is a stub that doesn't actually parse tokens
-    // For now, we'll skip token-based parsing and return empty stylesheet
-    // TODO: Implement proper CSS rule parsing from tokens
-    log_debug("Token-based CSS parsing not yet implemented, returning empty stylesheet");
+    fprintf(stderr, "[DEBUG] Parsing CSS rules from %d tokens\n", token_count);
+    log_debug("Parsing CSS rules from %d tokens", token_count);
 
-    // Disabled infinite loop:
-    // int token_index = 0;
-    // while (token_index < token_count) {
-    //     log_debug("Parsing CSS rule from tokens");
-    //     CssRule* rule = css_enhanced_parse_rule_from_tokens(tokens + token_index, token_count - token_index, engine->pool);
-    //     if (rule) {
-    //         // Add rule to stylesheet
-    //         if (stylesheet->rule_count >= stylesheet->rule_capacity) {
-    //             // Expand capacity
-    //             stylesheet->rule_capacity *= 2;
-    //             CssRule** new_rules = (CssRule**)pool_alloc(engine->pool,
-    //                                                                       stylesheet->rule_capacity * sizeof(CssRule*));
-    //             if (new_rules) {
-    //                 memcpy(new_rules, stylesheet->rules, stylesheet->rule_count * sizeof(CssRule*));
-    //                 stylesheet->rules = new_rules;
-    //             }
-    //         }
-    //
-    //         if (stylesheet->rule_count < stylesheet->rule_capacity) {
-    //             stylesheet->rules[stylesheet->rule_count++] = rule;
-    //
-    //             // Update feature usage flags
-    //             css_enhanced_detect_features_in_rule(stylesheet, rule);
-    //         }
-    //     }
-    //     // CRITICAL: Must advance token_index to avoid infinite loop!
-    //     // Since parse_rule_from_tokens is a stub, we don't know how many tokens were consumed
-    //     // For now, break after first rule or advance by fixed amount
-    //     token_index++; // This would cause another infinite loop with stub implementation
-    // }
+    int token_index = 0;
+    while (token_index < token_count) {
+        // Skip whitespace between rules
+        while (token_index < token_count &&
+               (tokens[token_index].type == CSS_TOKEN_WHITESPACE ||
+                tokens[token_index].type == CSS_TOKEN_COMMENT)) {
+            token_index++;
+        }
+
+        if (token_index >= token_count) break;
+
+        // Parse a rule
+        CssRule* rule = NULL;
+        int tokens_consumed = css_parse_rule_from_tokens_internal(
+            tokens + token_index, token_count - token_index, engine->pool, &rule);
+
+        if (tokens_consumed > 0) {
+            token_index += tokens_consumed;
+
+            if (rule) {
+                // Add rule to stylesheet
+                if (stylesheet->rule_count >= stylesheet->rule_capacity) {
+                    // Expand capacity
+                    stylesheet->rule_capacity *= 2;
+                    CssRule** new_rules = (CssRule**)pool_alloc(engine->pool,
+                                                                             stylesheet->rule_capacity * sizeof(CssRule*));
+                    if (new_rules) {
+                        memcpy(new_rules, stylesheet->rules, stylesheet->rule_count * sizeof(CssRule*));
+                        stylesheet->rules = new_rules;
+                    }
+                }
+
+                if (stylesheet->rule_count < stylesheet->rule_capacity) {
+                    stylesheet->rules[stylesheet->rule_count++] = rule;
+
+                    // Update feature usage flags
+                    css_enhanced_detect_features_in_rule(stylesheet, rule);
+                }
+            }
+        } else {
+            // Failed to parse, skip to next rule
+            // Look for the next closing brace or semicolon
+            while (token_index < token_count &&
+                   tokens[token_index].type != CSS_TOKEN_RIGHT_BRACE &&
+                   tokens[token_index].type != CSS_TOKEN_SEMICOLON) {
+                token_index++;
+            }
+            if (token_index < token_count) token_index++; // skip the terminator
+        }
+    }
+
+    fprintf(stderr, "[DEBUG] Parsed %zu CSS rules\n", stylesheet->rule_count);
+    log_debug("Parsed %zu CSS rules", stylesheet->rule_count);
 
     clock_t end_time = clock();
     stylesheet->parse_time = ((double)(end_time - start_time)) / CLOCKS_PER_SEC;
@@ -703,27 +707,6 @@ bool css_enhanced_pseudo_class_matches(const CssSelector* selector, const CssSty
     // In a full implementation, this would handle :hover, :focus, :nth-child, etc.
     (void)selector; (void)node;
     return false; // Default to no match for safety
-}
-
-CssRule* css_enhanced_parse_rule_from_tokens(const CssToken* tokens, int token_count, Pool* pool) {
-    // Stub implementation for parsing CSS rules from tokens
-    // In a full implementation, this would parse selectors and declarations
-    (void)tokens; (void)token_count;
-
-    if (!pool) return NULL;
-
-    CssRule* rule = (CssRule*)pool_alloc(pool, sizeof(CssRule));
-    if (!rule) return NULL;
-
-    // Initialize with empty style rule
-    rule->type = CSS_RULE_STYLE;
-    rule->pool = pool;
-    rule->selector_list = NULL;
-    rule->data.style_rule.selector = NULL;
-    rule->data.style_rule.declarations = NULL;
-    rule->data.style_rule.declaration_count = 0;
-
-    return rule;
 }
 
 // Wrapper functions for API compatibility
