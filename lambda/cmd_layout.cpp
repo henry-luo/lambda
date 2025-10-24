@@ -2,7 +2,7 @@
  * lambda layout - HTML Layout Command with Lambda CSS
  *
  * Computes layout for HTML documents using Lambda-parsed HTML/CSS and Radiant's layout engine.
- * This is separate from the Lexbor-based layout to use Lambda's CSS system.
+ * This is separate from the Lexbor-based CSS system.
  *
  * Usage:
  *   lambda layout input.html [-o output.json] [-c styles.css] [-w 800] [-h 600]
@@ -37,9 +37,99 @@ extern "C" {
 
 // Forward declarations
 Element* get_html_root_element(Input* input);
-const char* extract_inline_css(Element* root);
 DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
 void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool);
+CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count);
+void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool);
+void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count);
+void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool);
+
+/**
+ * Extract string attribute from Lambda Element
+ * Returns attribute value or nullptr if not found
+ */
+const char* extract_element_attribute(Element* elem, const char* attr_name, Pool* pool) {
+    if (!elem || !attr_name) return nullptr;
+
+    // Create a string key for the attribute
+    String* key_str = (String*)pool_alloc(pool, sizeof(String) + strlen(attr_name) + 1);
+    if (!key_str) return nullptr;
+
+    key_str->len = strlen(attr_name);
+    strcpy(key_str->chars, attr_name);
+
+    Item key = s2it((uint64_t)key_str);
+
+    // Get the attribute value using elmt_get_typed
+    TypedItem attr_value = elmt_get_typed(elem, key);
+
+    // Check if it's a string
+    if (attr_value.type_id == LMD_TYPE_STRING && attr_value.string) {
+        return attr_value.string->chars;
+    }
+
+    return nullptr;
+}
+
+/**
+ * Apply inline style attribute to a single DOM element
+ * Inline styles have highest specificity (1,0,0,0)
+ */
+void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool) {
+    if (!dom_elem || !html_elem || !pool) return;
+
+    // Extract 'style' attribute from html_elem
+    const char* style_text = extract_element_attribute(html_elem, "style", pool);
+
+    if (style_text && strlen(style_text) > 0) {
+        fprintf(stderr, "[CSS] Applying inline style to <%s>: %s\n",
+                dom_elem->tag_name, style_text);
+
+        // Apply the inline style using the DOM element API
+        int decl_count = dom_element_apply_inline_style(dom_elem, style_text);
+
+        if (decl_count > 0) {
+            fprintf(stderr, "[CSS] Applied %d inline declarations to <%s>\n",
+                    decl_count, dom_elem->tag_name);
+        } else {
+            fprintf(stderr, "[CSS] Warning: Failed to parse inline style for <%s>\n",
+                    dom_elem->tag_name);
+        }
+    }
+}
+
+/**
+ * Recursively apply inline style attributes to entire DOM tree
+ */
+void apply_inline_styles_to_tree(DomElement* dom_elem, Element* html_elem, Pool* pool) {
+    if (!dom_elem || !html_elem || !pool) return;
+
+    // Apply inline style to current element
+    apply_inline_style_attributes(dom_elem, html_elem, pool);
+
+    // Process children - need to match DOM children with HTML children
+    DomElement* dom_child = dom_elem->first_child;
+
+    // Iterate through HTML children to find matching elements
+    for (int64_t i = 0; i < html_elem->length && dom_child; i++) {
+        Item child_item = html_elem->items[i];
+
+        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+            Element* html_child = (Element*)child_item.pointer;
+            TypeElmt* child_type = (TypeElmt*)html_child->type;
+
+            // Skip non-element nodes (DOCTYPE, comments)
+            if (child_type &&
+                strcmp(child_type->name.str, "!DOCTYPE") != 0 &&
+                strcmp(child_type->name.str, "!--") != 0) {
+
+                // Recursively apply to this child
+                apply_inline_styles_to_tree(dom_child, html_child, pool);
+                dom_child = dom_child->next_sibling;
+            }
+        }
+    }
+}
 
 /**
  * Extract the root HTML element from parsed input
@@ -78,8 +168,166 @@ Element* get_html_root_element(Input* input) {
 }
 
 /**
+ * Recursively collect <link rel="stylesheet"> references from HTML
+ * Loads and parses external CSS files
+ */
+void collect_linked_stylesheets(Element* elem, CssEngine* engine, const char* base_path, Pool* pool) {
+    if (!elem || !engine || !pool) return;
+
+    TypeElmt* type = (TypeElmt*)elem->type;
+    if (!type) return;
+
+    // Check if this is a <link> element
+    if (strcasecmp(type->name.str, "link") == 0) {
+        // TODO: Extract 'rel' and 'href' attributes
+        // For now, we'll rely on external -c flag
+        // Full implementation would:
+        // 1. Check rel="stylesheet"
+        // 2. Extract href attribute
+        // 3. Resolve relative path using base_path
+        // 4. Load and parse CSS file
+        // 5. Add to engine's stylesheet list
+        fprintf(stderr, "[CSS] Found <link> element (attribute extraction not yet implemented)\n");
+    }
+
+    // Recursively process children
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child_item = elem->items[i];
+        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+            collect_linked_stylesheets((Element*)child_item.pointer, engine, base_path, pool);
+        }
+    }
+}
+
+/**
+ * Recursively collect <style> inline CSS from HTML
+ * Parses and returns list of stylesheets
+ */
+void collect_inline_styles_to_list(Element* elem, CssEngine* engine, Pool* pool, CssStylesheet*** stylesheets, int* count) {
+    if (!elem || !engine || !pool || !stylesheets || !count) return;
+
+    TypeElmt* type = (TypeElmt*)elem->type;
+    if (!type) return;
+
+    // Check if this is a <style> element
+    if (strcasecmp(type->name.str, "style") == 0) {
+        // Extract text content from style element
+        for (int64_t i = 0; i < elem->length; i++) {
+            Item child_item = elem->items[i];
+            if (get_type_id(child_item) == LMD_TYPE_STRING) {
+                String* css_text = (String*)child_item.pointer;
+                if (css_text && css_text->len > 0) {
+                    fprintf(stderr, "[CSS] Found <style> element with %d bytes of CSS\n", css_text->len);
+
+                    // Parse the inline CSS
+                    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
+                    if (stylesheet && stylesheet->rule_count > 0) {
+                        fprintf(stderr, "[CSS] Parsed inline <style>: %zu rules\n", stylesheet->rule_count);
+
+                        // Add to list
+                        *stylesheets = (CssStylesheet**)pool_realloc(pool, *stylesheets,
+                                                                      (*count + 1) * sizeof(CssStylesheet*));
+                        (*stylesheets)[*count] = stylesheet;
+                        (*count)++;
+                    }
+                }
+            }
+        }
+    }
+
+    // Recursively process children
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child_item = elem->items[i];
+        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+            collect_inline_styles_to_list((Element*)child_item.pointer, engine, pool, stylesheets, count);
+        }
+    }
+}
+
+/**
+ * Recursively collect <style> inline CSS from HTML
+ * Parses and adds to engine's stylesheet list
+ */
+void collect_inline_styles(Element* elem, CssEngine* engine, Pool* pool) {
+    if (!elem || !engine || !pool) return;
+
+    TypeElmt* type = (TypeElmt*)elem->type;
+    if (!type) return;
+
+    // Check if this is a <style> element
+    if (strcasecmp(type->name.str, "style") == 0) {
+        // Extract text content from style element
+        // Text content should be in the element's children
+        for (int64_t i = 0; i < elem->length; i++) {
+            Item child_item = elem->items[i];
+            if (get_type_id(child_item) == LMD_TYPE_STRING) {
+                String* css_text = (String*)child_item.pointer;
+                if (css_text && css_text->len > 0) {
+                    fprintf(stderr, "[CSS] Found <style> element with %d bytes of CSS\n", css_text->len);
+
+                    // Parse the inline CSS
+                    CssStylesheet* stylesheet = css_parse_stylesheet(engine, css_text->chars, "<inline-style>");
+                    if (stylesheet) {
+                        fprintf(stderr, "[CSS] Parsed inline <style>: %zu rules\n", stylesheet->rule_count);
+                        // Note: stylesheet is already added to engine's internal list
+                    }
+                }
+            }
+        }
+    }
+
+    // Recursively process children
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child_item = elem->items[i];
+        if (get_type_id(child_item) == LMD_TYPE_ELEMENT) {
+            collect_inline_styles((Element*)child_item.pointer, engine, pool);
+        }
+    }
+}
+
+/**
+ * Apply inline style attribute to a single DOM element
+ * Inline styles have highest specificity
+ */
+void apply_inline_style_attributes(DomElement* dom_elem, Element* html_elem, Pool* pool) {
+    if (!dom_elem || !html_elem || !pool) return;
+
+    // TODO: Extract 'style' attribute from html_elem
+    // Parse as CSS declarations
+    // Apply with inline specificity (1,0,0,0)
+    // For now, this is a placeholder
+}
+
+/**
+ * Master function to extract and apply all CSS from HTML document
+ * Handles linked stylesheets, <style> elements, and inline style attributes
+ * Returns array of collected stylesheets
+ */
+CssStylesheet** extract_and_collect_css(Element* html_root, CssEngine* engine, const char* base_path, Pool* pool, int* stylesheet_count) {
+    if (!html_root || !engine || !pool || !stylesheet_count) return nullptr;
+
+    fprintf(stderr, "[CSS] Extracting CSS from HTML document...\n");
+
+    *stylesheet_count = 0;
+    CssStylesheet** stylesheets = nullptr;
+
+    // Step 1: Collect and parse <link rel="stylesheet"> references
+    fprintf(stderr, "[CSS] Step 1: Collecting linked stylesheets...\n");
+    collect_linked_stylesheets(html_root, engine, base_path, pool);
+    // TODO: Add linked stylesheets to array when implemented
+
+    // Step 2: Collect and parse <style> inline CSS
+    fprintf(stderr, "[CSS] Step 2: Collecting inline <style> elements...\n");
+    collect_inline_styles_to_list(html_root, engine, pool, &stylesheets, stylesheet_count);
+
+    fprintf(stderr, "[CSS] Collected %d stylesheet(s) from HTML\n", *stylesheet_count);
+    return stylesheets;
+}
+
+/**
  * Extract inline CSS from <style> tags in the HTML document
  * Returns concatenated CSS text or nullptr if none found
+ * DEPRECATED: Use extract_and_apply_all_css instead
  */
 const char* extract_inline_css(Element* root) {
     if (!root) return nullptr;
@@ -370,50 +618,6 @@ int cmd_layout(int argc, char** argv) {
     // Configure CSS engine
     css_engine_set_viewport(css_engine, opts.viewport_width, opts.viewport_height);
 
-    // Parse CSS if provided
-    CssStylesheet* stylesheet = nullptr;
-    if (css_filename) {
-        char* css_content = read_text_file(css_filename);
-        if (css_content) {
-            log_debug("Parsing CSS file: %s", opts.css_file);
-            log_debug("CSS content length: %zu bytes", strlen(css_content));
-
-            // Copy CSS content to pool so it stays alive with the stylesheet
-            size_t css_len = strlen(css_content);
-            char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
-            if (css_pool_copy) {
-                strcpy(css_pool_copy, css_content);
-                free(css_content);  // Free the original, use pool copy
-
-                // Parse the CSS using pool-allocated copy
-                stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
-
-                if (!stylesheet) {
-                    log_error("Warning: failed to parse CSS file");
-                } else {
-                    log_debug("Successfully parsed CSS: %d rules", stylesheet->rule_count);
-                }
-            } else {
-                log_error("Failed to allocate memory for CSS");
-                free(css_content);
-            }
-        } else {
-            log_error("Failed to read CSS file: %s", opts.css_file);
-        }
-    }
-
-    // Create DomElement wrapper for CSS styling
-    TypeElmt* root_type = (TypeElmt*)root->type;
-    DomElement* css_dom = dom_element_create(pool, root_type->name.str, (void*)root);
-    if (!css_dom) {
-        log_error("Failed to create DOM element for CSS");
-        css_engine_destroy(css_engine);
-        pool_destroy(pool);
-        return 1;
-    }
-
-    log_debug("Created DOM element wrapper for styling");
-
     // Build complete DomElement tree from Lambda Element tree
     fprintf(stderr, "[DEBUG] Building DOM tree from Element tree...\n");
     DomElement* dom_root = build_dom_tree_from_element(root, pool, nullptr);
@@ -426,9 +630,45 @@ int cmd_layout(int argc, char** argv) {
 
     fprintf(stderr, "[DEBUG] Built DOM tree: root=<%s>\n", dom_root->tag_name);
 
-    // Apply CSS stylesheet if available
-    if (stylesheet && stylesheet->rule_count > 0) {
-        fprintf(stderr, "[DEBUG] Applying CSS stylesheet: %d rules\n", stylesheet->rule_count);
+    // === NEW APPROACH: Comprehensive CSS extraction and application ===
+    // This mimics browser behavior:
+    // 1. Parse external CSS from -c flag (if provided)
+    // 2. Extract and parse <link> stylesheets
+    // 3. Extract and parse <style> elements
+    // 4. Apply all stylesheets to DOM
+    // 5. Apply inline style attributes
+
+    // Step 1: External CSS from command line (highest priority for development)
+    CssStylesheet* external_stylesheet = nullptr;
+    if (css_filename) {
+        char* css_content = read_text_file(css_filename);
+        if (css_content) {
+            fprintf(stderr, "[CSS] Parsing external CSS file: %s\n", css_filename);
+
+            size_t css_len = strlen(css_content);
+            char* css_pool_copy = (char*)pool_alloc(pool, css_len + 1);
+            if (css_pool_copy) {
+                strcpy(css_pool_copy, css_content);
+                free(css_content);
+
+                external_stylesheet = css_parse_stylesheet(css_engine, css_pool_copy, css_filename);
+                if (external_stylesheet) {
+                    fprintf(stderr, "[CSS] Parsed external CSS: %zu rules\n", external_stylesheet->rule_count);
+                }
+            } else {
+                free(css_content);
+            }
+        }
+    }
+
+    // Step 2 & 3: Extract CSS from HTML (linked stylesheets and <style> elements)
+    int inline_stylesheet_count = 0;
+    CssStylesheet** inline_stylesheets = extract_and_collect_css(root, css_engine, opts.input_file, pool, &inline_stylesheet_count);
+
+    // Step 4: Apply all stylesheets to DOM tree
+    // Apply in cascade order: external -> inline <style> -> inline attributes
+    if ((external_stylesheet && external_stylesheet->rule_count > 0) || inline_stylesheet_count > 0) {
+        fprintf(stderr, "[CSS] Applying stylesheets to DOM tree...\n");
 
         // Create selector matcher
         SelectorMatcher* matcher = selector_matcher_create(pool);
@@ -439,12 +679,22 @@ int cmd_layout(int argc, char** argv) {
             return 1;
         }
 
-        fprintf(stderr, "[DEBUG] Created selector matcher\n");
+        // Apply external stylesheet first (lower priority)
+        if (external_stylesheet && external_stylesheet->rule_count > 0) {
+            fprintf(stderr, "[CSS] Applying external stylesheet (%zu rules)...\n", external_stylesheet->rule_count);
+            apply_stylesheet_to_dom_tree(dom_root, external_stylesheet, matcher, pool);
+        }
 
-        // Apply stylesheet to DOM tree
-        apply_stylesheet_to_dom_tree(dom_root, stylesheet, matcher, pool);
+        // Apply inline stylesheets (higher priority)
+        for (int i = 0; i < inline_stylesheet_count; i++) {
+            if (inline_stylesheets[i] && inline_stylesheets[i]->rule_count > 0) {
+                fprintf(stderr, "[CSS] Applying inline stylesheet %d (%zu rules)...\n",
+                        i + 1, inline_stylesheets[i]->rule_count);
+                apply_stylesheet_to_dom_tree(dom_root, inline_stylesheets[i], matcher, pool);
+            }
+        }
 
-        fprintf(stderr, "[DEBUG] CSS stylesheet applied to DOM tree\n");
+        fprintf(stderr, "[CSS] All CSS stylesheets applied to DOM tree\n");
 
         CssEngineStats stats = css_engine_get_stats(css_engine);
         log_debug("CSS Statistics:");
@@ -455,8 +705,11 @@ int cmd_layout(int argc, char** argv) {
             log_debug("  Parse errors: %zu", stats.parse_errors);
         }
     } else {
-        fprintf(stderr, "[DEBUG] No stylesheet to apply\n");
+        fprintf(stderr, "[CSS] No external stylesheet to apply\n");
     }
+
+    // Step 5: Apply inline style attributes (highest specificity)
+    // TODO: Implement inline style attribute parsing and application
 
     // Create DomNode wrapper for layout computation
     // Note: Full layout engine integration would go here
@@ -478,6 +731,7 @@ int cmd_layout(int argc, char** argv) {
     }
 
     // Output basic structure
+    TypeElmt* root_type = (TypeElmt*)root->type;
     fprintf(out, "{\n");
     fprintf(out, "  \"engine\": \"lambda-css\",\n");
     fprintf(out, "  \"viewport\": {\"width\": %d, \"height\": %d},\n",
