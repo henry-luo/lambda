@@ -81,7 +81,22 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
 
     // Expect property name (identifier)
     if (tokens[*pos].type != CSS_TOKEN_IDENT) return NULL;
-    const char* property_name = tokens[*pos].value;
+
+    // Extract property name from token (use start/length since value may be NULL)
+    const char* property_name;
+    if (tokens[*pos].value) {
+        property_name = tokens[*pos].value;
+    } else if (tokens[*pos].start && tokens[*pos].length > 0) {
+        // Create null-terminated string from start/length
+        char* name_buf = (char*)pool_calloc(pool, tokens[*pos].length + 1);
+        if (!name_buf) return NULL;
+        memcpy(name_buf, tokens[*pos].start, tokens[*pos].length);
+        name_buf[tokens[*pos].length] = '\0';
+        property_name = name_buf;
+    } else {
+        return NULL; // No valid property name
+    }
+
     (*pos)++;
 
     // Skip whitespace
@@ -128,8 +143,12 @@ CssDeclaration* css_parse_declaration_from_tokens(const CssToken* tokens, int* p
     CssDeclaration* decl = (CssDeclaration*)pool_calloc(pool, sizeof(CssDeclaration));
     if (!decl) return NULL;
 
-    // Get property ID from name (simplified: just set to unknown for now)
-    decl->property_id = CSS_PROP_UNKNOWN;  // Will need proper property lookup
+    // Get property ID from name
+    decl->property_id = css_property_id_from_name(property_name);
+
+    // Debug: Print property name and ID for troubleshooting
+    printf("[CSS Parser] Property: '%s' -> ID: %d\n", property_name, decl->property_id);
+
     decl->important = is_important;
     decl->valid = true;
     decl->ref_count = 1;
