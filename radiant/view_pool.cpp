@@ -417,6 +417,34 @@ void print_block_props(ViewBlock* block, StrBuf* buf, int indent) {
         // strbuf_append_format(buf, "scrollbar:{v:%p, h:%p}", block->scroller->pane->v_scrollbar, block->scroller->pane->h_scrollbar);
         strbuf_append_str(buf, "}\n");
     }
+
+    // Add position properties
+    if (block->position) {
+        strbuf_append_char_n(buf, ' ', indent);
+        strbuf_append_str(buf, "{position:");
+        if (block->position->position) {
+            const lxb_css_data_t* pos_value = lxb_css_value_by_id(block->position->position);
+            if (pos_value && pos_value->name) {
+                strbuf_append_format(buf, "%s ", pos_value->name);
+            }
+        }
+        if (block->position->has_top) {
+            strbuf_append_format(buf, "top:%.1f ", block->position->top);
+        }
+        if (block->position->has_right) {
+            strbuf_append_format(buf, "right:%.1f ", block->position->right);
+        }
+        if (block->position->has_bottom) {
+            strbuf_append_format(buf, "bottom:%.1f ", block->position->bottom);
+        }
+        if (block->position->has_left) {
+            strbuf_append_format(buf, "left:%.1f ", block->position->left);
+        }
+        if (block->position->z_index != 0) {
+            strbuf_append_format(buf, "z-index:%d ", block->position->z_index);
+        }
+        strbuf_append_str(buf, "}\n");
+    }
 }
 
 void print_block(ViewBlock* block, StrBuf* buf, int indent, DocumentType doc_type) {

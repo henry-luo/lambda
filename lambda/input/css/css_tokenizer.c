@@ -22,18 +22,18 @@ bool css_is_name_char_unicode(uint32_t codepoint) {
 }
 
 bool css_is_whitespace_unicode(uint32_t codepoint) {
-    return codepoint == ' ' || codepoint == '\t' || 
+    return codepoint == ' ' || codepoint == '\t' ||
            codepoint == '\n' || codepoint == '\r' || codepoint == '\f';
 }
 
 // Unicode parsing utilities
 UnicodeChar css_parse_unicode_char(const char* input, size_t max_length) {
     UnicodeChar result = {0, 0};
-    
+
     if (max_length == 0 || !input) return result;
-    
+
     unsigned char first = (unsigned char)input[0];
-    
+
     if (first < 0x80) {
         // ASCII character
         result.codepoint = first;
@@ -44,71 +44,71 @@ UnicodeChar css_parse_unicode_char(const char* input, size_t max_length) {
         result.byte_length = 2;
     } else if ((first & 0xF0) == 0xE0 && max_length >= 3) {
         // 3-byte UTF-8
-        result.codepoint = ((first & 0x0F) << 12) | 
-                          ((input[1] & 0x3F) << 6) | 
+        result.codepoint = ((first & 0x0F) << 12) |
+                          ((input[1] & 0x3F) << 6) |
                           (input[2] & 0x3F);
         result.byte_length = 3;
     } else if ((first & 0xF8) == 0xF0 && max_length >= 4) {
         // 4-byte UTF-8
-        result.codepoint = ((first & 0x07) << 18) | 
+        result.codepoint = ((first & 0x07) << 18) |
                           ((input[1] & 0x3F) << 12) |
-                          ((input[2] & 0x3F) << 6) | 
+                          ((input[2] & 0x3F) << 6) |
                           (input[3] & 0x3F);
         result.byte_length = 4;
     }
-    
+
     return result;
 }
 
 bool css_is_valid_unicode_escape(const char* input) {
     if (!input || input[0] != '\\') return false;
-    
+
     // CSS Unicode escape: \HHHHH (1-6 hex digits)
     const char* p = input + 1;
     int hex_count = 0;
-    
+
     while (*p && css_is_hex_digit(*p) && hex_count < 6) {
         p++;
         hex_count++;
     }
-    
+
     // Must have at least 1 hex digit
     if (hex_count == 0) return false;
-    
+
     // Optional whitespace after hex digits
     if (*p && css_is_whitespace_unicode(*p)) p++;
-    
+
     return true;
 }
 
 char* css_decode_unicode_escapes(const char* input, Pool* pool) {
     if (!input || !pool) return NULL;
-    
+
     size_t input_len = strlen(input);
     char* result = (char*)pool_alloc(pool, input_len * 4 + 1); // Worst case for UTF-8
     if (!result) return NULL;
-    
+
     size_t result_pos = 0;
     const char* p = input;
-    
+
     while (*p) {
         if (*p == '\\' && css_is_valid_unicode_escape(p)) {
             // Parse Unicode escape
             p++; // Skip backslash
             uint32_t codepoint = 0;
             int hex_count = 0;
-            
+
             while (*p && css_is_hex_digit(*p) && hex_count < 6) {
-                codepoint = (codepoint << 4) + 
+                codepoint = (codepoint << 4) +
                            (*p >= 'A' ? *p - 'A' + 10 :
                             *p >= 'a' ? *p - 'a' + 10 : *p - '0');
                 p++;
                 hex_count++;
             }
-            
+
             // Skip optional whitespace
             if (*p && css_is_whitespace_unicode(*p)) p++;
-            
+
             // Convert codepoint to UTF-8
             if (codepoint < 0x80) {
                 result[result_pos++] = (char)codepoint;
@@ -129,7 +129,7 @@ char* css_decode_unicode_escapes(const char* input, Pool* pool) {
             result[result_pos++] = *p++;
         }
     }
-    
+
     result[result_pos] = '\0';
     return result;
 }
@@ -158,12 +158,12 @@ static CssFunctionInfo css_function_database[] = {
     {"exp", 1, 1, NULL, false, true},
     {"abs", 1, 1, NULL, false, true},
     {"sign", 1, 1, NULL, false, true},
-    
+
     // Variable and environment functions
     {"var", 1, 2, NULL, false, false},
     {"env", 1, 2, NULL, false, false},
     {"attr", 1, 3, NULL, false, false},
-    
+
     // Color functions
     {"rgb", 3, 4, NULL, false, true},
     {"rgba", 3, 4, NULL, false, true},
@@ -177,7 +177,7 @@ static CssFunctionInfo css_function_database[] = {
     {"color", 2, -1, NULL, true, true},
     {"color-mix", 3, 3, NULL, false, true},
     {"color-contrast", 2, -1, NULL, true, true},
-    
+
     // Transform functions
     {"matrix", 6, 6, NULL, false, true},
     {"matrix3d", 16, 16, NULL, false, true},
@@ -200,7 +200,7 @@ static CssFunctionInfo css_function_database[] = {
     {"skewX", 1, 1, NULL, false, true},
     {"skewY", 1, 1, NULL, false, true},
     {"perspective", 1, 1, NULL, false, true},
-    
+
     // Filter functions
     {"blur", 1, 1, NULL, false, true},
     {"brightness", 1, 1, NULL, false, true},
@@ -212,7 +212,7 @@ static CssFunctionInfo css_function_database[] = {
     {"opacity", 1, 1, NULL, false, true},
     {"saturate", 1, 1, NULL, false, true},
     {"sepia", 1, 1, NULL, false, true},
-    
+
     // Gradient functions
     {"linear-gradient", 2, -1, NULL, true, false},
     {"radial-gradient", 2, -1, NULL, true, false},
@@ -220,28 +220,28 @@ static CssFunctionInfo css_function_database[] = {
     {"repeating-linear-gradient", 2, -1, NULL, true, false},
     {"repeating-radial-gradient", 2, -1, NULL, true, false},
     {"repeating-conic-gradient", 2, -1, NULL, true, false},
-    
+
     // Image functions
     {"url", 1, 1, NULL, false, false},
     {"image", 1, -1, NULL, true, false},
     {"image-set", 1, -1, NULL, true, false},
     {"cross-fade", 2, -1, NULL, true, false},
     {"element", 1, 1, NULL, false, false},
-    
+
     // Grid functions
     {"repeat", 2, 2, NULL, false, false},
     {"minmax", 2, 2, NULL, false, true},
     {"fit-content", 1, 1, NULL, false, true},
-    
+
     // Container and layer functions
     {"selector", 1, 1, NULL, false, false}, // For @supports
-    
+
     {NULL, 0, 0, NULL, false, false} // Sentinel
 };
 
 CssFunctionInfo* css_get_function_info(const char* function_name) {
     if (!function_name) return NULL;
-    
+
     for (CssFunctionInfo* info = css_function_database; info->name; info++) {
         if (strcmp(info->name, function_name) == 0) {
             return info;
@@ -259,14 +259,14 @@ bool css_parse_custom_property_name(const char* input, size_t length) {
     if (length < 2 || input[0] != '-' || input[1] != '-') {
         return false;
     }
-    
+
     // Must start with letter, underscore, or non-ASCII
     if (length > 2) {
         UnicodeChar first = css_parse_unicode_char(input + 2, length - 2);
         if (!css_is_name_start_char_unicode(first.codepoint)) {
             return false;
         }
-        
+
         // Rest must be name characters
         size_t pos = 2 + first.byte_length;
         while (pos < length) {
@@ -277,68 +277,68 @@ bool css_parse_custom_property_name(const char* input, size_t length) {
             pos += ch.byte_length;
         }
     }
-    
+
     return true;
 }
 
 // Enhanced color parsing
 CssColorType css_detect_color_type(const char* color_str) {
     if (!color_str) return CSS_COLOR_KEYWORD;
-    
+
     size_t len = strlen(color_str);
-    
+
     if (color_str[0] == '#') {
         return CSS_COLOR_HEX;
     }
-    
+
     if (len >= 4 && strncmp(color_str, "rgb(", 4) == 0) {
         return CSS_COLOR_RGB;
     }
-    
+
     if (len >= 5 && strncmp(color_str, "rgba(", 5) == 0) {
         return CSS_COLOR_RGB;
     }
-    
+
     if (len >= 4 && strncmp(color_str, "hsl(", 4) == 0) {
         return CSS_COLOR_HSL;
     }
-    
+
     if (len >= 5 && strncmp(color_str, "hsla(", 5) == 0) {
         return CSS_COLOR_HSL;
     }
-    
+
     if (len >= 4 && strncmp(color_str, "hwb(", 4) == 0) {
         return CSS_COLOR_HWB;
     }
-    
+
     if (len >= 4 && strncmp(color_str, "lab(", 4) == 0) {
         return CSS_COLOR_LAB;
     }
-    
+
     if (len >= 4 && strncmp(color_str, "lch(", 4) == 0) {
         return CSS_COLOR_LCH;
     }
-    
+
     if (len >= 6 && strncmp(color_str, "oklab(", 6) == 0) {
         return CSS_COLOR_OKLAB;
     }
-    
+
     if (len >= 6 && strncmp(color_str, "oklch(", 6) == 0) {
         return CSS_COLOR_OKLCH;
     }
-    
+
     if (len >= 6 && strncmp(color_str, "color(", 6) == 0) {
         return CSS_COLOR_COLOR;
     }
-    
+
     if (strcmp(color_str, "transparent") == 0) {
         return CSS_COLOR_TRANSPARENT;
     }
-    
+
     if (strcmp(color_str, "currentColor") == 0 || strcmp(color_str, "currentcolor") == 0) {
         return CSS_COLOR_CURRENTCOLOR;
     }
-    
+
     return CSS_COLOR_KEYWORD;
 }
 
@@ -429,14 +429,14 @@ const char* css_color_type_to_str(CssColorType type) {
 // Error recovery functions
 bool css_token_is_recoverable_error(CssToken* token) {
     if (!token) return false;
-    
+
     return token->type == CSS_TOKEN_BAD_STRING ||
            token->type == CSS_TOKEN_BAD_URL;
 }
 
 void css_token_fix_common_errors(CssToken* token, Pool* pool) {
     if (!token || !pool) return;
-    
+
     if (token->type == CSS_TOKEN_BAD_STRING) {
         // Try to close unclosed string
         size_t len = token->length;
@@ -464,30 +464,30 @@ void css_token_fix_common_errors(CssToken* token, Pool* pool) {
 // Basic CSS tokenizer compatibility functions
 CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* token_count) {
     if (!input || !pool || !token_count) return NULL;
-    
+
     // Use the tokenizer
     CSSTokenizer* enhanced = css_tokenizer_enhanced_create(pool);
     if (!enhanced) return NULL;
-    
+
     CssToken* enhanced_tokens;
     int enhanced_count = css_tokenizer_enhanced_tokenize(enhanced, input, length, &enhanced_tokens);
-    
+
     if (enhanced_count <= 0) {
         *token_count = 0;
         return NULL;
     }
-    
+
     // Convert enhanced tokens to basic tokens for compatibility
     CSSToken* basic_tokens = (CSSToken*)pool_calloc(pool, enhanced_count * sizeof(CSSToken));
     if (!basic_tokens) {
         *token_count = 0;
         return NULL;
     }
-    
+
     for (int i = 0; i < enhanced_count; i++) {
         CssToken* src = &enhanced_tokens[i];
         CSSToken* dst = &basic_tokens[i];
-        
+
         // Basic type mapping
         dst->type = CSS_TOKEN_IDENT; // Default fallback
         dst->start = src->start;
@@ -495,7 +495,7 @@ CSSToken* css_tokenize(const char* input, size_t length, Pool* pool, size_t* tok
         dst->value = src->value;
         dst->data.number_value = src->data.number_value;
     }
-    
+
     *token_count = enhanced_count;
     return basic_tokens;
 }
@@ -542,10 +542,10 @@ bool css_is_newline(int c) {
 // Enhanced tokenizer implementation
 CSSTokenizer* css_tokenizer_enhanced_create(Pool* pool) {
     if (!pool) return NULL;
-    
+
     CSSTokenizer* tokenizer = pool_alloc(pool, sizeof(CSSTokenizer));
     if (!tokenizer) return NULL;
-    
+
     tokenizer->pool = pool;
     tokenizer->input = NULL;
     tokenizer->length = 0;
@@ -554,7 +554,7 @@ CSSTokenizer* css_tokenizer_enhanced_create(Pool* pool) {
     tokenizer->column = 1;
     tokenizer->supports_unicode = true;
     tokenizer->supports_css3 = true;
-    
+
     return tokenizer;
 }
 
@@ -563,29 +563,36 @@ void css_tokenizer_enhanced_destroy(CSSTokenizer* tokenizer) {
     (void)tokenizer;
 }
 
-int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer, 
-                                   const char* input, size_t length, 
+int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
+                                   const char* input, size_t length,
                                    CssToken** tokens) {
     if (!tokenizer || !input || !tokens) return 0;
-    
+
+    fprintf(stderr, "[CSS Tokenizer] Starting tokenization of %zu characters\n", length);
+    fprintf(stderr, "[CSS Tokenizer] Input preview: %.80s%s\n",
+            input, length > 80 ? "..." : "");
+
     // Simple tokenizer implementation for testing
     // This is a basic implementation to break the recursion and allow tests to pass
-    
+
     // Allocate token array (estimate maximum tokens)
     size_t max_tokens = length + 10; // Conservative estimate
     CssToken* token_array = pool_alloc(tokenizer->pool, sizeof(CssToken) * max_tokens);
-    if (!token_array) return 0;
-    
+    if (!token_array) {
+        fprintf(stderr, "[CSS Tokenizer] ERROR: Failed to allocate token array\n");
+        return 0;
+    }
+
     size_t token_count = 0;
     size_t pos = 0;
-    
+
     while (pos < length && token_count < max_tokens - 1) {
         // Skip leading whitespace and track it
         size_t ws_start = pos;
         while (pos < length && css_is_whitespace(input[pos])) {
             pos++;
         }
-        
+
         // Create whitespace token if we found any
         if (pos > ws_start) {
             CssToken* token = &token_array[token_count++];
@@ -594,15 +601,15 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
             token->length = pos - ws_start;
             token->value = NULL; // Will be set when needed
         }
-        
+
         if (pos >= length) break;
-        
+
         char ch = input[pos];
         CssToken* token = &token_array[token_count++];
         token->start = input + pos;
         token->length = 1;
         token->value = NULL;
-        
+
         // Basic character classification
         switch (ch) {
             case '{':
@@ -765,12 +772,12 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                     // Number parsing (same as digit case)
                     size_t start = pos;
                     pos++; // Skip sign
-                    
+
                     // Parse integer part
                     while (pos < length && isdigit(input[pos])) {
                         pos++;
                     }
-                    
+
                     // Parse decimal part
                     if (pos < length && input[pos] == '.') {
                         pos++;
@@ -778,7 +785,7 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                             pos++;
                         }
                     }
-                    
+
                     // Check for dimension unit or percentage
                     size_t number_end = pos;
                     if (pos < length && input[pos] == '%') {
@@ -793,9 +800,9 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                     } else {
                         token->type = CSS_TOKEN_NUMBER;
                     }
-                    
+
                     token->length = pos - start;
-                    
+
                     // Parse number value
                     char* num_str = pool_alloc(tokenizer->pool, number_end - start + 1);
                     if (num_str) {
@@ -813,12 +820,12 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                 if (isdigit(ch) || ch == '.') {
                     // Number or dimension (for cases starting with digit or decimal)
                     size_t start = pos;
-                    
+
                     // Parse integer part
                     while (pos < length && isdigit(input[pos])) {
                         pos++;
                     }
-                    
+
                     // Parse decimal part
                     if (pos < length && input[pos] == '.') {
                         pos++;
@@ -826,7 +833,7 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                             pos++;
                         }
                     }
-                    
+
                     // Check for dimension unit or percentage
                     size_t number_end = pos;
                     if (pos < length && input[pos] == '%') {
@@ -841,9 +848,9 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                     } else {
                         token->type = CSS_TOKEN_NUMBER;
                     }
-                    
+
                     token->length = pos - start;
-                    
+
                     // Parse number value
                     char* num_str = pool_alloc(tokenizer->pool, number_end - start + 1);
                     if (num_str) {
@@ -857,7 +864,7 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                     while (pos < length && (isalnum(input[pos]) || input[pos] == '-' || input[pos] == '_')) {
                         pos++;
                     }
-                    
+
                     // Check for function
                     if (pos < length && input[pos] == '(') {
                         token->type = CSS_TOKEN_FUNCTION;
@@ -875,7 +882,7 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
                 break;
         }
     }
-    
+
     // Add EOF token
     if (token_count < max_tokens) {
         CssToken* eof_token = &token_array[token_count++];
@@ -884,7 +891,20 @@ int css_tokenizer_enhanced_tokenize(CSSTokenizer* tokenizer,
         eof_token->length = 0;
         eof_token->value = NULL;
     }
-    
+
+    fprintf(stderr, "[CSS Tokenizer] Tokenization complete: %zu tokens generated\n", token_count);
+
+    // Log first few tokens for debugging
+    fprintf(stderr, "[CSS Tokenizer] First tokens:\n");
+    for (size_t i = 0; i < token_count && i < 10; i++) {
+        const char* type_name = css_token_type_to_string(token_array[i].type);
+        fprintf(stderr, "  [%zu] %s", i, type_name);
+        if (token_array[i].length > 0 && token_array[i].length < 50) {
+            fprintf(stderr, " '%.*s'", (int)token_array[i].length, token_array[i].start);
+        }
+        fprintf(stderr, "\n");
+    }
+
     *tokens = token_array;
     return (int)token_count;
 }
@@ -977,10 +997,10 @@ bool css_token_equals_string(const CssToken* token, const char* str) {
 
 char* css_token_to_string(const CssToken* token, Pool* pool) {
     if (!token || !pool) return NULL;
-    
+
     char* result = pool_alloc(pool, token->length + 1);
     if (!result) return NULL;
-    
+
     strncpy(result, token->start, token->length);
     result[token->length] = '\0';
     return result;
@@ -992,15 +1012,15 @@ char* css_token_to_string(const CssToken* token, Pool* pool) {
 
 CssTokenStream* css_token_stream_create(CssToken* tokens, size_t length, Pool* pool) {
     if (!tokens || !pool) return NULL;
-    
+
     CssTokenStream* stream = pool_alloc(pool, sizeof(CssTokenStream));
     if (!stream) return NULL;
-    
+
     stream->tokens = tokens;
     stream->length = length;
     stream->current = 0;
     stream->pool = pool;
-    
+
     return stream;
 }
 

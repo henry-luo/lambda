@@ -311,6 +311,10 @@ uint32_t map_lambda_color_keyword(const char* keyword) {
     if (strcasecmp(keyword, "gray") == 0) return 0x808080FF;
     if (strcasecmp(keyword, "grey") == 0) return 0x808080FF;
     if (strcasecmp(keyword, "silver") == 0) return 0xC0C0C0FF;
+    if (strcasecmp(keyword, "lightgray") == 0) return 0xD3D3D3FF;
+    if (strcasecmp(keyword, "lightgrey") == 0) return 0xD3D3D3FF;
+    if (strcasecmp(keyword, "darkgray") == 0) return 0xA9A9A9FF;
+    if (strcasecmp(keyword, "darkgrey") == 0) return 0xA9A9A9FF;
     if (strcasecmp(keyword, "maroon") == 0) return 0x800000FF;
     if (strcasecmp(keyword, "purple") == 0) return 0x800080FF;
     if (strcasecmp(keyword, "fuchsia") == 0) return 0xFF00FFFF;
@@ -319,6 +323,7 @@ uint32_t map_lambda_color_keyword(const char* keyword) {
     if (strcasecmp(keyword, "navy") == 0) return 0x000080FF;
     if (strcasecmp(keyword, "teal") == 0) return 0x008080FF;
     if (strcasecmp(keyword, "aqua") == 0) return 0x00FFFFFF;
+    if (strcasecmp(keyword, "orange") == 0) return 0xFFA500FF;
     if (strcasecmp(keyword, "transparent") == 0) return 0x00000000;
 
     // TODO: Add more color keywords (148 total CSS3 colors)
@@ -608,38 +613,614 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         // ===== TODO: More property groups to be added =====
 
-        case CSS_PROPERTY_DISPLAY: {
-            // handle display property
-            if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
-                // TODO: set display property on lycon->view
-            }
-            break;
-        }
-
-        case CSS_PROPERTY_POSITION: {
-            // handle position property
-            if (value->type == CSS_VALUE_KEYWORD) {
-                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
-                // TODO: set position on lycon->view
-            }
-            break;
-        }
+        // ===== GROUP 2: Box Model Basics =====
 
         case CSS_PROPERTY_WIDTH: {
+            log_debug("[CSS] Processing width property");
+            if (!block) break;
+            if (!block->blk) {
+                block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+            }
+
             if (value->type == CSS_VALUE_LENGTH) {
                 float width = value->data.length.value;
-                // TODO: set width on lycon->view
+                block->blk->given_width = width;
+                block->blk->given_width_type = LXB_CSS_VALUE_INITIAL; // Mark as explicitly set
                 log_debug("[CSS] Width: %.2f px", width);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                // For now, store percentage as-is (need parent width for proper calculation)
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Width: %.2f%% (percentage not yet fully supported)", percentage);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // 'auto' keyword
+                log_debug("[CSS] Width: auto");
+                block->blk->given_width_type = LXB_CSS_VALUE_AUTO;
             }
             break;
         }
 
         case CSS_PROPERTY_HEIGHT: {
+            log_debug("[CSS] Processing height property");
+            if (!block) break;
+            if (!block->blk) {
+                block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+            }
+
             if (value->type == CSS_VALUE_LENGTH) {
                 float height = value->data.length.value;
-                // TODO: set height on lycon->view
+                block->blk->given_height = height;
                 log_debug("[CSS] Height: %.2f px", height);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Height: %.2f%% (percentage not yet fully supported)", percentage);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // 'auto' keyword
+                log_debug("[CSS] Height: auto");
+                block->blk->given_height = -1.0f; // -1 means auto
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_MARGIN_TOP: {
+            log_debug("[CSS] Processing margin-top property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float margin = value->data.length.value;
+                span->bound->margin.top = margin;
+                span->bound->margin.top_specificity = specificity;
+                log_debug("[CSS] Margin-top: %.2f px", margin);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Margin-top: %.2f%% (percentage)", percentage);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // 'auto' keyword for margins
+                span->bound->margin.top_type = LXB_CSS_VALUE_AUTO;
+                log_debug("[CSS] Margin-top: auto");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_MARGIN_RIGHT: {
+            log_debug("[CSS] Processing margin-right property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float margin = value->data.length.value;
+                span->bound->margin.right = margin;
+                span->bound->margin.right_specificity = specificity;
+                log_debug("[CSS] Margin-right: %.2f px", margin);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Margin-right: %.2f%% (percentage)", percentage);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                span->bound->margin.right_type = LXB_CSS_VALUE_AUTO;
+                log_debug("[CSS] Margin-right: auto");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_MARGIN_BOTTOM: {
+            log_debug("[CSS] Processing margin-bottom property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float margin = value->data.length.value;
+                span->bound->margin.bottom = margin;
+                span->bound->margin.bottom_specificity = specificity;
+                log_debug("[CSS] Margin-bottom: %.2f px", margin);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Margin-bottom: %.2f%% (percentage)", percentage);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                span->bound->margin.bottom_type = LXB_CSS_VALUE_AUTO;
+                log_debug("[CSS] Margin-bottom: auto");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_MARGIN_LEFT: {
+            log_debug("[CSS] Processing margin-left property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float margin = value->data.length.value;
+                span->bound->margin.left = margin;
+                span->bound->margin.left_specificity = specificity;
+                log_debug("[CSS] Margin-left: %.2f px", margin);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Margin-left: %.2f%% (percentage)", percentage);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                span->bound->margin.left_type = LXB_CSS_VALUE_AUTO;
+                log_debug("[CSS] Margin-left: auto");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_PADDING_TOP: {
+            log_debug("[CSS] Processing padding-top property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float padding = value->data.length.value;
+                span->bound->padding.top = padding;
+                span->bound->padding.top_specificity = specificity;
+                log_debug("[CSS] Padding-top: %.2f px", padding);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Padding-top: %.2f%% (percentage)", percentage);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_PADDING_RIGHT: {
+            log_debug("[CSS] Processing padding-right property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float padding = value->data.length.value;
+                span->bound->padding.right = padding;
+                span->bound->padding.right_specificity = specificity;
+                log_debug("[CSS] Padding-right: %.2f px", padding);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Padding-right: %.2f%% (percentage)", percentage);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_PADDING_BOTTOM: {
+            log_debug("[CSS] Processing padding-bottom property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float padding = value->data.length.value;
+                span->bound->padding.bottom = padding;
+                span->bound->padding.bottom_specificity = specificity;
+                log_debug("[CSS] Padding-bottom: %.2f px", padding);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Padding-bottom: %.2f%% (percentage)", percentage);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_PADDING_LEFT: {
+            log_debug("[CSS] Processing padding-left property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float padding = value->data.length.value;
+                span->bound->padding.left = padding;
+                span->bound->padding.left_specificity = specificity;
+                log_debug("[CSS] Padding-left: %.2f px", padding);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Padding-left: %.2f%% (percentage)", percentage);
+            }
+            break;
+        }
+
+        // ===== GROUP 3: Background & Borders =====
+
+        case CSS_PROPERTY_BACKGROUND_COLOR: {
+            log_debug("[CSS] Processing background-color property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->background) {
+                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            }
+
+            Color bg_color = {0};
+            if (value->type == CSS_VALUE_KEYWORD) {
+                // Map keyword to color (e.g., "red", "lightgray")
+                bg_color.c = map_lambda_color_keyword(value->data.keyword);
+                log_debug("[CSS] Background color keyword: %s -> 0x%08X", value->data.keyword, bg_color.c);
+            } else if (value->type == CSS_VALUE_COLOR) {
+                // Direct RGBA color value
+                if (value->data.color.type == CSS_COLOR_RGB) {
+                    bg_color.r = value->data.color.data.rgba.r;
+                    bg_color.g = value->data.color.data.rgba.g;
+                    bg_color.b = value->data.color.data.rgba.b;
+                    bg_color.a = value->data.color.data.rgba.a;
+                    log_debug("[CSS] Background color RGBA: (%d,%d,%d,%d) -> 0x%08X",
+                             bg_color.r, bg_color.g, bg_color.b, bg_color.a, bg_color.c);
+                }
+            }
+
+            if (bg_color.c != 0) {
+                span->bound->background->color = bg_color;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_TOP_WIDTH: {
+            log_debug("[CSS] Processing border-top-width property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float width = value->data.length.value;
+                span->bound->border->width.top = width;
+                span->bound->border->width.top_specificity = specificity;
+                log_debug("[CSS] Border-top-width: %.2f px", width);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // Keywords: thin (1px), medium (3px), thick (5px)
+                const char* keyword = value->data.keyword;
+                float width = 3.0f; // default to medium
+                if (strcasecmp(keyword, "thin") == 0) width = 1.0f;
+                else if (strcasecmp(keyword, "thick") == 0) width = 5.0f;
+                span->bound->border->width.top = width;
+                span->bound->border->width.top_specificity = specificity;
+                log_debug("[CSS] Border-top-width keyword: %s -> %.2f px", keyword, width);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_RIGHT_WIDTH: {
+            log_debug("[CSS] Processing border-right-width property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float width = value->data.length.value;
+                span->bound->border->width.right = width;
+                span->bound->border->width.right_specificity = specificity;
+                log_debug("[CSS] Border-right-width: %.2f px", width);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                const char* keyword = value->data.keyword;
+                float width = 3.0f;
+                if (strcasecmp(keyword, "thin") == 0) width = 1.0f;
+                else if (strcasecmp(keyword, "thick") == 0) width = 5.0f;
+                span->bound->border->width.right = width;
+                span->bound->border->width.right_specificity = specificity;
+                log_debug("[CSS] Border-right-width keyword: %s -> %.2f px", keyword, width);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_BOTTOM_WIDTH: {
+            log_debug("[CSS] Processing border-bottom-width property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float width = value->data.length.value;
+                span->bound->border->width.bottom = width;
+                span->bound->border->width.bottom_specificity = specificity;
+                log_debug("[CSS] Border-bottom-width: %.2f px", width);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                const char* keyword = value->data.keyword;
+                float width = 3.0f;
+                if (strcasecmp(keyword, "thin") == 0) width = 1.0f;
+                else if (strcasecmp(keyword, "thick") == 0) width = 5.0f;
+                span->bound->border->width.bottom = width;
+                span->bound->border->width.bottom_specificity = specificity;
+                log_debug("[CSS] Border-bottom-width keyword: %s -> %.2f px", keyword, width);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_LEFT_WIDTH: {
+            log_debug("[CSS] Processing border-left-width property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float width = value->data.length.value;
+                span->bound->border->width.left = width;
+                span->bound->border->width.left_specificity = specificity;
+                log_debug("[CSS] Border-left-width: %.2f px", width);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                const char* keyword = value->data.keyword;
+                float width = 3.0f;
+                if (strcasecmp(keyword, "thin") == 0) width = 1.0f;
+                else if (strcasecmp(keyword, "thick") == 0) width = 5.0f;
+                span->bound->border->width.left = width;
+                span->bound->border->width.left_specificity = specificity;
+                log_debug("[CSS] Border-left-width keyword: %s -> %.2f px", keyword, width);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_TOP_STYLE: {
+            log_debug("[CSS] Processing border-top-style property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                span->bound->border->top_style = lexbor_val;
+                log_debug("[CSS] Border-top-style: %s -> %d", value->data.keyword, lexbor_val);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_RIGHT_STYLE: {
+            log_debug("[CSS] Processing border-right-style property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                span->bound->border->right_style = lexbor_val;
+                log_debug("[CSS] Border-right-style: %s -> %d", value->data.keyword, lexbor_val);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_BOTTOM_STYLE: {
+            log_debug("[CSS] Processing border-bottom-style property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                span->bound->border->bottom_style = lexbor_val;
+                log_debug("[CSS] Border-bottom-style: %s -> %d", value->data.keyword, lexbor_val);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_LEFT_STYLE: {
+            log_debug("[CSS] Processing border-left-style property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                span->bound->border->left_style = lexbor_val;
+                log_debug("[CSS] Border-left-style: %s -> %d", value->data.keyword, lexbor_val);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_TOP_COLOR: {
+            log_debug("[CSS] Processing border-top-color property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            Color color = {0};
+            if (value->type == CSS_VALUE_KEYWORD) {
+                color.c = map_lambda_color_keyword(value->data.keyword);
+                log_debug("[CSS] Border-top-color keyword: %s -> 0x%08X", value->data.keyword, color.c);
+            } else if (value->type == CSS_VALUE_COLOR) {
+                if (value->data.color.type == CSS_COLOR_RGB) {
+                    color.r = value->data.color.data.rgba.r;
+                    color.g = value->data.color.data.rgba.g;
+                    color.b = value->data.color.data.rgba.b;
+                    color.a = value->data.color.data.rgba.a;
+                    log_debug("[CSS] Border-top-color RGBA: (%d,%d,%d,%d)", color.r, color.g, color.b, color.a);
+                }
+            }
+
+            if (color.c != 0) {
+                span->bound->border->top_color = color;
+                span->bound->border->top_color_specificity = specificity;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_RIGHT_COLOR: {
+            log_debug("[CSS] Processing border-right-color property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            Color color = {0};
+            if (value->type == CSS_VALUE_KEYWORD) {
+                color.c = map_lambda_color_keyword(value->data.keyword);
+                log_debug("[CSS] Border-right-color keyword: %s -> 0x%08X", value->data.keyword, color.c);
+            } else if (value->type == CSS_VALUE_COLOR) {
+                if (value->data.color.type == CSS_COLOR_RGB) {
+                    color.r = value->data.color.data.rgba.r;
+                    color.g = value->data.color.data.rgba.g;
+                    color.b = value->data.color.data.rgba.b;
+                    color.a = value->data.color.data.rgba.a;
+                    log_debug("[CSS] Border-right-color RGBA: (%d,%d,%d,%d)", color.r, color.g, color.b, color.a);
+                }
+            }
+
+            if (color.c != 0) {
+                span->bound->border->right_color = color;
+                span->bound->border->right_color_specificity = specificity;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_BOTTOM_COLOR: {
+            log_debug("[CSS] Processing border-bottom-color property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            Color color = {0};
+            if (value->type == CSS_VALUE_KEYWORD) {
+                color.c = map_lambda_color_keyword(value->data.keyword);
+                log_debug("[CSS] Border-bottom-color keyword: %s -> 0x%08X", value->data.keyword, color.c);
+            } else if (value->type == CSS_VALUE_COLOR) {
+                if (value->data.color.type == CSS_COLOR_RGB) {
+                    color.r = value->data.color.data.rgba.r;
+                    color.g = value->data.color.data.rgba.g;
+                    color.b = value->data.color.data.rgba.b;
+                    color.a = value->data.color.data.rgba.a;
+                    log_debug("[CSS] Border-bottom-color RGBA: (%d,%d,%d,%d)", color.r, color.g, color.b, color.a);
+                }
+            }
+
+            if (color.c != 0) {
+                span->bound->border->bottom_color = color;
+                span->bound->border->bottom_color_specificity = specificity;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_LEFT_COLOR: {
+            log_debug("[CSS] Processing border-left-color property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            Color color = {0};
+            if (value->type == CSS_VALUE_KEYWORD) {
+                color.c = map_lambda_color_keyword(value->data.keyword);
+                log_debug("[CSS] Border-left-color keyword: %s -> 0x%08X", value->data.keyword, color.c);
+            } else if (value->type == CSS_VALUE_COLOR) {
+                if (value->data.color.type == CSS_COLOR_RGB) {
+                    color.r = value->data.color.data.rgba.r;
+                    color.g = value->data.color.data.rgba.g;
+                    color.b = value->data.color.data.rgba.b;
+                    color.a = value->data.color.data.rgba.a;
+                    log_debug("[CSS] Border-left-color RGBA: (%d,%d,%d,%d)", color.r, color.g, color.b, color.a);
+                }
+            }
+
+            if (color.c != 0) {
+                span->bound->border->left_color = color;
+                span->bound->border->left_color_specificity = specificity;
+            }
+            break;
+        }
+
+        // ===== GROUP 4: Layout Properties =====
+
+        case CSS_PROPERTY_DISPLAY: {
+            log_debug("[CSS] Processing display property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                log_debug("[CSS] Display: %s -> %d", value->data.keyword, lexbor_val);
+
+                // Set display on the view (ViewGroup has DisplayValue with outer and inner)
+                if (block) {
+                    // For block elements, set both outer and inner display
+                    // Common values: block, inline, inline-block, flex, grid, none
+                    block->display.outer = lexbor_val;
+                    block->display.inner = lexbor_val;
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_POSITION: {
+            log_debug("[CSS] Processing position property");
+            if (!block) break;
+            if (!block->position) {
+                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
+                block->position->position = lexbor_val;
+                log_debug("[CSS] Position: %s -> %d", value->data.keyword, lexbor_val);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TOP: {
+            log_debug("[CSS] Processing top property");
+            if (!block) break;
+            if (!block->position) {
+                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float top = value->data.length.value;
+                block->position->top = top;
+                block->position->has_top = true;
+                log_debug("[CSS] Top: %.2f px", top);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Top: %.2f%% (percentage not yet fully supported)", percentage);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // 'auto' keyword
+                log_debug("[CSS] Top: auto");
+                block->position->has_top = false;
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_LEFT: {
+            log_debug("[CSS] Processing left property");
+            if (!block) break;
+            if (!block->position) {
+                block->position = (PositionProp*)alloc_prop(lycon, sizeof(PositionProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float left = value->data.length.value;
+                block->position->left = left;
+                block->position->has_left = true;
+                log_debug("[CSS] Left: %.2f px", left);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Left: %.2f%% (percentage not yet fully supported)", percentage);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // 'auto' keyword
+                log_debug("[CSS] Left: auto");
+                block->position->has_left = false;
             }
             break;
         }
