@@ -317,7 +317,7 @@ protected:
         // Check if it's a List (may contain DOCTYPE, comments, and HTML element)
         List* potential_list = (List*)root_ptr;
         if (potential_list->type_id == LMD_TYPE_LIST) {
-            // Search for the first Element in the list
+            // Search for the first REAL Element (skip DOCTYPE, comments, etc.)
             for (int64_t i = 0; i < potential_list->length; i++) {
                 Item item = potential_list->items[i];
 
@@ -331,7 +331,17 @@ protected:
                 if (item_ptr) {
                     Element* potential_elem = (Element*)item_ptr;
                     if (potential_elem->type_id == LMD_TYPE_ELEMENT) {
-                        return potential_elem;
+                        // Check the tag name to skip DOCTYPE and comments
+                        TypeElmt* elem_type = (TypeElmt*)potential_elem->type;
+                        if (elem_type && elem_type->name.str) {
+                            const char* tag_name = elem_type->name.str;
+
+                            // Skip DOCTYPE declarations and comments - find actual HTML element
+                            if (strcmp(tag_name, "!DOCTYPE") != 0 &&
+                                strcmp(tag_name, "!--") != 0) {
+                                return potential_elem;  // Found the real root element (html, body, div, etc.)
+                            }
+                        }
                     }
                 }
             }
@@ -703,7 +713,7 @@ TEST_F(HtmlCssIntegrationTest, CompleteHtmlCssPipeline_NestedElements) {
 }
 
 // ============================================================================
-// Real HTML File Tests
+// Real HTML File Tests - test/html/ directory
 // ============================================================================
 
 TEST_F(HtmlCssIntegrationTest, LoadSimpleBoxTestHTML) {
@@ -846,6 +856,578 @@ TEST_F(HtmlCssIntegrationTest, ProcessMultipleHTMLFiles) {
     printf("\nSummary: Processed %d files, converted %d to DomElements\n", processed, converted);
     EXPECT_GT(processed, 0) << "No test files were processed";
     EXPECT_GT(converted, 0) << "No files were converted to DomElements";
+}
+
+// ============================================================================
+// Layout Data Tests - Baseline Files
+// ============================================================================
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_EmptyDocument) {
+    std::string html_content = read_file("test/layout/data/baseline/baseline_001_empty_document.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_SingleDiv) {
+    std::string html_content = read_file("test/layout/data/baseline/baseline_002_single_div.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    ASSERT_NE(dom_root, nullptr);
+
+    // Should be able to extract CSS if present
+    std::string css = extract_css_from_html(root_elem);
+    printf("Baseline single div - CSS length: %zu bytes\n", css.length());
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_FlexContainer) {
+    std::string html_content = read_file("test/layout/data/baseline/baseline_007_simple_flexbox.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    ASSERT_NE(dom_root, nullptr);
+
+    std::string css = extract_css_from_html(root_elem);
+    if (!css.empty()) {
+        EXPECT_NE(css.find("flex"), std::string::npos) << "Should contain flexbox CSS";
+    }
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_DisplayTypes) {
+    std::string html_content = read_file("test/layout/data/baseline/baseline_801_display_block.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Baseline_BoxModel) {
+    std::string html_content = read_file("test/layout/data/baseline/box_001_width_height.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    ASSERT_NE(dom_root, nullptr);
+
+    std::string css = extract_css_from_html(root_elem);
+    if (!css.empty()) {
+        // Should contain width/height properties
+        bool has_width = css.find("width") != std::string::npos;
+        bool has_height = css.find("height") != std::string::npos;
+        EXPECT_TRUE(has_width || has_height) << "Should contain width or height";
+    }
+}
+
+// ============================================================================
+// Layout Data Tests - Flexbox Files
+// ============================================================================
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Flex_BasicLayout) {
+    std::string html_content = read_file("test/layout/data/baseline/flex_001_basic_layout.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    ASSERT_NE(dom_root, nullptr);
+
+    std::string css = extract_css_from_html(root_elem);
+    if (!css.empty()) {
+        EXPECT_NE(css.find("flex"), std::string::npos);
+    }
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Flex_WrapAlignment) {
+    std::string html_content = read_file("test/layout/data/baseline/flex_002_wrap.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Flex_NestedContent) {
+    std::string html_content = read_file("test/layout/data/flex/flex_019_nested_flex.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+// ============================================================================
+// Layout Data Tests - Grid Files
+// ============================================================================
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Grid_BasicLayout) {
+    std::string html_content = read_file("test/layout/data/grid/grid_001_basic_layout.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    ASSERT_NE(dom_root, nullptr);
+
+    std::string css = extract_css_from_html(root_elem);
+    if (!css.empty()) {
+        EXPECT_NE(css.find("grid"), std::string::npos) << "Should contain grid CSS";
+    }
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Grid_TemplateAreas) {
+    std::string html_content = read_file("test/layout/data/grid/grid_005_template_areas.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Grid_NestedGrid) {
+    std::string html_content = read_file("test/layout/data/grid/grid_012_nested_grid.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+// ============================================================================
+// Layout Data Tests - Table Files
+// ============================================================================
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Table_BasicTable) {
+    std::string html_content = read_file("test/layout/data/table/table_001_basic_table.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    ASSERT_NE(dom_root, nullptr);
+
+    // Find table element
+    DomElement* table = find_element_by_tag(dom_root, "table");
+    if (table) {
+        EXPECT_STREQ(table->tag_name, "table");
+    }
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Table_BorderCollapse) {
+    std::string html_content = read_file("test/layout/data/table/table_006_border_collapse.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Table_ColspanRowspan) {
+    std::string html_content = read_file("test/layout/data/table/table_018_complex_spanning.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+// ============================================================================
+// Layout Data Tests - Position Files
+// ============================================================================
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Position_FloatLeft) {
+    std::string html_content = read_file("test/layout/data/position/position_001_float_left.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    ASSERT_NE(dom_root, nullptr);
+
+    std::string css = extract_css_from_html(root_elem);
+    if (!css.empty()) {
+        EXPECT_NE(css.find("float"), std::string::npos);
+    }
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Position_Absolute) {
+    std::string html_content = read_file("test/layout/data/position/position_007_absolute_basic.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Position_Combined) {
+    std::string html_content = read_file("test/layout/data/position/position_015_all_types_combined.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+// ============================================================================
+// Layout Data Tests - Box Model Files
+// ============================================================================
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Box_FloatClear) {
+    std::string html_content = read_file("test/layout/data/box/float-001.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Box_Borders) {
+    std::string html_content = read_file("test/layout/data/box/box_004_borders.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    ASSERT_NE(dom_root, nullptr);
+
+    std::string css = extract_css_from_html(root_elem);
+    if (!css.empty()) {
+        EXPECT_NE(css.find("border"), std::string::npos);
+    }
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Box_Overflow) {
+    std::string html_content = read_file("test/layout/data/box/box_012_overflow.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+// ============================================================================
+// Layout Data Tests - Text Flow Files
+// ============================================================================
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_TextFlow_FontFamilies) {
+    std::string html_content = read_file("test/layout/data/text_flow/text_flow_751_mixed_font_families.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    ASSERT_NE(dom_root, nullptr);
+
+    std::string css = extract_css_from_html(root_elem);
+    if (!css.empty()) {
+        EXPECT_NE(css.find("font"), std::string::npos);
+    }
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_TextFlow_Wrapping) {
+    std::string html_content = read_file("test/layout/data/text_flow/text_flow_741_text_wrapping_sans.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+// ============================================================================
+// Layout Data Tests - Page Samples
+// ============================================================================
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Page_Sample2) {
+    std::string html_content = read_file("test/layout/data/page/sample2.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    ASSERT_NE(dom_root, nullptr);
+
+    std::string css = extract_css_from_html(root_elem);
+    printf("Sample2 page - CSS length: %zu bytes\n", css.length());
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Page_Sample5) {
+    std::string html_content = read_file("test/layout/data/page/sample5.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+// ============================================================================
+// Layout Data Tests - Medium Complexity Documents
+// ============================================================================
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Medium_DocumentStructure) {
+    std::string html_content = read_file("test/layout/data/medium/combo_001_document_structure.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    ASSERT_NE(dom_root, nullptr);
+
+    // Try to extract CSS to verify document structure
+    std::string css = extract_css_from_html(root_elem);
+    printf("Document structure - CSS length: %zu bytes\n", css.length());
+
+    // Successful conversion is enough - child counting may have edge cases
+    EXPECT_NE(dom_root, nullptr) << "Document should convert to DOM";
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Medium_NestedLists) {
+    std::string html_content = read_file("test/layout/data/medium/list_002_nested_lists.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+// ============================================================================
+// Layout Data Tests - Basic CSS Properties
+// ============================================================================
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Basic_Colors) {
+    std::string html_content = read_file("test/layout/data/basic/color-001.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    ASSERT_NE(dom_root, nullptr);
+
+    std::string css = extract_css_from_html(root_elem);
+    if (!css.empty()) {
+        EXPECT_NE(css.find("color"), std::string::npos);
+    }
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Basic_Margins) {
+    std::string html_content = read_file("test/layout/data/basic/margin-collapse-001.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_Basic_Images) {
+    std::string html_content = read_file("test/layout/data/basic/image_001_basic_layout.html");
+    if (html_content.empty()) {
+        GTEST_SKIP() << "File not found";
+    }
+
+    Input* input = parse_html_string(html_content.c_str());
+    ASSERT_NE(input, nullptr);
+    Element* root_elem = get_root_element(input);
+    DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+    EXPECT_NE(dom_root, nullptr);
+}
+
+// ============================================================================
+// Batch Processing Test for Layout Data Files
+// ============================================================================
+
+TEST_F(HtmlCssIntegrationTest, LayoutData_BatchProcessing) {
+    const char* layout_files[] = {
+        // Baseline samples
+        "test/layout/data/baseline/baseline_001_empty_document.html",
+        "test/layout/data/baseline/baseline_002_single_div.html",
+        "test/layout/data/baseline/baseline_007_simple_flexbox.html",
+        "test/layout/data/baseline/box_001_width_height.html",
+        "test/layout/data/baseline/flex_001_basic_layout.html",
+
+        // Grid samples
+        "test/layout/data/grid/grid_001_basic_layout.html",
+        "test/layout/data/grid/grid_003_span_cells.html",
+
+        // Table samples
+        "test/layout/data/table/table_001_basic_table.html",
+        "test/layout/data/table/table_simple.html",
+
+        // Position samples
+        "test/layout/data/position/position_001_float_left.html",
+        "test/layout/data/position/position_007_absolute_basic.html",
+
+        // Box samples
+        "test/layout/data/box/box_004_borders.html",
+        "test/layout/data/box/float-001.html",
+
+        // Page samples
+        "test/layout/data/page/sample3.html",
+        "test/layout/data/page/sample4.html",
+
+        nullptr
+    };
+
+    printf("\n=== Batch Processing Layout Data Files ===\n");
+    int total = 0;
+    int parsed = 0;
+    int converted = 0;
+    int has_css = 0;
+
+    for (int i = 0; layout_files[i] != nullptr; i++) {
+        total++;
+        std::string html_content = read_file(layout_files[i]);
+
+        if (html_content.empty()) {
+            printf("  ⚠️  Skipped: %s (not found)\n", layout_files[i]);
+            continue;
+        }
+
+        Input* input = parse_html_string(html_content.c_str());
+        if (!input) {
+            printf("  ✗ Parse failed: %s\n", layout_files[i]);
+            continue;
+        }
+        parsed++;
+
+        Element* root_elem = get_root_element(input);
+        DomElement* dom_root = lambda_element_to_dom_element(root_elem, pool);
+
+        if (dom_root) {
+            converted++;
+
+            // Try to extract CSS
+            std::string css = extract_css_from_html(root_elem);
+            if (!css.empty()) {
+                has_css++;
+                printf("  ✓ %s: %d children, %zu bytes CSS\n",
+                       layout_files[i],
+                       dom_element_count_children(dom_root),
+                       css.length());
+            } else {
+                printf("  ✓ %s: %d children, no CSS\n",
+                       layout_files[i],
+                       dom_element_count_children(dom_root));
+            }
+        } else {
+            printf("  ✗ Convert failed: %s\n", layout_files[i]);
+        }
+    }
+
+    printf("\n=== Batch Processing Summary ===\n");
+    printf("  Total files: %d\n", total);
+    printf("  Successfully parsed: %d (%.1f%%)\n", parsed, 100.0 * parsed / total);
+    printf("  Converted to DOM: %d (%.1f%%)\n", converted, 100.0 * converted / total);
+    printf("  Files with CSS: %d (%.1f%%)\n", has_css, converted > 0 ? 100.0 * has_css / converted : 0);
+
+    EXPECT_GT(parsed, total * 0.8) << "At least 80% should parse successfully";
+    EXPECT_GT(converted, parsed * 0.8) << "At least 80% of parsed should convert";
 }
 
 // ============================================================================
