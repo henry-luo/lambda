@@ -38,6 +38,8 @@ extern "C" {
 // Forward declarations
 Element* get_html_root_element(Input* input);
 const char* extract_inline_css(Element* root);
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent);
+void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool);
 
 /**
  * Extract the root HTML element from parsed input
@@ -85,6 +87,120 @@ const char* extract_inline_css(Element* root) {
     // TODO: Implement style tag extraction
     // For now, return nullptr - external CSS via -c flag will work
     return nullptr;
+}
+
+/**
+ * Recursively build DomElement tree from Lambda Element tree
+ * Converts HTML parser output (Element) to CSS system format (DomElement)
+ */
+DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* parent) {
+    if (!elem || !pool) return nullptr;
+
+    // Get element type and tag name
+    TypeElmt* type = (TypeElmt*)elem->type;
+    if (!type) return nullptr;
+
+    const char* tag_name = type->name.str;
+
+    // Skip DOCTYPE, comments, and text nodes
+    if (strcmp(tag_name, "!DOCTYPE") == 0 || strcmp(tag_name, "!--") == 0) {
+        return nullptr;
+    }
+
+    // Create DomElement
+    DomElement* dom_elem = dom_element_create(pool, tag_name, (void*)elem);
+    if (!dom_elem) return nullptr;
+
+    // TODO: Extract id and class attributes from Lambda Element
+    // For now, create elements without attributes - this can be enhanced
+    // by properly parsing Element attribute data structure
+
+    // Set parent relationship if provided
+    if (parent) {
+        dom_element_append_child(parent, dom_elem);
+    }
+
+    // Process child elements
+    // Elements are Lists, so iterate through items
+    for (int64_t i = 0; i < elem->length; i++) {
+        Item child_item = elem->items[i];
+        TypeId child_type = get_type_id(child_item);
+
+        // Only process element nodes (skip text nodes for CSS purposes)
+        if (child_type == LMD_TYPE_ELEMENT) {
+            Element* child_elem = (Element*)child_item.pointer;
+            build_dom_tree_from_element(child_elem, pool, dom_elem);
+        }
+    }
+
+    return dom_elem;
+}
+
+/**
+ * Apply CSS stylesheet rules to DOM tree
+ * Walks the tree recursively and matches selectors to elements
+ */
+void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, SelectorMatcher* matcher, Pool* pool) {
+    if (!root || !stylesheet || !matcher || !pool) return;
+
+    fprintf(stderr, "[CSS] Applying stylesheet with %d rules to element <%s>\n",
+              stylesheet->rule_count, root->tag_name);
+
+    // Iterate through all rules in the stylesheet
+    for (int rule_idx = 0; rule_idx < stylesheet->rule_count; rule_idx++) {
+        CssRule* rule = stylesheet->rules[rule_idx];
+        if (!rule) {
+            fprintf(stderr, "[CSS] Rule %d is NULL\n", rule_idx);
+            continue;
+        }
+
+        fprintf(stderr, "[CSS] Processing rule %d, type=%d\n", rule_idx, rule->type);
+
+        // Only process style rules (skip @media, @import, etc.)
+        if (rule->type != CSS_RULE_STYLE) {
+            fprintf(stderr, "[CSS] Rule %d is not a style rule, skipping\n", rule_idx);
+            continue;
+        }
+
+        // Get selector from style_rule union
+        CssSelector* selector = rule->data.style_rule.selector;
+        if (!selector) {
+            fprintf(stderr, "[CSS] Rule %d has no selector\n", rule_idx);
+            continue;
+        }
+
+        fprintf(stderr, "[CSS] Rule %d has selector, testing match against <%s>\n", rule_idx, root->tag_name);
+
+        // Check if the selector matches this element
+        MatchResult match_result;
+        if (selector_matcher_matches(matcher, selector, root, &match_result)) {
+            fprintf(stderr, "[CSS] Rule %d MATCHES <%s>: specificity (%d,%d,%d,%d)\n",
+                      rule_idx, root->tag_name,
+                      match_result.specificity.inline_style,
+                      match_result.specificity.ids,
+                      match_result.specificity.classes,
+                      match_result.specificity.elements);
+
+            // Apply all declarations from this rule
+            size_t decl_count = rule->data.style_rule.declaration_count;
+            fprintf(stderr, "[CSS] Applying %zu declarations from rule %d\n", decl_count, rule_idx);
+
+            if (decl_count > 0) {
+                dom_element_apply_rule(root, rule, match_result.specificity);
+                fprintf(stderr, "[CSS] Applied %zu declarations to <%s>\n",
+                          decl_count, root->tag_name);
+            }
+        } else {
+            fprintf(stderr, "[CSS] Rule %d does NOT match <%s>\n", rule_idx, root->tag_name);
+        }
+    }
+
+    // Recursively apply to children
+    DomElement* child = root->first_child;
+    while (child) {
+        apply_stylesheet_to_dom_tree(child, stylesheet, matcher, pool);
+        child = child->next_sibling;
+    }
 }
 
 /**
@@ -298,19 +414,37 @@ int cmd_layout(int argc, char** argv) {
 
     log_debug("Created DOM element wrapper for styling");
 
-    // Apply CSS stylesheet if available
-    if (stylesheet) {
-        log_debug("CSS stylesheet parsed: %d rules", stylesheet->rule_count);
+    // Build complete DomElement tree from Lambda Element tree
+    fprintf(stderr, "[DEBUG] Building DOM tree from Element tree...\n");
+    DomElement* dom_root = build_dom_tree_from_element(root, pool, nullptr);
+    if (!dom_root) {
+        log_error("Failed to build DOM tree");
+        css_engine_destroy(css_engine);
+        pool_destroy(pool);
+        return 1;
+    }
 
-        // TODO: Implement CSS rule application to DOM tree
-        // This requires:
-        // 1. Walking the DOM tree recursively
-        // 2. For each element, matching selectors from the stylesheet
-        // 3. Applying matched CSS declarations to the element's computed style
-        // 4. Handling cascading and specificity
-        //
-        // For now, the stylesheet is parsed but not yet applied to elements.
-        // The selector_matcher.c provides the matching logic that needs to be used here.
+    fprintf(stderr, "[DEBUG] Built DOM tree: root=<%s>\n", dom_root->tag_name);
+
+    // Apply CSS stylesheet if available
+    if (stylesheet && stylesheet->rule_count > 0) {
+        fprintf(stderr, "[DEBUG] Applying CSS stylesheet: %d rules\n", stylesheet->rule_count);
+
+        // Create selector matcher
+        SelectorMatcher* matcher = selector_matcher_create(pool);
+        if (!matcher) {
+            log_error("Failed to create selector matcher");
+            css_engine_destroy(css_engine);
+            pool_destroy(pool);
+            return 1;
+        }
+
+        fprintf(stderr, "[DEBUG] Created selector matcher\n");
+
+        // Apply stylesheet to DOM tree
+        apply_stylesheet_to_dom_tree(dom_root, stylesheet, matcher, pool);
+
+        fprintf(stderr, "[DEBUG] CSS stylesheet applied to DOM tree\n");
 
         CssEngineStats stats = css_engine_get_stats(css_engine);
         log_debug("CSS Statistics:");
@@ -321,7 +455,7 @@ int cmd_layout(int argc, char** argv) {
             log_debug("  Parse errors: %zu", stats.parse_errors);
         }
     } else {
-        log_debug("No stylesheet to apply (CSS file not provided or parsing failed)");
+        fprintf(stderr, "[DEBUG] No stylesheet to apply\n");
     }
 
     // Create DomNode wrapper for layout computation
