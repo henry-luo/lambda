@@ -145,6 +145,22 @@ extern "C" String* format_data(Item item, String* type, String* flavor, Pool* po
     else if (strcmp(type->chars, "text") == 0) {
         result = format_text_string(pool, item);
     }
+    else if (strcmp(type->chars, "graph") == 0) {
+        // Graph type with flavor support for DOT, Mermaid, D2
+        if (!flavor || strcmp(flavor->chars, "dot") == 0) {
+            result = format_graph_with_flavor(pool, item, "dot");
+        }
+        else if (strcmp(flavor->chars, "mermaid") == 0) {
+            result = format_graph_with_flavor(pool, item, "mermaid");
+        }
+        else if (strcmp(flavor->chars, "d2") == 0) {
+            result = format_graph_with_flavor(pool, item, "d2");
+        }
+        else {
+            printf("Unsupported graph flavor: %s, defaulting to dot\n", flavor->chars);
+            result = format_graph_with_flavor(pool, item, "dot");
+        }
+    }
     else if (strcmp(type->chars, "markup") == 0) {
         // Markup type with flavor-based format selection
         if (!flavor || strcmp(flavor->chars, "standard") == 0 || strcmp(flavor->chars, "markdown") == 0) {
