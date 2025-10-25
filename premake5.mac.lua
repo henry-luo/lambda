@@ -1387,6 +1387,69 @@ project "test_avl_tree"
     filter {}
     
 
+project "test_avl_tree_perf"
+    kind "ConsoleApp"
+    language "C++"
+    targetdir "test"
+    objdir "build/obj/%{prj.name}"
+    targetextension ".exe"
+    
+    files {
+        "test/perf/test_avl_tree_perf.cpp",
+        "lib/avl_tree.c",
+        "lib/mempool.c",
+    }
+    
+    includedirs {
+        ".",
+        "lambda/tree-sitter/lib/include",
+        "lambda/tree-sitter-lambda/bindings/c",
+        "lambda/tree-sitter-javascript/bindings/c",
+        "lexbor/source",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/include",
+        "/opt/homebrew/Cellar/freetype/2.13.3/include/freetype2",
+        "/opt/homebrew/include/fontconfig",
+        "/opt/homebrew/include",
+        "/opt/homebrew/include/libpng16",
+        "lib/mem-pool/include",
+        "mac-deps/curl-8.10.1/include",
+        "/usr/local/include",
+    }
+    
+    libdirs {
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar/criterion/2.4.2_2/lib",
+        "/usr/local/lib",
+        "build/lib",
+    }
+    
+    links {
+        "gtest",
+        "gtest_main",
+    }
+    
+    linkoptions {
+        "/opt/homebrew/lib/libgtest.a",
+        "/opt/homebrew/lib/libgtest_main.a",
+        "/Users/henryluo/Projects/Jubily/mac-deps/rpmalloc-install/lib/librpmalloc_no_override.a",
+    }
+    
+    buildoptions {
+        "-pedantic",
+        "-fdiagnostics-color=auto",
+        "-fno-omit-frame-pointer",
+        "-g",
+        "-O2",
+    }
+    
+    -- AddressSanitizer for test projects only
+    filter { "configurations:Debug", "not platforms:Linux_x64" }
+        buildoptions { "-fsanitize=address", "-fno-omit-frame-pointer" }
+        linkoptions { "-fsanitize=address" }
+    
+    filter {}
+    
+
 project "test_mime_detect_gtest"
     kind "ConsoleApp"
     language "C++"
