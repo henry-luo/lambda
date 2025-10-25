@@ -551,6 +551,8 @@ void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
 void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl,
                                   LayoutContext* lycon) {
     log_debug("[Lambda CSS Property] resolve_lambda_css_property called: prop_id=%d", prop_id);
+    fprintf(stderr, "[DEBUG] resolve_lambda_css_property: prop_id=%d (DISPLAY=%d)\n",
+            prop_id, CSS_PROPERTY_DISPLAY);
 
     if (!decl || !lycon || !lycon->view) {
         log_debug("[Lambda CSS Property] Early return: decl=%p, lycon=%p, view=%p",
@@ -1747,10 +1749,61 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
                 // Set display on the view (ViewGroup has DisplayValue with outer and inner)
                 if (block) {
-                    // For block elements, set both outer and inner display
-                    // Common values: block, inline, inline-block, flex, grid, none
-                    block->display.outer = lexbor_val;
-                    block->display.inner = lexbor_val;
+                    // Map single-value display to outer/inner pair following CSS Display Level 3 spec
+                    // See: https://www.w3.org/TR/css-display-3/#the-display-properties
+                    switch (lexbor_val) {
+                        case LXB_CSS_VALUE_BLOCK:
+                            block->display.outer = LXB_CSS_VALUE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_FLOW;
+                            break;
+                        case LXB_CSS_VALUE_INLINE:
+                            block->display.outer = LXB_CSS_VALUE_INLINE;
+                            block->display.inner = LXB_CSS_VALUE_FLOW;
+                            break;
+                        case LXB_CSS_VALUE_INLINE_BLOCK:
+                            block->display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_FLOW;
+                            break;
+                        case LXB_CSS_VALUE_FLEX:
+                            block->display.outer = LXB_CSS_VALUE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_FLEX;
+                            log_debug("[CSS] Display flex: outer=BLOCK, inner=FLEX");
+                            break;
+                        case LXB_CSS_VALUE_INLINE_FLEX:
+                            block->display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_FLEX;
+                            break;
+                        case LXB_CSS_VALUE_GRID:
+                            block->display.outer = LXB_CSS_VALUE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_GRID;
+                            break;
+                        case LXB_CSS_VALUE_INLINE_GRID:
+                            block->display.outer = LXB_CSS_VALUE_INLINE;
+                            block->display.inner = LXB_CSS_VALUE_GRID;
+                            break;
+                        case LXB_CSS_VALUE_TABLE:
+                            block->display.outer = LXB_CSS_VALUE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_TABLE;
+                            break;
+                        case LXB_CSS_VALUE_INLINE_TABLE:
+                            block->display.outer = LXB_CSS_VALUE_INLINE;
+                            block->display.inner = LXB_CSS_VALUE_TABLE;
+                            break;
+                        case LXB_CSS_VALUE_LIST_ITEM:
+                            block->display.outer = LXB_CSS_VALUE_LIST_ITEM;
+                            block->display.inner = LXB_CSS_VALUE_FLOW;
+                            break;
+                        case LXB_CSS_VALUE_NONE:
+                            block->display.outer = LXB_CSS_VALUE_NONE;
+                            block->display.inner = LXB_CSS_VALUE_NONE;
+                            break;
+                        default:
+                            // Unknown or unsupported - default to block flow
+                            log_debug("[CSS] Unknown display value %d, defaulting to block flow", lexbor_val);
+                            block->display.outer = LXB_CSS_VALUE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_FLOW;
+                            break;
+                    }
                 }
             }
             break;
