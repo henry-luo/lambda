@@ -427,6 +427,18 @@ typedef struct ViewTable : ViewBlock {
     float border_spacing_h; // horizontal spacing between columns (px)
     float border_spacing_v; // vertical spacing between rows (px)
 
+    // Caption positioning
+    enum {
+        CAPTION_SIDE_TOP = 0,     // Caption appears above the table (default)
+        CAPTION_SIDE_BOTTOM = 1   // Caption appears below the table
+    } caption_side;
+
+    // Empty cells display
+    enum {
+        EMPTY_CELLS_SHOW = 0,     // Show borders and backgrounds of empty cells (default)
+        EMPTY_CELLS_HIDE = 1      // Hide borders and backgrounds of empty cells
+    } empty_cells;
+
     // Fixed layout height distribution
     int fixed_row_height;   // Height per row for table-layout:fixed with explicit height (0=auto)
 

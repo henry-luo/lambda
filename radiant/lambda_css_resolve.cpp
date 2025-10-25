@@ -25,19 +25,33 @@ struct KeywordMapping {
 static const KeywordMapping keyword_map[] = {
     // Display and layout values
     {"absolute", 0x014f},  // LXB_CSS_VALUE_ABSOLUTE
+
+    // Animation keywords
+    {"alternate", 0x0095}, // LXB_CSS_VALUE_ALTERNATE (animation-direction)
+    {"alternate-reverse", 0x0096}, // LXB_CSS_VALUE_ALTERNATE_REVERSE
     {"auto", 0x000c},      // LXB_CSS_VALUE_AUTO
     {"baseline", 0x000b},  // LXB_CSS_VALUE_BASELINE
     {"block", 0x00ef},     // LXB_CSS_VALUE_BLOCK
     {"border-box", 0x002a}, // LXB_CSS_VALUE_BORDER_BOX
     {"both", 0x0174},      // LXB_CSS_VALUE_BOTH
     {"bottom", 0x0019},    // LXB_CSS_VALUE_BOTTOM
+    {"break-all", 0x0039}, // LXB_CSS_VALUE_BREAK_ALL (word-break)
+    {"break-word", 0x003a}, // LXB_CSS_VALUE_BREAK_WORD (word-wrap)
+
+    // Animation fill modes
+    {"backwards", 0x009a}, // LXB_CSS_VALUE_BACKWARDS (animation-fill-mode)
 
     // Font and text values
     {"bold", 0x013d},      // LXB_CSS_VALUE_BOLD
     {"bolder", 0x013e},    // LXB_CSS_VALUE_BOLDER
 
-    // Positioning and alignment
+    // Text transformation
+    {"capitalize", 0x0053}, // LXB_CSS_VALUE_CAPITALIZE
     {"center", 0x0007},    // LXB_CSS_VALUE_CENTER
+    {"clip", 0x003c},      // LXB_CSS_VALUE_CLIP (text-overflow)
+    {"collapse", 0x0210},  // Custom value for border-collapse collapse
+    {"column", 0x0054},    // LXB_CSS_VALUE_COLUMN (flex-direction)
+    {"column-reverse", 0x0055}, // LXB_CSS_VALUE_COLUMN_REVERSE
     {"content-box", 0x0029}, // LXB_CSS_VALUE_CONTENT_BOX
     {"currentcolor", 0x0031}, // LXB_CSS_VALUE_CURRENTCOLOR
 
@@ -45,10 +59,28 @@ static const KeywordMapping keyword_map[] = {
     {"dashed", 0x0022},    // LXB_CSS_VALUE_DASHED
     {"dotted", 0x0021},    // LXB_CSS_VALUE_DOTTED
     {"double", 0x0024},    // LXB_CSS_VALUE_DOUBLE
+    
+    // Background size keywords
+    {"contain", 0x0200},   // Custom value for background-size contain
+    {"cover", 0x0201},     // Custom value for background-size cover
+
+    // Animation timing functions
+    {"ease", 0x0083},      // LXB_CSS_VALUE_EASE (animation-timing-function)
+    {"ease-in", 0x0084},   // LXB_CSS_VALUE_EASE_IN
+    {"ease-in-out", 0x0085}, // LXB_CSS_VALUE_EASE_IN_OUT
+    {"ease-out", 0x0086},  // LXB_CSS_VALUE_EASE_OUT
+
+    // Text overflow
+    {"ellipsis", 0x0056},  // LXB_CSS_VALUE_ELLIPSIS
 
     // Display types
     {"flex", 0x00f5},      // LXB_CSS_VALUE_FLEX
+    {"flex-end", 0x0057},  // LXB_CSS_VALUE_FLEX_END
+    {"flex-start", 0x0058}, // LXB_CSS_VALUE_FLEX_START
     {"fixed", 0x0151},     // LXB_CSS_VALUE_FIXED
+
+    // Animation fill modes  
+    {"forwards", 0x009b},  // LXB_CSS_VALUE_FORWARDS (animation-fill-mode)
 
     // Colors - Common colors
     {"black", 0x003b},     // LXB_CSS_VALUE_BLACK
@@ -61,8 +93,11 @@ static const KeywordMapping keyword_map[] = {
 
     // Visibility and overflow
     {"hidden", 0x0020},    // LXB_CSS_VALUE_HIDDEN
+    {"hide", 0x0211},      // Custom value for empty-cells hide
 
     // Layout display
+    // Animation iteration count and play state
+    {"infinite", 0x0097},  // LXB_CSS_VALUE_INFINITE (animation-iteration-count)
     {"inline", 0x00f0},    // LXB_CSS_VALUE_INLINE
     {"inline-block", 0x00f1}, // LXB_CSS_VALUE_INLINE_BLOCK
     {"inline-flex", 0x00f2},  // LXB_CSS_VALUE_INLINE_FLEX
@@ -74,13 +109,27 @@ static const KeywordMapping keyword_map[] = {
     // Text alignment
     {"justify", 0x0152},   // LXB_CSS_VALUE_JUSTIFY
 
+    // Word breaking
+    {"keep-all", 0x0058},  // LXB_CSS_VALUE_KEEP_ALL (word-break)
+
     // Alignment
     {"left", 0x002f},      // LXB_CSS_VALUE_LEFT
+
+    // Animation timing functions
+    {"linear", 0x0087},    // LXB_CSS_VALUE_LINEAR (animation-timing-function)
     {"line-through", 0x0159}, // LXB_CSS_VALUE_LINE_THROUGH
+    
+    // Background attachment
+    {"local", 0x0202},     // Custom value for background-attachment local
+    
+    {"lowercase", 0x0060}, // LXB_CSS_VALUE_LOWERCASE
 
     // Vertical alignment
     {"middle", 0x0010},    // LXB_CSS_VALUE_MIDDLE
     {"move", 0x00ec},      // LXB_CSS_VALUE_MOVE
+
+    // Background blend modes
+    {"multiply", 0x0204},  // Custom value for background-blend-mode multiply
 
     // Display and text
     {"none", 0x001f},      // LXB_CSS_VALUE_NONE
@@ -92,7 +141,14 @@ static const KeywordMapping keyword_map[] = {
 
     // Colors
     {"orange", 0x009d},    // LXB_CSS_VALUE_ORANGE
+    
+    // Background blend modes
+    {"overlay", 0x0205},   // Custom value for background-blend-mode overlay
+    
     {"overline", 0x0158},  // LXB_CSS_VALUE_OVERLINE
+
+    // Background origin/clip
+    {"padding-box", 0x0203}, // Custom value for background-origin/clip padding-box
 
     // Colors
     {"pink", 0x00a7},      // LXB_CSS_VALUE_PINK
@@ -105,14 +161,37 @@ static const KeywordMapping keyword_map[] = {
     // Colors
     {"red", 0x00ac},       // LXB_CSS_VALUE_RED
     {"relative", 0x014e},  // LXB_CSS_VALUE_RELATIVE
+
+    // Animation direction
+    {"reverse", 0x0098},   // LXB_CSS_VALUE_REVERSE (animation-direction)
     {"right", 0x0030},     // LXB_CSS_VALUE_RIGHT
+    
+    // Background repeat
+    {"round", 0x0206},     // Custom value for background-repeat round
+    
+    {"row", 0x0059},       // LXB_CSS_VALUE_ROW (flex-direction)
+    {"row-reverse", 0x005a}, // LXB_CSS_VALUE_ROW_REVERSE
+
+    // Animation play state
+    {"running", 0x009c},   // LXB_CSS_VALUE_RUNNING (animation-play-state)
 
     // Overflow
     {"scroll", 0x014b},    // LXB_CSS_VALUE_SCROLL
+    {"separate", 0x0212},  // Custom value for border-collapse separate
+    {"show", 0x0213},      // Custom value for empty-cells show
     {"silver", 0x00b5},    // LXB_CSS_VALUE_SILVER
+    {"small-caps", 0x0062}, // LXB_CSS_VALUE_SMALL_CAPS (font-variant)
     {"solid", 0x0023},     // LXB_CSS_VALUE_SOLID
+    
+    // Background repeat
+    {"space", 0x0207},     // Custom value for background-repeat space
+    
+    {"space-around", 0x005b}, // LXB_CSS_VALUE_SPACE_AROUND
+    {"space-between", 0x005c}, // LXB_CSS_VALUE_SPACE_BETWEEN
+    {"space-evenly", 0x005d}, // LXB_CSS_VALUE_SPACE_EVENLY
     {"static", 0x014d},    // LXB_CSS_VALUE_STATIC
     {"sticky", 0x0150},    // LXB_CSS_VALUE_STICKY
+    {"stretch", 0x005e},   // LXB_CSS_VALUE_STRETCH
     {"sub", 0x0016},       // LXB_CSS_VALUE_SUB
     {"super", 0x0017},     // LXB_CSS_VALUE_SUPER
 
@@ -125,9 +204,14 @@ static const KeywordMapping keyword_map[] = {
 
     // Text decoration
     {"underline", 0x0157},   // LXB_CSS_VALUE_UNDERLINE
+    {"uppercase", 0x0065},   // LXB_CSS_VALUE_UPPERCASE
 
     // Overflow
     {"visible", 0x0149},     // LXB_CSS_VALUE_VISIBLE
+
+    // Flexbox wrap
+    {"wrap", 0x005f},        // LXB_CSS_VALUE_WRAP
+    {"wrap-reverse", 0x0060}, // LXB_CSS_VALUE_WRAP_REVERSE
 
     // Colors
     {"white", 0x00c4},       // LXB_CSS_VALUE_WHITE
@@ -941,6 +1025,126 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             break;
         }
 
+        // ===== GROUP 16: Background Advanced Properties =====
+
+        case CSS_PROPERTY_BACKGROUND_ATTACHMENT: {
+            log_debug("[CSS] Processing background-attachment property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->background) {
+                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                // Values: scroll, fixed, local
+                log_debug("[CSS] background-attachment: %s", value->data.keyword);
+                // TODO: Store attachment value when BackgroundProp is extended
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BACKGROUND_ORIGIN: {
+            log_debug("[CSS] Processing background-origin property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->background) {
+                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                // Values: border-box, padding-box, content-box
+                log_debug("[CSS] background-origin: %s", value->data.keyword);
+                // TODO: Store origin value when BackgroundProp is extended
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BACKGROUND_CLIP: {
+            log_debug("[CSS] Processing background-clip property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->background) {
+                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                // Values: border-box, padding-box, content-box
+                log_debug("[CSS] background-clip: %s", value->data.keyword);
+                // TODO: Store clip value when BackgroundProp is extended
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BACKGROUND_POSITION_X: {
+            log_debug("[CSS] Processing background-position-x property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->background) {
+                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float pos_x = convert_lambda_length_to_px(value, lycon, prop_id);
+                log_debug("[CSS] background-position-x: %.2fpx", pos_x);
+                // TODO: Store position-x when BackgroundProp is extended
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float pos_x_percent = value->data.percentage.value;
+                log_debug("[CSS] background-position-x: %.2f%%", pos_x_percent);
+                // TODO: Store position-x percentage when BackgroundProp is extended
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // Values: left, center, right
+                log_debug("[CSS] background-position-x: %s", value->data.keyword);
+                // TODO: Store position-x keyword when BackgroundProp is extended
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BACKGROUND_POSITION_Y: {
+            log_debug("[CSS] Processing background-position-y property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->background) {
+                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float pos_y = convert_lambda_length_to_px(value, lycon, prop_id);
+                log_debug("[CSS] background-position-y: %.2fpx", pos_y);
+                // TODO: Store position-y when BackgroundProp is extended
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float pos_y_percent = value->data.percentage.value;
+                log_debug("[CSS] background-position-y: %.2f%%", pos_y_percent);
+                // TODO: Store position-y percentage when BackgroundProp is extended
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // Values: top, center, bottom
+                log_debug("[CSS] background-position-y: %s", value->data.keyword);
+                // TODO: Store position-y keyword when BackgroundProp is extended
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BACKGROUND_BLEND_MODE: {
+            log_debug("[CSS] Processing background-blend-mode property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->background) {
+                span->bound->background = (BackgroundProp*)alloc_prop(lycon, sizeof(BackgroundProp));
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                // Values: normal, multiply, screen, overlay, darken, lighten, etc.
+                log_debug("[CSS] background-blend-mode: %s", value->data.keyword);
+                // TODO: Store blend mode when BackgroundProp is extended
+            }
+            break;
+        }
+
         case CSS_PROPERTY_BORDER_TOP_WIDTH: {
             log_debug("[CSS] Processing border-top-width property");
             if (!span->bound) {
@@ -1230,6 +1434,80 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (color.c != 0) {
                 span->bound->border->left_color = color;
                 span->bound->border->left_color_specificity = specificity;
+            }
+            break;
+        }
+
+        // ===== GROUP 15: Additional Border Properties =====
+
+        case CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS: {
+            log_debug("[CSS] Processing border-top-left-radius property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float radius = convert_lambda_length_to_px(value, lycon, prop_id);
+                span->bound->border->radius.top_left = radius;
+                span->bound->border->radius.tl_specificity = specificity;
+                log_debug("[CSS] border-top-left-radius: %.2fpx", radius);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS: {
+            log_debug("[CSS] Processing border-top-right-radius property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float radius = convert_lambda_length_to_px(value, lycon, prop_id);
+                span->bound->border->radius.top_right = radius;
+                span->bound->border->radius.tr_specificity = specificity;
+                log_debug("[CSS] border-top-right-radius: %.2fpx", radius);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS: {
+            log_debug("[CSS] Processing border-bottom-right-radius property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float radius = convert_lambda_length_to_px(value, lycon, prop_id);
+                span->bound->border->radius.bottom_right = radius;
+                span->bound->border->radius.br_specificity = specificity;
+                log_debug("[CSS] border-bottom-right-radius: %.2fpx", radius);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS: {
+            log_debug("[CSS] Processing border-bottom-left-radius property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float radius = convert_lambda_length_to_px(value, lycon, prop_id);
+                span->bound->border->radius.bottom_left = radius;
+                span->bound->border->radius.bl_specificity = specificity;
+                log_debug("[CSS] border-bottom-left-radius: %.2fpx", radius);
             }
             break;
         }
@@ -1565,6 +1843,539 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (boxsizing_value > 0) {
                     block->blk->box_sizing = boxsizing_value;
                     log_debug("[CSS] Box-sizing: %s -> 0x%04X", value->data.keyword, boxsizing_value);
+                }
+            }
+            break;
+        }
+
+        // ===== GROUP 12: Advanced Typography Properties =====
+
+        case CSS_PROPERTY_FONT_STYLE: {
+            log_debug("[CSS] Processing font-style property");
+            if (!span->font) {
+                log_debug("[CSS] font-style: FontProp is NULL");
+                break;
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (lexbor_value > 0) {
+                    span->font->font_style = lexbor_value;
+                    log_debug("[CSS] font-style: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TEXT_TRANSFORM: {
+            log_debug("[CSS] Processing text-transform property");
+            if (!block || !block->blk) {
+                if (block) {
+                    block->blk = alloc_block_prop(lycon);
+                } else {
+                    log_debug("[CSS] text-transform: Cannot apply to inline element without block context");
+                    break;
+                }
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (lexbor_value > 0) {
+                    // Note: Adding text_transform field to BlockProp would be needed
+                    // For now, log the value that would be set
+                    log_debug("[CSS] text-transform: %s -> 0x%04X (field not yet added to BlockProp)", 
+                             value->data.keyword, lexbor_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TEXT_OVERFLOW: {
+            log_debug("[CSS] Processing text-overflow property");
+            if (!block || !block->blk) {
+                if (block) {
+                    block->blk = alloc_block_prop(lycon);
+                } else {
+                    log_debug("[CSS] text-overflow: Cannot apply to inline element without block context");
+                    break;
+                }
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (lexbor_value > 0) {
+                    // Note: Adding text_overflow field to BlockProp would be needed
+                    log_debug("[CSS] text-overflow: %s -> 0x%04X (field not yet added to BlockProp)", 
+                             value->data.keyword, lexbor_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_WORD_BREAK: {
+            log_debug("[CSS] Processing word-break property");
+            if (!block || !block->blk) {
+                if (block) {
+                    block->blk = alloc_block_prop(lycon);
+                } else {
+                    log_debug("[CSS] word-break: Cannot apply to inline element without block context");
+                    break;
+                }
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (lexbor_value > 0) {
+                    // Note: Adding word_break field to BlockProp would be needed
+                    log_debug("[CSS] word-break: %s -> 0x%04X (field not yet added to BlockProp)", 
+                             value->data.keyword, lexbor_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_WORD_WRAP: {
+            log_debug("[CSS] Processing word-wrap property");
+            if (!block || !block->blk) {
+                if (block) {
+                    block->blk = alloc_block_prop(lycon);
+                } else {
+                    log_debug("[CSS] word-wrap: Cannot apply to inline element without block context");
+                    break;
+                }
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (lexbor_value > 0) {
+                    // Note: Adding word_wrap field to BlockProp would be needed
+                    log_debug("[CSS] word-wrap: %s -> 0x%04X (field not yet added to BlockProp)", 
+                             value->data.keyword, lexbor_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_FONT_VARIANT: {
+            log_debug("[CSS] Processing font-variant property");
+            if (!span->font) {
+                log_debug("[CSS] font-variant: FontProp is NULL");
+                break;
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (lexbor_value > 0) {
+                    // Note: Adding font_variant field to FontProp would be needed
+                    log_debug("[CSS] font-variant: %s -> 0x%04X (field not yet added to FontProp)", 
+                             value->data.keyword, lexbor_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_LETTER_SPACING: {
+            log_debug("[CSS] Processing letter-spacing property");
+            if (!span->font) {
+                log_debug("[CSS] letter-spacing: FontProp is NULL");
+                break;
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float spacing = convert_lambda_length_to_px(value, lycon, prop_id);
+                // Note: Adding letter_spacing field to FontProp would be needed
+                log_debug("[CSS] letter-spacing: %.2fpx (field not yet added to FontProp)", spacing);
+            } else if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "normal") == 0) {
+                log_debug("[CSS] letter-spacing: normal -> 0px (field not yet added to FontProp)");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_WORD_SPACING: {
+            log_debug("[CSS] Processing word-spacing property");
+            if (!span->font) {
+                log_debug("[CSS] word-spacing: FontProp is NULL");
+                break;
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float spacing = convert_lambda_length_to_px(value, lycon, prop_id);
+                // Note: Adding word_spacing field to FontProp would be needed
+                log_debug("[CSS] word-spacing: %.2fpx (field not yet added to FontProp)", spacing);
+            } else if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "normal") == 0) {
+                log_debug("[CSS] word-spacing: normal -> 0px (field not yet added to FontProp)");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_TEXT_SHADOW: {
+            log_debug("[CSS] Processing text-shadow property");
+            if (!span->font) {
+                log_debug("[CSS] text-shadow: FontProp is NULL");
+                break;
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "none") == 0) {
+                log_debug("[CSS] text-shadow: none (field not yet added to FontProp)");
+            } else {
+                // TODO: Parse shadow offset, blur, and color
+                // For now, just log that shadow is set
+                log_debug("[CSS] text-shadow: complex value (needs full shadow parsing and field not yet added)");
+            }
+            break;
+        }
+
+        // ===== GROUP 13: Flexbox Properties =====
+
+        case CSS_PROPERTY_FLEX_DIRECTION: {
+            log_debug("[CSS] Processing flex-direction property");
+            if (!block) {
+                log_debug("[CSS] flex-direction: Cannot apply to non-block element");
+                break;
+            }
+            if (!block->embed || !block->embed->flex) {
+                // Allocate FlexProp if needed
+                if (!block->embed) {
+                    // Note: This requires alloc_embed_prop function
+                    log_debug("[CSS] flex-direction: EmbedProp not allocated");
+                    break;
+                }
+                // Note: This requires alloc_flex_prop function
+                log_debug("[CSS] flex-direction: FlexProp not allocated");
+                break;
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (lexbor_value > 0) {
+                    block->embed->flex->direction = lexbor_value;
+                    log_debug("[CSS] flex-direction: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_FLEX_WRAP: {
+            log_debug("[CSS] Processing flex-wrap property");
+            if (!block) {
+                log_debug("[CSS] flex-wrap: Cannot apply to non-block element");
+                break;
+            }
+            if (!block->embed || !block->embed->flex) {
+                log_debug("[CSS] flex-wrap: FlexProp not allocated");
+                break;
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (lexbor_value > 0) {
+                    block->embed->flex->wrap = lexbor_value;
+                    log_debug("[CSS] flex-wrap: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_JUSTIFY_CONTENT: {
+            log_debug("[CSS] Processing justify-content property");
+            if (!block) {
+                log_debug("[CSS] justify-content: Cannot apply to non-block element");
+                break;
+            }
+            if (!block->embed || !block->embed->flex) {
+                log_debug("[CSS] justify-content: FlexProp not allocated");
+                break;
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (lexbor_value > 0) {
+                    block->embed->flex->justify = lexbor_value;
+                    log_debug("[CSS] justify-content: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_ALIGN_ITEMS: {
+            log_debug("[CSS] Processing align-items property");
+            if (!block) {
+                log_debug("[CSS] align-items: Cannot apply to non-block element");
+                break;
+            }
+            if (!block->embed || !block->embed->flex) {
+                log_debug("[CSS] align-items: FlexProp not allocated");
+                break;
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (lexbor_value > 0) {
+                    block->embed->flex->align_items = lexbor_value;
+                    log_debug("[CSS] align-items: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_ALIGN_CONTENT: {
+            log_debug("[CSS] Processing align-content property");
+            if (!block) {
+                log_debug("[CSS] align-content: Cannot apply to non-block element");
+                break;
+            }
+            if (!block->embed || !block->embed->flex) {
+                log_debug("[CSS] align-content: FlexProp not allocated");
+                break;
+            }
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (lexbor_value > 0) {
+                    block->embed->flex->align_content = lexbor_value;
+                    log_debug("[CSS] align-content: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_FLEX_GROW: {
+            log_debug("[CSS] Processing flex-grow property");
+            if (value->type == CSS_VALUE_NUMBER) {
+                float grow_value = (float)value->data.number.value;
+                span->flex_grow = grow_value;
+                log_debug("[CSS] flex-grow: %.2f", grow_value);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_FLEX_SHRINK: {
+            log_debug("[CSS] Processing flex-shrink property");
+            if (value->type == CSS_VALUE_NUMBER) {
+                float shrink_value = (float)value->data.number.value;
+                span->flex_shrink = shrink_value;
+                log_debug("[CSS] flex-shrink: %.2f", shrink_value);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_FLEX_BASIS: {
+            log_debug("[CSS] Processing flex-basis property");
+            if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "auto") == 0) {
+                span->flex_basis = -1; // -1 indicates auto
+                span->flex_basis_is_percent = false;
+                log_debug("[CSS] flex-basis: auto");
+            } else if (value->type == CSS_VALUE_LENGTH) {
+                float basis_value = convert_lambda_length_to_px(value, lycon, prop_id);
+                span->flex_basis = (int)basis_value;
+                span->flex_basis_is_percent = false;
+                log_debug("[CSS] flex-basis: %.2fpx", basis_value);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                span->flex_basis = (int)value->data.percentage.value;
+                span->flex_basis_is_percent = true;
+                log_debug("[CSS] flex-basis: %d%%", span->flex_basis);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_ORDER: {
+            log_debug("[CSS] Processing order property");
+            if (value->type == CSS_VALUE_NUMBER || value->type == CSS_VALUE_INTEGER) {
+                int order_value = (int)value->data.number.value;
+                span->order = order_value;
+                log_debug("[CSS] order: %d", order_value);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_ALIGN_SELF: {
+            log_debug("[CSS] Processing align-self property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
+                if (lexbor_value > 0) {
+                    span->align_self = lexbor_value;
+                    log_debug("[CSS] align-self: %s -> 0x%04X", value->data.keyword, lexbor_value);
+                }
+            }
+            break;
+        }
+
+        // Animation Properties (Group 14)
+        case CSS_PROPERTY_ANIMATION: {
+            log_debug("[CSS] Processing animation shorthand property");
+            // Note: Animation shorthand would be parsed into individual properties
+            // For now, just log the value
+            if (value->type == CSS_VALUE_KEYWORD) {
+                log_debug("[CSS] animation: %s", value->data.keyword);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_ANIMATION_NAME: {
+            log_debug("[CSS] Processing animation-name property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                if (strcasecmp(value->data.keyword, "none") == 0) {
+                    log_debug("[CSS] animation-name: none");
+                } else {
+                    log_debug("[CSS] animation-name: %s", value->data.keyword);
+                }
+            } else if (value->type == CSS_VALUE_STRING) {
+                log_debug("[CSS] animation-name: \"%s\"", value->data.string);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_ANIMATION_DURATION: {
+            log_debug("[CSS] Processing animation-duration property");
+            if (value->type == CSS_VALUE_TIME) {
+                float duration = (float)value->data.length.value;
+                log_debug("[CSS] animation-duration: %.3fs", duration);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_ANIMATION_TIMING_FUNCTION: {
+            log_debug("[CSS] Processing animation-timing-function property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* timing = value->data.keyword;
+                int lexbor_value = map_css_keyword_to_lexbor(timing);
+                if (lexbor_value > 0) {
+                    log_debug("[CSS] animation-timing-function: %s -> 0x%04X", timing, lexbor_value);
+                } else {
+                    log_debug("[CSS] animation-timing-function: %s", timing);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_ANIMATION_DELAY: {
+            log_debug("[CSS] Processing animation-delay property");
+            if (value->type == CSS_VALUE_TIME) {
+                float delay = (float)value->data.length.value;
+                log_debug("[CSS] animation-delay: %.3fs", delay);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_ANIMATION_ITERATION_COUNT: {
+            log_debug("[CSS] Processing animation-iteration-count property");
+            if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "infinite") == 0) {
+                log_debug("[CSS] animation-iteration-count: infinite");
+            } else if (value->type == CSS_VALUE_NUMBER) {
+                float count = (float)value->data.number.value;
+                log_debug("[CSS] animation-iteration-count: %.2f", count);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_ANIMATION_DIRECTION: {
+            log_debug("[CSS] Processing animation-direction property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* direction = value->data.keyword;
+                int lexbor_value = map_css_keyword_to_lexbor(direction);
+                if (lexbor_value > 0) {
+                    log_debug("[CSS] animation-direction: %s -> 0x%04X", direction, lexbor_value);
+                } else {
+                    log_debug("[CSS] animation-direction: %s", direction);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_ANIMATION_FILL_MODE: {
+            log_debug("[CSS] Processing animation-fill-mode property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* fill_mode = value->data.keyword;
+                int lexbor_value = map_css_keyword_to_lexbor(fill_mode);
+                if (lexbor_value > 0) {
+                    log_debug("[CSS] animation-fill-mode: %s -> 0x%04X", fill_mode, lexbor_value);
+                } else {
+                    log_debug("[CSS] animation-fill-mode: %s", fill_mode);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_ANIMATION_PLAY_STATE: {
+            log_debug("[CSS] Processing animation-play-state property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* play_state = value->data.keyword;
+                if (strcasecmp(play_state, "running") == 0) {
+                    log_debug("[CSS] animation-play-state: running");
+                } else if (strcasecmp(play_state, "paused") == 0) {
+                    log_debug("[CSS] animation-play-state: paused");
+                } else {
+                    log_debug("[CSS] animation-play-state: %s", play_state);
+                }
+            }
+            break;
+        }
+
+        // Table Properties (Group 17)
+        case CSS_PROPERTY_TABLE_LAYOUT: {
+            log_debug("[CSS] Processing table-layout property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* layout = value->data.keyword;
+                if (strcasecmp(layout, "auto") == 0) {
+                    log_debug("[CSS] table-layout: auto");
+                } else if (strcasecmp(layout, "fixed") == 0) {
+                    log_debug("[CSS] table-layout: fixed");
+                } else {
+                    log_debug("[CSS] table-layout: %s", layout);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_COLLAPSE: {
+            log_debug("[CSS] Processing border-collapse property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* collapse = value->data.keyword;
+                int lexbor_value = map_css_keyword_to_lexbor(collapse);
+                if (lexbor_value > 0) {
+                    log_debug("[CSS] border-collapse: %s -> 0x%04X", collapse, lexbor_value);
+                } else {
+                    log_debug("[CSS] border-collapse: %s", collapse);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_SPACING: {
+            log_debug("[CSS] Processing border-spacing property");
+            if (value->type == CSS_VALUE_LENGTH) {
+                double spacing = convert_lambda_length_to_px(value->data.length);
+                log_debug("[CSS] border-spacing: %.2fpx", spacing);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                log_debug("[CSS] border-spacing: %s", value->data.keyword);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_CAPTION_SIDE: {
+            log_debug("[CSS] Processing caption-side property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* side = value->data.keyword;
+                if (strcasecmp(side, "top") == 0) {
+                    log_debug("[CSS] caption-side: top");
+                } else if (strcasecmp(side, "bottom") == 0) {
+                    log_debug("[CSS] caption-side: bottom");
+                } else {
+                    log_debug("[CSS] caption-side: %s", side);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_EMPTY_CELLS: {
+            log_debug("[CSS] Processing empty-cells property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* cells = value->data.keyword;
+                int lexbor_value = map_css_keyword_to_lexbor(cells);
+                if (lexbor_value > 0) {
+                    log_debug("[CSS] empty-cells: %s -> 0x%04X", cells, lexbor_value);
+                } else {
+                    log_debug("[CSS] empty-cells: %s", cells);
                 }
             }
             break;

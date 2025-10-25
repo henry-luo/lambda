@@ -15,6 +15,7 @@ static bool validate_integer(const char* value_str, void** parsed_value, Pool* p
 static bool validate_percentage(const char* value_str, void** parsed_value, Pool* pool);
 static bool validate_url(const char* value_str, void** parsed_value, Pool* pool);
 static bool validate_string(const char* value_str, void** parsed_value, Pool* pool);
+static bool validate_time(const char* value_str, void** parsed_value, Pool* pool);
 
 // ============================================================================
 // Property Definitions
@@ -77,6 +78,10 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_FONT_SIZE, "font-size", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "medium", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_FONT_WEIGHT, "font-weight", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_FONT_STYLE, "font-style", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_FONT_VARIANT, "font-variant", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "normal", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_LETTER_SPACING, "letter-spacing", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_WORD_SPACING, "word-spacing", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_TEXT_SHADOW, "text-shadow", PROP_TYPE_STRING, PROP_INHERIT_YES, "none", false, false, NULL, 0, validate_string, NULL},
     {CSS_PROPERTY_LINE_HEIGHT, "line-height", PROP_TYPE_LENGTH, PROP_INHERIT_YES, "normal", true, false, NULL, 0, validate_length, NULL},
     {CSS_PROPERTY_TEXT_ALIGN, "text-align", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "left", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_TEXT_DECORATION, "text-decoration", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
@@ -118,11 +123,33 @@ static CssProperty property_definitions[] = {
     {CSS_PROPERTY_CURSOR, "cursor", PROP_TYPE_KEYWORD, PROP_INHERIT_YES, "auto", false, false, NULL, 0, validate_keyword, NULL},
     {CSS_PROPERTY_BORDER_RADIUS, "border-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
     
+    // Additional Border Properties (Group 15)
+    {CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS, "border-top-left-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_TOP_RIGHT_RADIUS, "border-top-right-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_BOTTOM_RIGHT_RADIUS, "border-bottom-right-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BORDER_BOTTOM_LEFT_RADIUS, "border-bottom-left-radius", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0", true, false, NULL, 0, validate_length, NULL},
+    
+    // Advanced Background Properties (Group 16)
+    {CSS_PROPERTY_BACKGROUND_ATTACHMENT, "background-attachment", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "scroll", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_BACKGROUND_ORIGIN, "background-origin", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "padding-box", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_BACKGROUND_CLIP, "background-clip", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "border-box", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_BACKGROUND_POSITION_X, "background-position-x", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0%", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BACKGROUND_POSITION_Y, "background-position-y", PROP_TYPE_LENGTH, PROP_INHERIT_NO, "0%", true, false, NULL, 0, validate_length, NULL},
+    {CSS_PROPERTY_BACKGROUND_BLEND_MODE, "background-blend-mode", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_keyword, NULL},
+    
     // Transform Properties
     {CSS_PROPERTY_TRANSFORM, "transform", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
     
     // Animation Properties
     {CSS_PROPERTY_ANIMATION, "animation", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_ANIMATION_NAME, "animation-name", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_ANIMATION_DURATION, "animation-duration", PROP_TYPE_TIME, PROP_INHERIT_NO, "0s", false, false, NULL, 0, validate_time, NULL},
+    {CSS_PROPERTY_ANIMATION_TIMING_FUNCTION, "animation-timing-function", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "ease", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_ANIMATION_DELAY, "animation-delay", PROP_TYPE_TIME, PROP_INHERIT_NO, "0s", false, false, NULL, 0, validate_time, NULL},
+    {CSS_PROPERTY_ANIMATION_ITERATION_COUNT, "animation-iteration-count", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "1", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_ANIMATION_DIRECTION, "animation-direction", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "normal", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_ANIMATION_FILL_MODE, "animation-fill-mode", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, false, NULL, 0, validate_keyword, NULL},
+    {CSS_PROPERTY_ANIMATION_PLAY_STATE, "animation-play-state", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "running", false, false, NULL, 0, validate_keyword, NULL},
     
     // Transition Properties
     {CSS_PROPERTY_TRANSITION, "transition", PROP_TYPE_KEYWORD, PROP_INHERIT_NO, "none", false, true, NULL, 0, validate_keyword, NULL},
@@ -757,6 +784,36 @@ static bool validate_string(const char* value_str, void** parsed_value, Pool* po
     char* string = (char*)pool_calloc(pool, len + 1);
     strcpy(string, value_str);
     *parsed_value = string;
+    return true;
+}
+
+static bool validate_time(const char* value_str, void** parsed_value, Pool* pool) {
+    if (!value_str || !parsed_value) return false;
+    
+    // Parse time values like "0.5s", "300ms", "2s"
+    char* endptr;
+    double value = strtod(value_str, &endptr);
+    
+    if (endptr == value_str) return false;
+    
+    // Check for valid time units
+    bool valid_unit = false;
+    if (strncmp(endptr, "s", 1) == 0 && strlen(endptr) == 1) {
+        // seconds
+        valid_unit = true;
+    } else if (strncmp(endptr, "ms", 2) == 0 && strlen(endptr) == 2) {
+        // milliseconds - convert to seconds
+        value = value / 1000.0;
+        valid_unit = true;
+    }
+    
+    if (!valid_unit || value < 0) return false;
+    
+    double* time = (double*)pool_calloc(pool, sizeof(double));
+    if (!time) return false;
+    
+    *time = value;
+    *parsed_value = time;
     return true;
 }
 

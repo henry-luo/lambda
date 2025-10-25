@@ -422,6 +422,11 @@ void resolve_spacing_prop(LayoutContext* lycon, uintptr_t property,
 
 DisplayValue resolve_display(lxb_html_element_t* elmt) {
     PropValue outer_display, inner_display;
+    // Check for NULL element
+    if (!elmt) {
+        log_debug("resolve_display: NULL element passed, returning default inline display");
+        return {LXB_CSS_VALUE_INLINE, LXB_CSS_VALUE_FLOW};
+    }
     // determine element 'display'
     int name = elmt->element.node.local_name;  // todo: should check ns as well
     switch (name) {
