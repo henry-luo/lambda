@@ -143,7 +143,7 @@ static AvlNode* rebalance(AvlNode* node) {
     // Left heavy
     if (balance < -1) {
         // Left-Right case
-        if (node_balance_factor(node->left) > 0) {
+        if (node->left && node_balance_factor(node->left) > 0) {
             node->left = rotate_left(node->left);
         }
         // Left-Left case
@@ -153,7 +153,7 @@ static AvlNode* rebalance(AvlNode* node) {
     // Right heavy
     if (balance > 1) {
         // Right-Left case
-        if (node_balance_factor(node->right) < 0) {
+        if (node->right && node_balance_factor(node->right) < 0) {
             node->right = rotate_right(node->right);
         }
         // Right-Right case
@@ -186,114 +186,295 @@ static AvlNode* subtree_max(AvlNode* node) {
 }
 
 /**
- * Insert a node into a subtree (recursive helper)
+ * Insert a node into a subtree (iterative approach like lexbor's)
  */
-static AvlNode* insert_recursive(AvlNode* root, AvlNode* new_node, AvlNode* parent) {
-    // Base case: found insertion point
+static AvlNode* insert_iterative(AvlNode* root, AvlNode* new_node) {
     if (!root) {
-        new_node->parent = parent;
+        new_node->parent = NULL;
         return new_node;
     }
     
-    // Recursive insertion
-    if (new_node->property_id < root->property_id) {
-        root->left = insert_recursive(root->left, new_node, root);
-    } else if (new_node->property_id > root->property_id) {
-        root->right = insert_recursive(root->right, new_node, root);
-    } else {
-        // Key already exists - update the declaration
-        root->declaration = new_node->declaration;
-        return root;
-    }
+    AvlNode* node = root;
     
-    // Rebalance and return new subtree root
-    return rebalance(root);
-}
-
-/**
- * Remove a node from a subtree (recursive helper)
- */
-static AvlNode* remove_recursive(AvlNode* root, uintptr_t property_id, AvlNode** removed_node) {
-    if (!root) {
-        *removed_node = NULL;
-        return NULL;
-    }
-    
-    if (property_id < root->property_id) {
-        root->left = remove_recursive(root->left, property_id, removed_node);
-    } else if (property_id > root->property_id) {
-        root->right = remove_recursive(root->right, property_id, removed_node);
-    } else {
-        // Found the node to remove
-        *removed_node = root;
-        
-        if (!root->left && !root->right) {
-            // Leaf node
-            return NULL;
-        } else if (!root->left) {
-            // Only right child
-            if (root->right) root->right->parent = root->parent;
-            return root->right;
-        } else if (!root->right) {
-            // Only left child
-            if (root->left) root->left->parent = root->parent;
-            return root->left;
+    // Find insertion point iteratively
+    for (;;) {
+        if (new_node->property_id == node->property_id) {
+            // Key already exists - update the declaration
+            node->declaration = new_node->declaration;
+            return root; // Return original root since no structural change
+        } else if (new_node->property_id < node->property_id) {
+            if (node->left == NULL) {
+                // Insert as left child
+                node->left = new_node;
+                new_node->parent = node;
+                node = new_node;
+                break;
+            }
+            node = node->left;
         } else {
-            // Two children - find successor
-            AvlNode* successor = subtree_min(root->right);
-            
-            // Replace root's data with successor's data
-            root->property_id = successor->property_id;
-            root->declaration = successor->declaration;
-            
-            // Remove the successor (which has at most one child)
-            AvlNode* temp_removed;
-            root->right = remove_recursive(root->right, successor->property_id, &temp_removed);
-            
-            // Update the removed node pointer to point to the original successor
-            *removed_node = temp_removed;
+            if (node->right == NULL) {
+                // Insert as right child
+                node->right = new_node;
+                new_node->parent = node;
+                node = new_node;
+                break;
+            }
+            node = node->right;
         }
     }
     
-    return rebalance(root);
-}
-
-/**
- * Search for a node in a subtree (recursive helper)
- */
-static AvlNode* search_recursive(AvlNode* root, uintptr_t property_id) {
-    if (!root || root->property_id == property_id) {
-        return root;
+    // Rebalance from inserted node up to root
+    AvlNode* current_root = root;
+    while (node != NULL) {
+        node = rebalance(node);
+        
+        // Update parent's child pointer if node was rebalanced
+        if (node->parent) {
+            if (node->parent->left && node->parent->left != node && 
+                (node->left == node->parent->left || node->right == node->parent->left)) {
+                node->parent->left = node;
+            } else if (node->parent->right && node->parent->right != node && 
+                      (node->left == node->parent->right || node->right == node->parent->right)) {
+                node->parent->right = node;
+            }
+        } else {
+            current_root = node; // New root
+        }
+        
+        node = node->parent;
     }
     
-    if (property_id < root->property_id) {
-        return search_recursive(root->left, property_id);
-    } else {
-        return search_recursive(root->right, property_id);
-    }
+    return current_root;
 }
 
 /**
- * In-order traversal helper with early exit support
+ * Remove a node from a subtree (iterative approach like lexbor's)
  */
-static int foreach_inorder_recursive(AvlNode* node, avl_callback_t callback, void* context, bool* should_continue) {
-    if (!node || !*should_continue) return 0;
+static AvlNode* rebalance_upward_from_node(AvlNode* start_node, AvlNode* tree_root) {
+    AvlNode* current_root = tree_root;
+    AvlNode* node = start_node;
+    
+    while (node != NULL) {
+        AvlNode* old_node = node;
+        node = rebalance(node);
+        
+        // If node changed due to rotation, update parent pointers
+        if (node != old_node) {
+            if (node->parent) {
+                if (node->parent->left == old_node) {
+                    node->parent->left = node;
+                } else if (node->parent->right == old_node) {
+                    node->parent->right = node;
+                }
+            } else {
+                current_root = node; // New root
+            }
+        }
+        
+        node = node->parent;
+    }
+    
+    return current_root;
+}
+
+static AvlNode* remove_iterative(AvlNode* root, uintptr_t property_id, AvlNode** removed_node) {
+    *removed_node = NULL;
+    if (!root) return NULL;
+    
+    AvlNode* node = root;
+    
+    // Find the node to remove iteratively
+    while (node != NULL) {
+        if (property_id == node->property_id) {
+            // Found the node to remove
+            *removed_node = node;
+            AvlNode* rebalance_start = node->parent;
+            
+            if (!node->left && !node->right) {
+                // Leaf node
+                if (node->parent) {
+                    if (node->parent->left == node) {
+                        node->parent->left = NULL;
+                    } else {
+                        node->parent->right = NULL;
+                    }
+                    return rebalance_upward_from_node(rebalance_start, root);
+                } else {
+                    return NULL; // Removed root, tree is empty
+                }
+            } else if (!node->left) {
+                // Only right child
+                if (node->parent) {
+                    if (node->parent->left == node) {
+                        node->parent->left = node->right;
+                    } else {
+                        node->parent->right = node->right;
+                    }
+                    if (node->right) {
+                        node->right->parent = node->parent;
+                    }
+                    return rebalance_upward_from_node(rebalance_start, root);
+                } else {
+                    if (node->right) {
+                        node->right->parent = NULL;
+                    }
+                    return node->right;
+                }
+            } else if (!node->right) {
+                // Only left child
+                if (node->parent) {
+                    if (node->parent->left == node) {
+                        node->parent->left = node->left;
+                    } else {
+                        node->parent->right = node->left;
+                    }
+                    if (node->left) {
+                        node->left->parent = node->parent;
+                    }
+                    return rebalance_upward_from_node(rebalance_start, root);
+                } else {
+                    if (node->left) {
+                        node->left->parent = NULL;
+                    }
+                    return node->left;
+                }
+            } else {
+                // Two children - find successor (leftmost node in right subtree)
+                AvlNode* successor = subtree_min(node->right);
+                
+                // Replace node's data with successor's data
+                node->property_id = successor->property_id;
+                node->declaration = successor->declaration;
+                
+                // Remove the successor (which has at most one right child)
+                if (successor->parent != node) {
+                    successor->parent->left = successor->right;
+                    rebalance_start = successor->parent;
+                } else {
+                    node->right = successor->right;
+                    rebalance_start = node;
+                }
+                
+                if (successor->right) {
+                    successor->right->parent = successor->parent;
+                }
+                
+                *removed_node = successor;
+                return rebalance_upward_from_node(rebalance_start, root);
+            }
+        } else if (property_id < node->property_id) {
+            node = node->left;
+        } else {
+            node = node->right;
+        }
+    }
+    
+    return root; // Node not found
+}
+
+/**
+ * Search for a node in a subtree (iterative approach like lexbor's)
+ */
+static AvlNode* search_iterative(AvlNode* root, uintptr_t property_id) {
+    AvlNode* node = root;
+    
+    while (node != NULL) {
+        if (property_id == node->property_id) {
+            return node;
+        } else if (property_id < node->property_id) {
+            node = node->left;
+        } else {
+            node = node->right;
+        }
+    }
+    
+    return NULL;
+}
+
+/**
+ * Safe iterative in-order traversal with modification support
+ * Based on lexbor's approach but simplified
+ */
+static int foreach_inorder_iterative(AvlTree* tree, avl_callback_t callback, void* context) {
+    if (!tree || !tree->root || !callback) return 0;
     
     int count = 0;
+    AvlNode* node = tree->root;
+    AvlNode* root = tree->root;
+    bool from_right = false;
     
-    // Traverse left subtree
-    count += foreach_inorder_recursive(node->left, callback, context, should_continue);
-    
-    // Process current node if we should continue
-    if (*should_continue) {
-        count++;
-        *should_continue = callback(node, context);
+    // Start from leftmost node
+    while (node->left != NULL) {
+        node = node->left;
     }
     
-    // Traverse right subtree if we should continue
-    if (*should_continue) {
-        count += foreach_inorder_recursive(node->right, callback, context, should_continue);
-    }
+    do {
+        AvlNode* parent = node->parent;
+        AvlNode* original_root = tree->root;
+        
+        if (!from_right) {
+            // Process current node
+            count++;
+            bool should_continue = callback(node, context);
+            if (!should_continue) {
+                return count;
+            }
+            
+            // Check if tree was modified during callback
+            if (tree->root != original_root) {
+                // Tree structure changed, need to restart or handle specially
+                root = tree->root;
+                if (root == NULL) {
+                    return count;
+                } else if (tree->last_removed == root) {
+                    node = root;
+                } else {
+                    // Find where to continue from
+                    node = root;
+                    while (node->left != NULL) {
+                        node = node->left;
+                    }
+                    continue;
+                }
+            }
+            
+            // Check if current node was removed
+            if (parent && parent->left != node && parent->right != node) {
+                // Node was removed, adjust traversal
+                if (parent->left != NULL) {
+                    node = parent->left;
+                    while (node->right != NULL) {
+                        node = node->right;
+                    }
+                } else {
+                    node = parent;
+                    from_right = true;
+                    continue;
+                }
+            }
+        }
+        
+        // Move to next node in inorder sequence
+        if (node->right != NULL && !from_right) {
+            node = node->right;
+            while (node->left != NULL) {
+                node = node->left;
+            }
+            from_right = false;
+            continue;
+        }
+        
+        // Move up to parent
+        if (parent == NULL || parent == root->parent) {
+            break;
+        } else if (node == parent->left) {
+            from_right = false;
+        } else {
+            from_right = true;
+        }
+        
+        node = parent;
+    } while (true);
     
     return count;
 }
@@ -375,32 +556,49 @@ static void calculate_depth_stats(AvlNode* node, int current_depth, int* min_dep
 /**
  * Validate AVL tree properties helper
  */
-static bool validate_recursive(AvlNode* node, int* balance_violations) {
-    if (!node) return true;
+static bool validate_iterative(AvlNode* root, int* balance_violations) {
+    if (!root) return true;
     
-    // Check balance factor
-    int balance = node_balance_factor(node);
-    if (balance < -1 || balance > 1) {
-        (*balance_violations)++;
+    // Use a simple array-based stack for iterative traversal
+    AvlNode* stack[1000]; // Should be enough for most practical trees
+    int stack_top = 0;
+    
+    stack[stack_top++] = root;
+    
+    while (stack_top > 0) {
+        AvlNode* node = stack[--stack_top];
+        
+        // Check balance factor
+        int balance = node_balance_factor(node);
+        if (balance < -1 || balance > 1) {
+            (*balance_violations)++;
+        }
+        
+        // Check height calculation
+        int calculated_height = 1 + (node_height(node->left) > node_height(node->right) ? 
+                                     node_height(node->left) : node_height(node->right));
+        if (node->height != calculated_height) {
+            return false;
+        }
+        
+        // Check parent pointers
+        if (node->left && node->left->parent != node) return false;
+        if (node->right && node->right->parent != node) return false;
+        
+        // Check BST property
+        if (node->left && node->left->property_id >= node->property_id) return false;
+        if (node->right && node->right->property_id <= node->property_id) return false;
+        
+        // Add children to stack for processing
+        if (node->right && stack_top < 999) {
+            stack[stack_top++] = node->right;
+        }
+        if (node->left && stack_top < 999) {
+            stack[stack_top++] = node->left;
+        }
     }
     
-    // Check height calculation
-    int calculated_height = 1 + (node_height(node->left) > node_height(node->right) ? 
-                                 node_height(node->left) : node_height(node->right));
-    if (node->height != calculated_height) {
-        return false;
-    }
-    
-    // Check parent pointers
-    if (node->left && node->left->parent != node) return false;
-    if (node->right && node->right->parent != node) return false;
-    
-    // Check BST property
-    if (node->left && node->left->property_id >= node->property_id) return false;
-    if (node->right && node->right->property_id <= node->property_id) return false;
-    
-    return validate_recursive(node->left, balance_violations) && 
-           validate_recursive(node->right, balance_violations);
+    return true;
 }
 
 // ============================================================================
@@ -415,6 +613,7 @@ AvlTree* avl_tree_create(Pool* pool) {
     tree->pool = pool;
     tree->node_count = 0;
     tree->max_depth = 0;
+    tree->last_removed = NULL;
     
     return tree;
 }
@@ -426,6 +625,7 @@ bool avl_tree_init(AvlTree* tree, Pool* pool) {
     tree->pool = pool;
     tree->node_count = 0;
     tree->max_depth = 0;
+    tree->last_removed = NULL;
     
     return true;
 }
@@ -443,6 +643,7 @@ void avl_tree_clear(AvlTree* tree) {
     tree->root = NULL;
     tree->node_count = 0;
     tree->max_depth = 0;
+    tree->last_removed = NULL;
 }
 
 AvlNode* avl_tree_insert(AvlTree* tree, uintptr_t property_id, void* declaration) {
@@ -460,7 +661,7 @@ AvlNode* avl_tree_insert(AvlTree* tree, uintptr_t property_id, void* declaration
     if (!new_node) return NULL;
     
     // Insert into tree
-    tree->root = insert_recursive(tree->root, new_node, NULL);
+    tree->root = insert_iterative(tree->root, new_node);
     tree->node_count++;
     
     // Update max depth
@@ -474,14 +675,15 @@ AvlNode* avl_tree_insert(AvlTree* tree, uintptr_t property_id, void* declaration
 
 AvlNode* avl_tree_search(AvlTree* tree, uintptr_t property_id) {
     if (!tree) return NULL;
-    return search_recursive(tree->root, property_id);
+    return search_iterative(tree->root, property_id);
 }
 
 void* avl_tree_remove(AvlTree* tree, uintptr_t property_id) {
     if (!tree) return NULL;
     
     AvlNode* removed_node;
-    tree->root = remove_recursive(tree->root, property_id, &removed_node);
+    tree->last_removed = subtree_min(tree->root ? tree->root->left : NULL);
+    tree->root = remove_iterative(tree->root, property_id, &removed_node);
     
     if (removed_node) {
         tree->node_count--;
@@ -499,8 +701,7 @@ void* avl_tree_remove_node(AvlTree* tree, AvlNode* node) {
 
 int avl_tree_foreach_inorder(AvlTree* tree, avl_callback_t callback, void* context) {
     if (!tree || !callback) return 0;
-    bool should_continue = true;
-    return foreach_inorder_recursive(tree->root, callback, context, &should_continue);
+    return foreach_inorder_iterative(tree, callback, context);
 }
 
 int avl_tree_foreach_preorder(AvlTree* tree, avl_callback_t callback, void* context) {
@@ -574,7 +775,7 @@ bool avl_tree_validate(AvlTree* tree) {
     if (!tree) return false;
     
     int balance_violations = 0;
-    bool valid = validate_recursive(tree->root, &balance_violations);
+    bool valid = validate_iterative(tree->root, &balance_violations);
     
     return valid && balance_violations == 0;
 }
@@ -649,7 +850,7 @@ void avl_tree_get_stats(AvlTree* tree, AvlTreeStats* stats) {
     stats->min_depth = min_depth == -1 ? 0 : min_depth;
     stats->average_depth = node_count > 0 ? (double)total_depth / node_count : 0.0;
     
-    validate_recursive(tree->root, &stats->balance_violations);
+    validate_iterative(tree->root, &stats->balance_violations);
 }
 
 int avl_tree_bulk_insert(AvlTree* tree, uintptr_t* property_ids, void** declarations, int count) {
