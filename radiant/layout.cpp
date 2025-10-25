@@ -688,5 +688,12 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     } else {
         log_debug("Warning: No view tree generated");
     }
+
+    // Clean up heap-allocated DomNode wrappers created during traversal
+    // Note: root_node itself is stack-allocated, but its cached children are heap-allocated
+    log_debug("calling free_cached_children for root_node...");
+    root_node.free_cached_children();
+    log_debug("DomNode cleanup complete");
+
     log_debug("layout_html_doc complete");
 }
