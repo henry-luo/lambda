@@ -239,8 +239,8 @@ static Element* parse_edge_statement(Input* input, const char **dot) {
     // Create edge element
     Element* edge = create_edge_element(input, from_id->chars, to_id->chars, NULL);
     
-    // Add direction attribute
-    add_graph_attribute(input, edge, "dir", is_directed ? "forward" : "none");
+    // Add direction attribute with CSS-aligned naming
+    add_graph_attribute(input, edge, "direction", is_directed ? "forward" : "none");
     
     // Parse optional attributes
     parse_attribute_list(input, edge, dot);
@@ -395,12 +395,15 @@ void parse_graph_dot(Input* input, const char* dot_string) {
         "dot", 
         "dot");
     
+    // Add graph attributes with CSS-aligned naming
     if (graph_name) {
         add_graph_attribute(input, graph, "name", graph_name->chars);
     }
     if (is_strict) {
         add_graph_attribute(input, graph, "strict", "true");
     }
+    // Add the directed attribute as a boolean
+    add_graph_attribute(input, graph, "directed", is_directed ? "true" : "false");
     
     // Parse graph statements
     while (*dot && *dot != '}') {

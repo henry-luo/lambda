@@ -257,7 +257,8 @@ static void parse_mermaid_edge_def(Input* input, Element* graph, const char **me
     Element* edge = create_edge_element(input, from_id->chars, to_id->chars, 
                                        edge_label ? edge_label->chars : NULL);
     
-    // Add edge style
+    // Add edge style with CSS-aligned naming
+    // The add_graph_attribute function will convert "style" to "stroke-dasharray" for edges
     add_graph_attribute(input, edge, "style", edge_style->chars);
     
     // Add to graph
@@ -348,9 +349,10 @@ void parse_graph_mermaid(Input* input, const char* mermaid_string) {
         diagram_type = input_create_string(input, "flowchart");
     }
     
-    // Create main graph element
+    // Create main graph element with CSS-aligned attributes
     Element* graph = create_graph_element(input, "directed", "mermaid", "mermaid");
-    add_graph_attribute(input, graph, "diagram_type", diagram_type->chars);
+    add_graph_attribute(input, graph, "diagram-type", diagram_type->chars);
+    add_graph_attribute(input, graph, "directed", "true"); // Mermaid flowcharts are typically directed
     
     // Parse diagram content
     while (*mermaid) {
