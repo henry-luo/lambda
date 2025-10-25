@@ -25,6 +25,7 @@ extern "C" {
     char *strstr(const char *target, const char *source);
     char *strrchr(const char *s, int c);
     char *strtok(char *str, const char *delim);
+    char *strtok_r(char *str, const char *delim, char **saveptr);
 #ifdef __cplusplus
 }
 #endif
@@ -140,6 +141,12 @@ typedef struct DomNode {
     // Mark node constructors
     static DomNode* create_mark_element(Element* element);
     static DomNode* create_mark_text(String* text);
+
+    // Memory management - free DomNode tree recursively
+    static void free_tree(DomNode* node);
+
+    // Clean up cached children (for stack-allocated root nodes)
+    void free_cached_children();
 
     // Access to underlying lexbor objects for transition period
     lxb_html_element_t* as_element() {

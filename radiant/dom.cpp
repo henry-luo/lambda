@@ -308,3 +308,32 @@ DomNode* DomNode::create_mark_text(String* text) {
 
     return node;
 }
+
+// Free DomNode tree recursively
+void DomNode::free_tree(DomNode* node) {
+    if (!node) return;
+
+    // Free cached child and sibling nodes recursively
+    if (node->_child) {
+        free_tree(node->_child);
+    }
+
+    if (node->_next) {
+        free_tree(node->_next);
+    }
+
+    // Note: We don't free mark_element, mark_text, lxb_elmt, or lxb_node
+    // as they are managed by their respective systems (Pool or Lexbor)
+
+    // Free the DomNode wrapper itself
+    free(node);
+}
+
+// Clean up cached children for stack-allocated root nodes
+void DomNode::free_cached_children() {
+    if (_child) {
+        free_tree(_child);
+        _child = nullptr;
+    }
+    // Note: We don't free _next for root nodes as root typically has no siblings
+}

@@ -339,7 +339,7 @@ clean-tree-sitter-minimal:
 	    verify-windows verify-linux test-windows test-linux tree-sitter-libs \
 	    generate-premake clean-premake build-test build-test-linux \
 	    build-mingw64 build-tree-sitter clean-tree-sitter-minimal build-radiant \
-	    test-radiant capture-layout test-layout
+	    test-radiant capture-layout test-layout layout
 
 # Help target - shows available commands
 help:
@@ -423,9 +423,17 @@ help:
 	@echo "  lint          - Run linter (cppcheck) on source files"
 	@echo "  analyze-size  - Analyze executable size breakdown by components"
 	@echo "  test-layout              - Run Radiant layout integration tests (all suites)"
+	@echo "                             Uses Radiant engine (Lexbor-based HTML/CSS rendering)"
 	@echo "                             Usage: make test-layout suite=baseline (run specific suite)"
 	@echo "                             Usage: make test-layout test=table_simple (run specific test)"
 	@echo "                             Usage: make test-layout pattern=float (run tests matching pattern)"
+	@echo "                             Note: Uppercase variants also work (SUITE=, TEST=, PATTERN=)"
+	@echo "                             Available suites: auto-detected from test/layout/data/"
+	@echo "  layout                   - Run Lambda CSS layout integration tests (all suites)"
+	@echo "                             Uses Lambda CSS engine (custom CSS cascade and layout)"
+	@echo "                             Usage: make layout suite=baseline (run specific suite)"
+	@echo "                             Usage: make layout test=table_simple (run specific test)"
+	@echo "                             Usage: make layout pattern=float (run tests matching pattern)"
 	@echo "                             Note: Uppercase variants also work (SUITE=, TEST=, PATTERN=)"
 	@echo "                             Available suites: auto-detected from test/layout/data/"
 	@echo "  capture-layout   - Extract browser layout references using Puppeteer"
@@ -1422,6 +1430,11 @@ capture-layout:
 	    exit 1; \
 	fi
 
+# Layout Engine Testing Targets
+# ==============================
+
+# test-layout: Run layout tests using Radiant engine (Lexbor-based)
+# Usage: make test-layout [suite=SUITE] [test=TEST] [pattern=PATTERN]
 test-layout:
 	@echo "🎨 Running Radiant Layout Engine Tests"
 	@echo "======================================"
@@ -1431,16 +1444,43 @@ test-layout:
 		SUITE_VAR="$(or $(suite),$(SUITE))"; \
 		if [ -n "$$TEST_VAR" ]; then \
 			echo "🎯 Running single test: $$TEST_VAR"; \
-			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe --test $$TEST_VAR -v; \
+			node test/layout/test_radiant_layout.js --engine radiant --radiant-exe ./radiant.exe --test $$TEST_VAR -v; \
 		elif [ -n "$$PATTERN_VAR" ]; then \
 			echo "🔍 Running tests matching pattern: $$PATTERN_VAR"; \
-			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe --pattern $$PATTERN_VAR; \
+			node test/layout/test_radiant_layout.js --engine radiant --radiant-exe ./radiant.exe --pattern $$PATTERN_VAR; \
 		elif [ -n "$$SUITE_VAR" ]; then \
 			echo "📂 Running test suite: $$SUITE_VAR"; \
-			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe --category $$SUITE_VAR; \
+			node test/layout/test_radiant_layout.js --engine radiant --radiant-exe ./radiant.exe --category $$SUITE_VAR; \
 		else \
 			echo "🎯 Running all layout tests"; \
-			node test/layout/test_radiant_layout.js --radiant-exe ./radiant.exe; \
+			node test/layout/test_radiant_layout.js --engine radiant --radiant-exe ./radiant.exe; \
+		fi; \
+	else \
+		echo "❌ Error: Layout test script not found at test/layout/test_radiant_layout.js"; \
+		exit 1; \
+	fi
+
+# layout: Run layout tests using Lambda CSS engine
+# Usage: make layout [suite=SUITE] [test=TEST] [pattern=PATTERN]
+layout:
+	@echo "🎨 Running Lambda CSS Layout Engine Tests"
+	@echo "=========================================="
+	@if [ -f "test/layout/test_radiant_layout.js" ]; then \
+		TEST_VAR="$(or $(test),$(TEST))"; \
+		PATTERN_VAR="$(or $(pattern),$(PATTERN))"; \
+		SUITE_VAR="$(or $(suite),$(SUITE))"; \
+		if [ -n "$$TEST_VAR" ]; then \
+			echo "🎯 Running single test: $$TEST_VAR"; \
+			node test/layout/test_radiant_layout.js --engine lambda-css --radiant-exe ./lambda.exe --test $$TEST_VAR -v; \
+		elif [ -n "$$PATTERN_VAR" ]; then \
+			echo "🔍 Running tests matching pattern: $$PATTERN_VAR"; \
+			node test/layout/test_radiant_layout.js --engine lambda-css --radiant-exe ./lambda.exe --pattern $$PATTERN_VAR; \
+		elif [ -n "$$SUITE_VAR" ]; then \
+			echo "📂 Running test suite: $$SUITE_VAR"; \
+			node test/layout/test_radiant_layout.js --engine lambda-css --radiant-exe ./lambda.exe --category $$SUITE_VAR; \
+		else \
+			echo "🎯 Running all layout tests"; \
+			node test/layout/test_radiant_layout.js --engine lambda-css --radiant-exe ./lambda.exe; \
 		fi; \
 	else \
 		echo "❌ Error: Layout test script not found at test/layout/test_radiant_layout.js"; \
