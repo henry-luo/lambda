@@ -358,9 +358,29 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
     DomElement* dom_elem = dom_element_create(pool, tag_name, (void*)elem);
     if (!dom_elem) return nullptr;
 
-    // TODO: Extract id and class attributes from Lambda Element
-    // For now, create elements without attributes - this can be enhanced
-    // by properly parsing Element attribute data structure
+    // Extract id and class attributes from Lambda Element
+    const char* id_value = extract_element_attribute(elem, "id", pool);
+    if (id_value) {
+        dom_element_set_attribute(dom_elem, "id", id_value);
+    }
+
+    const char* class_value = extract_element_attribute(elem, "class", pool);
+    if (class_value) {
+        // Parse multiple classes separated by spaces
+        char* class_copy = (char*)pool_alloc(pool, strlen(class_value) + 1);
+        if (class_copy) {
+            strcpy(class_copy, class_value);
+
+            // Split by spaces and add each class
+            char* token = strtok(class_copy, " \t\n");
+            while (token) {
+                if (strlen(token) > 0) {
+                    dom_element_add_class(dom_elem, token);
+                }
+                token = strtok(nullptr, " \t\n");
+            }
+        }
+    }
 
     // Set parent relationship if provided
     if (parent) {

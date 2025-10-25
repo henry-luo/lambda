@@ -80,12 +80,25 @@ DomNode* DomNode::first_child() {
         Element* elem = (Element*)mark_element;
         List* list = (List*)elem;
 
-        if (list->length == 0) {
+        // Find first element child (skip text nodes)
+        int64_t child_index = -1;
+        TypeId first_type = 0;
+        for (int64_t i = 0; i < list->length; i++) {
+            Item item = list->items[i];
+            TypeId item_type = get_type_id(item);
+            if (item_type == LMD_TYPE_ELEMENT) {
+                child_index = i;
+                first_type = item_type;
+                break;
+            }
+        }
+
+        if (child_index < 0) {
             return nullptr;
         }
 
-        Item first_item = list->items[0];
-        TypeId first_type = get_type_id(first_item);
+        Item first_item = list->items[child_index];
+
         DomNode* child_node = nullptr;
 
         if (first_type == LMD_TYPE_ELEMENT) {
@@ -144,31 +157,32 @@ DomNode* DomNode::next_sibling() {
             }
         }
 
-        // Get next sibling
-        if (my_index >= 0 && my_index + 1 < parent_list->length) {
-            Item next_item = parent_list->items[my_index + 1];
-            TypeId next_type = get_type_id(next_item);
-            DomNode* sibling_node = nullptr;
+        // Find next element sibling (skip text nodes)
+        if (my_index >= 0) {
+            for (int64_t i = my_index + 1; i < parent_list->length; i++) {
+                Item next_item = parent_list->items[i];
+                TypeId next_type = get_type_id(next_item);
 
-            if (next_type == LMD_TYPE_ELEMENT) {
-                sibling_node = create_mark_element((Element*)next_item.pointer);
+                if (next_type == LMD_TYPE_ELEMENT) {
+                    DomNode* sibling_node = create_mark_element((Element*)next_item.pointer);
 
-                // CRITICAL: Link to DomElement for CSS access
-                // Navigate parallel DomElement tree to get styling
-                if (this->style) {
-                    DomElement* current_dom = (DomElement*)this->style;
-                    if (current_dom->next_sibling) {
-                        sibling_node->style = (Style*)current_dom->next_sibling;
+                    // CRITICAL: Link to DomElement for CSS access
+                    // Navigate parallel DomElement tree to get styling
+                    if (this->style) {
+                        DomElement* current_dom = (DomElement*)this->style;
+                        if (current_dom->next_sibling) {
+                            sibling_node->style = (Style*)current_dom->next_sibling;
+                        }
                     }
-                }
-            } else if (next_type == LMD_TYPE_STRING) {
-                sibling_node = create_mark_text((String*)next_item.pointer);
-            }
 
-            if (sibling_node) {
-                sibling_node->parent = parent;
-                this->_next = sibling_node;
-                return sibling_node;
+                    if (sibling_node) {
+                        sibling_node->parent = parent;
+                        this->_next = sibling_node;
+                        return sibling_node;
+                    }
+                    break;  // Found element, done
+                }
+                // Skip non-element nodes and continue searching
             }
         }
     }
