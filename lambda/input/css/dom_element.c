@@ -695,6 +695,13 @@ bool dom_element_apply_declaration(DomElement* element, CssDeclaration* declarat
         return false;
     }
 
+    // DEBUG: Log which element is receiving the declaration
+    fprintf(stderr, "[APPLY_DECL] Element <%s> receiving property %d (spec:%u, order:%d)\n",
+            element->tag_name ? element->tag_name : "null",
+            declaration->property_id,
+            css_specificity_to_value(declaration->specificity),
+            declaration->source_order);
+
     // Apply to specified style tree
     StyleNode* node = style_tree_apply_declaration(element->specified_style, declaration);
     if (!node) {
@@ -774,6 +781,27 @@ void dom_element_invalidate_computed_values(DomElement* element, bool propagate_
     }
 }
 
+// callback for copying specified properties to computed_style
+static bool copy_specified_to_computed_callback(StyleNode* node, void* context) {
+    DomElement* element = (DomElement*)context;
+    if (!node || !element || !element->computed_style) {
+        return true; // continue iteration
+    }
+
+    // Get the property ID from the AVL node
+    CssPropertyId property_id = (CssPropertyId)node->base.property_id;
+
+    // Only copy if property doesn't already exist in computed_style
+    // (inherited properties are already set by style_tree_apply_inheritance)
+    CssDeclaration* existing = style_tree_get_declaration(element->computed_style, property_id);
+    if (!existing && node->winning_decl) {
+        // Copy the specified declaration to computed
+        style_tree_apply_declaration(element->computed_style, node->winning_decl);
+    }
+
+    return true; // continue iteration
+}
+
 bool dom_element_recompute_styles(DomElement* element) {
     if (!element) {
         return false;
@@ -784,9 +812,13 @@ bool dom_element_recompute_styles(DomElement* element) {
         style_tree_apply_inheritance(element->computed_style, element->parent->computed_style);
     }
 
-    // Copy specified values to computed (this is simplified - real implementation
-    // would resolve relative units, compute percentages, etc.)
-    // TODO: Implement full value computation
+    // Copy all specified values to computed_style
+    // Non-inherited properties need explicit copying
+    if (element->specified_style) {
+        style_tree_foreach(element->specified_style, copy_specified_to_computed_callback, element);
+    }
+
+    // TODO: Implement full value computation (resolve relative units, percentages, etc.)
 
     // Update version tracking
     element->computed_version = element->style_version;
