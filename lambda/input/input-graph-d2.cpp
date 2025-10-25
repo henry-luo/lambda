@@ -241,7 +241,15 @@ void parse_graph_d2(Input* input, const char* d2_string) {
         
         // Parse node/edge statement
         char* first_id = d2_parse_identifier(&parser);
-        if (!first_id) break;
+        if (!first_id) {
+            // Skip to next line if identifier parsing failed
+            while (parser.position < parser.length && 
+                   parser.current[0] != '\n' && parser.current[0] != '\r') {
+                parser.current++;
+                parser.position++;
+            }
+            continue;
+        }
         
         d2_skip_whitespace_and_comments(&parser);
         
@@ -340,6 +348,25 @@ void parse_graph_d2(Input* input, const char* d2_string) {
             free(second_id);
             if (edge_label) free(edge_label);
             
+        } else if (parser.position < parser.length && parser.current[0] == ':') {
+            // Node with attributes block: node: { ... }
+            parser.current++; // Skip colon
+            parser.position++;
+            
+            d2_skip_whitespace_and_comments(&parser);
+            
+            Element* node = create_node_element(input, first_id, NULL);
+            if (node) {
+                add_node_to_graph(input, graph, node);
+                
+                if (parser.position < parser.length && parser.current[0] == '{') {
+                    // Parse attribute block
+                    d2_parse_style_block(&parser, node, input);
+                }
+            }
+            
+            free(first_id);
+            
         } else {
             // Simple node declaration
             Element* node = create_node_element(input, first_id, NULL);
@@ -353,6 +380,13 @@ void parse_graph_d2(Input* input, const char* d2_string) {
         // Skip to next line or statement
         while (parser.position < parser.length && 
                parser.current[0] != '\n' && parser.current[0] != '\r') {
+            parser.current++;
+            parser.position++;
+        }
+        
+        // Skip past newline characters to start of next line
+        while (parser.position < parser.length && 
+               (parser.current[0] == '\n' || parser.current[0] == '\r')) {
             parser.current++;
             parser.position++;
         }

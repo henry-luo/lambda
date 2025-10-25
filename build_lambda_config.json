@@ -1271,6 +1271,19 @@
                         "binary": "test_graph_parser_gtest.exe"
                     },
                     {
+                        "source": "test_graph_formatter_gtest.cpp",
+                        "name": "🎨 Graph Formatter Tests (GTest) - DOT, Mermaid, D2",
+                        "dependencies": [
+                            "lambda-input-full"
+                        ],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "binary": "test_graph_formatter_gtest.exe"
+                    },
+                    {
                         "source": "test/test_http_gtest.cpp",
                         "name": "🌐 HTTP/HTTPS Tests (GTest)",
                         "dependencies": [
