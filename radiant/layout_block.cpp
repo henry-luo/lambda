@@ -144,7 +144,6 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
             if (display.inner == LXB_CSS_VALUE_FLOW) {
                 // inline content flow
                 do {
-                    // printf("Processing child %p\n", child);
                     layout_flow_node(lycon, child);
                     DomNode* next_child = child->next_sibling();
                     child = next_child;
