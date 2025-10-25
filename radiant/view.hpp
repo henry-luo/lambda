@@ -217,6 +217,10 @@ typedef struct {
     float given_min_width, given_max_width;  // non-negative
     float given_min_height, given_max_height;  // non-negative
     PropValue list_style_type;
+    PropValue list_style_position;  // inside, outside
+    char* list_style_image;         // URL or none
+    char* counter_reset;            // counter names and values
+    char* counter_increment;        // counter names and values
     PropValue box_sizing;  // LXB_CSS_VALUE_CONTENT_BOX or LXB_CSS_VALUE_BORDER_BOX
     PropValue white_space;  // LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NOWRAP, LXB_CSS_VALUE_PRE, etc.
     float given_width, given_height;  // CSS specified width/height values
