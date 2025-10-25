@@ -1,7 +1,13 @@
+#define _POSIX_C_SOURCE 200809L
 #include "dom_element.h"
 #include "../../../lib/hashmap.h"
 #include <string.h>
 #include <stdio.h>
+
+// Forward declaration for strtok_r (POSIX function)
+#ifndef strtok_r
+extern char *strtok_r(char *str, const char *delim, char **saveptr);
+#endif
 
 // ============================================================================
 // Attribute Storage Implementation (Hybrid Array/HashMap)

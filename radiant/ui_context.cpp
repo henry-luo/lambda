@@ -132,11 +132,18 @@ void free_document(Document* doc) {
     }
 
     if (doc->url) {
-        // Free the path data we manually allocated
-        if (doc->url->path.str.data) {
-            free(doc->url->path.str.data);
+        // For Lexbor documents, the URL and its path data are managed by Lexbor's
+        // memory pool (lexbor_mraw), so we shouldn't free them with free()
+        // The URL will be destroyed when the Lexbor document is destroyed above
+        if (doc->doc_type != DOC_TYPE_LEXBOR) {
+            // For non-Lexbor documents, we might have manually allocated URL data
+            if (doc->url->path.str.data) {
+                free(doc->url->path.str.data);
+            }
+            free(doc->url);
         }
-        free(doc->url);  // Just free the struct, don't call lxb_url_destroy
+        // Note: For Lexbor documents, url points to memory managed by lexbor_mraw
+        // which is freed when lxb_html_document_destroy() is called
     }
 
     free(doc);
