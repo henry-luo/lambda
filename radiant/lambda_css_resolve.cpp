@@ -48,6 +48,7 @@ static const KeywordMapping keyword_map[] = {
     // Text transformation
     {"capitalize", 0x0053}, // LXB_CSS_VALUE_CAPITALIZE
     {"center", 0x0007},    // LXB_CSS_VALUE_CENTER
+    {"circle", 0x0220},    // Custom value for list-style-type circle
     {"clip", 0x003c},      // LXB_CSS_VALUE_CLIP (text-overflow)
     {"collapse", 0x0210},  // Custom value for border-collapse collapse
     {"column", 0x0054},    // LXB_CSS_VALUE_COLUMN (flex-direction)
@@ -57,6 +58,8 @@ static const KeywordMapping keyword_map[] = {
 
     // Border styles
     {"dashed", 0x0022},    // LXB_CSS_VALUE_DASHED
+    {"decimal", 0x0221},   // Custom value for list-style-type decimal
+    {"disc", 0x0222},      // Custom value for list-style-type disc
     {"dotted", 0x0021},    // LXB_CSS_VALUE_DOTTED
     {"double", 0x0024},    // LXB_CSS_VALUE_DOUBLE
     
@@ -104,6 +107,7 @@ static const KeywordMapping keyword_map[] = {
     {"inline-grid", 0x00f3},  // LXB_CSS_VALUE_INLINE_GRID
 
     // Font styles
+    {"inside", 0x0223},    // Custom value for list-style-position inside
     {"italic", 0x013b},    // LXB_CSS_VALUE_ITALIC
 
     // Text alignment
@@ -146,6 +150,7 @@ static const KeywordMapping keyword_map[] = {
     {"overlay", 0x0205},   // Custom value for background-blend-mode overlay
     
     {"overline", 0x0158},  // LXB_CSS_VALUE_OVERLINE
+    {"outside", 0x0224},   // Custom value for list-style-position outside
 
     // Background origin/clip
     {"padding-box", 0x0203}, // Custom value for background-origin/clip padding-box
@@ -189,6 +194,7 @@ static const KeywordMapping keyword_map[] = {
     {"space-around", 0x005b}, // LXB_CSS_VALUE_SPACE_AROUND
     {"space-between", 0x005c}, // LXB_CSS_VALUE_SPACE_BETWEEN
     {"space-evenly", 0x005d}, // LXB_CSS_VALUE_SPACE_EVENLY
+    {"square", 0x0225},    // Custom value for list-style-type square
     {"static", 0x014d},    // LXB_CSS_VALUE_STATIC
     {"sticky", 0x0150},    // LXB_CSS_VALUE_STICKY
     {"stretch", 0x005e},   // LXB_CSS_VALUE_STRETCH
@@ -2344,7 +2350,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         case CSS_PROPERTY_BORDER_SPACING: {
             log_debug("[CSS] Processing border-spacing property");
             if (value->type == CSS_VALUE_LENGTH) {
-                double spacing = convert_lambda_length_to_px(value->data.length);
+                double spacing = convert_lambda_length_to_px(value, lycon, prop_id);
                 log_debug("[CSS] border-spacing: %.2fpx", spacing);
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 log_debug("[CSS] border-spacing: %s", value->data.keyword);
@@ -2376,6 +2382,85 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     log_debug("[CSS] empty-cells: %s -> 0x%04X", cells, lexbor_value);
                 } else {
                     log_debug("[CSS] empty-cells: %s", cells);
+                }
+            }
+            break;
+        }
+
+        // List Properties (Group 18)
+        case CSS_PROPERTY_LIST_STYLE_TYPE: {
+            log_debug("[CSS] Processing list-style-type property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* type = value->data.keyword;
+                int lexbor_value = map_css_keyword_to_lexbor(type);
+                if (lexbor_value > 0) {
+                    log_debug("[CSS] list-style-type: %s -> 0x%04X", type, lexbor_value);
+                } else {
+                    log_debug("[CSS] list-style-type: %s", type);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_LIST_STYLE_POSITION: {
+            log_debug("[CSS] Processing list-style-position property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* position = value->data.keyword;
+                int lexbor_value = map_css_keyword_to_lexbor(position);
+                if (lexbor_value > 0) {
+                    log_debug("[CSS] list-style-position: %s -> 0x%04X", position, lexbor_value);
+                } else {
+                    log_debug("[CSS] list-style-position: %s", position);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_LIST_STYLE_IMAGE: {
+            log_debug("[CSS] Processing list-style-image property");
+            if (value->type == CSS_VALUE_URL) {
+                log_debug("[CSS] list-style-image: %s", value->data.url);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                if (strcasecmp(value->data.keyword, "none") == 0) {
+                    log_debug("[CSS] list-style-image: none");
+                } else {
+                    log_debug("[CSS] list-style-image: %s", value->data.keyword);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_LIST_STYLE: {
+            log_debug("[CSS] Processing list-style shorthand property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* style = value->data.keyword;
+                log_debug("[CSS] list-style: %s", style);
+                // Note: Shorthand parsing would need more complex implementation
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_COUNTER_RESET: {
+            log_debug("[CSS] Processing counter-reset property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* reset = value->data.keyword;
+                if (strcasecmp(reset, "none") == 0) {
+                    log_debug("[CSS] counter-reset: none");
+                } else {
+                    log_debug("[CSS] counter-reset: %s", reset);
+                }
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_COUNTER_INCREMENT: {
+            log_debug("[CSS] Processing counter-increment property");
+            if (value->type == CSS_VALUE_KEYWORD) {
+                const char* increment = value->data.keyword;
+                if (strcasecmp(increment, "none") == 0) {
+                    log_debug("[CSS] counter-increment: none");
+                } else {
+                    log_debug("[CSS] counter-increment: %s", increment);
                 }
             }
             break;

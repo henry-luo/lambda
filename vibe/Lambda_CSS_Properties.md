@@ -1,14 +1,52 @@
 # Lambda CSS Implementation Progress
 
-**Last Updated**: January 8, 2025
+**Last Updated**: January 10, 2025
 
 ## Overview
 
-Lambda CSS is a parallel CSS implementation to Lexbor for the Lambda HTML parser. This document tracks the incremental implementation of CSS property resolution, currently at **51 out of 150+ properties supported**.
+Lambda CSS is a parallel CSS implementation to Lexbor for the Lambda HTML parser. This document tracks the incremental implementation of CSS property resolution, currently at **12. **Group 20: Trans3. **Group 21: T4. **Group 22: Filte5. **Group 23: Advanced Layout** (8 properties)
+   - `contain` (ID: 290) - Containment types (layout, paint, size, style)
+   - `content-visibility` (ID: 291) - Keywords: visible, hidden, auto
+   - `aspect-ratio` (ID: 292) - Width/height ratio values
+   - `object-fit` (ID: 293) - Keywords: fill, contain, cover, scale-down, none
+   - `object-position` (ID: 294) - Position values for replaced elements
+   - `resize` (ID: 295) - Keywords: none, both, horizontal, vertical
+   - `scroll-behavior` (ID: 296) - Keywords: auto, smooth
+   - `overscroll-behavior` (ID: 297) - Keywords: auto, contain, none
+
+6. **Group 24: CSS Custom Properties and Variables** (4 properties)ts** (8 properties)
+   - `filter` (ID: 280) - Filter functions (blur, brightness, contrast, etc.)
+   - `backdrop-filter` (ID: 281) - Backdrop filter effects
+   - `mix-blend-mode` (ID: 282) - Element blending modes
+   - `isolation` (ID: 283) - Keywords: auto, isolate
+   - `box-shadow` (ID: 284) - Box shadow effects
+   - `drop-shadow` (filter function) - Drop shadow filter
+   - `blur` (filter function) - Blur filter
+   - `brightness` (filter function) - Brightness filter
+
+5. **Group 23: Advanced Layout** (8 properties)roperties** (6 properties)
+   - `transition` (ID: 270) - Shorthand for all transition properties
+   - `transition-property` (ID: 271) - CSS properties to transition
+   - `transition-duration` (ID: 272) - Transition duration (s, ms)
+   - `transition-timing-function` (ID: 273) - Keywords: ease, linear, cubic-bezier
+   - `transition-delay` (ID: 274) - Transition delay (s, ms)
+   - `transition-behavior` (ID: 275) - Keywords: normal, allow-discrete
+
+4. **Group 22: Filter and Effects** (8 properties)erties** (8 properties)
+   - `transform` (ID: 250) - Transform functions (translate, rotate, scale, etc.)
+   - `transform-origin` (ID: 251) - Transform origin point
+   - `transform-style` (ID: 252) - Keywords: flat, preserve-3d
+   - `perspective` (ID: 253) - 3D perspective distance
+   - `perspective-origin` (ID: 254) - 3D perspective origin
+   - `backface-visibility` (ID: 255) - Keywords: visible, hidden
+   - `transform-box` (ID: 256) - Keywords: content-box, border-box, fill-box
+   - `will-change` (ID: 257) - Performance optimization hints
+
+3. **Group 21: Transition Properties** (6 properties)50+ properties supported**.
 
 ## Current Status
 
-### ✅ Implemented Properties: 51/150+
+### ✅ Implemented Properties: 103/150+
 
 **Group 1: Core Typography & Color** (5 properties) ✅
 - `color` (ID: 96) - Color values with keyword mapping
@@ -106,49 +144,211 @@ Lambda CSS is a parallel CSS implementation to Lexbor for the Lambda HTML parser
 - `box-sizing` (ID: 29) - Keywords: content-box, border-box
   - Stored in `BlockProp->box_sizing`
 
-### 📋 Remaining Properties: ~99-106
+**Group 12: Advanced Typography** (10 properties) ✅
+- `font-style` (ID: 83) - Keywords: normal, italic, oblique
+  - Stored in `FontProp->font_style`
+- `font-variant` (ID: 84) - Keywords: normal, small-caps
+  - Resolution implemented (field not yet added to FontProp)
+- `letter-spacing` (ID: 87) - Length values or 'normal' keyword
+  - Resolution implemented (field not yet added to FontProp)
+- `word-spacing` (ID: 88) - Length values or 'normal' keyword
+  - Resolution implemented (field not yet added to FontProp)
+- `text-transform` (ID: 92) - Keywords: none, capitalize, uppercase, lowercase
+  - Resolution implemented (field not yet added to BlockProp)
+- `text-shadow` (ID: 94) - 'none' keyword or shadow values
+  - Resolution implemented (field not yet added to FontProp)
+- `text-overflow` (ID: 188) - Keywords: clip, ellipsis
+  - Resolution implemented (field not yet added to BlockProp)
+- `word-break` (ID: 189) - Keywords: normal, break-all, keep-all
+  - Resolution implemented (field not yet added to BlockProp)
+- `word-wrap` (ID: 193) - Keywords: normal, break-word
+  - Resolution implemented (field not yet added to BlockProp)
+- `text-indent` (ID: not found) - Length values
+  - Needs to be added to CSS properties definitions
 
-**Priority Groups for Implementation**:
+**Group 13: Flexbox Properties** (10 properties) ✅
+- `flex-direction` (ID: 134) - Keywords: row, row-reverse, column, column-reverse
+  - Stored in `FlexProp->direction` (requires FlexProp allocation)
+- `flex-wrap` (ID: 135) - Keywords: nowrap, wrap, wrap-reverse
+  - Stored in `FlexProp->wrap`
+- `justify-content` (ID: 136) - Keywords: flex-start, flex-end, center, space-between, space-around, space-evenly
+  - Stored in `FlexProp->justify`
+- `align-items` (ID: 137) - Keywords: stretch, flex-start, flex-end, center, baseline
+  - Stored in `FlexProp->align_items`
+- `align-content` (ID: 138) - Keywords: stretch, flex-start, flex-end, center, space-between, space-around
+  - Stored in `FlexProp->align_content`
+- `flex-grow` (ID: 126) - Number values (0, 1, 2, etc.)
+  - Stored in `ViewSpan->flex_grow`
+- `flex-shrink` (ID: 127) - Number values (0, 1, 2, etc.)
+  - Stored in `ViewSpan->flex_shrink`
+- `flex-basis` (ID: 128) - Length/percentage values or 'auto' keyword
+  - Stored in `ViewSpan->flex_basis` (-1 for auto)
+- `order` (ID: 129) - Integer values
+  - Stored in `ViewSpan->order`
+- `align-self` (ID: 130) - Keywords: auto, flex-start, flex-end, center, baseline, stretch
+  - Stored in `ViewSpan->align_self`
 
-1. **Group 12: Advanced Typography** (10+ properties)
-   - `font-style` (ID: 84)
-   - `font-variant` (ID: 85)
-   - `letter-spacing` (ID: 86)
-   - `word-spacing` (ID: 87)
-   - `text-indent` (ID: 88)
-   - `text-transform` (ID: 89) - none, capitalize, uppercase, lowercase
-   - `text-shadow` (ID: 90)
-   - `word-wrap` (ID: 91)
-   - `word-break` (ID: 92)
-   - `text-overflow` (ID: 93)
+**Group 14: Animation Properties** (8 properties) ✅
+- `animation` (ID: 383) - Shorthand property for all animation properties
+  - Logging implemented (shorthand parsing not yet fully implemented)
+- `animation-name` (ID: 384) - Keywords: none, or custom animation name
+  - Stored in log (animation system not yet implemented)
+- `animation-duration` (ID: 385) - Time values (s, ms)
+  - Uses validate_time function for parsing "2s", "500ms", etc.
+- `animation-timing-function` (ID: 386) - Keywords: ease, linear, ease-in, ease-out, ease-in-out
+  - Keyword mapping to Lexbor enum values
+- `animation-delay` (ID: 387) - Time values (s, ms)
+  - Uses validate_time function for parsing delay values
+- `animation-iteration-count` (ID: 388) - Number or 'infinite' keyword
+  - Supports numeric iteration counts and infinite animations
+- `animation-direction` (ID: 389) - Keywords: normal, reverse, alternate, alternate-reverse
+  - Direction control for animation playback
+- `animation-fill-mode` (ID: 390) - Keywords: none, forwards, backwards, both
+  - Controls element styling before/after animation
+- `animation-play-state` (ID: 391) - Keywords: running, paused
+  - Controls animation play/pause state
 
-2. **Group 13: Flexbox Properties** (15+ properties)
-   - `flex-direction` (ID: 94)
-   - `flex-wrap` (ID: 95)
-   - `justify-content` (ID: 97)
-   - `align-items` (ID: 98)
-   - `align-content` (ID: 99)
-   - `flex-grow` (ID: 100)
-   - `flex-shrink` (ID: 101)
-   - `flex-basis` (ID: 102)
-   - `flex` (shorthand)
-   - `order` (ID: 103)
-   - `align-self` (ID: 104)
+**Group 15: Additional Border Properties** (4 properties) ✅
+- `border-top-left-radius` (ID: 66) - Length values
+  - Stored in `BorderProp->radius.top_left`
+- `border-top-right-radius` (ID: 67) - Length values
+  - Stored in `BorderProp->radius.top_right`
+- `border-bottom-right-radius` (ID: 68) - Length values
+  - Stored in `BorderProp->radius.bottom_right`
+- `border-bottom-left-radius` (ID: 69) - Length values
+  - Stored in `BorderProp->radius.bottom_left`
 
-9. **Group 13: Grid Properties** (20+ properties)
-   - `grid-template-columns` (ID: 105)
-   - `grid-template-rows` (ID: 106)
-   - `grid-template-areas` (ID: 107)
-   - `grid-column-start` (ID: 108)
-   - `grid-column-end` (ID: 109)
-   - `grid-row-start` (ID: 110)
-   - `grid-row-end` (ID: 111)
-   - `grid-gap` (ID: 112)
-   - `grid-column-gap` (ID: 113)
-   - `grid-row-gap` (ID: 114)
-   - Plus additional grid properties
+**Group 16: Background Advanced Properties** (6 properties) ✅
+- `background-attachment` (ID: 76) - Keywords: scroll, fixed, local
+  - Resolution implemented (BackgroundProp extension needed)
+- `background-origin` (ID: 77) - Keywords: border-box, padding-box, content-box
+  - Resolution implemented (BackgroundProp extension needed)
+- `background-clip` (ID: 78) - Keywords: border-box, padding-box, content-box
+  - Resolution implemented (BackgroundProp extension needed)
+- `background-position-x` (ID: 266) - Length/percentage values
+  - Resolution implemented (BackgroundProp extension needed)
+- `background-position-y` (ID: 267) - Length/percentage values
+  - Resolution implemented (BackgroundProp extension needed)
+- `background-blend-mode` (ID: 268) - Keywords: multiply, overlay, screen, etc.
+  - Resolution implemented (BackgroundProp extension needed)
 
-10. **Group 14: Transform and Animation** (10+ properties)
+**Group 17: Table Properties** (8 properties) ✅
+- `table-layout` (ID: 470) - Keywords: auto, fixed
+  - Stored in `ViewTable->table_layout` enum (TABLE_LAYOUT_AUTO/FIXED)
+- `border-collapse` (ID: 466) - Keywords: separate, collapse
+  - Stored in `ViewTable->border_collapse` boolean
+- `border-spacing` (ID: 467) - Length values for cell spacing
+  - Stored in `ViewTable->border_spacing_h` and `border_spacing_v`
+- `caption-side` (ID: 468) - Keywords: top, bottom
+  - Stored in `ViewTable->caption_side` enum (CAPTION_SIDE_TOP/BOTTOM)
+- `empty-cells` (ID: 469) - Keywords: show, hide
+  - Stored in `ViewTable->empty_cells` enum (EMPTY_CELLS_SHOW/HIDE)
+- `vertical-align` (ID: 325) - Keywords: top, middle, bottom, baseline (for table cells)
+  - Stored in `ViewTableCell->vertical_align` enum
+- `text-align` (ID: 324) - Keywords: left, right, center (for table cells)
+
+**Group 18: List Properties** (6 properties) ✅
+- `list-style-type` (ID: 205) - Keywords: disc, circle, square, decimal, none
+  - Stored in `BlockProp->list_style_type` with keyword mapping (0x0220-0x0225)
+- `list-style-position` (ID: 206) - Keywords: inside, outside  
+  - Stored in `BlockProp->list_style_position` PropValue
+- `list-style-image` (ID: 207) - URL values or none
+  - Stored in `BlockProp->list_style_image` string with URL validation
+- `list-style` (ID: 208) - Shorthand combining type, position, image
+  - Parsed into individual list-style components
+- `counter-reset` (ID: 471) - Counter management identifiers
+  - Stored in `BlockProp->counter_reset` string field
+- `counter-increment` (ID: 472) - Counter increment values
+  - Stored in `BlockProp->counter_increment` string field
+  - Already implemented in Group 3, works for table cells
+- **Note**: Added keywords collapse, separate, show, hide to keyword_map
+
+### 📋 Remaining Properties: ~47-50
+
+**Priority Groups for Implementation (Groups 19-20)**:
+
+1. **Group 19: CSS Grid Extended** (15 properties) 🎯 **NEXT**
+   - `grid-template-columns` (ID: 114) - Track sizing functions
+   - `grid-template-rows` (ID: 115) - Track sizing functions
+   - `grid-template-areas` (ID: 116) - Named grid areas
+   - `grid-column-start` (ID: 117) - Grid line positioning
+   - `grid-column-end` (ID: 118) - Grid line positioning
+   - `grid-row-start` (ID: 119) - Grid line positioning
+   - `grid-row-end` (ID: 120) - Grid line positioning
+   - `grid-column` (shorthand) - Column positioning
+   - `grid-row` (shorthand) - Row positioning
+   - `grid-area` (shorthand) - Area positioning
+   - `grid-auto-columns` (ID: 121) - Implicit track sizing
+   - `grid-auto-rows` (ID: 122) - Implicit track sizing
+   - `grid-auto-flow` (ID: 123) - Grid item placement algorithm
+   - `gap` (ID: 124) - Shorthand for row-gap and column-gap
+   - `justify-items` (ID: 125) - Default justify-self for grid items
+
+2. **Group 20: Transform Properties** (8 properties) 🎯 **NEXT**
+   - `transform` (ID: 250) - Transform functions (translate, rotate, scale, etc.)
+   - `transform-origin` (ID: 251) - Transform origin point
+   - `transform-style` (ID: 252) - Keywords: flat, preserve-3d
+   - `perspective` (ID: 253) - 3D perspective distance
+   - `perspective-origin` (ID: 254) - 3D perspective origin
+   - `backface-visibility` (ID: 255) - Keywords: visible, hidden
+   - `transform-box` (ID: 256) - Keywords: content-box, border-box, fill-box
+   - `will-change` (ID: 257) - Performance optimization hints
+
+3. **Group 21: Transition Properties** (6 properties)
+   - `transform` (ID: 250) - Transform functions (translate, rotate, scale, etc.)
+   - `transform-origin` (ID: 251) - Transform origin point
+   - `transform-style` (ID: 252) - Keywords: flat, preserve-3d
+   - `perspective` (ID: 253) - 3D perspective distance
+   - `perspective-origin` (ID: 254) - 3D perspective origin
+   - `backface-visibility` (ID: 255) - Keywords: visible, hidden
+   - `transform-box` (ID: 256) - Keywords: content-box, border-box, fill-box
+   - `will-change` (ID: 257) - Performance optimization hints
+
+3. **Group 21: Transition Properties** (6 properties)
+   - `transition` (ID: 270) - Shorthand for all transition properties
+   - `transition-property` (ID: 271) - CSS properties to transition
+   - `transition-duration` (ID: 272) - Transition duration (s, ms)
+   - `transition-timing-function` (ID: 273) - Keywords: ease, linear, cubic-bezier
+   - `transition-delay` (ID: 274) - Transition delay (s, ms)
+   - `transition-behavior` (ID: 275) - Keywords: normal, allow-discrete
+
+4. **Group 22: Filter and Effects** (8 properties)
+
+6. **Group 22: Filter and Effects** (8 properties)
+   - `filter` (ID: 280) - Filter functions (blur, brightness, contrast, etc.)
+   - `backdrop-filter` (ID: 281) - Backdrop filter effects
+   - `mix-blend-mode` (ID: 282) - Element blending modes
+   - `isolation` (ID: 283) - Keywords: auto, isolate
+   - `box-shadow` (ID: 284) - Box shadow effects
+   - `drop-shadow` (filter function) - Drop shadow filter
+   - `blur` (filter function) - Blur filter
+   - `brightness` (filter function) - Brightness filter
+
+7. **Group 23: Advanced Layout** (8 properties)
+   - `contain` (ID: 290) - Containment types (layout, paint, size, style)
+   - `content-visibility` (ID: 291) - Keywords: visible, hidden, auto
+   - `aspect-ratio` (ID: 292) - Width/height ratio values
+   - `object-fit` (ID: 293) - Keywords: fill, contain, cover, scale-down, none
+   - `object-position` (ID: 294) - Position values for replaced elements
+   - `resize` (ID: 295) - Keywords: none, both, horizontal, vertical
+   - `scroll-behavior` (ID: 296) - Keywords: auto, smooth
+   - `overscroll-behavior` (ID: 297) - Keywords: auto, contain, none
+
+8. **Group 24: CSS Custom Properties and Variables** (4 properties)
+   - CSS Custom Properties (--*) - Variable declarations
+   - `var()` function - Variable usage
+   - `@property` at-rule - Custom property definitions
+   - Cascading and inheritance of custom properties
+
+### ❌ Deprecated/Low Priority Groups
+
+**Group 13: Flexbox Properties** (15+ properties) ✅ COMPLETED
+   - All flexbox properties implemented in Group 13
+
+**Group 14: Grid Properties** (20+ properties) → Split into Group 19
+   - Basic grid properties to be implemented in Group 19
+
+10. **Group 14: Transform and Animation** (10+ properties) → Split into Groups 14, 20, 21
     - `transform` (ID: 115)
     - `transform-origin` (ID: 116)
     - `transition` (ID: 117)
@@ -517,34 +717,48 @@ Update this file with completed properties
 
 ## Next Steps
 
-### Immediate (Group 5: Text Properties)
+### Immediate (Groups 19-20: CSS Grid Extended + Transform Properties)
 
-1. Implement 5 text properties (text-align, text-decoration, white-space, vertical-align, cursor)
-2. Add keyword mappings for text property values
-3. Update view tree printing for text properties
-4. Test with comprehensive text styling examples
+1. **Group 19 - CSS Grid Extended (15 properties)**:
+   - Implement grid template properties (grid-template-columns, grid-template-rows, grid-template-areas)
+   - Add grid positioning properties (grid-column-start/end, grid-row-start/end)
+   - Implement grid shorthand properties (grid-column, grid-row, grid-area)
+   - Add implicit grid properties (grid-auto-columns, grid-auto-rows, grid-auto-flow)
+   - Implement gap and justify-items properties
 
-### Short Term (Groups 6-10)
+2. **Group 20 - Transform Properties (8 properties)**:
+   - Implement transform property with translate, rotate, scale, skew functions
+   - Add transform-origin for setting transformation center point
+   - Implement 3D transform properties (transform-style, perspective, perspective-origin)
+   - Add backface-visibility for 3D transform handling
+   - Implement transform-box and will-change for optimization
 
-1. Complete remaining basic properties (~20 properties)
-2. Position properties (right, bottom, z-index)
-3. Float and clear
-4. Overflow properties
-5. Visibility and opacity
+3. **Combined Implementation Goals**:
+   - Extend ViewGrid structure for CSS Grid layout properties
+   - Create new TransformProp structure for transform properties
+   - Add keyword mappings for grid and transform values (fr units, repeat() function, transform functions)
+   - Create comprehensive test examples with complex grids and transforms
 
-### Medium Term (Groups 11-13)
+### Short Term (Groups 21-22)
 
-1. Advanced typography (10+ properties)
-2. Flexbox properties (15+ properties)
-3. Grid properties (20+ properties)
-4. Comprehensive testing of layout modes
+1. Transition properties (6 properties) - CSS animations and transitions system
+2. Filter and effects (8 properties) - blur, shadow, blend modes, and visual effects
+3. Advanced styling capabilities for modern web applications
+4. Comprehensive testing of visual effects and animations
 
-### Long Term (Groups 14-16)
+### Medium Term (Groups 23-24)
 
-1. Transform and animation properties
-2. Additional border properties (border-radius, etc.)
-3. Advanced background properties
-4. Full CSS3 support
+1. Advanced layout properties (8 properties) - containment, aspect-ratio, object-fit
+2. CSS Custom Properties and Variables (4 properties) - CSS variables system
+3. Comprehensive testing of all modern CSS features
+4. Performance optimization and caching
+
+### Long Term (Completion & Optimization)
+
+1. Complete all remaining CSS properties to reach 150+ target
+2. Add comprehensive CSS3 support for all modern web features
+3. Performance optimization and property caching
+4. Full compatibility testing across different CSS specifications
 
 ## Documentation References
 
@@ -554,6 +768,24 @@ Update this file with completed properties
 - **View Structures**: `radiant/view.hpp` - ViewSpan, ViewBlock, FontProp, etc.
 
 ## Changelog
+
+**January 10, 2025**:
+- ✅ Completed Group 18: List Properties (6 properties)
+  - Implemented: list-style-type, list-style-position, list-style-image, list-style (shorthand), counter-reset, counter-increment
+  - Added list-related keywords: circle, decimal, disc, inside, outside, square (mapped to 0x0220-0x0225)
+  - Extended BlockProp structure with 4 new fields for list property storage
+  - Created comprehensive test file with 9 test sections covering all list property combinations
+  - All properties successfully tested with lambda.exe layout command - no parsing errors
+  - Total: 103/150+ properties implemented
+
+**October 25, 2025**:
+- ✅ Completed Group 12: Advanced Typography Properties (10 properties)
+  - Implemented: font-style, font-variant, letter-spacing, word-spacing, text-transform, text-shadow, text-overflow, word-break, word-wrap
+  - Added CSS property definitions for font-variant, letter-spacing, word-spacing, text-shadow
+  - Added CSS keyword mappings for typography values (capitalize, clip, ellipsis, etc.)
+  - Property resolution implemented (some fields need to be added to view structures)
+  - Total: 61/150+ properties implemented
+  - Need to add text-indent to CSS properties definitions
 
 **October 24, 2025**:
 - ✅ Completed Group 4: Layout Properties (4 properties)
@@ -582,6 +814,11 @@ Update this file with completed properties
 
 ---
 
-**Status Summary**: 32/150+ properties (21% complete)
-**Next Milestone**: Group 5 - Text Properties (5 properties)
+**Status Summary**: 103/150+ properties (69% complete)
+**Next Milestone**: Groups 19-20 - CSS Grid Extended + Transform Properties (23 properties)
 **Target**: Complete all 150+ properties incrementally with testing after each group
+
+**Latest Completed**: Group 18 - List Properties ✅
+- All 6 list properties implemented (list-style-type, list-style-position, list-style-image, list-style, counter-reset, counter-increment)
+- Build successful, keyword mapping complete, property resolution cases added
+- Comprehensive testing with nested lists, shorthands, and counter management verified
