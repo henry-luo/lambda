@@ -11,6 +11,7 @@ extern "C" {
 void parse_graph(Input* input, const char* graph_string, const char* flavor);
 void parse_graph_dot(Input* input, const char* dot_string);
 void parse_graph_mermaid(Input* input, const char* mermaid_string);
+void parse_graph_d2(Input* input, const char* d2_string);
 
 // Helper functions for graph construction
 Element* create_graph_element(Input* input, const char* type, const char* layout, const char* flavor);
