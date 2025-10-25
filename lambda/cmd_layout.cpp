@@ -42,6 +42,7 @@ int ui_context_init(UiContext* uicon, bool headless);
 void ui_context_cleanup(UiContext* uicon);
 void ui_context_create_surface(UiContext* uicon, int pixel_width, int pixel_height);
 void layout_html_doc(UiContext* uicon, Document* doc, bool is_reflow);
+void print_view_tree(ViewGroup* view_root, lxb_url_t* url, float pixel_ratio, DocumentType doc_type);
 
 // Forward declarations
 Element* get_html_root_element(Input* input);
@@ -845,57 +846,17 @@ int cmd_layout(int argc, char** argv) {
         fprintf(stderr, "[Layout] Layout computed successfully!\n");
     }
 
-    // Write output
+    // Write output using Radiant's print_view_tree function
     fprintf(stderr, "[Layout] Preparing output...\n");
-    FILE* out = stdout;
-    if (opts.output_file) {
-        out = fopen(opts.output_file, "w");
-        if (!out) {
-            log_error("Error: failed to open output file: %s", opts.output_file);
-            ui_context_cleanup(&ui_context);
-            free_document(doc);
-            pool_destroy(pool);
-            return 1;
-        }
-    }
 
-    // Output layout results
-    fprintf(stderr, "[Layout] Accessing lambda_html_root...\n");
-    TypeElmt* root_type = (TypeElmt*)doc->lambda_html_root->type;
-    fprintf(stderr, "[Layout] root_type=%p, name=%s\n", (void*)root_type, root_type ? root_type->name.str : "NULL");
-    fprintf(out, "{\n");
-    fprintf(out, "  \"engine\": \"lambda-css-radiant\",\n");
-    fprintf(out, "  \"css_applied\": true,\n");
-    fprintf(out, "  \"layout_computed\": %s,\n",
-            (doc->view_tree && doc->view_tree->root) ? "true" : "false");
-    fprintf(out, "  \"viewport\": {\"width\": %d, \"height\": %d},\n",
-            opts.viewport_width, opts.viewport_height);
-
-    fprintf(stderr, "[Layout] Outputting root info...\n");
+    // Use print_view_tree to generate complete layout tree JSON
+    // It writes to /tmp/view_tree.json which is what the test framework expects
     if (doc->view_tree && doc->view_tree->root) {
-        ViewGroup* root_view = (ViewGroup*)doc->view_tree->root;
-        fprintf(out, "  \"root\": {\n");
-        fprintf(out, "    \"tag\": \"%s\",\n", root_type->name.str);
-        fprintf(out, "    \"type\": \"view-group\",\n");
-        fprintf(out, "    \"x\": %.2f,\n", root_view->x);
-        fprintf(out, "    \"y\": %.2f,\n", root_view->y);
-        fprintf(out, "    \"width\": %.2f,\n", root_view->width);
-        fprintf(out, "    \"height\": %.2f\n", root_view->height);
-        fprintf(out, "  }\n");
+        fprintf(stderr, "[Layout] Calling print_view_tree for complete layout output...\n");
+        print_view_tree((ViewGroup*)doc->view_tree->root, doc->url, 1.0f, doc->doc_type);
+        fprintf(stderr, "[Layout] Layout tree written to /tmp/view_tree.json\n");
     } else {
-        fprintf(out, "  \"root\": {\n");
-        fprintf(out, "    \"tag\": \"%s\",\n", root_type->name.str);
-        fprintf(out, "    \"viewport_width\": %d,\n", opts.viewport_width);
-        fprintf(out, "    \"viewport_height\": %d,\n", opts.viewport_height);
-        fprintf(out, "    \"note\": \"Layout computation failed or not completed\"\n");
-        fprintf(out, "  }\n");
-    }
-
-    fprintf(out, "}\n");
-
-    if (opts.output_file) {
-        fclose(out);
-        fprintf(stderr, "[Output] Layout written to: %s\n", opts.output_file);
+        log_warn("No view tree available to output");
     }
 
     // Cleanup

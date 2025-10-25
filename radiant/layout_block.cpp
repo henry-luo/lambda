@@ -200,15 +200,20 @@ void layout_block_content(LayoutContext* lycon, ViewBlock* block, DisplayValue d
 }
 
 float adjust_min_max_width(ViewBlock* block, float width) {
+    fprintf(stderr, "[ADJUST] adjust_min_max_width: input=%.2f, blk=%p\n", width, (void*)block->blk);
     if (block->blk) {
+        fprintf(stderr, "[ADJUST] min=%.2f, max=%.2f\n", block->blk->given_min_width, block->blk->given_max_width);
         if (block->blk->given_max_width >= 0 && width > block->blk->given_max_width) {
             width = block->blk->given_max_width;
+            fprintf(stderr, "[ADJUST] Clamped to max: %.2f\n", width);
         }
         // Note: given_min_width overrides given_max_width if both are specified
         if (block->blk->given_min_width >= 0 && width < block->blk->given_min_width) {
             width = block->blk->given_min_width;
+            fprintf(stderr, "[ADJUST] Clamped to min: %.2f\n", width);
         }
     }
+    fprintf(stderr, "[ADJUST] adjust_min_max_width: output=%.2f\n", width);
     return width;
 }
 
@@ -476,15 +481,31 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         lycon->block.init_ascender + lycon->block.init_descender, lycon->block.lead_y);
 
     // determine block width and height
+    fprintf(stderr, "[BEFORE WIDTH CALC] Element '%s': lycon->block.given_width=%.2f, given_height=%.2f\n",
+            elmt->name(), lycon->block.given_width, lycon->block.given_height);
     float content_width = -1;
+    fprintf(stderr, "[LAYOUT] Block '%s': given_width=%.2f, blk=%p, width_type=%d\n",
+            elmt->name(), lycon->block.given_width, (void*)block->blk,
+            block->blk ? block->blk->given_width_type : -1);
+    bool cond1 = (lycon->block.given_width >= 0);
+    bool cond2 = (!block->blk || block->blk->given_width_type != LXB_CSS_VALUE_AUTO);
+    fprintf(stderr, "[LAYOUT] Condition check: given_width>=0? %d, (!blk || type!=AUTO)? %d, LXB_CSS_VALUE_AUTO=%d\n",
+            cond1, cond2, LXB_CSS_VALUE_AUTO);
+    fprintf(stderr, "[LAYOUT] About to check if condition... (given_width=%.2f, blk=%p, type=%d)\n",
+            lycon->block.given_width, (void*)block->blk, block->blk ? block->blk->given_width_type : -999);
     if (lycon->block.given_width >= 0 && (!block->blk || block->blk->given_width_type != LXB_CSS_VALUE_AUTO)) {
+        fprintf(stderr, "[LAYOUT] INSIDE IF BLOCK!\n");
         content_width = max(lycon->block.given_width, 0);
+        fprintf(stderr, "[LAYOUT] Using given_width: content_width=%.2f\n", content_width);
         content_width = adjust_min_max_width(block, content_width);
+        fprintf(stderr, "[LAYOUT] After adjust_min_max_width: content_width=%.2f\n", content_width);
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
             if (block->bound) content_width = adjust_border_padding_width(block, content_width);
+            fprintf(stderr, "[LAYOUT] After adjust_border_padding (border-box): content_width=%.2f\n", content_width);
         }
     }
     else { // derive from parent block width
+        fprintf(stderr, "[LAYOUT] Deriving from parent: pa_block.width=%.2f\n", pa_block.width);
         if (block->bound) {
             content_width = pa_block.width
                 - (block->bound->margin.left_type == LXB_CSS_VALUE_AUTO ? 0 : block->bound->margin.left)
@@ -504,8 +525,10 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
         block->blk && block->blk->given_max_width >= 0 ? block->blk->given_max_width : -1);
 
     float content_height = -1;
+    fprintf(stderr, "[LAYOUT] Block '%s': given_height=%.2f\n", elmt->name(), lycon->block.given_height);
     if (lycon->block.given_height >= 0) {
         content_height = max(lycon->block.given_height, 0);
+        fprintf(stderr, "[LAYOUT] Using given_height: content_height=%.2f\n", content_height);
         content_height = adjust_min_max_height(block, content_height);
         if (block->blk && block->blk->box_sizing == LXB_CSS_VALUE_BORDER_BOX) {
             if (block->bound) content_height = adjust_border_padding_height(block, content_height);
@@ -525,12 +548,16 @@ void layout_block(LayoutContext* lycon, DomNode *elmt, DisplayValue display) {
     log_debug("content_height=%f, given_height=%f, max_height=%f", content_height, lycon->block.given_height,
         block->blk && block->blk->given_max_height >= 0 ? block->blk->given_max_height : -1);
     lycon->block.width = content_width;  lycon->block.height = content_height;
+    fprintf(stderr, "[LAYOUT] Block '%s': final content_width=%.2f, content_height=%.2f\n",
+            elmt->name(), content_width, content_height);
 
     if (block->bound) {
         block->width = content_width + block->bound->padding.left + block->bound->padding.right +
             (block->bound->border ? block->bound->border->width.left + block->bound->border->width.right : 0);
         block->height = content_height + block->bound->padding.top + block->bound->padding.bottom +
             (block->bound->border ? block->bound->border->width.top + block->bound->border->width.bottom : 0);
+        fprintf(stderr, "[LAYOUT] Block '%s': final block->width=%.2f, block->height=%.2f (with padding/border)\n",
+                elmt->name(), block->width, block->height);
         // todo: we should keep LENGTH_AUTO (may be in flags) for reflow
         log_debug("block margins: left=%f, right=%f, left_type=%d, right_type=%d",
             block->bound->margin.left, block->bound->margin.right, block->bound->margin.left_type, block->bound->margin.right_type);

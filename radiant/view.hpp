@@ -225,8 +225,7 @@ typedef struct {
     PropValue white_space;  // LXB_CSS_VALUE_NORMAL, LXB_CSS_VALUE_NOWRAP, LXB_CSS_VALUE_PRE, etc.
     float given_width, given_height;  // CSS specified width/height values
     lxb_css_value_type_t given_width_type;
-    PropValue clear;          // clear property for floats
-    PropValue float_prop;     // float property (left, right, none)
+    // REMOVED DUPLICATE FIELDS: clear and float_prop are in PositionProp above
 } BlockProp;
 
 typedef struct View View;
