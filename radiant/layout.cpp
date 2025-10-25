@@ -272,6 +272,14 @@ void line_align(LayoutContext* lycon) {
 
 void layout_flow_node(LayoutContext* lycon, DomNode *node) {
     log_debug("layout node %s, advance_y: %f", node->name(), lycon->block.advance_y);
+
+    // Skip HTML comments (Lambda CSS parser creates these as elements with name "!--")
+    const char* node_name = node->name();
+    if (node_name && (strcmp(node_name, "!--") == 0 || strcmp(node_name, "#comment") == 0)) {
+        log_debug("skipping HTML comment node");
+        return;
+    }
+
     if (node->is_element()) {
         log_debug("Element: %s", node->name());
         // Use resolve_display_value which handles both Lexbor and Lambda CSS nodes
