@@ -102,6 +102,11 @@ void sysinfo_manager_destroy(SysInfoManager* manager);
 Input* input_from_sysinfo(Url* url, Pool* pool);
 bool is_sys_url(const char* url);
 
+// Graph parsing functions (from input-graph.cpp)
+void parse_graph(Input* input, const char* graph_string, const char* flavor);
+void parse_graph_dot(Input* input, const char* dot_string);
+void parse_graph_mermaid(Input* input, const char* mermaid_string);
+
 #ifdef __cplusplus
 }
 #endif
