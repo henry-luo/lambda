@@ -1,6 +1,7 @@
 #include "layout.hpp"
 #include "layout_flex.hpp"
 #include "layout_flex_measurement.hpp"
+#include "lambda_css_resolve.h"
 
 #include "../lib/log.h"
 
@@ -209,10 +210,64 @@ DisplayValue resolve_display_value(DomNode* child) {
                 display = resolve_display(elmt);
             }
         } else if (child->type == MARK_ELEMENT) {
-            // Lambda CSS element - resolve display based on tag name
+            // Lambda CSS element - resolve display from CSS if available
             const char* tag_name = child->name();
 
-            // Default display values based on tag name
+            // First, try to get display from CSS
+            DomElement* dom_elem = (DomElement*)child->style;
+            if (dom_elem && dom_elem->specified_style) {
+                StyleTree* style_tree = dom_elem->specified_style;
+                if (style_tree->tree) {
+                    // Look for display property (ID=1) in the AVL tree
+                    AvlNode* node = avl_tree_search(style_tree->tree, CSS_PROPERTY_DISPLAY);
+                    if (node) {
+                        StyleNode* style_node = (StyleNode*)node->declaration;
+                        if (style_node && style_node->winning_decl) {
+                            CssDeclaration* decl = style_node->winning_decl;
+                            if (decl->value && decl->value->type == CSS_VALUE_KEYWORD) {
+                                const char* keyword = decl->value->data.keyword;
+
+                                // Map keyword to display values
+                                if (strcmp(keyword, "flex") == 0) {
+                                    display.outer = LXB_CSS_VALUE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_FLEX;
+                                    return display;
+                                } else if (strcmp(keyword, "inline-flex") == 0) {
+                                    display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_FLEX;
+                                    return display;
+                                } else if (strcmp(keyword, "grid") == 0) {
+                                    display.outer = LXB_CSS_VALUE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_GRID;
+                                    return display;
+                                } else if (strcmp(keyword, "inline-grid") == 0) {
+                                    display.outer = LXB_CSS_VALUE_INLINE;
+                                    display.inner = LXB_CSS_VALUE_GRID;
+                                    return display;
+                                } else if (strcmp(keyword, "block") == 0) {
+                                    display.outer = LXB_CSS_VALUE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_FLOW;
+                                    return display;
+                                } else if (strcmp(keyword, "inline") == 0) {
+                                    display.outer = LXB_CSS_VALUE_INLINE;
+                                    display.inner = LXB_CSS_VALUE_FLOW;
+                                    return display;
+                                } else if (strcmp(keyword, "inline-block") == 0) {
+                                    display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
+                                    display.inner = LXB_CSS_VALUE_FLOW;
+                                    return display;
+                                } else if (strcmp(keyword, "none") == 0) {
+                                    display.outer = LXB_CSS_VALUE_NONE;
+                                    display.inner = LXB_CSS_VALUE_NONE;
+                                    return display;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fall back to default display values based on tag name
             if (strcmp(tag_name, "body") == 0 || strcmp(tag_name, "h1") == 0 ||
                 strcmp(tag_name, "h2") == 0 || strcmp(tag_name, "h3") == 0 ||
                 strcmp(tag_name, "h4") == 0 || strcmp(tag_name, "h5") == 0 ||

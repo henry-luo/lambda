@@ -505,8 +505,6 @@ static bool resolve_property_callback(AvlNode* node, void* context) {
     // get property ID from node
     CssPropertyId prop_id = (CssPropertyId)node->property_id;
 
-    log_debug("  Processing property ID: %d", prop_id);
-
     // get the CSS declaration for this property
     CssDeclaration* decl = style_node ? style_node->winning_decl : NULL;
     if (!decl) {
@@ -923,13 +921,141 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         }
 
         case CSS_PROPERTY_MARGIN: {
-            log_debug("[CSS] Processing margin shorthand property");
+            log_debug("[CSS] Processing margin shorthand property (value type: %d)", value->type);
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-            // Note: Margin shorthand would need multi-value parsing (1-4 values)
-            // For now, just log
-            log_debug("[CSS] margin: shorthand parsing not yet fully implemented");
+
+            // CSS margin shorthand: 1-4 values (same as padding)
+            // 1 value: all sides
+            // 2 values: top/bottom, left/right
+            // 3 values: top, left/right, bottom
+            // 4 values: top, right, bottom, left
+            // Note: margins can be length or 'auto' keyword
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                // Single value - all sides get same value
+                float margin = value->data.length.value;
+                span->bound->margin.top = margin;
+                span->bound->margin.right = margin;
+                span->bound->margin.bottom = margin;
+                span->bound->margin.left = margin;
+                span->bound->margin.top_specificity = specificity;
+                span->bound->margin.right_specificity = specificity;
+                span->bound->margin.bottom_specificity = specificity;
+                span->bound->margin.left_specificity = specificity;
+                log_debug("[CSS] Margin (all): %.2f px", margin);
+            } else if (value->type == CSS_VALUE_KEYWORD) {
+                // Single keyword (auto) - all sides get auto
+                span->bound->margin.top_type = LXB_CSS_VALUE_AUTO;
+                span->bound->margin.right_type = LXB_CSS_VALUE_AUTO;
+                span->bound->margin.bottom_type = LXB_CSS_VALUE_AUTO;
+                span->bound->margin.left_type = LXB_CSS_VALUE_AUTO;
+                span->bound->margin.top_specificity = specificity;
+                span->bound->margin.right_specificity = specificity;
+                span->bound->margin.bottom_specificity = specificity;
+                span->bound->margin.left_specificity = specificity;
+                log_debug("[CSS] Margin (all): auto");
+            } else if (value->type == CSS_VALUE_LIST) {
+                // Multi-value margin
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+
+                if (count == 2) {
+                    // top/bottom, left/right (can be length or auto)
+                    // Handle first value (top/bottom)
+                    if (values[0]->type == CSS_VALUE_LENGTH) {
+                        float vertical = values[0]->data.length.value;
+                        span->bound->margin.top = vertical;
+                        span->bound->margin.bottom = vertical;
+                    } else if (values[0]->type == CSS_VALUE_KEYWORD) {
+                        span->bound->margin.top_type = LXB_CSS_VALUE_AUTO;
+                        span->bound->margin.bottom_type = LXB_CSS_VALUE_AUTO;
+                    }
+                    span->bound->margin.top_specificity = specificity;
+                    span->bound->margin.bottom_specificity = specificity;
+
+                    // Handle second value (left/right)
+                    if (values[1]->type == CSS_VALUE_LENGTH) {
+                        float horizontal = values[1]->data.length.value;
+                        span->bound->margin.left = horizontal;
+                        span->bound->margin.right = horizontal;
+                        log_debug("[CSS] Margin (2 values): %.2f %.2f px",
+                                values[0]->data.length.value, horizontal);
+                    } else if (values[1]->type == CSS_VALUE_KEYWORD) {
+                        span->bound->margin.left_type = LXB_CSS_VALUE_AUTO;
+                        span->bound->margin.right_type = LXB_CSS_VALUE_AUTO;
+                        log_debug("[CSS] Margin (2 values): %.2f auto",
+                                values[0]->type == CSS_VALUE_LENGTH ? values[0]->data.length.value : 0.0f);
+                    }
+                    span->bound->margin.left_specificity = specificity;
+                    span->bound->margin.right_specificity = specificity;
+                } else if (count == 3) {
+                    // top, left/right, bottom
+                    // Handle top
+                    if (values[0]->type == CSS_VALUE_LENGTH) {
+                        span->bound->margin.top = values[0]->data.length.value;
+                    } else if (values[0]->type == CSS_VALUE_KEYWORD) {
+                        span->bound->margin.top_type = LXB_CSS_VALUE_AUTO;
+                    }
+                    span->bound->margin.top_specificity = specificity;
+
+                    // Handle left/right
+                    if (values[1]->type == CSS_VALUE_LENGTH) {
+                        float horizontal = values[1]->data.length.value;
+                        span->bound->margin.left = horizontal;
+                        span->bound->margin.right = horizontal;
+                    } else if (values[1]->type == CSS_VALUE_KEYWORD) {
+                        span->bound->margin.left_type = LXB_CSS_VALUE_AUTO;
+                        span->bound->margin.right_type = LXB_CSS_VALUE_AUTO;
+                    }
+                    span->bound->margin.left_specificity = specificity;
+                    span->bound->margin.right_specificity = specificity;
+
+                    // Handle bottom
+                    if (values[2]->type == CSS_VALUE_LENGTH) {
+                        span->bound->margin.bottom = values[2]->data.length.value;
+                    } else if (values[2]->type == CSS_VALUE_KEYWORD) {
+                        span->bound->margin.bottom_type = LXB_CSS_VALUE_AUTO;
+                    }
+                    span->bound->margin.bottom_specificity = specificity;
+                    log_debug("[CSS] Margin (3 values)");
+                } else if (count == 4) {
+                    // top, right, bottom, left
+                    // Handle top
+                    if (values[0]->type == CSS_VALUE_LENGTH) {
+                        span->bound->margin.top = values[0]->data.length.value;
+                    } else if (values[0]->type == CSS_VALUE_KEYWORD) {
+                        span->bound->margin.top_type = LXB_CSS_VALUE_AUTO;
+                    }
+                    span->bound->margin.top_specificity = specificity;
+
+                    // Handle right
+                    if (values[1]->type == CSS_VALUE_LENGTH) {
+                        span->bound->margin.right = values[1]->data.length.value;
+                    } else if (values[1]->type == CSS_VALUE_KEYWORD) {
+                        span->bound->margin.right_type = LXB_CSS_VALUE_AUTO;
+                    }
+                    span->bound->margin.right_specificity = specificity;
+
+                    // Handle bottom
+                    if (values[2]->type == CSS_VALUE_LENGTH) {
+                        span->bound->margin.bottom = values[2]->data.length.value;
+                    } else if (values[2]->type == CSS_VALUE_KEYWORD) {
+                        span->bound->margin.bottom_type = LXB_CSS_VALUE_AUTO;
+                    }
+                    span->bound->margin.bottom_specificity = specificity;
+
+                    // Handle left
+                    if (values[3]->type == CSS_VALUE_LENGTH) {
+                        span->bound->margin.left = values[3]->data.length.value;
+                    } else if (values[3]->type == CSS_VALUE_KEYWORD) {
+                        span->bound->margin.left_type = LXB_CSS_VALUE_AUTO;
+                    }
+                    span->bound->margin.left_specificity = specificity;
+                    log_debug("[CSS] Margin (4 values)");
+                }
+            }
             break;
         }
 
@@ -938,9 +1064,75 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound) {
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
-            // Note: Padding shorthand would need multi-value parsing (1-4 values)
-            // For now, just log
-            log_debug("[CSS] padding: shorthand parsing not yet fully implemented");
+
+            // CSS padding shorthand: 1-4 values
+            // 1 value: all sides
+            // 2 values: top/bottom, left/right
+            // 3 values: top, left/right, bottom
+            // 4 values: top, right, bottom, left
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                // Single value - all sides get same value
+                float padding = value->data.length.value;
+                span->bound->padding.top = padding;
+                span->bound->padding.right = padding;
+                span->bound->padding.bottom = padding;
+                span->bound->padding.left = padding;
+                span->bound->padding.top_specificity = specificity;
+                span->bound->padding.right_specificity = specificity;
+                span->bound->padding.bottom_specificity = specificity;
+                span->bound->padding.left_specificity = specificity;
+                log_debug("[CSS] Padding (all): %.2f px", padding);
+            } else if (value->type == CSS_VALUE_LIST) {
+                // Multi-value padding
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+
+                if (count == 2 && values[0]->type == CSS_VALUE_LENGTH && values[1]->type == CSS_VALUE_LENGTH) {
+                    // top/bottom, left/right
+                    float vertical = values[0]->data.length.value;
+                    float horizontal = values[1]->data.length.value;
+                    span->bound->padding.top = vertical;
+                    span->bound->padding.bottom = vertical;
+                    span->bound->padding.left = horizontal;
+                    span->bound->padding.right = horizontal;
+                    span->bound->padding.top_specificity = specificity;
+                    span->bound->padding.right_specificity = specificity;
+                    span->bound->padding.bottom_specificity = specificity;
+                    span->bound->padding.left_specificity = specificity;
+                    log_debug("[CSS] Padding (vertical/horizontal): %.2f %.2f px", vertical, horizontal);
+                } else if (count == 3 && values[0]->type == CSS_VALUE_LENGTH &&
+                           values[1]->type == CSS_VALUE_LENGTH && values[2]->type == CSS_VALUE_LENGTH) {
+                    // top, left/right, bottom
+                    float top = values[0]->data.length.value;
+                    float horizontal = values[1]->data.length.value;
+                    float bottom = values[2]->data.length.value;
+                    span->bound->padding.top = top;
+                    span->bound->padding.left = horizontal;
+                    span->bound->padding.right = horizontal;
+                    span->bound->padding.bottom = bottom;
+                    span->bound->padding.top_specificity = specificity;
+                    span->bound->padding.right_specificity = specificity;
+                    span->bound->padding.bottom_specificity = specificity;
+                    span->bound->padding.left_specificity = specificity;
+                    log_debug("[CSS] Padding (3 values): %.2f %.2f %.2f px", top, horizontal, bottom);
+                } else if (count == 4 && values[0]->type == CSS_VALUE_LENGTH &&
+                           values[1]->type == CSS_VALUE_LENGTH && values[2]->type == CSS_VALUE_LENGTH &&
+                           values[3]->type == CSS_VALUE_LENGTH) {
+                    // top, right, bottom, left
+                    span->bound->padding.top = values[0]->data.length.value;
+                    span->bound->padding.right = values[1]->data.length.value;
+                    span->bound->padding.bottom = values[2]->data.length.value;
+                    span->bound->padding.left = values[3]->data.length.value;
+                    span->bound->padding.top_specificity = specificity;
+                    span->bound->padding.right_specificity = specificity;
+                    span->bound->padding.bottom_specificity = specificity;
+                    span->bound->padding.left_specificity = specificity;
+                    log_debug("[CSS] Padding (4 values): %.2f %.2f %.2f %.2f px",
+                            values[0]->data.length.value, values[1]->data.length.value,
+                            values[2]->data.length.value, values[3]->data.length.value);
+                }
+            }
             break;
         }
 
@@ -950,6 +1142,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
 
+            // Check specificity before overwriting
+            if (specificity < span->bound->margin.top_specificity) {
+                break; // lower specificity, skip
+            }
+
             if (value->type == CSS_VALUE_LENGTH) {
                 float margin = value->data.length.value;
                 span->bound->margin.top = margin;
@@ -957,10 +1154,12 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] Margin-top: %.2f px", margin);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                span->bound->margin.top_specificity = specificity;
                 log_debug("[CSS] Margin-top: %.2f%% (percentage)", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 // 'auto' keyword for margins
                 span->bound->margin.top_type = LXB_CSS_VALUE_AUTO;
+                span->bound->margin.top_specificity = specificity;
                 log_debug("[CSS] Margin-top: auto");
             }
             break;
@@ -972,6 +1171,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
 
+            // Check specificity before overwriting
+            if (specificity < span->bound->margin.right_specificity) {
+                break; // lower or equal specificity, skip
+            }
+
             if (value->type == CSS_VALUE_LENGTH) {
                 float margin = value->data.length.value;
                 span->bound->margin.right = margin;
@@ -979,9 +1183,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] Margin-right: %.2f px", margin);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                span->bound->margin.right_specificity = specificity;
                 log_debug("[CSS] Margin-right: %.2f%% (percentage)", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 span->bound->margin.right_type = LXB_CSS_VALUE_AUTO;
+                span->bound->margin.right_specificity = specificity;
                 log_debug("[CSS] Margin-right: auto");
             }
             break;
@@ -993,6 +1199,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
 
+            // Check specificity before overwriting
+            if (specificity < span->bound->margin.bottom_specificity) {
+                break; // lower or equal specificity, skip
+            }
+
             if (value->type == CSS_VALUE_LENGTH) {
                 float margin = value->data.length.value;
                 span->bound->margin.bottom = margin;
@@ -1000,9 +1211,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] Margin-bottom: %.2f px", margin);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                span->bound->margin.bottom_specificity = specificity;
                 log_debug("[CSS] Margin-bottom: %.2f%% (percentage)", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 span->bound->margin.bottom_type = LXB_CSS_VALUE_AUTO;
+                span->bound->margin.bottom_specificity = specificity;
                 log_debug("[CSS] Margin-bottom: auto");
             }
             break;
@@ -1014,6 +1227,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
 
+            // Check specificity before overwriting
+            if (specificity < span->bound->margin.left_specificity) {
+                break; // lower or equal specificity, skip
+            }
+
             if (value->type == CSS_VALUE_LENGTH) {
                 float margin = value->data.length.value;
                 span->bound->margin.left = margin;
@@ -1021,9 +1239,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] Margin-left: %.2f px", margin);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                span->bound->margin.left_specificity = specificity;
                 log_debug("[CSS] Margin-left: %.2f%% (percentage)", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 span->bound->margin.left_type = LXB_CSS_VALUE_AUTO;
+                span->bound->margin.left_specificity = specificity;
                 log_debug("[CSS] Margin-left: auto");
             }
             break;
@@ -1035,6 +1255,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
 
+            // Check specificity before overwriting
+            if (specificity < span->bound->padding.top_specificity) {
+                break; // lower or equal specificity, skip
+            }
+
             if (value->type == CSS_VALUE_LENGTH) {
                 float padding = value->data.length.value;
                 span->bound->padding.top = padding;
@@ -1042,6 +1267,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] Padding-top: %.2f px", padding);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                span->bound->padding.top_specificity = specificity;
                 log_debug("[CSS] Padding-top: %.2f%% (percentage)", percentage);
             }
             break;
@@ -1053,6 +1279,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
 
+            // Check specificity before overwriting
+            if (specificity < span->bound->padding.right_specificity) {
+                break; // lower or equal specificity, skip
+            }
+
             if (value->type == CSS_VALUE_LENGTH) {
                 float padding = value->data.length.value;
                 span->bound->padding.right = padding;
@@ -1060,6 +1291,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] Padding-right: %.2f px", padding);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                span->bound->padding.right_specificity = specificity;
                 log_debug("[CSS] Padding-right: %.2f%% (percentage)", percentage);
             }
             break;
@@ -1071,6 +1303,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
 
+            // Check specificity before overwriting
+            if (specificity < span->bound->padding.bottom_specificity) {
+                break; // lower or equal specificity, skip
+            }
+
             if (value->type == CSS_VALUE_LENGTH) {
                 float padding = value->data.length.value;
                 span->bound->padding.bottom = padding;
@@ -1078,6 +1315,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] Padding-bottom: %.2f px", padding);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                span->bound->padding.bottom_specificity = specificity;
                 log_debug("[CSS] Padding-bottom: %.2f%% (percentage)", percentage);
             }
             break;
@@ -1089,6 +1327,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
             }
 
+            // Check specificity before overwriting
+            if (specificity < span->bound->padding.left_specificity) {
+                break; // lower or equal specificity, skip
+            }
+
             if (value->type == CSS_VALUE_LENGTH) {
                 float padding = value->data.length.value;
                 span->bound->padding.left = padding;
@@ -1096,6 +1339,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] Padding-left: %.2f px", padding);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
+                span->bound->padding.left_specificity = specificity;
                 log_debug("[CSS] Padding-left: %.2f%% (percentage)", percentage);
             }
             break;
@@ -1264,6 +1508,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
+            // Check specificity before overwriting
+            if (specificity < span->bound->border->width.top_specificity) {
+                break; // lower specificity, skip
+            }
+
             if (value->type == CSS_VALUE_LENGTH) {
                 float width = value->data.length.value;
                 span->bound->border->width.top = width;
@@ -1289,6 +1538,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            // Check specificity before overwriting
+            if (specificity < span->bound->border->width.right_specificity) {
+                break; // lower specificity, skip
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
@@ -1317,6 +1571,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
+            // Check specificity before overwriting
+            if (specificity < span->bound->border->width.bottom_specificity) {
+                break; // lower specificity, skip
+            }
+
             if (value->type == CSS_VALUE_LENGTH) {
                 float width = value->data.length.value;
                 span->bound->border->width.bottom = width;
@@ -1341,6 +1600,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            // Check specificity before overwriting
+            if (specificity < span->bound->border->width.left_specificity) {
+                break; // lower specificity, skip
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
@@ -1437,6 +1701,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
+            // Check specificity before overwriting
+            if (specificity < span->bound->border->top_color_specificity) {
+                break; // lower specificity, skip
+            }
+
             Color color = {0};
             if (value->type == CSS_VALUE_KEYWORD) {
                 color.c = map_lambda_color_keyword(value->data.keyword);
@@ -1465,6 +1734,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            // Check specificity before overwriting
+            if (specificity < span->bound->border->right_color_specificity) {
+                break; // lower specificity, skip
             }
 
             Color color = {0};
@@ -1497,6 +1771,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
 
+            // Check specificity before overwriting
+            if (specificity < span->bound->border->bottom_color_specificity) {
+                break; // lower specificity, skip
+            }
+
             Color color = {0};
             if (value->type == CSS_VALUE_KEYWORD) {
                 color.c = map_lambda_color_keyword(value->data.keyword);
@@ -1525,6 +1804,11 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             }
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+
+            // Check specificity before overwriting
+            if (specificity < span->bound->border->left_color_specificity) {
+                break; // lower specificity, skip
             }
 
             Color color = {0};
@@ -1556,9 +1840,114 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            // Note: Border shorthand sets all 4 sides with width, style, and color
-            // Would need multi-value parsing
-            log_debug("[CSS] border: shorthand parsing not yet fully implemented");
+
+            // Border shorthand: <width> <style> <color> (any order)
+            // Parse values from the list or single value
+            float border_width = -1.0f;
+            int border_style = -1;
+            Color border_color = {0};
+
+            if (value->type == CSS_VALUE_LIST) {
+                // Multiple values
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+
+                for (size_t i = 0; i < count; i++) {
+                    CssValue* val = values[i];
+                    if (val->type == CSS_VALUE_LENGTH) {
+                        // Width
+                        border_width = val->data.length.value;
+                    } else if (val->type == CSS_VALUE_KEYWORD) {
+                        // Could be width keyword, style, or color
+                        const char* keyword = val->data.keyword;
+                        if (strcasecmp(keyword, "thin") == 0) {
+                            border_width = 1.0f;
+                        } else if (strcasecmp(keyword, "medium") == 0) {
+                            border_width = 3.0f;
+                        } else if (strcasecmp(keyword, "thick") == 0) {
+                            border_width = 5.0f;
+                        } else if (strcasecmp(keyword, "solid") == 0 || strcasecmp(keyword, "dashed") == 0 ||
+                                   strcasecmp(keyword, "dotted") == 0 || strcasecmp(keyword, "double") == 0 ||
+                                   strcasecmp(keyword, "groove") == 0 || strcasecmp(keyword, "ridge") == 0 ||
+                                   strcasecmp(keyword, "inset") == 0 || strcasecmp(keyword, "outset") == 0 ||
+                                   strcasecmp(keyword, "none") == 0 || strcasecmp(keyword, "hidden") == 0) {
+                            // Style keyword
+                            border_style = map_css_keyword_to_lexbor(keyword);
+                        } else {
+                            // Color keyword
+                            border_color.c = map_lambda_color_keyword(keyword);
+                        }
+                    } else if (val->type == CSS_VALUE_COLOR) {
+                        // Color
+                        if (val->data.color.type == CSS_COLOR_RGB) {
+                            border_color.r = val->data.color.data.rgba.r;
+                            border_color.g = val->data.color.data.rgba.g;
+                            border_color.b = val->data.color.data.rgba.b;
+                            border_color.a = val->data.color.data.rgba.a;
+                        }
+                    }
+                }
+            } else {
+                // Single value
+                if (value->type == CSS_VALUE_LENGTH) {
+                    border_width = value->data.length.value;
+                } else if (value->type == CSS_VALUE_KEYWORD) {
+                    const char* keyword = value->data.keyword;
+                    if (strcasecmp(keyword, "thin") == 0) {
+                        border_width = 1.0f;
+                    } else if (strcasecmp(keyword, "medium") == 0) {
+                        border_width = 3.0f;
+                    } else if (strcasecmp(keyword, "thick") == 0) {
+                        border_width = 5.0f;
+                    } else if (strcasecmp(keyword, "solid") == 0 || strcasecmp(keyword, "dashed") == 0 ||
+                               strcasecmp(keyword, "dotted") == 0 || strcasecmp(keyword, "double") == 0 ||
+                               strcasecmp(keyword, "groove") == 0 || strcasecmp(keyword, "ridge") == 0 ||
+                               strcasecmp(keyword, "inset") == 0 || strcasecmp(keyword, "outset") == 0 ||
+                               strcasecmp(keyword, "none") == 0 || strcasecmp(keyword, "hidden") == 0) {
+                        border_style = map_css_keyword_to_lexbor(keyword);
+                    } else {
+                        border_color.c = map_lambda_color_keyword(keyword);
+                    }
+                } else if (value->type == CSS_VALUE_COLOR) {
+                    if (value->data.color.type == CSS_COLOR_RGB) {
+                        border_color.r = value->data.color.data.rgba.r;
+                        border_color.g = value->data.color.data.rgba.g;
+                        border_color.b = value->data.color.data.rgba.b;
+                        border_color.a = value->data.color.data.rgba.a;
+                    }
+                }
+            }
+
+            // Apply to all 4 sides
+            if (border_width >= 0) {
+                span->bound->border->width.top = border_width;
+                span->bound->border->width.right = border_width;
+                span->bound->border->width.bottom = border_width;
+                span->bound->border->width.left = border_width;
+                span->bound->border->width.top_specificity = specificity;
+                span->bound->border->width.right_specificity = specificity;
+                span->bound->border->width.bottom_specificity = specificity;
+                span->bound->border->width.left_specificity = specificity;
+                log_debug("[CSS] Border width (all sides): %.2f px", border_width);
+            }
+            if (border_style >= 0) {
+                span->bound->border->top_style = border_style;
+                span->bound->border->right_style = border_style;
+                span->bound->border->bottom_style = border_style;
+                span->bound->border->left_style = border_style;
+                log_debug("[CSS] Border style (all sides): %d", border_style);
+            }
+            if (border_color.c != 0) {
+                span->bound->border->top_color = border_color;
+                span->bound->border->right_color = border_color;
+                span->bound->border->bottom_color = border_color;
+                span->bound->border->left_color = border_color;
+                span->bound->border->top_color_specificity = specificity;
+                span->bound->border->right_color_specificity = specificity;
+                span->bound->border->bottom_color_specificity = specificity;
+                span->bound->border->left_color_specificity = specificity;
+                log_debug("[CSS] Border color (all sides): 0x%08X", border_color.c);
+            }
             break;
         }
 
@@ -1619,8 +2008,63 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            // Note: Border-style shorthand can have 1-4 values
-            log_debug("[CSS] border-style: shorthand parsing not yet fully implemented");
+
+            // CSS border-style shorthand: 1-4 keyword values
+            // 1 value: all sides
+            // 2 values: top/bottom, left/right
+            // 3 values: top, left/right, bottom
+            // 4 values: top, right, bottom, left
+
+            if (value->type == CSS_VALUE_KEYWORD) {
+                // Single value - all sides get same style
+                int border_style = map_css_keyword_to_lexbor(value->data.keyword);
+                if (border_style > 0) {
+                    span->bound->border->top_style = border_style;
+                    span->bound->border->right_style = border_style;
+                    span->bound->border->bottom_style = border_style;
+                    span->bound->border->left_style = border_style;
+                    log_debug("[CSS] Border-style (all): %s -> 0x%04X", value->data.keyword, border_style);
+                }
+            } else if (value->type == CSS_VALUE_LIST) {
+                // Multi-value border-style
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+
+                if (count == 2 && values[0]->type == CSS_VALUE_KEYWORD && values[1]->type == CSS_VALUE_KEYWORD) {
+                    // top/bottom, left/right
+                    int vertical = map_css_keyword_to_lexbor(values[0]->data.keyword);
+                    int horizontal = map_css_keyword_to_lexbor(values[1]->data.keyword);
+                    span->bound->border->top_style = vertical;
+                    span->bound->border->bottom_style = vertical;
+                    span->bound->border->left_style = horizontal;
+                    span->bound->border->right_style = horizontal;
+                    log_debug("[CSS] Border-style (2 values): %s %s", values[0]->data.keyword, values[1]->data.keyword);
+                } else if (count == 3 && values[0]->type == CSS_VALUE_KEYWORD &&
+                           values[1]->type == CSS_VALUE_KEYWORD && values[2]->type == CSS_VALUE_KEYWORD) {
+                    // top, left/right, bottom
+                    int top = map_css_keyword_to_lexbor(values[0]->data.keyword);
+                    int horizontal = map_css_keyword_to_lexbor(values[1]->data.keyword);
+                    int bottom = map_css_keyword_to_lexbor(values[2]->data.keyword);
+                    span->bound->border->top_style = top;
+                    span->bound->border->left_style = horizontal;
+                    span->bound->border->right_style = horizontal;
+                    span->bound->border->bottom_style = bottom;
+                    log_debug("[CSS] Border-style (3 values): %s %s %s", values[0]->data.keyword, values[1]->data.keyword, values[2]->data.keyword);
+                } else if (count == 4 && values[0]->type == CSS_VALUE_KEYWORD &&
+                           values[1]->type == CSS_VALUE_KEYWORD && values[2]->type == CSS_VALUE_KEYWORD &&
+                           values[3]->type == CSS_VALUE_KEYWORD) {
+                    // top, right, bottom, left
+                    int top = map_css_keyword_to_lexbor(values[0]->data.keyword);
+                    int right = map_css_keyword_to_lexbor(values[1]->data.keyword);
+                    int bottom = map_css_keyword_to_lexbor(values[2]->data.keyword);
+                    int left = map_css_keyword_to_lexbor(values[3]->data.keyword);
+                    span->bound->border->top_style = top;
+                    span->bound->border->right_style = right;
+                    span->bound->border->bottom_style = bottom;
+                    span->bound->border->left_style = left;
+                    log_debug("[CSS] Border-style (4 values): %s %s %s %s", values[0]->data.keyword, values[1]->data.keyword, values[2]->data.keyword, values[3]->data.keyword);
+                }
+            }
             break;
         }
 
@@ -1632,8 +2076,120 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            // Note: Border-width shorthand can have 1-4 values
-            log_debug("[CSS] border-width: shorthand parsing not yet fully implemented");
+
+            // CSS border-width shorthand: 1-4 length values
+            // 1 value: all sides
+            // 2 values: top/bottom, left/right
+            // 3 values: top, left/right, bottom
+            // 4 values: top, right, bottom, left
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                // Single value - all sides get same width
+                float width = value->data.length.value;
+
+                // Check specificity for each side before setting
+                if (specificity >= span->bound->border->width.top_specificity) {
+                    span->bound->border->width.top = width;
+                    span->bound->border->width.top_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->width.right_specificity) {
+                    span->bound->border->width.right = width;
+                    span->bound->border->width.right_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->width.bottom_specificity) {
+                    span->bound->border->width.bottom = width;
+                    span->bound->border->width.bottom_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->width.left_specificity) {
+                    span->bound->border->width.left = width;
+                    span->bound->border->width.left_specificity = specificity;
+                }
+                log_debug("[CSS] Border-width (all): %.2f px", width);
+            } else if (value->type == CSS_VALUE_LIST) {
+                // Multi-value border-width
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+
+                if (count == 2 && values[0]->type == CSS_VALUE_LENGTH && values[1]->type == CSS_VALUE_LENGTH) {
+                    // top/bottom, left/right
+                    float vertical = values[0]->data.length.value;
+                    float horizontal = values[1]->data.length.value;
+
+                    // Check specificity for each side before setting
+                    if (specificity >= span->bound->border->width.top_specificity) {
+                        span->bound->border->width.top = vertical;
+                        span->bound->border->width.top_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->width.bottom_specificity) {
+                        span->bound->border->width.bottom = vertical;
+                        span->bound->border->width.bottom_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->width.left_specificity) {
+                        span->bound->border->width.left = horizontal;
+                        span->bound->border->width.left_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->width.right_specificity) {
+                        span->bound->border->width.right = horizontal;
+                        span->bound->border->width.right_specificity = specificity;
+                    }
+                    log_debug("[CSS] Border-width (2 values): %.2f %.2f px", vertical, horizontal);
+                } else if (count == 3 && values[0]->type == CSS_VALUE_LENGTH &&
+                           values[1]->type == CSS_VALUE_LENGTH && values[2]->type == CSS_VALUE_LENGTH) {
+                    // top, left/right, bottom
+                    float top = values[0]->data.length.value;
+                    float horizontal = values[1]->data.length.value;
+                    float bottom = values[2]->data.length.value;
+
+                    // Check specificity for each side before setting
+                    if (specificity >= span->bound->border->width.top_specificity) {
+                        span->bound->border->width.top = top;
+                        span->bound->border->width.top_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->width.left_specificity) {
+                        span->bound->border->width.left = horizontal;
+                        span->bound->border->width.left_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->width.right_specificity) {
+                        span->bound->border->width.right = horizontal;
+                        span->bound->border->width.right_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->width.bottom_specificity) {
+                        span->bound->border->width.bottom = bottom;
+                        span->bound->border->width.bottom_specificity = specificity;
+                    }
+                    log_debug("[CSS] Border-width (3 values): %.2f %.2f %.2f px", top, horizontal, bottom);
+                } else if (count == 4 && values[0]->type == CSS_VALUE_LENGTH &&
+                           values[1]->type == CSS_VALUE_LENGTH && values[2]->type == CSS_VALUE_LENGTH &&
+                           values[3]->type == CSS_VALUE_LENGTH) {
+                    // top, right, bottom, left
+                    float top = values[0]->data.length.value;
+                    float right = values[1]->data.length.value;
+                    float bottom = values[2]->data.length.value;
+                    float left = values[3]->data.length.value;
+
+                    // Check specificity for each side before setting
+                    if (specificity >= span->bound->border->width.top_specificity) {
+                        span->bound->border->width.top = top;
+                        span->bound->border->width.top_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->width.right_specificity) {
+                        span->bound->border->width.right = right;
+                        span->bound->border->width.right_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->width.bottom_specificity) {
+                        span->bound->border->width.bottom = bottom;
+                        span->bound->border->width.bottom_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->width.left_specificity) {
+                        span->bound->border->width.left = left;
+                        span->bound->border->width.left_specificity = specificity;
+                    }
+                    log_debug("[CSS] Border-width (4 values): %.2f %.2f %.2f %.2f px", top, right, bottom, left);
+                    span->bound->border->width.bottom_specificity = specificity;
+                    span->bound->border->width.left_specificity = specificity;
+                    log_debug("[CSS] Border-width (4 values): %.2f %.2f %.2f %.2f px", top, right, bottom, left);
+                }
+            }
             break;
         }
 
@@ -1645,8 +2201,114 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            // Note: Border-color shorthand can have 1-4 values
-            log_debug("[CSS] border-color: shorthand parsing not yet fully implemented");
+
+            // CSS border-color shorthand: 1-4 color values
+            // 1 value: all sides
+            // 2 values: top/bottom, left/right
+            // 3 values: top, left/right, bottom
+            // 4 values: top, right, bottom, left
+
+            if (value->type == CSS_VALUE_COLOR || value->type == CSS_VALUE_KEYWORD) {
+                // Single value - all sides get same color
+                Color color = convert_lambda_color(value);
+
+                // Check specificity for each side before setting
+                if (specificity >= span->bound->border->top_color_specificity) {
+                    span->bound->border->top_color = color;
+                    span->bound->border->top_color_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->right_color_specificity) {
+                    span->bound->border->right_color = color;
+                    span->bound->border->right_color_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->bottom_color_specificity) {
+                    span->bound->border->bottom_color = color;
+                    span->bound->border->bottom_color_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->left_color_specificity) {
+                    span->bound->border->left_color = color;
+                    span->bound->border->left_color_specificity = specificity;
+                }
+                log_debug("[CSS] Border-color (all): 0x%08X", color.c);
+            } else if (value->type == CSS_VALUE_LIST) {
+                // Multi-value border-color
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+
+                if (count == 2) {
+                    // top/bottom, left/right
+                    Color vertical = convert_lambda_color(values[0]);
+                    Color horizontal = convert_lambda_color(values[1]);
+
+                    // Check specificity for each side before setting
+                    if (specificity >= span->bound->border->top_color_specificity) {
+                        span->bound->border->top_color = vertical;
+                        span->bound->border->top_color_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->bottom_color_specificity) {
+                        span->bound->border->bottom_color = vertical;
+                        span->bound->border->bottom_color_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->left_color_specificity) {
+                        span->bound->border->left_color = horizontal;
+                        span->bound->border->left_color_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->right_color_specificity) {
+                        span->bound->border->right_color = horizontal;
+                        span->bound->border->right_color_specificity = specificity;
+                    }
+                    log_debug("[CSS] Border-color (2 values): 0x%08X 0x%08X", vertical.c, horizontal.c);
+                } else if (count == 3) {
+                    // top, left/right, bottom
+                    Color top = convert_lambda_color(values[0]);
+                    Color horizontal = convert_lambda_color(values[1]);
+                    Color bottom = convert_lambda_color(values[2]);
+
+                    // Check specificity for each side before setting
+                    if (specificity >= span->bound->border->top_color_specificity) {
+                        span->bound->border->top_color = top;
+                        span->bound->border->top_color_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->left_color_specificity) {
+                        span->bound->border->left_color = horizontal;
+                        span->bound->border->left_color_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->right_color_specificity) {
+                        span->bound->border->right_color = horizontal;
+                        span->bound->border->right_color_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->bottom_color_specificity) {
+                        span->bound->border->bottom_color = bottom;
+                        span->bound->border->bottom_color_specificity = specificity;
+                    }
+                    log_debug("[CSS] Border-color (3 values): 0x%08X 0x%08X 0x%08X", top.c, horizontal.c, bottom.c);
+                } else if (count == 4) {
+                    // top, right, bottom, left
+                    Color top = convert_lambda_color(values[0]);
+                    Color right = convert_lambda_color(values[1]);
+                    Color bottom = convert_lambda_color(values[2]);
+                    Color left = convert_lambda_color(values[3]);
+
+                    // Check specificity for each side before setting
+                    if (specificity >= span->bound->border->top_color_specificity) {
+                        span->bound->border->top_color = top;
+                        span->bound->border->top_color_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->right_color_specificity) {
+                        span->bound->border->right_color = right;
+                        span->bound->border->right_color_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->bottom_color_specificity) {
+                        span->bound->border->bottom_color = bottom;
+                        span->bound->border->bottom_color_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->left_color_specificity) {
+                        span->bound->border->left_color = left;
+                        span->bound->border->left_color_specificity = specificity;
+                    }
+                    log_debug("[CSS] Border-color (4 values): 0x%08X 0x%08X 0x%08X 0x%08X", top.c, right.c, bottom.c, left.c);
+                }
+            }
             break;
         }
 
@@ -1658,8 +2320,114 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             if (!span->bound->border) {
                 span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
             }
-            // Note: Border-radius shorthand can have 1-4 values for corners
-            log_debug("[CSS] border-radius: shorthand parsing not yet fully implemented");
+
+            // CSS border-radius shorthand: 1-4 length values
+            // 1 value: all corners
+            // 2 values: top-left/bottom-right, top-right/bottom-left
+            // 3 values: top-left, top-right/bottom-left, bottom-right
+            // 4 values: top-left, top-right, bottom-right, bottom-left
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                // Single value - all corners get same radius
+                float radius = value->data.length.value;
+
+                // Check specificity before setting each corner
+                if (specificity >= span->bound->border->radius.tl_specificity) {
+                    span->bound->border->radius.top_left = radius;
+                    span->bound->border->radius.tl_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->radius.tr_specificity) {
+                    span->bound->border->radius.top_right = radius;
+                    span->bound->border->radius.tr_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->radius.br_specificity) {
+                    span->bound->border->radius.bottom_right = radius;
+                    span->bound->border->radius.br_specificity = specificity;
+                }
+                if (specificity >= span->bound->border->radius.bl_specificity) {
+                    span->bound->border->radius.bottom_left = radius;
+                    span->bound->border->radius.bl_specificity = specificity;
+                }
+                log_debug("[CSS] Border-radius (all): %.2f px", radius);
+            } else if (value->type == CSS_VALUE_LIST) {
+                // Multi-value border-radius
+                size_t count = value->data.list.count;
+                CssValue** values = value->data.list.values;
+
+                if (count == 2 && values[0]->type == CSS_VALUE_LENGTH && values[1]->type == CSS_VALUE_LENGTH) {
+                    // top-left/bottom-right, top-right/bottom-left
+                    float diagonal1 = values[0]->data.length.value;
+                    float diagonal2 = values[1]->data.length.value;
+
+                    if (specificity >= span->bound->border->radius.tl_specificity) {
+                        span->bound->border->radius.top_left = diagonal1;
+                        span->bound->border->radius.tl_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->radius.tr_specificity) {
+                        span->bound->border->radius.top_right = diagonal2;
+                        span->bound->border->radius.tr_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->radius.br_specificity) {
+                        span->bound->border->radius.bottom_right = diagonal1;
+                        span->bound->border->radius.br_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->radius.bl_specificity) {
+                        span->bound->border->radius.bottom_left = diagonal2;
+                        span->bound->border->radius.bl_specificity = specificity;
+                    }
+                    log_debug("[CSS] Border-radius (2 values): %.2f %.2f px", diagonal1, diagonal2);
+                } else if (count == 3 && values[0]->type == CSS_VALUE_LENGTH &&
+                           values[1]->type == CSS_VALUE_LENGTH && values[2]->type == CSS_VALUE_LENGTH) {
+                    // top-left, top-right/bottom-left, bottom-right
+                    float top_left = values[0]->data.length.value;
+                    float diagonal = values[1]->data.length.value;
+                    float bottom_right = values[2]->data.length.value;
+
+                    if (specificity >= span->bound->border->radius.tl_specificity) {
+                        span->bound->border->radius.top_left = top_left;
+                        span->bound->border->radius.tl_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->radius.tr_specificity) {
+                        span->bound->border->radius.top_right = diagonal;
+                        span->bound->border->radius.tr_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->radius.br_specificity) {
+                        span->bound->border->radius.bottom_right = bottom_right;
+                        span->bound->border->radius.br_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->radius.bl_specificity) {
+                        span->bound->border->radius.bottom_left = diagonal;
+                        span->bound->border->radius.bl_specificity = specificity;
+                    }
+                    log_debug("[CSS] Border-radius (3 values): %.2f %.2f %.2f px", top_left, diagonal, bottom_right);
+                } else if (count == 4 && values[0]->type == CSS_VALUE_LENGTH &&
+                           values[1]->type == CSS_VALUE_LENGTH && values[2]->type == CSS_VALUE_LENGTH &&
+                           values[3]->type == CSS_VALUE_LENGTH) {
+                    // top-left, top-right, bottom-right, bottom-left
+                    float top_left = values[0]->data.length.value;
+                    float top_right = values[1]->data.length.value;
+                    float bottom_right = values[2]->data.length.value;
+                    float bottom_left = values[3]->data.length.value;
+
+                    if (specificity >= span->bound->border->radius.tl_specificity) {
+                        span->bound->border->radius.top_left = top_left;
+                        span->bound->border->radius.tl_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->radius.tr_specificity) {
+                        span->bound->border->radius.top_right = top_right;
+                        span->bound->border->radius.tr_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->radius.br_specificity) {
+                        span->bound->border->radius.bottom_right = bottom_right;
+                        span->bound->border->radius.br_specificity = specificity;
+                    }
+                    if (specificity >= span->bound->border->radius.bl_specificity) {
+                        span->bound->border->radius.bottom_left = bottom_left;
+                        span->bound->border->radius.bl_specificity = specificity;
+                    }
+                    log_debug("[CSS] Border-radius (4 values): %.2f %.2f %.2f %.2f px", top_left, top_right, bottom_right, bottom_left);
+                }
+            }
             break;
         }
 
@@ -1743,14 +2511,63 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing display property");
             if (value->type == CSS_VALUE_KEYWORD) {
                 int lexbor_val = map_css_keyword_to_lexbor(value->data.keyword);
-                log_debug("[CSS] Display: %s -> %d", value->data.keyword, lexbor_val);
-
-                // Set display on the view (ViewGroup has DisplayValue with outer and inner)
+                log_debug("[CSS] Display: %s -> %d", value->data.keyword, lexbor_val);                // Set display on the view (ViewGroup has DisplayValue with outer and inner)
                 if (block) {
-                    // For block elements, set both outer and inner display
-                    // Common values: block, inline, inline-block, flex, grid, none
-                    block->display.outer = lexbor_val;
-                    block->display.inner = lexbor_val;
+                    // Map single-value display to outer/inner pair following CSS Display Level 3 spec
+                    // See: https://www.w3.org/TR/css-display-3/#the-display-properties
+                    switch (lexbor_val) {
+                        case LXB_CSS_VALUE_BLOCK:
+                            block->display.outer = LXB_CSS_VALUE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_FLOW;
+                            break;
+                        case LXB_CSS_VALUE_INLINE:
+                            block->display.outer = LXB_CSS_VALUE_INLINE;
+                            block->display.inner = LXB_CSS_VALUE_FLOW;
+                            break;
+                        case LXB_CSS_VALUE_INLINE_BLOCK:
+                            block->display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_FLOW;
+                            break;
+                        case LXB_CSS_VALUE_FLEX:
+                            block->display.outer = LXB_CSS_VALUE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_FLEX;
+                            log_debug("[CSS] Display flex: outer=BLOCK, inner=FLEX");
+                            break;
+                        case LXB_CSS_VALUE_INLINE_FLEX:
+                            block->display.outer = LXB_CSS_VALUE_INLINE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_FLEX;
+                            break;
+                        case LXB_CSS_VALUE_GRID:
+                            block->display.outer = LXB_CSS_VALUE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_GRID;
+                            break;
+                        case LXB_CSS_VALUE_INLINE_GRID:
+                            block->display.outer = LXB_CSS_VALUE_INLINE;
+                            block->display.inner = LXB_CSS_VALUE_GRID;
+                            break;
+                        case LXB_CSS_VALUE_TABLE:
+                            block->display.outer = LXB_CSS_VALUE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_TABLE;
+                            break;
+                        case LXB_CSS_VALUE_INLINE_TABLE:
+                            block->display.outer = LXB_CSS_VALUE_INLINE;
+                            block->display.inner = LXB_CSS_VALUE_TABLE;
+                            break;
+                        case LXB_CSS_VALUE_LIST_ITEM:
+                            block->display.outer = LXB_CSS_VALUE_LIST_ITEM;
+                            block->display.inner = LXB_CSS_VALUE_FLOW;
+                            break;
+                        case LXB_CSS_VALUE_NONE:
+                            block->display.outer = LXB_CSS_VALUE_NONE;
+                            block->display.inner = LXB_CSS_VALUE_NONE;
+                            break;
+                        default:
+                            // Unknown or unsupported - default to block flow
+                            log_debug("[CSS] Unknown display value %d, defaulting to block flow", lexbor_val);
+                            block->display.outer = LXB_CSS_VALUE_BLOCK;
+                            block->display.inner = LXB_CSS_VALUE_FLOW;
+                            break;
+                    }
                 }
             }
             break;
@@ -2258,17 +3075,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] flex-direction: Cannot apply to non-block element");
                 break;
             }
-            if (!block->embed || !block->embed->flex) {
-                // Allocate FlexProp if needed
-                if (!block->embed) {
-                    // Note: This requires alloc_embed_prop function
-                    log_debug("[CSS] flex-direction: EmbedProp not allocated");
-                    break;
-                }
-                // Note: This requires alloc_flex_prop function
-                log_debug("[CSS] flex-direction: FlexProp not allocated");
-                break;
-            }
+
+            // Allocate FlexProp if needed (same as resolve_style.cpp)
+            alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_KEYWORD) {
                 int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
@@ -2286,10 +3095,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] flex-wrap: Cannot apply to non-block element");
                 break;
             }
-            if (!block->embed || !block->embed->flex) {
-                log_debug("[CSS] flex-wrap: FlexProp not allocated");
-                break;
-            }
+
+            // Allocate FlexProp if needed
+            alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_KEYWORD) {
                 int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
@@ -2307,10 +3115,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] justify-content: Cannot apply to non-block element");
                 break;
             }
-            if (!block->embed || !block->embed->flex) {
-                log_debug("[CSS] justify-content: FlexProp not allocated");
-                break;
-            }
+
+            // Allocate FlexProp if needed
+            alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_KEYWORD) {
                 int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
@@ -2328,10 +3135,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] align-items: Cannot apply to non-block element");
                 break;
             }
-            if (!block->embed || !block->embed->flex) {
-                log_debug("[CSS] align-items: FlexProp not allocated");
-                break;
-            }
+
+            // Allocate FlexProp if needed
+            alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_KEYWORD) {
                 int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
@@ -2349,10 +3155,9 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 log_debug("[CSS] align-content: Cannot apply to non-block element");
                 break;
             }
-            if (!block->embed || !block->embed->flex) {
-                log_debug("[CSS] align-content: FlexProp not allocated");
-                break;
-            }
+
+            // Allocate FlexProp if needed
+            alloc_flex_prop(lycon, block);
 
             if (value->type == CSS_VALUE_KEYWORD) {
                 int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
@@ -2427,10 +3232,14 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
 
         case CSS_PROPERTY_FLEX_FLOW: {
             log_debug("[CSS] Processing flex-flow shorthand property");
-            if (!block || !block->embed || !block->embed->flex) {
-                log_debug("[CSS] flex-flow: FlexProp not allocated");
+            if (!block) {
+                log_debug("[CSS] flex-flow: Cannot apply to non-block element");
                 break;
             }
+
+            // Allocate FlexProp if needed
+            alloc_flex_prop(lycon, block);
+
             // Note: flex-flow is a shorthand for flex-direction and flex-wrap
             // Would need to parse both values from the declaration
             // For now, just log
