@@ -34,6 +34,10 @@ String* format_wiki_string(Pool* pool, Item root_item);
 void format_text(StringBuf* sb, Item root_item);
 String* format_text_string(Pool* pool, Item root_item);
 
+// Graph format function declarations
+String* format_graph(Pool* pool, Item root_item);
+String* format_graph_with_flavor(Pool* pool, Item root_item, const char* flavor);
+
 // Math format function declarations
 String* format_math(Pool* pool, Item root_item);
 String* format_math_latex(Pool* pool, Item root_item);
