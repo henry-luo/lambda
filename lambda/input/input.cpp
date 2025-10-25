@@ -564,6 +564,10 @@ extern "C" Input* input_from_source(const char* source, Url* abs_url, String* ty
         else if (strcmp(effective_type, "markup") == 0) {
             input->root = input_markup(input, source);
         }
+        else if (strcmp(effective_type, "graph") == 0) {
+            const char* graph_flavor = (flavor && flavor->chars) ? flavor->chars : "dot";
+            parse_graph(input, source, graph_flavor);
+        }
         else {
             printf("Unknown input type: %s\n", effective_type);
         }

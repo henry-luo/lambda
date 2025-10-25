@@ -1,0 +1,16 @@
+%% Test Mermaid flowchart
+flowchart TD
+    A[Start] --> B{Decision}
+    B -->|Yes| C[Process A]
+    B -->|No| D[Process B]
+    C --> E[End]
+    D --> E
+    
+    %% Node styling
+    classDef startEnd fill:#9f9f9f,stroke:#333,stroke-width:2px
+    classDef process fill:#bbf,stroke:#333,stroke-width:2px
+    classDef decision fill:#fbf,stroke:#333,stroke-width:2px
+    
+    class A,E startEnd
+    class C,D process
+    class B decision
