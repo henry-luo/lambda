@@ -62,7 +62,7 @@ static const KeywordMapping keyword_map[] = {
     {"disc", 0x0222},      // Custom value for list-style-type disc
     {"dotted", 0x0021},    // LXB_CSS_VALUE_DOTTED
     {"double", 0x0024},    // LXB_CSS_VALUE_DOUBLE
-    
+
     // Background size keywords
     {"contain", 0x0200},   // Custom value for background-size contain
     {"cover", 0x0201},     // Custom value for background-size cover
@@ -82,7 +82,7 @@ static const KeywordMapping keyword_map[] = {
     {"flex-start", 0x0058}, // LXB_CSS_VALUE_FLEX_START
     {"fixed", 0x0151},     // LXB_CSS_VALUE_FIXED
 
-    // Animation fill modes  
+    // Animation fill modes
     {"forwards", 0x009b},  // LXB_CSS_VALUE_FORWARDS (animation-fill-mode)
 
     // Colors - Common colors
@@ -122,10 +122,10 @@ static const KeywordMapping keyword_map[] = {
     // Animation timing functions
     {"linear", 0x0087},    // LXB_CSS_VALUE_LINEAR (animation-timing-function)
     {"line-through", 0x0159}, // LXB_CSS_VALUE_LINE_THROUGH
-    
+
     // Background attachment
     {"local", 0x0202},     // Custom value for background-attachment local
-    
+
     {"lowercase", 0x0060}, // LXB_CSS_VALUE_LOWERCASE
 
     // Vertical alignment
@@ -145,10 +145,10 @@ static const KeywordMapping keyword_map[] = {
 
     // Colors
     {"orange", 0x009d},    // LXB_CSS_VALUE_ORANGE
-    
+
     // Background blend modes
     {"overlay", 0x0205},   // Custom value for background-blend-mode overlay
-    
+
     {"overline", 0x0158},  // LXB_CSS_VALUE_OVERLINE
     {"outside", 0x0224},   // Custom value for list-style-position outside
 
@@ -170,10 +170,10 @@ static const KeywordMapping keyword_map[] = {
     // Animation direction
     {"reverse", 0x0098},   // LXB_CSS_VALUE_REVERSE (animation-direction)
     {"right", 0x0030},     // LXB_CSS_VALUE_RIGHT
-    
+
     // Background repeat
     {"round", 0x0206},     // Custom value for background-repeat round
-    
+
     {"row", 0x0059},       // LXB_CSS_VALUE_ROW (flex-direction)
     {"row-reverse", 0x005a}, // LXB_CSS_VALUE_ROW_REVERSE
 
@@ -187,10 +187,10 @@ static const KeywordMapping keyword_map[] = {
     {"silver", 0x00b5},    // LXB_CSS_VALUE_SILVER
     {"small-caps", 0x0062}, // LXB_CSS_VALUE_SMALL_CAPS (font-variant)
     {"solid", 0x0023},     // LXB_CSS_VALUE_SOLID
-    
+
     // Background repeat
     {"space", 0x0207},     // Custom value for background-repeat space
-    
+
     {"space-around", 0x005b}, // LXB_CSS_VALUE_SPACE_AROUND
     {"space-between", 0x005c}, // LXB_CSS_VALUE_SPACE_BETWEEN
     {"space-evenly", 0x005d}, // LXB_CSS_VALUE_SPACE_EVENLY
@@ -840,6 +840,106 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             break;
         }
 
+        case CSS_PROPERTY_MIN_WIDTH: {
+            log_debug("[CSS] Processing min-width property");
+            if (!block) break;
+            if (!block->blk) {
+                block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float min_width = convert_lambda_length_to_px(value, lycon, prop_id);
+                block->blk->given_min_width = min_width;
+                log_debug("[CSS] Min-width: %.2f px", min_width);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Min-width: %.2f%% (percentage not yet fully supported)", percentage);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_MAX_WIDTH: {
+            log_debug("[CSS] Processing max-width property");
+            if (!block) break;
+            if (!block->blk) {
+                block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float max_width = convert_lambda_length_to_px(value, lycon, prop_id);
+                block->blk->given_max_width = max_width;
+                log_debug("[CSS] Max-width: %.2f px", max_width);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Max-width: %.2f%% (percentage not yet fully supported)", percentage);
+            } else if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "none") == 0) {
+                block->blk->given_max_width = -1.0f; // -1 means none/unlimited
+                log_debug("[CSS] Max-width: none");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_MIN_HEIGHT: {
+            log_debug("[CSS] Processing min-height property");
+            if (!block) break;
+            if (!block->blk) {
+                block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float min_height = convert_lambda_length_to_px(value, lycon, prop_id);
+                block->blk->given_min_height = min_height;
+                log_debug("[CSS] Min-height: %.2f px", min_height);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Min-height: %.2f%% (percentage not yet fully supported)", percentage);
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_MAX_HEIGHT: {
+            log_debug("[CSS] Processing max-height property");
+            if (!block) break;
+            if (!block->blk) {
+                block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+            }
+
+            if (value->type == CSS_VALUE_LENGTH) {
+                float max_height = convert_lambda_length_to_px(value, lycon, prop_id);
+                block->blk->given_max_height = max_height;
+                log_debug("[CSS] Max-height: %.2f px", max_height);
+            } else if (value->type == CSS_VALUE_PERCENTAGE) {
+                float percentage = value->data.percentage.value;
+                log_debug("[CSS] Max-height: %.2f%% (percentage not yet fully supported)", percentage);
+            } else if (value->type == CSS_VALUE_KEYWORD && strcasecmp(value->data.keyword, "none") == 0) {
+                block->blk->given_max_height = -1.0f; // -1 means none/unlimited
+                log_debug("[CSS] Max-height: none");
+            }
+            break;
+        }
+
+        case CSS_PROPERTY_MARGIN: {
+            log_debug("[CSS] Processing margin shorthand property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            // Note: Margin shorthand would need multi-value parsing (1-4 values)
+            // For now, just log
+            log_debug("[CSS] margin: shorthand parsing not yet fully implemented");
+            break;
+        }
+
+        case CSS_PROPERTY_PADDING: {
+            log_debug("[CSS] Processing padding shorthand property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            // Note: Padding shorthand would need multi-value parsing (1-4 values)
+            // For now, just log
+            log_debug("[CSS] padding: shorthand parsing not yet fully implemented");
+            break;
+        }
+
         case CSS_PROPERTY_MARGIN_TOP: {
             log_debug("[CSS] Processing margin-top property");
             if (!span->bound) {
@@ -1444,6 +1544,121 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             break;
         }
 
+        case CSS_PROPERTY_BORDER: {
+            log_debug("[CSS] Processing border shorthand property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            // Note: Border shorthand sets all 4 sides with width, style, and color
+            // Would need multi-value parsing
+            log_debug("[CSS] border: shorthand parsing not yet fully implemented");
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_TOP: {
+            log_debug("[CSS] Processing border-top shorthand property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            // Note: Border-top shorthand sets width, style, and color for top
+            log_debug("[CSS] border-top: shorthand parsing not yet fully implemented");
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_RIGHT: {
+            log_debug("[CSS] Processing border-right shorthand property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            log_debug("[CSS] border-right: shorthand parsing not yet fully implemented");
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_BOTTOM: {
+            log_debug("[CSS] Processing border-bottom shorthand property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            log_debug("[CSS] border-bottom: shorthand parsing not yet fully implemented");
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_LEFT: {
+            log_debug("[CSS] Processing border-left shorthand property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            log_debug("[CSS] border-left: shorthand parsing not yet fully implemented");
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_STYLE: {
+            log_debug("[CSS] Processing border-style shorthand property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            // Note: Border-style shorthand can have 1-4 values
+            log_debug("[CSS] border-style: shorthand parsing not yet fully implemented");
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_WIDTH: {
+            log_debug("[CSS] Processing border-width shorthand property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            // Note: Border-width shorthand can have 1-4 values
+            log_debug("[CSS] border-width: shorthand parsing not yet fully implemented");
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_COLOR: {
+            log_debug("[CSS] Processing border-color shorthand property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            // Note: Border-color shorthand can have 1-4 values
+            log_debug("[CSS] border-color: shorthand parsing not yet fully implemented");
+            break;
+        }
+
+        case CSS_PROPERTY_BORDER_RADIUS: {
+            log_debug("[CSS] Processing border-radius shorthand property");
+            if (!span->bound) {
+                span->bound = (BoundaryProp*)alloc_prop(lycon, sizeof(BoundaryProp));
+            }
+            if (!span->bound->border) {
+                span->bound->border = (BorderProp*)alloc_prop(lycon, sizeof(BorderProp));
+            }
+            // Note: Border-radius shorthand can have 1-4 values for corners
+            log_debug("[CSS] border-radius: shorthand parsing not yet fully implemented");
+            break;
+        }
+
         // ===== GROUP 15: Additional Border Properties =====
 
         case CSS_PROPERTY_BORDER_TOP_LEFT_RADIUS: {
@@ -1889,7 +2104,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 if (lexbor_value > 0) {
                     // Note: Adding text_transform field to BlockProp would be needed
                     // For now, log the value that would be set
-                    log_debug("[CSS] text-transform: %s -> 0x%04X (field not yet added to BlockProp)", 
+                    log_debug("[CSS] text-transform: %s -> 0x%04X (field not yet added to BlockProp)",
                              value->data.keyword, lexbor_value);
                 }
             }
@@ -1911,7 +2126,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding text_overflow field to BlockProp would be needed
-                    log_debug("[CSS] text-overflow: %s -> 0x%04X (field not yet added to BlockProp)", 
+                    log_debug("[CSS] text-overflow: %s -> 0x%04X (field not yet added to BlockProp)",
                              value->data.keyword, lexbor_value);
                 }
             }
@@ -1933,7 +2148,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding word_break field to BlockProp would be needed
-                    log_debug("[CSS] word-break: %s -> 0x%04X (field not yet added to BlockProp)", 
+                    log_debug("[CSS] word-break: %s -> 0x%04X (field not yet added to BlockProp)",
                              value->data.keyword, lexbor_value);
                 }
             }
@@ -1955,7 +2170,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding word_wrap field to BlockProp would be needed
-                    log_debug("[CSS] word-wrap: %s -> 0x%04X (field not yet added to BlockProp)", 
+                    log_debug("[CSS] word-wrap: %s -> 0x%04X (field not yet added to BlockProp)",
                              value->data.keyword, lexbor_value);
                 }
             }
@@ -1973,7 +2188,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                 int lexbor_value = map_css_keyword_to_lexbor(value->data.keyword);
                 if (lexbor_value > 0) {
                     // Note: Adding font_variant field to FontProp would be needed
-                    log_debug("[CSS] font-variant: %s -> 0x%04X (field not yet added to FontProp)", 
+                    log_debug("[CSS] font-variant: %s -> 0x%04X (field not yet added to FontProp)",
                              value->data.keyword, lexbor_value);
                 }
             }
@@ -2203,6 +2418,28 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
                     log_debug("[CSS] align-self: %s -> 0x%04X", value->data.keyword, lexbor_value);
                 }
             }
+            break;
+        }
+
+        case CSS_PROPERTY_FLEX_FLOW: {
+            log_debug("[CSS] Processing flex-flow shorthand property");
+            if (!block || !block->embed || !block->embed->flex) {
+                log_debug("[CSS] flex-flow: FlexProp not allocated");
+                break;
+            }
+            // Note: flex-flow is a shorthand for flex-direction and flex-wrap
+            // Would need to parse both values from the declaration
+            // For now, just log
+            log_debug("[CSS] flex-flow: shorthand parsing not yet fully implemented");
+            break;
+        }
+
+        case CSS_PROPERTY_FLEX: {
+            log_debug("[CSS] Processing flex shorthand property");
+            // flex is a shorthand for flex-grow, flex-shrink, and flex-basis
+            // Common values: auto (1 1 auto), none (0 0 auto), <grow> (grow 1 0)
+            // For now, just log
+            log_debug("[CSS] flex: shorthand parsing not yet fully implemented");
             break;
         }
 
