@@ -35,6 +35,7 @@ typedef struct AvlTree {
     Pool* pool;                  // Memory allocation pool
     int node_count;              // Number of nodes in the tree
     int max_depth;               // Maximum depth reached (for debugging)
+    AvlNode* last_removed;       // Last node removed (for safe traversal)
 } AvlTree;
 
 /**

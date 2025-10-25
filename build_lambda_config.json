@@ -1143,6 +1143,21 @@
                             "lib/mempool.c"
                         ],
                         "binary": "test_avl_tree.exe"
+                    },
+                    {
+                        "source": "perf/test_avl_tree_perf.cpp",
+                        "name": "⚡ AVL Tree Performance Tests (GTest)",
+                        "dependencies": [],
+                        "libraries": [
+                            "gtest",
+                            "gtest_main",
+                            "rpmalloc"
+                        ],
+                        "additional_sources": [
+                            "lib/avl_tree.c",
+                            "lib/mempool.c"
+                        ],
+                        "binary": "test_avl_tree_perf.exe"
                     }
                 ],
                 "type": "library"
