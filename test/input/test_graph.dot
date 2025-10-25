@@ -1,0 +1,24 @@
+// Test DOT graph
+digraph example {
+    rankdir=LR;
+    node [shape=box, style=filled, fillcolor=lightblue];
+    
+    // Nodes
+    A [label="Start", shape=circle, fillcolor=lightgreen];
+    B [label="Process", fillcolor=yellow];
+    C [label="Decision", shape=diamond, fillcolor=orange];
+    D [label="End", shape=doublecircle, fillcolor=lightcoral];
+    
+    // Edges
+    A -> B [label="begin"];
+    B -> C [label="check"];
+    C -> D [label="yes", color=green];
+    C -> B [label="no", color=red, style=dashed];
+    
+    // Subgraph
+    subgraph cluster_main {
+        label="Main Process";
+        style=dashed;
+        A; B;
+    }
+}
