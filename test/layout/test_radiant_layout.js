@@ -14,7 +14,8 @@ const { spawn } = require('child_process');
 
 class RadiantLayoutTester {
     constructor(options = {}) {
-        this.radiantExe = options.radiantExe || './radiant.exe';
+        this.engine = options.engine || 'radiant'; // 'radiant' or 'lambda-css'
+        this.radiantExe = options.radiantExe || (this.engine === 'lambda-css' ? './lambda.exe' : './radiant.exe');
         this.tolerance = options.tolerance || 5; // 5px tolerance for layout differences
         this.elementThreshold = options.elementThreshold || 100.0; // 100% overall element match threshold
         this.textThreshold = options.textThreshold || 100.0; // 100% overall text match threshold
@@ -26,7 +27,7 @@ class RadiantLayoutTester {
     }
 
     /**
-     * Run Radiant layout engine on a test file
+     * Run layout engine on a test file
      */
     async runRadiantLayout(htmlFile) {
         return new Promise((resolve, reject) => {
@@ -47,7 +48,7 @@ class RadiantLayoutTester {
 
             const timeout = setTimeout(() => {
                 process.kill();
-                reject(new Error('Radiant execution timeout (30s)'));
+                reject(new Error(`${this.engine === 'lambda-css' ? 'Lambda CSS' : 'Radiant'} execution timeout (30s)`));
             }, 30000);
 
             process.on('close', (code) => {
@@ -55,7 +56,7 @@ class RadiantLayoutTester {
                 if (code === 0) {
                     resolve({ stdout, stderr });
                 } else {
-                    reject(new Error(`Radiant failed with exit code ${code}: ${stderr}`));
+                    reject(new Error(`${this.engine === 'lambda-css' ? 'Lambda CSS' : 'Radiant'} failed with exit code ${code}: ${stderr}`));
                 }
             });
 
@@ -1075,7 +1076,8 @@ class RadiantLayoutTester {
      * Test files matching a pattern across all categories
      */
     async testByPattern(pattern) {
-        console.log(`\n🔍 Testing files matching pattern: "${pattern}"`);
+        const engineName = this.engine === 'lambda-css' ? 'Lambda CSS' : 'Radiant';
+        console.log(`\n🔍 Testing files matching pattern: "${pattern}" (${engineName} engine)`);
         console.log('=' .repeat(50));
 
         const categories = await this.getAvailableCategories();
@@ -1136,7 +1138,8 @@ class RadiantLayoutTester {
      * Test all categories
      */
     async testAll() {
-        console.log('🎯 Radiant Layout Engine Automated Tests');
+        const engineName = this.engine === 'lambda-css' ? 'Lambda CSS' : 'Radiant';
+        console.log(`🎯 ${engineName} Layout Engine Automated Tests`);
         console.log('=========================================');
 
         const categories = await this.getAvailableCategories();
@@ -1176,7 +1179,8 @@ async function main() {
     // Parse arguments
     const options = {
         tolerance: 5.2,
-        verbose: false
+        verbose: false,
+        engine: 'radiant' // default to radiant engine
     };
 
     let category = null;
@@ -1190,6 +1194,14 @@ async function main() {
             case '--help':
             case '-h':
                 showHelp = true;
+                break;
+            case '--engine':
+            case '-e':
+                options.engine = args[++i];
+                if (options.engine !== 'radiant' && options.engine !== 'lambda-css') {
+                    console.error(`Invalid engine: ${options.engine}. Must be 'radiant' or 'lambda-css'`);
+                    process.exit(1);
+                }
                 break;
             case '--category':
             case '-c':
@@ -1232,6 +1244,7 @@ Radiant Layout Engine Automated Test Script
 Usage: node test/layout/test_radiant_layout.js [options]
 
 Options:
+  --engine, -e <name>      Layout engine to use: 'radiant' or 'lambda-css' (default: radiant)
   --category, -c <name>    Test specific category (e.g., basic, flex, grid)
   --test, -t <file>        Test specific HTML file
   --pattern, -p <text>     Test files containing pattern (runs in verbose mode)
@@ -1239,12 +1252,18 @@ Options:
   --element-threshold <pct> Element match threshold percentage (default: 80.0)
   --text-threshold <pct>   Text match threshold percentage (default: 70.0)
   --verbose, -v            Show detailed output
-  --radiant-exe <path>     Path to Radiant executable (default: ./radiant.exe)
+  --radiant-exe <path>     Path to layout engine executable (default: ./radiant.exe or ./lambda.exe)
   --help, -h               Show this help message
 
+Engines:
+  radiant      - Radiant layout engine (Lexbor-based HTML/CSS rendering)
+  lambda-css   - Lambda CSS layout engine (custom CSS cascade and layout)
+
 Examples:
-  node test/layout/test_radiant_layout.js                              # Test all categories
-  node test/layout/test_radiant_layout.js -c baseline                  # Test baseline category only
+  node test/layout/test_radiant_layout.js                              # Test all categories with Radiant
+  node test/layout/test_radiant_layout.js --engine lambda-css          # Test all categories with Lambda CSS
+  node test/layout/test_radiant_layout.js -e lambda-css -c baseline    # Test baseline category with Lambda CSS
+  node test/layout/test_radiant_layout.js -c baseline                  # Test baseline category with Radiant
   node test/layout/test_radiant_layout.js -t baseline_801_display_block.html  # Test specific file
   node test/layout/test_radiant_layout.js -p float                     # Test all files containing "float"
   node test/layout/test_radiant_layout.js --tolerance 2.0              # Use 2px tolerance
