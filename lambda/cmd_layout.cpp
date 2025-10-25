@@ -599,6 +599,11 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
                 fprintf(fp, "%s    \"fontSize\": %.2f", indent, val->data.length.value);
                 has_props = true;
             }
+        } else {
+            // No fontSize declaration, use default
+            if (has_props) fprintf(fp, ",\n");
+            fprintf(fp, "%s    \"fontSize\": 16.00", indent);
+            has_props = true;
         }
 
         // Font family property (ID 80 - inherited)
@@ -698,6 +703,11 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
                 fprintf(fp, "%s    \"display\": \"block\"", indent); // TODO: extract actual keyword
                 has_props = true;
             }
+        } else {
+            // No display declaration, use default
+            if (has_props) fprintf(fp, ",\n");
+            fprintf(fp, "%s    \"display\": \"block\"", indent);
+            has_props = true;
         }
 
         // Background color property (ID 71)
@@ -759,6 +769,11 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
                 fprintf(fp, "%s    \"fontWeight\": 400", indent); // Default to normal
                 has_props = true;
             }
+        } else {
+            // No fontWeight declaration, use default
+            if (has_props) fprintf(fp, ",\n");
+            fprintf(fp, "%s    \"fontWeight\": 400", indent);
+            has_props = true;
         }
 
         if (has_props) fprintf(fp, "\n");

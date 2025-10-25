@@ -472,7 +472,7 @@ void* style_tree_get_computed_value(StyleTree* style_tree,
         }
 
         // Return initial value
-        return css_get_initial_value(property_id, style_tree->pool);
+        return css_property_get_initial_value(property_id, style_tree->pool);
     }
 
     StyleNode* node = (StyleNode*)avl_node->declaration;
