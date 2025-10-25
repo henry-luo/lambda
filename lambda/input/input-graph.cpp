@@ -11,6 +11,8 @@ void parse_graph(Input* input, const char* graph_string, const char* flavor) {
         parse_graph_dot(input, graph_string);
     } else if (strcmp(flavor, "mermaid") == 0) {
         parse_graph_mermaid(input, graph_string);
+    } else if (strcmp(flavor, "d2") == 0) {
+        parse_graph_d2(input, graph_string);
     } else {
         printf("Unknown graph flavor: %s\n", flavor);
         // Default to DOT parser

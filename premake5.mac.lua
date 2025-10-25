@@ -636,6 +636,7 @@ project "lambda"
         "lambda/input/input-ini.cpp",
         "lambda/input/input-xml.cpp",
         "lambda/input/input-common.cpp",
+        "lambda/input/input-graph-d2.cpp",
         "lambda/input/input-graph-dot.cpp",
         "lambda/input/css/css_tokenizer.c",
         "lambda/input/css/css_integration.c",
