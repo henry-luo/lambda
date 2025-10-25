@@ -522,30 +522,30 @@ static bool resolve_property_callback(AvlNode* node, void* context) {
 
 void resolve_lambda_css_styles(DomElement* dom_elem, LayoutContext* lycon) {
     if (!dom_elem || !lycon) {
-        log_debug("[Lambda CSS] resolve_lambda_css_styles: null input (dom_elem=%p, lycon=%p)", dom_elem, lycon);
+        fprintf(stderr, "[Lambda CSS] resolve_lambda_css_styles: null input (dom_elem=%p, lycon=%p)\n", (void*)dom_elem, (void*)lycon);
         return;
     }
 
-    log_debug("[Lambda CSS] Resolving styles for element");
+    fprintf(stderr, "[Lambda CSS] Resolving styles for element\n");
 
     // iterate through specified_style AVL tree
     StyleTree* style_tree = dom_elem->specified_style;
     if (!style_tree) {
-        log_debug("[Lambda CSS] No style tree found for element");
+        fprintf(stderr, "[Lambda CSS] No style tree found for element\n");
         return;
     }
 
     if (!style_tree->tree) {
-        log_debug("[Lambda CSS] Style tree has no AVL tree");
+        fprintf(stderr, "[Lambda CSS] Style tree has no AVL tree\n");
         return;
     }
 
-    log_debug("[Lambda CSS] Style tree has %d nodes", style_tree->tree->node_count);
+    fprintf(stderr, "[Lambda CSS] Style tree has %d nodes\n", style_tree->tree->node_count);
 
     // Traverse the AVL tree and resolve each property
     int processed = avl_tree_foreach_inorder(style_tree->tree, resolve_property_callback, lycon);
 
-    log_debug("[Lambda CSS] Processed %d style properties", processed);
+    fprintf(stderr, "[Lambda CSS] Processed %d style properties\n", processed);
 }
 
 void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* decl,
@@ -795,47 +795,51 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
         // ===== GROUP 2: Box Model Basics =====
 
         case CSS_PROPERTY_WIDTH: {
-            log_debug("[CSS] Processing width property");
+            fprintf(stderr, "[CSS] Processing width property\n");
             if (!block) break;
             if (!block->blk) {
-                block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+                block->blk = alloc_block_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
                 float width = value->data.length.value;
                 block->blk->given_width = width;
+                lycon->block.given_width = width;  // CRITICAL: Also set in LayoutContext for layout calculation
                 block->blk->given_width_type = LXB_CSS_VALUE_INITIAL; // Mark as explicitly set
-                log_debug("[CSS] Width: %.2f px", width);
+                fprintf(stderr, "[CSS] Width: %.2f px\n", width);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 // For now, store percentage as-is (need parent width for proper calculation)
                 float percentage = value->data.percentage.value;
-                log_debug("[CSS] Width: %.2f%% (percentage not yet fully supported)", percentage);
+                fprintf(stderr, "[CSS] Width: %.2f%% (percentage not yet fully supported)\n", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 // 'auto' keyword
-                log_debug("[CSS] Width: auto");
+                fprintf(stderr, "[CSS] Width: auto\n");
                 block->blk->given_width_type = LXB_CSS_VALUE_AUTO;
+                lycon->block.given_width = -1.0f;  // -1 means auto in LayoutContext
             }
             break;
         }
 
         case CSS_PROPERTY_HEIGHT: {
-            log_debug("[CSS] Processing height property");
+            fprintf(stderr, "[CSS] Processing height property\n");
             if (!block) break;
             if (!block->blk) {
-                block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+                block->blk = alloc_block_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
                 float height = value->data.length.value;
                 block->blk->given_height = height;
-                log_debug("[CSS] Height: %.2f px", height);
+                lycon->block.given_height = height;  // CRITICAL: Also set in LayoutContext for layout calculation
+                fprintf(stderr, "[CSS] Height: %.2f px\n", height);
             } else if (value->type == CSS_VALUE_PERCENTAGE) {
                 float percentage = value->data.percentage.value;
-                log_debug("[CSS] Height: %.2f%% (percentage not yet fully supported)", percentage);
+                fprintf(stderr, "[CSS] Height: %.2f%% (percentage not yet fully supported)\n", percentage);
             } else if (value->type == CSS_VALUE_KEYWORD) {
                 // 'auto' keyword
-                log_debug("[CSS] Height: auto");
+                fprintf(stderr, "[CSS] Height: auto\n");
                 block->blk->given_height = -1.0f; // -1 means auto
+                lycon->block.given_height = -1.0f;  // -1 means auto in LayoutContext
             }
             break;
         }
@@ -844,7 +848,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing min-width property");
             if (!block) break;
             if (!block->blk) {
-                block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+                block->blk = alloc_block_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
@@ -862,7 +866,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing max-width property");
             if (!block) break;
             if (!block->blk) {
-                block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+                block->blk = alloc_block_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
@@ -883,7 +887,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing min-height property");
             if (!block) break;
             if (!block->blk) {
-                block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+                block->blk = alloc_block_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_LENGTH) {
@@ -901,7 +905,7 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             log_debug("[CSS] Processing max-height property");
             if (!block) break;
             if (!block->blk) {
-                block->blk = (BlockProp*)alloc_prop(lycon, sizeof(BlockProp));
+                block->blk = alloc_block_prop(lycon);
             }
 
             if (value->type == CSS_VALUE_LENGTH) {

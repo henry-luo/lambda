@@ -31,7 +31,11 @@ class RadiantLayoutTester {
      */
     async runRadiantLayout(htmlFile) {
         return new Promise((resolve, reject) => {
-            const process = spawn(this.radiantExe, ['layout', htmlFile], {
+            // For Lambda CSS, add viewport arguments to match browser reference (1200x800)
+            const args = this.engine === 'lambda-css'
+                ? ['layout', htmlFile, '--width', '1200', '--height', '800']
+                : ['layout', htmlFile];
+            const process = spawn(this.radiantExe, args, {
                 cwd: this.projectRoot
             });
 
