@@ -2067,7 +2067,7 @@ project "test_html_roundtrip_gtest"
     filter {}
     
 
-project "test_html_gtest_simple"
+project "test_html_gtest"
     kind "ConsoleApp"
     language "C++"
     targetdir "test"
@@ -2075,7 +2075,7 @@ project "test_html_gtest_simple"
     targetextension ".exe"
     
     files {
-        "test/test_html_gtest_simple.cpp",
+        "test/test_html_gtest.cpp",
     }
     
     includedirs {
