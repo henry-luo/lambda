@@ -510,15 +510,29 @@ static Item parse_css_qualified_rule(Input *input, const char **css) {
                 if (values) {
                     // Flatten single property value array
                     Item values_item = flatten_single_array(values);
+
+                    // Check for !important before adding the property
+                    skip_css_comments(css);
+                    bool is_important = false;
+                    if (**css == '!' && strncmp(*css, "!important", 10) == 0) {
+                        *css += 10;
+                        is_important = true;
+                    }
+
+                    // If important, add the flag as a separate property
                     printf("Adding property %s with values %p\n", property_str->chars, (void*)values_item.item);
                     input_add_attribute_item_to_element(input, rule, property_str->chars, values_item);
-                }
 
-                // Check for !important (for now, we'll ignore it in the flattened structure)
-                skip_css_comments(css);
-                if (**css == '!' && strncmp(*css, "!important", 10) == 0) {
-                    *css += 10;
-                    // Could add importance as property_name + "_important" if needed
+                    if (is_important) {
+                        // Add an "important" flag attribute with boolean true value
+                        StringBuf* important_sb = stringbuf_new(input->pool);
+                        stringbuf_append_str(important_sb, property_str->chars);
+                        stringbuf_append_str(important_sb, "-important");
+                        String* important_key = stringbuf_to_string(important_sb);
+
+                        Item true_item = {.item = ITEM_TRUE};
+                        input_add_attribute_item_to_element(input, rule, important_key->chars, true_item);
+                    }
                 }
             }
 
@@ -884,6 +898,7 @@ static Item parse_css_number(Input *input, const char **css) {
 
 static Item parse_css_measure(Input *input, const char **css) {
     StringBuf* sb = input->sb;
+    stringbuf_reset(sb);  // Reset the buffer before parsing measure
     const char* start = *css;
 
     // Parse number part

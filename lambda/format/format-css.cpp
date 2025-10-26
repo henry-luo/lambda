@@ -351,6 +351,14 @@ static void format_css_declarations(StringBuf* sb, Element* rule, int indent) {
             continue;
         }
 
+        // Skip -important flag fields (these are handled by their main property)
+        if (field->name->length > 10 &&
+            strncmp(field->name->str + field->name->length - 10, "-important", 10) == 0) {
+            field = field->next;
+            field_count++;
+            continue;
+        }
+
         add_css_indent(sb, indent + 1);
 
         // Clean property name - aggressive cleaning for corrupted strings
@@ -384,6 +392,28 @@ static void format_css_declarations(StringBuf* sb, Element* rule, int indent) {
         Item property_value = create_item_from_field_data(field_data, field->type->type_id);
         format_css_value(sb, property_value);
 
+        // Check if this property has an !important flag
+        // Look for a field named "propertyname-important"
+        bool is_important = false;
+        if (clean_len > 0) {
+            ShapeEntry* check_field = type_map->shape;
+            int check_count = 0;
+            while (check_field && check_count < type_map->length) {
+                if (check_field->name &&
+                    check_field->name->length == clean_len + 10 &&
+                    strncmp(check_field->name->str, prop_name, clean_len) == 0 &&
+                    strncmp(check_field->name->str + clean_len, "-important", 10) == 0) {
+                    is_important = true;
+                    break;
+                }
+                check_field = check_field->next;
+                check_count++;
+            }
+        }
+
+        if (is_important) {
+            stringbuf_append_str(sb, " !important");
+        }
         stringbuf_append_str(sb, ";\n");
 
         field = field->next;
