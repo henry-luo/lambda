@@ -1093,7 +1093,7 @@
                     },
                     {
                         "source": "test_cmdedit_gtest.cpp",
-                        "name": "⌨️ Command Line Editor Tests (GTest)",
+                        "name": "⌨️  Command Line Editor Tests (GTest)",
                         "dependencies": [
                             "lambda-lib"
                         ],
@@ -1325,7 +1325,7 @@
                     },
                     {
                         "source": "test/test_sysinfo_gtest.cpp",
-                        "name": "🖥️ System Information Tests (GTest)",
+                        "name": "🖥️  System Information Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1620,7 +1620,7 @@
                     },
                     {
                         "source": "test/test_jsx_roundtrip_gtest.cpp",
-                        "name": "⚛️ JSX Roundtrip Tests (GTest)",
+                        "name": "⚛️  JSX Roundtrip Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
