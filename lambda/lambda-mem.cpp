@@ -159,12 +159,20 @@ void check_memory_leak() {
 void free_container(Container* cont, bool clear_entry);
 
 void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
+    log_debug("free_map_item: field=%p, map_data=%p, clear_entry=%d", field, map_data, clear_entry);
     while (field) {
-        // log_debug("freeing map field: %.*s, type: %d", (int)field->name.length, field->name.str, field->type->type_id);
+        const char* field_name = field->name ? "named_field" : "(nested)";
+        log_debug("freeing map field: name=%s, name_ptr=%p, type=%d, byte_offset=%d",
+                  field_name, field->name,
+                  field->type ? field->type->type_id : -1, field->byte_offset);
         void* field_ptr = ((uint8_t*)map_data) + field->byte_offset;
+        log_debug("field_ptr=%p", field_ptr);
         if (!field->name) { // nested map
             Map *nested_map = *(Map**)field_ptr;
+            log_debug("nested_map pointer: %p", nested_map);
             if (nested_map) {
+                log_debug("nested_map: data=%p, ref_cnt=%d, type=%p",
+                          nested_map->data, nested_map->ref_cnt, nested_map->type);
                 // delink the nested map
                 if (nested_map->ref_cnt > 0) nested_map->ref_cnt--;
                 if (!nested_map->ref_cnt) free_container((Container*)nested_map, clear_entry);
@@ -199,7 +207,8 @@ void free_map_item(ShapeEntry *field, void* map_data, bool clear_entry) {
 
 void free_container(Container* cont, bool clear_entry) {
     if (!cont) return;
-    log_debug("free container: %p", cont);
+    log_debug("free_container: cont=%p, clear_entry=%d", cont, clear_entry);
+    log_debug("container details: type_id=%d, ref_cnt=%d", cont->type_id, cont->ref_cnt);
     assert(cont->ref_cnt == 0);
     TypeId type_id = cont->type_id;
     if (type_id == LMD_TYPE_LIST) {
@@ -216,13 +225,29 @@ void free_container(Container* cont, bool clear_entry) {
     }
     else if (type_id == LMD_TYPE_ARRAY) {
         Array *arr = (Array*)cont;
+        log_debug("freeing array: %p, ref_cnt=%d, length=%ld, items=%p", arr, arr->ref_cnt, arr->length, arr->items);
         if (!arr->ref_cnt) {
             // free array items
+            log_debug("freeing array items, length=%ld", arr->length);
             for (int j = 0; j < arr->length; j++) {
+                log_debug("freeing array item[%d]: type=%d, pointer=%p", j, arr->items[j].type_id, arr->items[j].pointer);
                 free_item(arr->items[j], clear_entry);
             }
-            if (arr->items) free(arr->items);
+            if (arr->items) {
+                log_debug("freeing arr->items array: %p", arr->items);
+                free(arr->items);
+            }
+            log_debug("calling pool_free on array container: %p, pool=%p", cont, context->heap->pool);
+            log_debug("checking if pointer is in pool range...");
+            // DIAGNOSTIC: Check if this pointer looks valid
+            if ((uint64_t)cont < 0x100000000ULL) {
+                log_error("DIAGNOSTIC: Array pointer %p appears to be in low memory - likely stack allocated or corrupted!", cont);
+                log_error("DIAGNOSTIC: This array was NOT allocated from heap pool and should NOT be freed!");
+                // Don't free this - it will crash
+                return;
+            }
             pool_free(context->heap->pool, cont);
+            log_debug("pool_free completed for array");
         }
     }
     else if (type_id == LMD_TYPE_ARRAY_INT) {
@@ -248,11 +273,20 @@ void free_container(Container* cont, bool clear_entry) {
     }
     else if (type_id == LMD_TYPE_MAP) {
         Map *map = (Map*)cont;
+        log_debug("freeing map: %p, ref_cnt=%d, type=%p, data=%p", map, map->ref_cnt, map->type, map->data);
         if (!map->ref_cnt) {
             // free map items based on the shape
             ShapeEntry *field = ((TypeMap*)map->type)->shape;
-            if (field) { free_map_item(field, map->data, clear_entry); }
-            if (map->data) free(map->data);
+            log_debug("map shape field: %p", field);
+            if (field) {
+                log_debug("calling free_map_item with field=%p, map->data=%p", field, map->data);
+                free_map_item(field, map->data, clear_entry);
+            }
+            if (map->data) {
+                log_debug("freeing map->data: %p", map->data);
+                free(map->data);
+            }
+            log_debug("calling pool_free on map: %p", cont);
             pool_free(context->heap->pool, cont);
         }
     }
