@@ -845,12 +845,13 @@ static Item parse_element(Input *input, const char **html, const char *html_star
                         const char* before_child_parse = *html;
                         Item child = parse_element(input, html, html_start);
 
-                        if (child.type_id == LMD_TYPE_ERROR) {
+                        TypeId child_type = get_type_id(child);
+                        if (child_type == LMD_TYPE_ERROR) {
                             // If we hit an error, try to recover by skipping this character
                             if (**html) (*html)++;
                             break;
                         }
-                        else if (child.type_id != LMD_TYPE_NULL) {
+                        else if (child_type != LMD_TYPE_NULL) {
                             list_push((List*)element, child);
                         }
 
@@ -869,16 +870,17 @@ static Item parse_element(Input *input, const char **html, const char *html_star
                     // Collect text until we hit '<' or closing tag
                     int text_chars = 0;
                     while (**html && **html != '<' && text_chars < MAX_CONTENT_CHARS &&
-                           strncasecmp(*html, closing_tag, closing_tag_len) != 0) {
+                        strncasecmp(*html, closing_tag, closing_tag_len) != 0) {
                         stringbuf_append_char(text_sb, **html);
-                        (*html)++;
-                        text_chars++;
+                        (*html)++;  text_chars++;
                     }
 
                     // Create text string if we have content (preserve all whitespace)
                     if (text_chars > 0) {
                         String *text_string = stringbuf_to_string(text_sb);
+                        log_debug("got text content: '%s'", text_string->chars);
                         Item text_item = {.item = s2it(text_string)};
+                        log_debug("pushing text to element %p", element);
                         list_push((List*)element, text_item);
                     }
                 }

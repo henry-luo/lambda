@@ -1244,8 +1244,8 @@
                         "binary": "test_html_roundtrip_gtest.exe"
                     },
                     {
-                        "source": "test_html_gtest_simple.cpp",
-                        "name": "🌐 HTML Parser Tests (GTest) - Simple",
+                        "source": "test_html_gtest.cpp",
+                        "name": "🌐 HTML Parser Tests (GTest)",
                         "dependencies": [
                             "lambda-input-full"
                         ],
@@ -1254,7 +1254,7 @@
                             "gtest_main",
                             "rpmalloc"
                         ],
-                        "binary": "test_html_gtest_simple.exe"
+                        "binary": "test_html_gtest.exe"
                     },
                     {
                         "source": "test_lambda_domnode_gtest.cpp",

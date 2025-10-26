@@ -270,7 +270,7 @@ void array_push(Array* arr, Item item) {
 
 void list_push(List *list, Item item) {
     TypeId type_id = get_type_id(item);
-    // log_debug("list_push: pushing item: type_id: %d", type_id);
+    log_debug("list_push: pushing item: type_id: %d", type_id);
     if (type_id == LMD_TYPE_NULL) { return; } // skip NULL value
     if (type_id == LMD_TYPE_LIST) { // nest list is flattened
         log_debug("list_push: pushing nested list: %p, type_id: %d", item.list, type_id);
@@ -285,8 +285,10 @@ void list_push(List *list, Item item) {
     else if (type_id == LMD_TYPE_STRING) {
         // need to merge with previous string if any (unless disabled)
         if (list->length > 0 && !input_context->disable_string_merging) {
+            log_debug("list_push: checking for string merging, list length: %ld", list->length);
             Item prev_item = list->items[list->length - 1];
             if (get_type_id(prev_item) == LMD_TYPE_STRING) {
+                log_debug("list_push: merging strings");
                 String *prev_str = (String*)prev_item.pointer;
                 String *new_str = (String*)item.pointer;
                 // merge the two strings
