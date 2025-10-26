@@ -43,7 +43,7 @@ protected:
     }
 
     // Helper: Parse HTML string using Lambda parser
-    Input* parse_html(const char* html_content) {
+    Input* parse_html_source(const char* html_content) {
         String* type_str = create_lambda_string("html");
         Url* url = url_parse("file://test.html");
 
@@ -84,7 +84,7 @@ protected:
 TEST_F(LambdaDomNodeTest, CreateMarkElement) {
     const char* html = "<div id=\"test\">Hello</div>";
 
-    Input* input = parse_html(html);
+    Input* input = parse_html_source(html);
     ASSERT_NE(input, nullptr);
 
     Element* root = get_root_element(input);
@@ -111,7 +111,7 @@ TEST_F(LambdaDomNodeTest, CreateMarkText) {
 TEST_F(LambdaDomNodeTest, GetTagName) {
     const char* html = "<div>Content</div>";
 
-    Input* input = parse_html(html);
+    Input* input = parse_html_source(html);
     Element* root = get_root_element(input);
     DomNode* node = DomNode::create_mark_element(root);
 
@@ -123,7 +123,7 @@ TEST_F(LambdaDomNodeTest, GetTagName) {
 TEST_F(LambdaDomNodeTest, GetAttribute) {
     const char* html = "<div id=\"main\" class=\"container\">Content</div>";
 
-    Input* input = parse_html(html);
+    Input* input = parse_html_source(html);
     Element* root = get_root_element(input);
     DomNode* node = DomNode::create_mark_element(root);
 
@@ -149,7 +149,7 @@ TEST_F(LambdaDomNodeTest, GetAttribute) {
 TEST_F(LambdaDomNodeTest, GetBooleanAttribute) {
     const char* html = "<input disabled checked=\"checked\">";
 
-    Input* input = parse_html(html);
+    Input* input = parse_html_source(html);
     Element* root = get_root_element(input);
     DomNode* node = DomNode::create_mark_element(root);
 
@@ -167,7 +167,7 @@ TEST_F(LambdaDomNodeTest, GetBooleanAttribute) {
 TEST_F(LambdaDomNodeTest, GetEmptyAttribute) {
     const char* html = "<div class=\"\">Content</div>";
 
-    Input* input = parse_html(html);
+    Input* input = parse_html_source(html);
     Element* root = get_root_element(input);
     DomNode* node = DomNode::create_mark_element(root);
 
@@ -182,7 +182,7 @@ TEST_F(LambdaDomNodeTest, GetEmptyAttribute) {
 TEST_F(LambdaDomNodeTest, NavigateFirstChild) {
     const char* html = "<div><p>Paragraph</p></div>";
 
-    Input* input = parse_html(html);
+    Input* input = parse_html_source(html);
     Element* root = get_root_element(input);
     DomNode* div_node = DomNode::create_mark_element(root);
 
@@ -199,7 +199,7 @@ TEST_F(LambdaDomNodeTest, NavigateFirstChild) {
 TEST_F(LambdaDomNodeTest, NavigateMultipleChildren) {
     const char* html = "<div><p>First</p><span>Second</span><a>Third</a></div>";
 
-    Input* input = parse_html(html);
+    Input* input = parse_html_source(html);
     Element* root = get_root_element(input);
     DomNode* div_node = DomNode::create_mark_element(root);
 
@@ -226,7 +226,7 @@ TEST_F(LambdaDomNodeTest, NavigateMultipleChildren) {
 TEST_F(LambdaDomNodeTest, NavigateTextNode) {
     const char* html = "<div>Text content</div>";
 
-    Input* input = parse_html(html);
+    Input* input = parse_html_source(html);
     Element* root = get_root_element(input);
     DomNode* div_node = DomNode::create_mark_element(root);
 
@@ -245,7 +245,7 @@ TEST_F(LambdaDomNodeTest, NavigateTextNode) {
 TEST_F(LambdaDomNodeTest, NavigateMixedContent) {
     const char* html = "<div>Text before<em>emphasized</em>Text after</div>";
 
-    Input* input = parse_html(html);
+    Input* input = parse_html_source(html);
     Element* root = get_root_element(input);
     DomNode* div_node = DomNode::create_mark_element(root);
 
@@ -271,7 +271,7 @@ TEST_F(LambdaDomNodeTest, NavigateMixedContent) {
 TEST_F(LambdaDomNodeTest, NavigateNestedStructure) {
     const char* html = "<div><ul><li>Item 1</li><li>Item 2</li></ul></div>";
 
-    Input* input = parse_html(html);
+    Input* input = parse_html_source(html);
     Element* root = get_root_element(input);
     DomNode* div_node = DomNode::create_mark_element(root);
 
@@ -304,7 +304,7 @@ TEST_F(LambdaDomNodeTest, NavigateNestedStructure) {
 TEST_F(LambdaDomNodeTest, CachedNavigation) {
     const char* html = "<div><p>Child</p></div>";
 
-    Input* input = parse_html(html);
+    Input* input = parse_html_source(html);
     Element* root = get_root_element(input);
     DomNode* div_node = DomNode::create_mark_element(root);
 

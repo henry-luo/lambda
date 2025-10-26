@@ -76,17 +76,18 @@ DomNode* DomNode::first_child() {
 
     // Handle mark elements
     if (type == MARK_ELEMENT && mark_element) {
-        // Lambda Elements are Lists with children as items
+        // Lambda Elements inherit from List - the List items are children content
+        // Attributes are stored separately in Element's type/data fields
         Element* elem = (Element*)mark_element;
         List* list = (List*)elem;
 
-        // Find first element child (skip text nodes)
+        // Find first child (element or text node)
         int64_t child_index = -1;
         TypeId first_type = 0;
         for (int64_t i = 0; i < list->length; i++) {
             Item item = list->items[i];
             TypeId item_type = get_type_id(item);
-            if (item_type == LMD_TYPE_ELEMENT) {
+            if (item_type == LMD_TYPE_ELEMENT || item_type == LMD_TYPE_STRING) {
                 child_index = i;
                 first_type = item_type;
                 break;
@@ -157,22 +158,28 @@ DomNode* DomNode::next_sibling() {
             }
         }
 
-        // Find next element sibling (skip text nodes)
+        // Find next sibling (element or text node)
         if (my_index >= 0) {
             for (int64_t i = my_index + 1; i < parent_list->length; i++) {
                 Item next_item = parent_list->items[i];
                 TypeId next_type = get_type_id(next_item);
 
-                if (next_type == LMD_TYPE_ELEMENT) {
-                    DomNode* sibling_node = create_mark_element((Element*)next_item.pointer);
+                if (next_type == LMD_TYPE_ELEMENT || next_type == LMD_TYPE_STRING) {
+                    DomNode* sibling_node = nullptr;
 
-                    // CRITICAL: Link to DomElement for CSS access
-                    // Navigate parallel DomElement tree to get styling
-                    if (this->style) {
-                        DomElement* current_dom = (DomElement*)this->style;
-                        if (current_dom->next_sibling) {
-                            sibling_node->style = (Style*)current_dom->next_sibling;
+                    if (next_type == LMD_TYPE_ELEMENT) {
+                        sibling_node = create_mark_element((Element*)next_item.pointer);
+
+                        // CRITICAL: Link to DomElement for CSS access
+                        // Navigate parallel DomElement tree to get styling
+                        if (this->style) {
+                            DomElement* current_dom = (DomElement*)this->style;
+                            if (current_dom->next_sibling) {
+                                sibling_node->style = (Style*)current_dom->next_sibling;
+                            }
                         }
+                    } else if (next_type == LMD_TYPE_STRING) {
+                        sibling_node = create_mark_text((String*)next_item.pointer);
                     }
 
                     if (sibling_node) {
@@ -180,9 +187,9 @@ DomNode* DomNode::next_sibling() {
                         this->_next = sibling_node;
                         return sibling_node;
                     }
-                    break;  // Found element, done
+                    break;  // Found node, done
                 }
-                // Skip non-element nodes and continue searching
+                // Skip other node types and continue searching
             }
         }
     }
