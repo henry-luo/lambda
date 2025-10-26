@@ -909,7 +909,9 @@ static Item parse_element(Input *input, const char **html, const char *html_star
     return {.element = element};
 }
 
-void parse_html(Input* input, const char* html_string) {
+// Internal function - use input_from_source() instead for external API
+__attribute__((visibility("hidden")))
+void parse_html_impl(Input* input, const char* html_string) {
     input->sb = stringbuf_new(input->pool);
     const char *html = html_string;
 
