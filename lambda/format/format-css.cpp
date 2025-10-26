@@ -14,6 +14,37 @@ static void format_css_value(StringBuf* sb, Item value);
 static void format_css_declarations(StringBuf* sb, Element* rule, int indent);
 static void format_css_function(StringBuf* sb, Element* function);
 
+// Helper function to check if a font name needs quotes
+// Returns true if the font name contains spaces, special characters, or starts with a digit
+static bool font_name_needs_quotes(const char* name, size_t len) {
+    if (!name || len == 0) return false;
+
+    // Generic font families never need quotes
+    if ((len == 5 && strncmp(name, "serif", 5) == 0) ||
+        (len == 10 && strncmp(name, "sans-serif", 10) == 0) ||
+        (len == 9 && strncmp(name, "monospace", 9) == 0) ||
+        (len == 7 && strncmp(name, "cursive", 7) == 0) ||
+        (len == 7 && strncmp(name, "fantasy", 7) == 0)) {
+        return false;
+    }
+
+    // Check if name starts with a digit
+    if (name[0] >= '0' && name[0] <= '9') return true;
+
+    // Check for spaces or special characters (anything not alphanumeric or hyphen)
+    for (size_t i = 0; i < len; i++) {
+        char c = name[i];
+        if (!(c >= 'a' && c <= 'z') &&
+            !(c >= 'A' && c <= 'Z') &&
+            !(c >= '0' && c <= '9') &&
+            c != '-' && c != '_') {
+            return true; // Contains special character or space
+        }
+    }
+
+    return false;
+}
+
 // Helper function to add indentation
 static void add_css_indent(StringBuf* sb, int indent) {
     for (int i = 0; i < indent; i++) {
@@ -98,7 +129,23 @@ static void format_css_value(StringBuf* sb, Item value) {
                 const char* separator = likely_font_family ? ", " : " ";
                 for (int i = 0; i < arr->length; i++) {
                     if (i > 0) stringbuf_append_str(sb, separator);
-                    format_css_value(sb, arr->items[i]);
+
+                    // Special handling for font-family symbols
+                    if (likely_font_family && get_type_id(arr->items[i]) == LMD_TYPE_SYMBOL) {
+                        String* symbol = (String*)arr->items[i].pointer;
+                        if (symbol && symbol->chars && symbol->len > 0) {
+                            // Check if this font name needs quotes
+                            if (font_name_needs_quotes(symbol->chars, symbol->len)) {
+                                stringbuf_append_str(sb, "\"");
+                                stringbuf_append_format(sb, "%.*s", (int)symbol->len, symbol->chars);
+                                stringbuf_append_str(sb, "\"");
+                            } else {
+                                stringbuf_append_format(sb, "%.*s", (int)symbol->len, symbol->chars);
+                            }
+                        }
+                    } else {
+                        format_css_value(sb, arr->items[i]);
+                    }
                 }
             }
             break;
