@@ -174,7 +174,7 @@ TEST_F(CssParserUnitTest, Selector_ID_Simple) {
     EXPECT_EQ(selector->type, CSS_SELECTOR_TYPE_ID);
     ASSERT_NE(selector->value, nullptr);
     // Value should NOT include the # symbol
-    EXPECT_STREQ(selector->value, "#header");
+    EXPECT_STREQ(selector->value, "header");
 }
 
 TEST_F(CssParserUnitTest, Selector_ID_Footer) {
@@ -183,7 +183,7 @@ TEST_F(CssParserUnitTest, Selector_ID_Footer) {
 
     ASSERT_NE(selector, nullptr);
     EXPECT_EQ(selector->type, CSS_SELECTOR_TYPE_ID);
-    EXPECT_STREQ(selector->value, "#footer");
+    EXPECT_STREQ(selector->value, "footer");
 }
 
 TEST_F(CssParserUnitTest, Selector_ID_WithHyphen) {
@@ -192,7 +192,7 @@ TEST_F(CssParserUnitTest, Selector_ID_WithHyphen) {
 
     ASSERT_NE(selector, nullptr);
     EXPECT_EQ(selector->type, CSS_SELECTOR_TYPE_ID);
-    EXPECT_STREQ(selector->value, "#main-content");
+    EXPECT_STREQ(selector->value, "main-content");
 }
 
 TEST_F(CssParserUnitTest, Selector_ID_WithUnderscore) {
@@ -201,7 +201,7 @@ TEST_F(CssParserUnitTest, Selector_ID_WithUnderscore) {
 
     ASSERT_NE(selector, nullptr);
     EXPECT_EQ(selector->type, CSS_SELECTOR_TYPE_ID);
-    EXPECT_STREQ(selector->value, "#my_id");
+    EXPECT_STREQ(selector->value, "my_id");
 }
 
 TEST_F(CssParserUnitTest, Selector_ID_WithWhitespace) {
@@ -210,7 +210,7 @@ TEST_F(CssParserUnitTest, Selector_ID_WithWhitespace) {
 
     ASSERT_NE(selector, nullptr);
     EXPECT_EQ(selector->type, CSS_SELECTOR_TYPE_ID);
-    EXPECT_STREQ(selector->value, "#header");
+    EXPECT_STREQ(selector->value, "header");
 }
 
 // =============================================================================
@@ -593,7 +593,7 @@ TEST_F(CssParserUnitTest, Rule_DeclarationsWithImportant) {
 
     ASSERT_NE(rule, nullptr);
     EXPECT_GE(rule->data.style_rule.declaration_count, 2);
-    
+
     // Check that at least one declaration has important flag
     bool has_important = false;
     for (size_t i = 0; i < rule->data.style_rule.declaration_count; i++) {
