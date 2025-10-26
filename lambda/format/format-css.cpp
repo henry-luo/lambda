@@ -189,6 +189,7 @@ static void format_css_function(StringBuf* sb, Element* function) {
         List* param_list = (List*)function;
 
         bool is_calc = is_calc_function(elmt_type->name.str, elmt_type->name.length);
+        bool is_url = (elmt_type->name.length == 3 && strncmp(elmt_type->name.str, "url", 3) == 0);
         bool in_gradient_direction = false;
 
         for (long i = 0; i < param_list->length; i++) {
@@ -269,7 +270,25 @@ static void format_css_function(StringBuf* sb, Element* function) {
                 }
             }
 
-            format_css_value(sb, param_value);
+            // Special handling for URL function: wrap string values in quotes
+            if (is_url && param_type == LMD_TYPE_STRING) {
+                String* str = (String*)param_value.pointer;
+                if (str && str->chars) {
+                    stringbuf_append_char(sb, '"');
+                    // Escape any quotes in the URL
+                    for (size_t j = 0; j < str->len; j++) {
+                        if (str->chars[j] == '"') {
+                            stringbuf_append_char(sb, '\\');
+                        }
+                        stringbuf_append_char(sb, str->chars[j]);
+                    }
+                    stringbuf_append_char(sb, '"');
+                } else {
+                    format_css_value(sb, param_value);
+                }
+            } else {
+                format_css_value(sb, param_value);
+            }
         }
 
         stringbuf_append_char(sb, ')');
