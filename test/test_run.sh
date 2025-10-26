@@ -450,8 +450,11 @@ parse_json_results() {
         # GTest JSON format
         local total=$(jq -r '.tests // 0' "$json_file" 2>/dev/null || echo "0")
         local failed=$(jq -r '.failures // 0' "$json_file" 2>/dev/null || echo "0")
+        local disabled=$(jq -r '.disabled // 0' "$json_file" 2>/dev/null || echo "0")
         # Ensure we have valid numbers
-        if [[ "$total" =~ ^[0-9]+$ ]] && [[ "$failed" =~ ^[0-9]+$ ]]; then
+        if [[ "$total" =~ ^[0-9]+$ ]] && [[ "$failed" =~ ^[0-9]+$ ]] && [[ "$disabled" =~ ^[0-9]+$ ]]; then
+            # Exclude disabled tests from the total count
+            local total=$((total - disabled))
             local passed=$((total - failed))
         else
             local passed=0
