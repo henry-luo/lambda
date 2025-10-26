@@ -278,6 +278,36 @@ ensure_test_compiled() {
     fi
 }
 
+# Function to detect if a test executable is a GTest test
+is_gtest_test() {
+    local test_exe="$1"
+    local base_name="$(basename "$test_exe" .exe)"
+
+    # First check: name ends with _gtest
+    if [[ "$base_name" =~ _gtest$ ]]; then
+        return 0
+    fi
+
+    # Second check: explicitly known GTest tests (for tests with non-standard names)
+    case "$base_name" in
+        test_flex_minimal|test_flex_new_features|test_css_system|test_css_style_node|test_avl_tree|test_avl_tree_perf|\
+        test_compound_descendant_selectors|test_selector_groups|test_css_tokenizer_unit|test_css_parser_unit|\
+        test_css_integration_unit)
+            return 0
+            ;;
+    esac
+
+    # Third check: try to run with --gtest_list_tests to detect GTest at runtime
+    # This is more reliable but slower, so we do it last
+    if [ -x "$test_exe" ]; then
+        if timeout 2s "./$test_exe" --gtest_list_tests >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 # Function to run a test executable with timeout and JSON output
 run_test_with_timeout() {
     local test_exe="$1"
@@ -302,8 +332,8 @@ run_test_with_timeout() {
             "./test/csv_generator.exe" "$json_file" "$TEST_OUTPUT_DIR/${base_name}_results.csv" > /dev/null 2>&1 || echo "Warning: CSV generation failed" >&2
         fi
     else
-        # Check if this is a GTest test by examining the executable name
-        if [[ "$base_name" =~ _gtest$ ]] || [[ "$base_name" == "test_flex_minimal" ]] || [[ "$base_name" == "test_flex_new_features" ]] || [[ "$base_name" == "test_css_system" ]] || [[ "$base_name" == "test_css_style_node" ]] || [[ "$base_name" == "test_avl_tree" ]]; then
+        # Check if this is a GTest test
+        if is_gtest_test "$test_exe"; then
             # GTest-based tests - use JSON output format
 
             # Special handling for input roundtrip test - only run working JSON tests
