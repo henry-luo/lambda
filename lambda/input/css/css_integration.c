@@ -130,6 +130,12 @@ static void css_enhanced_apply_rule_to_element(CssRule* rule, CssStyleNode* elem
 CssEngine* css_enhanced_engine_create(Pool* pool) {
     if (!pool) return NULL;
 
+    // Initialize CSS property system FIRST (required for property lookups)
+    if (!css_property_system_init(pool)) {
+        fprintf(stderr, "[CSS Engine] Failed to initialize property system\n");
+        return NULL;
+    }
+
     CssEngine* engine = (CssEngine*)pool_calloc(pool, sizeof(CssEngine));
     if (!engine) return NULL;
 
