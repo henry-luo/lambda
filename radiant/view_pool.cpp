@@ -76,6 +76,13 @@ View* alloc_view(LayoutContext* lycon, ViewType type, DomNode *node) {
     view->type = type;  view->node = node;  view->parent = lycon->parent;
 
     // COMPREHENSIVE VIEW ALLOCATION TRACING
+    fprintf(stderr, "[DOM DEBUG] alloc_view - created view %p, type=%d, node=%p", view, type, (void*)node);
+    if (node) {
+        fprintf(stderr, ", node_type=%d\n", node->type);
+    } else {
+        fprintf(stderr, ", node=NULL\n");
+    }
+
     const char* node_name = node ? node->name() : "NULL";
     const char* parent_name = lycon->parent ? "has_parent" : "no_parent";
     log_debug("*** ALLOC_VIEW TRACE: Created view %p (type=%d) for node %s (%p), parent=%p (%s)",
@@ -618,6 +625,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     // CRITICAL FIX: Provide better element names for debugging
     const char* tag_name = "unknown";
     if (block->node) {
+        fprintf(stderr, "[DOM DEBUG] view_to_json accessing block %p, block->node=%p\n", (void*)block, (void*)block->node);
         const char* node_name = block->node->name();
         if (node_name) {
             // CRITICAL ISSUE: #null elements should not exist in proper DOM structure
