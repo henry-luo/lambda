@@ -364,6 +364,12 @@ DomElement* build_dom_tree_from_element(Element* elem, Pool* pool, DomElement* p
         return nullptr;  // Skip comments, DOCTYPE, and XML declarations
     }
 
+    // skip script elements - they should not participate in layout
+    // script elements have display: none by default in browser user-agent stylesheets
+    if (strcasecmp(tag_name, "script") == 0) {
+        return nullptr;  // Skip script elements during DOM tree building
+    }
+
     // create DomElement
     DomElement* dom_elem = dom_element_create(pool, tag_name, (void*)elem);
     if (!dom_elem) return nullptr;
