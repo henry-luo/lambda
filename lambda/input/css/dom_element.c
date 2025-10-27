@@ -338,7 +338,6 @@ bool dom_element_init(DomElement* element, Pool* pool, const char* tag_name, voi
 
     // Initialize version tracking
     element->style_version = 1;
-    element->computed_version = 0;
     element->needs_style_recompute = true;
 
     // Initialize arrays
@@ -376,7 +375,6 @@ void dom_element_clear(DomElement* element) {
 
     // Reset version tracking
     element->style_version++;
-    element->computed_version = 0;
     element->needs_style_recompute = true;
 
     // Note: We don't free memory here since it's pool-allocated
@@ -749,84 +747,6 @@ CssDeclaration* dom_element_get_specified_value(DomElement* element, CssProperty
     return style_tree_get_declaration(element->specified_style, property_id);
 }
 
-CssValue* dom_element_get_computed_value(DomElement* element, CssPropertyId property_id) {
-    if (!element || !element->computed_style) {
-        return NULL;
-    }
-
-    // Check if recomputation is needed
-    if (element->needs_style_recompute ||
-        element->computed_version != element->style_version) {
-        dom_element_recompute_styles(element);
-    }
-
-    // Get computed value from tree
-    return style_tree_get_computed_value(element->computed_style, property_id,
-                                        element->parent ? element->parent->computed_style : NULL);
-}
-
-void dom_element_invalidate_computed_values(DomElement* element, bool propagate_to_children) {
-    if (!element) {
-        return;
-    }
-
-    element->needs_style_recompute = true;
-
-    if (propagate_to_children) {
-        DomElement* child = element->first_child;
-        while (child) {
-            dom_element_invalidate_computed_values(child, true);
-            child = child->next_sibling;
-        }
-    }
-}
-
-// callback for copying specified properties to computed_style
-static bool copy_specified_to_computed_callback(StyleNode* node, void* context) {
-    DomElement* element = (DomElement*)context;
-    if (!node || !element || !element->computed_style) {
-        return true; // continue iteration
-    }
-
-    // Get the property ID from the AVL node
-    CssPropertyId property_id = (CssPropertyId)node->base.property_id;
-
-    // Only copy if property doesn't already exist in computed_style
-    // (inherited properties are already set by style_tree_apply_inheritance)
-    CssDeclaration* existing = style_tree_get_declaration(element->computed_style, property_id);
-    if (!existing && node->winning_decl) {
-        // Copy the specified declaration to computed
-        style_tree_apply_declaration(element->computed_style, node->winning_decl);
-    }
-
-    return true; // continue iteration
-}
-
-bool dom_element_recompute_styles(DomElement* element) {
-    if (!element) {
-        return false;
-    }
-
-    // Apply inheritance from parent
-    if (element->parent && element->parent->computed_style) {
-        style_tree_apply_inheritance(element->computed_style, element->parent->computed_style);
-    }
-
-    // Copy all specified values to computed_style
-    // Non-inherited properties need explicit copying
-    if (element->specified_style) {
-        style_tree_foreach(element->specified_style, copy_specified_to_computed_callback, element);
-    }
-
-    // TODO: Implement full value computation (resolve relative units, percentages, etc.)
-
-    // Update version tracking
-    element->computed_version = element->style_version;
-    element->needs_style_recompute = false;
-
-    return true;
-}
-
 bool dom_element_remove_property(DomElement* element, CssPropertyId property_id) {
     if (!element || !element->specified_style) {
         return false;
@@ -932,7 +852,7 @@ bool dom_element_append_child(DomElement* parent, DomElement* child) {
     }
 
     // Invalidate child's computed values (parent relationship changed)
-    dom_element_invalidate_computed_values(child, true);
+    // dom_element_invalidate_computed_values(child, true);
 
     return true;
 }
@@ -994,7 +914,7 @@ bool dom_element_insert_before(DomElement* parent, DomElement* new_child, DomEle
     reference_child->prev_sibling = new_child;
 
     // Invalidate new child's computed values
-    dom_element_invalidate_computed_values(new_child, true);
+    // dom_element_invalidate_computed_values(new_child, true);
 
     return true;
 }
@@ -1111,7 +1031,6 @@ void dom_element_print_info(DomElement* element) {
 
     printf(">\n");
     printf("  Style version: %u\n", element->style_version);
-    printf("  Computed version: %u\n", element->computed_version);
     printf("  Needs recompute: %s\n", element->needs_style_recompute ? "yes" : "no");
     printf("  Pseudo-state: 0x%08X\n", element->pseudo_state);
     printf("  Children: %d\n", dom_element_count_children(element));

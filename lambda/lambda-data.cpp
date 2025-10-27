@@ -693,3 +693,39 @@ TypedItem elmt_get_typed(Element* elmt, Item key) {
     }
     return _map_get_typed((TypeMap*)elmt->type, elmt->data, key_str, &is_found);
 }
+
+bool Element::has_attr(const char* attr_name) {
+    if (!this || !this->type) return false;
+
+    TypeElmt* type = (TypeElmt*)this->type;
+    if (!type->shape) return false;
+
+    ShapeEntry* shape = type->shape;
+    // Iterate through the shape to find the attribute
+    while (shape) {
+        if (shape->name && strview_equal(shape->name, attr_name)) {
+            return true;
+        }
+        shape = shape->next;
+    }
+    return false;
+}
+
+/*
+TypedItem Element::get_attr(const char* attr_name) {
+    if (!this || !this->type) return null_result;
+
+    TypeElmt* type = (TypeElmt*)this->type;
+    if (!type->shape) return null_result;
+
+    ShapeEntry* shape = type->shape;
+    // Iterate through the shape to find the attribute
+    while (shape) {
+        if (shape->name && strview_equal(shape->name, attr_name)) {
+            return shape->value;
+        }
+        shape = shape->next;
+    }
+    return null_result;
+}
+*/
