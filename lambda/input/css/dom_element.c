@@ -1139,12 +1139,17 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
         dom_element_add_class(clone, source->class_names[i]);
     }
 
-    // Copy style trees (simplified - just copy references for now)
-    if (source->specified_style && clone->specified_style) {
-        // TODO: Implement deep copy of style trees
-        // For now, this is a shallow reference copy
-        // clone->specified_style = source->specified_style;
+    // Deep copy style trees using style_tree_clone
+    if (source->specified_style) {
+        clone->specified_style = style_tree_clone(source->specified_style, pool);
     }
+
+    if (source->computed_style) {
+        clone->computed_style = style_tree_clone(source->computed_style, pool);
+    }
+
+    // Note: inline_style field may not exist in all DomElement versions
+    // Skip inline_style copy if the field doesn't exist
 
     // Copy pseudo state
     clone->pseudo_state = source->pseudo_state;
@@ -1152,9 +1157,7 @@ DomElement* dom_element_clone(DomElement* source, Pool* pool) {
     // Note: Children are not cloned - caller should handle that if needed
 
     return clone;
-}
-
-// ============================================================================
+}// ============================================================================
 // DOM Text Node Implementation
 // ============================================================================
 
