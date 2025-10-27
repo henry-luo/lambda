@@ -93,6 +93,7 @@
         "radiant/render_pdf.cpp",
         "radiant/render_img.cpp",
         "radiant/event.cpp",
+        "radiant/cmd_layout.cpp",
         "radiant/window.cpp",
         "typeset/typeset.c",
         "typeset/view/view_tree.c",
@@ -103,8 +104,7 @@
         "typeset/output/pdf_renderer.c",
         "typeset/output/pdf_renderer_enhanced.c",
         "lambda/main-repl.cpp",
-        "lambda/main.cpp",
-        "lambda/cmd_layout.cpp"
+        "lambda/main.cpp"
     ],
     "includes": [
         ".",
