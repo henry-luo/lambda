@@ -705,7 +705,7 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
             DomNode* sibling = parent->first_child();
 
             while (sibling) {
-                if (sibling->type == LEXBOR_ELEMENT) {
+                if (sibling->type == LEXBOR_ELEMENT || sibling->type == MARK_ELEMENT) {
                     const char* sibling_tag = sibling->name();
                     if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
                         sibling_count++;
@@ -995,14 +995,20 @@ void print_block_json(ViewBlock* block, StrBuf* buf, int indent, float pixel_rat
     }
     strbuf_append_char_n(buf, ' ', indent + 6);
     if (block->font && block->font->font_style) {
-        strbuf_append_format(buf, "\"style\": \"%s\",\n", lxb_css_value_by_id(block->font->font_style)->name);
+        const char* style_str = "normal";
+        auto style_val = lxb_css_value_by_id(block->font->font_style);
+        if (style_val) style_str = (const char*)style_val->name;
+        strbuf_append_format(buf, "\"style\": \"%s\",\n", style_str);
     } else {
         // CSS default font-style is normal
         strbuf_append_str(buf, "\"style\": \"normal\",\n");
     }
     strbuf_append_char_n(buf, ' ', indent + 6);
     if (block->font && block->font->font_weight) {
-        strbuf_append_format(buf, "\"weight\": \"%s\"\n", lxb_css_value_by_id(block->font->font_weight)->name);
+        const char* weight_str = "normal";
+        auto weight_val = lxb_css_value_by_id(block->font->font_weight);
+        if (weight_val) weight_str = (const char*)weight_val->name;
+        strbuf_append_format(buf, "\"weight\": \"%s\"\n", weight_str);
     } else {
         // CSS default font-weight is 400 (normal)
         strbuf_append_str(buf, "\"weight\": \"400\"\n");
@@ -1221,7 +1227,7 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
             DomNode* sibling = parent->first_child();
 
             while (sibling) {
-                if (sibling->type == LEXBOR_ELEMENT) {
+                if (sibling->type == LEXBOR_ELEMENT || sibling->type == MARK_ELEMENT) {
                     const char* sibling_tag = sibling->name();
                     if (sibling_tag && strcmp(sibling_tag, tag_name) == 0) {
                         sibling_count++;
@@ -1296,11 +1302,20 @@ void print_inline_json(ViewSpan* span, StrBuf* buf, int indent, float pixel_rati
         strbuf_append_char_n(buf, ' ', indent + 6);
         strbuf_append_format(buf, "\"size\": %f,\n", span->font->font_size);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"style\": \"%s\",\n", lxb_css_value_by_id(span->font->font_style)->name);
+        const char* style_str = "normal";
+        auto style_val = lxb_css_value_by_id(span->font->font_style);
+        if (style_val) style_str = (const char*)style_val->name;
+        strbuf_append_format(buf, "\"style\": \"%s\",\n", style_str);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"weight\": \"%s\",\n", lxb_css_value_by_id(span->font->font_weight)->name);
+        const char* weight_str = "normal";
+        auto weight_val = lxb_css_value_by_id(span->font->font_weight);
+        if (weight_val) weight_str = (const char*)weight_val->name;
+        strbuf_append_format(buf, "\"weight\": \"%s\",\n", weight_str);
         strbuf_append_char_n(buf, ' ', indent + 6);
-        strbuf_append_format(buf, "\"decoration\": \"%s\"\n", lxb_css_value_by_id(span->font->text_deco)->name);
+        const char* deco_str = "none";
+        auto deco_val = lxb_css_value_by_id(span->font->text_deco);
+        if (deco_val) deco_str = (const char*)deco_val->name;
+        strbuf_append_format(buf, "\"decoration\": \"%s\"\n", deco_str);
         strbuf_append_char_n(buf, ' ', indent + 4);
         strbuf_append_str(buf, "}");
     }
