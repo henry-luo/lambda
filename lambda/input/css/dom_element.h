@@ -89,7 +89,6 @@ typedef struct DomElement {
 
     // Version tracking for cache invalidation
     uint32_t style_version;      // Incremented when specified styles change
-    uint32_t computed_version;   // Version of last computed value calculation
     bool needs_style_recompute;  // Flag indicating computed values are stale
 
     // DOM tree relationships
@@ -351,28 +350,6 @@ int dom_element_apply_rule(DomElement* element, CssRule* rule, CssSpecificity sp
  * @return Specified CSS declaration or NULL if not set
  */
 CssDeclaration* dom_element_get_specified_value(DomElement* element, CssPropertyId property_id);
-
-/**
- * Get the computed value for a CSS property
- * @param element Target element
- * @param property_id Property to look up
- * @return Computed CSS value or NULL if not available
- */
-CssValue* dom_element_get_computed_value(DomElement* element, CssPropertyId property_id);
-
-/**
- * Invalidate computed styles (mark as needing recomputation)
- * @param element Target element
- * @param propagate_to_children If true, also invalidate all descendants
- */
-void dom_element_invalidate_computed_values(DomElement* element, bool propagate_to_children);
-
-/**
- * Recompute all computed styles for an element
- * @param element Target element
- * @return true on success, false on failure
- */
-bool dom_element_recompute_styles(DomElement* element);
 
 /**
  * Remove a CSS property from an element

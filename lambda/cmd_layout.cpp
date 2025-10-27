@@ -486,24 +486,7 @@ void apply_stylesheet_to_dom_tree(DomElement* root, CssStylesheet* stylesheet, S
 }
 
 /**
- * Recursively recompute styles for element tree (applies inheritance)
- */
-void recompute_element_styles_recursive(DomElement* elem) {
-    if (!elem) return;
-
-    // Recompute this element's styles (applies inheritance from parent)
-    dom_element_recompute_styles(elem);
-
-    // Recursively recompute children
-    DomElement* child = elem->first_child;
-    while (child) {
-        recompute_element_styles_recursive(child);
-        child = child->next_sibling;
-    }
-}
-
-/**
- * Dump CSS properties from DomElement's computed_style to JSON
+ * Dump CSS properties from DomElement's specified_style to JSON
  * This dumps COMPUTED CSS VALUES including inheritance, before layout
  */
 void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
@@ -549,16 +532,16 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
     }
     fprintf(fp, ",\n");
 
-    // Dump CSS properties from computed_style (includes inheritance)
+    // Dump CSS properties from specified_style (includes inheritance)
     fprintf(fp, "%s  \"css_properties\": {\n", indent);
 
-    if (elem->computed_style) {
+    if (elem->specified_style) {
         // Dump key properties by querying the computed StyleTree
         CssDeclaration* decl;
         bool has_props = false;
 
         // Margin shorthand property (ID 23)
-        decl = style_tree_get_declaration(elem->computed_style, CSS_PROPERTY_MARGIN);
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_MARGIN);
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_LENGTH || val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
@@ -574,7 +557,7 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
         }
 
         // Padding shorthand property (ID 34)
-        decl = style_tree_get_declaration(elem->computed_style, CSS_PROPERTY_PADDING);
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_PADDING);
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_LENGTH || val->type == CSS_VALUE_NUMBER || val->type == CSS_VALUE_INTEGER) {
@@ -591,7 +574,7 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
         }
 
         // Font size property (ID 78 - inherited)
-        decl = style_tree_get_declaration(elem->computed_style, CSS_PROPERTY_FONT_SIZE);
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_FONT_SIZE);
         if (decl && decl->value) {
             if (has_props) fprintf(fp, ",\n");
             CssValue* val = (CssValue*)decl->value;
@@ -607,7 +590,7 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
         }
 
         // Font family property (ID 80 - inherited)
-        decl = style_tree_get_declaration(elem->computed_style, CSS_PROPERTY_FONT_FAMILY);
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_FONT_FAMILY);
         if (decl && decl->value) {
             if (has_props) fprintf(fp, ",\n");
             CssValue* val = (CssValue*)decl->value;
@@ -646,7 +629,7 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
         }
 
         // Line height property (inherited)
-        decl = style_tree_get_declaration(elem->computed_style, CSS_PROPERTY_LINE_HEIGHT);
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_LINE_HEIGHT);
         if (has_props) fprintf(fp, ",\n");
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
@@ -664,7 +647,7 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
         has_props = true;
 
         // Width property (ID 16)
-        decl = style_tree_get_declaration(elem->computed_style, CSS_PROPERTY_WIDTH);
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_WIDTH);
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_LENGTH) {
@@ -679,7 +662,7 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
         }
 
         // Height property (ID 17)
-        decl = style_tree_get_declaration(elem->computed_style, CSS_PROPERTY_HEIGHT);
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_HEIGHT);
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_LENGTH) {
@@ -694,7 +677,7 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
         }
 
         // Display property (ID 1)
-        decl = style_tree_get_declaration(elem->computed_style, CSS_PROPERTY_DISPLAY);
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_DISPLAY);
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_KEYWORD) {
@@ -711,7 +694,7 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
         }
 
         // Background color property (ID 71)
-        decl = style_tree_get_declaration(elem->computed_style, CSS_PROPERTY_BACKGROUND_COLOR);
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_BACKGROUND_COLOR);
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_COLOR) {
@@ -728,7 +711,7 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
         }
 
         // Color property (ID 97)
-        decl = style_tree_get_declaration(elem->computed_style, CSS_PROPERTY_COLOR);
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_COLOR);
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_COLOR) {
@@ -744,7 +727,7 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
         }
 
         // Text align property (ID 89)
-        decl = style_tree_get_declaration(elem->computed_style, CSS_PROPERTY_TEXT_ALIGN);
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_TEXT_ALIGN);
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_KEYWORD) {
@@ -756,7 +739,7 @@ void dump_css_properties_json(FILE* fp, DomElement* elem, int depth) {
         }
 
         // Font weight property (ID 82)
-        decl = style_tree_get_declaration(elem->computed_style, CSS_PROPERTY_FONT_WEIGHT);
+        decl = style_tree_get_declaration(elem->specified_style, CSS_PROPERTY_FONT_WEIGHT);
         if (decl && decl->value) {
             CssValue* val = (CssValue*)decl->value;
             if (val->type == CSS_VALUE_INTEGER) {
@@ -983,8 +966,8 @@ Document* load_lambda_html_doc(const char* html_filename, const char* css_filena
     fprintf(stderr, "[Lambda CSS] CSS cascade complete\n");
 
     // Recompute styles to apply inheritance before dumping
-    fprintf(stderr, "[Lambda CSS] Computing inherited styles...\n");
-    recompute_element_styles_recursive(dom_root);
+    // fprintf(stderr, "[Lambda CSS] Computing inherited styles...\n");
+    // recompute_element_styles_recursive(dom_root);
 
     // Dump CSS computed values for testing/comparison (includes inheritance, before layout)
     write_css_cascade_output(dom_root, "/tmp/css_cascade.json");
