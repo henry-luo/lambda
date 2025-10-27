@@ -180,6 +180,7 @@ typedef struct {
     Element* lambda_html_root;  // Lambda HTML parser root (for Lambda CSS docs)
     ViewTree* view_tree;
     StateStore* state;
+    DomNode* root_dom_node;  // Root DomNode wrapper (heap-allocated, freed with view tree)
 } Document;
 
 typedef unsigned short PropValue;

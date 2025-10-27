@@ -654,30 +654,37 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
     log_debug("layout_init complete");
 
     // Create DomNode wrapper for root based on document type
-    DomNode root_node;
-    memset(&root_node, 0, sizeof(DomNode));
+    // CRITICAL: Heap-allocate and store in Document so it persists with the view tree
+    DomNode* root_node = (DomNode*)calloc(1, sizeof(DomNode));
+    if (!root_node) {
+        log_error("Failed to allocate root_node");
+        return;
+    }
+    doc->root_dom_node = root_node;  // Store in Document for later cleanup
 
     if (doc->doc_type == DOC_TYPE_LEXBOR) {
         // Lexbor HTML document
         lxb_html_element_t *lexbor_root = (lxb_html_element_t *)doc->dom_tree->dom_document.element;
-        root_node.type = LEXBOR_ELEMENT;
-        root_node.lxb_node = (lxb_dom_node_t*)lexbor_root;
-        log_debug("layout lexbor html root %s", root_node.name());
+        root_node->type = LEXBOR_ELEMENT;
+        root_node->lxb_node = (lxb_dom_node_t*)lexbor_root;
+        log_debug("layout lexbor html root %s", root_node->name());
     } else if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
         // Lambda CSS document - DomNode wraps DomElement directly
         log_debug("DEBUG: Setting root_node.type to MARK_ELEMENT (%d)", MARK_ELEMENT);
-        root_node.type = MARK_ELEMENT;
-        root_node.dom_element = doc->lambda_dom_root;  // DomElement contains all data
-        root_node.style = (Style*)doc->lambda_dom_root;  // Also store in style for compatibility
-        log_debug("DEBUG: root_node.type is now %d", root_node.type);
-        log_debug("layout lambda css html root %s", root_node.name());
+        root_node->type = MARK_ELEMENT;
+        root_node->dom_element = doc->lambda_dom_root;  // DomElement contains all data
+        root_node->style = (Style*)doc->lambda_dom_root;  // Also store in style for compatibility
+        log_debug("DEBUG: root_node.type is now %d", root_node->type);
+        log_debug("layout lambda css html root %s", root_node->name());
     } else {
         log_error("Unknown document type: %d", doc->doc_type);
+        free(root_node);
+        doc->root_dom_node = NULL;
         return;
     }
 
     log_debug("calling layout_html_root...");
-    layout_html_root(&lycon, &root_node);
+    layout_html_root(&lycon, root_node);
     log_debug("layout_html_root complete");
 
     log_debug("end layout");
@@ -697,11 +704,9 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
         log_debug("Warning: No view tree generated");
     }
 
-    // Clean up heap-allocated DomNode wrappers created during traversal
-    // Note: root_node itself is stack-allocated, but its cached children are heap-allocated
-    log_debug("calling free_cached_children for root_node...");
-    root_node.free_cached_children();
-    log_debug("DomNode cleanup complete");
+    // Note: root_dom_node and its cached children are NOT freed here
+    // They are stored in doc->root_dom_node and will be freed when the view tree is freed
+    log_debug("DomNode cleanup skipped - will be freed with view tree");
 
     log_debug("layout_html_doc complete");
 }

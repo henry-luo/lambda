@@ -131,6 +131,14 @@ void free_document(Document* doc) {
         free(doc->view_tree);
     }
 
+    // Free root DomNode wrapper and its cached children
+    // This is freed together with the view tree as the view tree may depend on it
+    if (doc->root_dom_node) {
+        log_debug("Freeing root DomNode and its cached children");
+        DomNode::free_tree(doc->root_dom_node);
+        doc->root_dom_node = NULL;
+    }
+
     if (doc->url) {
         // For Lexbor documents, the URL and its path data are managed by Lexbor's
         // memory pool (lexbor_mraw), so we shouldn't free them with free()
