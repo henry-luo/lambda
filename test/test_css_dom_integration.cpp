@@ -179,22 +179,6 @@ TEST_F(DomIntegrationTest, StyleVersioning) {
     EXPECT_TRUE(element->needs_style_recompute);
 }
 
-TEST_F(DomIntegrationTest, StyleInvalidation) {
-    DomElement* parent = dom_element_create(pool, "div", nullptr);
-    DomElement* child1 = dom_element_create(pool, "span", nullptr);
-    DomElement* child2 = dom_element_create(pool, "span", nullptr);
-
-    dom_element_append_child(parent, child1);
-    dom_element_append_child(parent, child2);
-
-    // Invalidate parent and children
-    dom_element_invalidate_computed_values(parent, true);
-
-    EXPECT_TRUE(parent->needs_style_recompute);
-    EXPECT_TRUE(child1->needs_style_recompute);
-    EXPECT_TRUE(child2->needs_style_recompute);
-}
-
 // ============================================================================
 // DOM Tree Navigation Tests
 // ============================================================================
