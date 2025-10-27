@@ -664,11 +664,11 @@ void layout_html_doc(UiContext* uicon, Document *doc, bool is_reflow) {
         root_node.lxb_node = (lxb_dom_node_t*)lexbor_root;
         log_debug("layout lexbor html root %s", root_node.name());
     } else if (doc->doc_type == DOC_TYPE_LAMBDA_CSS) {
-        // Lambda CSS document - use Lambda Element with DomElement styling
+        // Lambda CSS document - DomNode wraps DomElement directly
         log_debug("DEBUG: Setting root_node.type to MARK_ELEMENT (%d)", MARK_ELEMENT);
         root_node.type = MARK_ELEMENT;
-        root_node.mark_element = doc->lambda_html_root;
-        root_node.style = (Style*)doc->lambda_dom_root;  // Link to DomElement for CSS access
+        root_node.dom_element = doc->lambda_dom_root;  // DomElement contains all data
+        root_node.style = (Style*)doc->lambda_dom_root;  // Also store in style for compatibility
         log_debug("DEBUG: root_node.type is now %d", root_node.type);
         log_debug("layout lambda css html root %s", root_node.name());
     } else {

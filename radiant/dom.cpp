@@ -6,9 +6,29 @@ extern "C" {
 
 // DomNode member function implementations
 
+char* DomNode::name() {
+    if (type == LEXBOR_ELEMENT && lxb_elmt) {
+        const lxb_char_t* element_name = lxb_dom_element_local_name(lxb_dom_interface_element(lxb_elmt), NULL);
+        return element_name ? (char*)element_name : (char*)"#element";
+    }
+    else if (type == LEXBOR_NODE && lxb_node) {
+        return (char*)"#text";
+    }
+    else if (type == MARK_ELEMENT && dom_element) {
+        return (char*)dom_element->tag_name;
+    }
+    else if (type == MARK_TEXT && dom_text) {
+        return (char*)"#text";
+    }
+    else if (type == MARK_COMMENT && dom_comment) {
+        return (char*)"#comment";
+    }
+    return (char*)"#null";
+}
+
 unsigned char* DomNode::text_data() {
-    if (type == MARK_TEXT && mark_text) {
-        return (unsigned char*)mark_text->chars;
+    if (type == MARK_TEXT && dom_text) {
+        return (unsigned char*)dom_text->text;
     }
     else if (is_text()) {
         lxb_dom_text_t* text = lxb_dom_interface_text(lxb_node);
@@ -24,29 +44,12 @@ const lxb_char_t* DomNode::get_attribute(const char* attr_name, size_t* value_le
         return lxb_dom_element_get_attribute((lxb_dom_element_t*)lxb_elmt,
             (lxb_char_t*)attr_name, strlen(attr_name), value_len);
     }
-    else if (type == MARK_ELEMENT && mark_element) {
-        // Use Lambda implementation
-        Item attr_item = mark_get_attribute(attr_name);
-
-        // Check if attribute was found (type_id == 0 means not found)
-        if (attr_item.type_id == 0) {
-            return nullptr;
-        }
-
-        if (attr_item.type_id == LMD_TYPE_STRING) {
-            String* str = (String*)attr_item.pointer;
-            if (value_len) *value_len = str->len;
-            return (const lxb_char_t*)str->chars;
-        } else if (attr_item.type_id == LMD_TYPE_BOOL) {
-            // Boolean attribute - return "true" for true, nullptr for false
-            if (attr_item.bool_val) {
-                if (value_len) *value_len = 4;
-                return (const lxb_char_t*)"true";
-            }
-        } else if (attr_item.type_id == LMD_TYPE_NULL) {
-            // Empty attribute - return empty string
-            if (value_len) *value_len = 0;
-            return (const lxb_char_t*)"";
+    else if (type == MARK_ELEMENT && dom_element) {
+        // Use DOM element's attribute system
+        const char* value = dom_element_get_attribute(dom_element, attr_name);
+        if (value) {
+            if (value_len) *value_len = strlen(value);
+            return (const lxb_char_t*)value;
         }
     }
     return nullptr;
@@ -60,6 +63,12 @@ DomNode* DomNode::first_child() {
     // Handle Lexbor elements
     if (type == LEXBOR_ELEMENT && lxb_elmt) {
         lxb_dom_node_t* chd = lxb_dom_node_first_child(lxb_dom_interface_node(lxb_elmt));
+
+        // Skip comment nodes
+        while (chd && chd->type == LXB_DOM_NODE_TYPE_COMMENT) {
+            chd = lxb_dom_node_next(chd);
+        }
+
         if (chd) {
             DomNode* dn = (DomNode*)calloc(1, sizeof(DomNode));
             if (chd->type == LXB_DOM_NODE_TYPE_ELEMENT) {
@@ -74,53 +83,39 @@ DomNode* DomNode::first_child() {
         }
     }
 
-    // Handle mark elements
-    if (type == MARK_ELEMENT && mark_element) {
-        // Lambda Elements inherit from List - the List items are children content
-        // Attributes are stored separately in Element's type/data fields
-        Element* elem = (Element*)mark_element;
-        List* list = (List*)elem;
+    // Handle mark elements (now using DomElement)
+    if (type == MARK_ELEMENT && dom_element) {
+        // Navigate to first child through DomElement tree
+        void* first = dom_element->first_child;
 
-        // Find first child (element or text node)
-        int64_t child_index = -1;
-        TypeId first_type = 0;
-        for (int64_t i = 0; i < list->length; i++) {
-            Item item = list->items[i];
-            TypeId item_type = get_type_id(item);
-            if (item_type == LMD_TYPE_ELEMENT || item_type == LMD_TYPE_STRING) {
-                child_index = i;
-                first_type = item_type;
-                break;
+        // Skip comment nodes
+        while (first && dom_node_get_type(first) == DOM_NODE_COMMENT) {
+            if (dom_node_get_type(first) == DOM_NODE_ELEMENT) {
+                first = ((DomElement*)first)->next_sibling;
+            } else if (dom_node_get_type(first) == DOM_NODE_TEXT) {
+                first = ((DomText*)first)->next_sibling;
+            } else {
+                first = ((DomComment*)first)->next_sibling;
             }
         }
 
-        if (child_index < 0) {
-            return nullptr;
-        }
+        if (first) {
+            DomNode* child_node = nullptr;
+            DomNodeType node_type = dom_node_get_type(first);
 
-        Item first_item = list->items[child_index];
-
-        DomNode* child_node = nullptr;
-
-        if (first_type == LMD_TYPE_ELEMENT) {
-            child_node = create_mark_element((Element*)first_item.pointer);
-
-            // CRITICAL: Link to DomElement for CSS access
-            // Navigate parallel DomElement tree to get styling
-            if (this->style) {
-                DomElement* parent_dom = (DomElement*)this->style;
-                if (parent_dom->first_child) {
-                    child_node->style = (Style*)parent_dom->first_child;
-                }
+            if (node_type == DOM_NODE_ELEMENT) {
+                child_node = create_mark_element((DomElement*)first);
+            } else if (node_type == DOM_NODE_TEXT) {
+                child_node = create_mark_text((DomText*)first);
             }
-        } else if (first_type == LMD_TYPE_STRING) {
-            child_node = create_mark_text((String*)first_item.pointer);
-        }
+            // Comments are skipped, so we don't create nodes for them
 
-        if (child_node) {
-            child_node->parent = this;
-            this->_child = child_node;
-            return child_node;
+            if (child_node) {
+                child_node->parent = this;
+                child_node->style = (Style*)first;  // Link to DomElement/DomText for CSS
+                this->_child = child_node;
+                return child_node;
+            }
         }
     }
 
@@ -130,66 +125,43 @@ DomNode* DomNode::first_child() {
 DomNode* DomNode::next_sibling() {
     if (_next) { return _next; }
 
-    // handle mark nodes
+    // handle mark nodes (now using DomElement/DomText)
     if (type == MARK_ELEMENT || type == MARK_TEXT) {
-        if (!parent || parent->type != MARK_ELEMENT) {
-            return nullptr;
+        // Get next sibling from DomElement/DomText structure
+        void* next = nullptr;
+        if (type == MARK_ELEMENT && dom_element) {
+            next = dom_element->next_sibling;
+        } else if (type == MARK_TEXT && dom_text) {
+            next = dom_text->next_sibling;
         }
 
-        // Parent is a mark element, which is a List
-        List* parent_list = (List*)parent->mark_element;
-
-        // Find our index in parent's children
-        int my_index = -1;
-        for (int64_t i = 0; i < parent_list->length; i++) {
-            Item item = parent_list->items[i];
-            TypeId item_type = get_type_id(item);
-
-            if (type == MARK_ELEMENT && item_type == LMD_TYPE_ELEMENT) {
-                if ((Element*)item.pointer == mark_element) {
-                    my_index = i;
-                    break;
-                }
-            } else if (type == MARK_TEXT && item_type == LMD_TYPE_STRING) {
-                if ((String*)item.pointer == mark_text) {
-                    my_index = i;
-                    break;
-                }
+        // Skip comment nodes
+        while (next && dom_node_get_type(next) == DOM_NODE_COMMENT) {
+            if (dom_node_get_type(next) == DOM_NODE_ELEMENT) {
+                next = ((DomElement*)next)->next_sibling;
+            } else if (dom_node_get_type(next) == DOM_NODE_TEXT) {
+                next = ((DomText*)next)->next_sibling;
+            } else {
+                next = ((DomComment*)next)->next_sibling;
             }
         }
 
-        // Find next sibling (element or text node)
-        if (my_index >= 0) {
-            for (int64_t i = my_index + 1; i < parent_list->length; i++) {
-                Item next_item = parent_list->items[i];
-                TypeId next_type = get_type_id(next_item);
+        if (next) {
+            DomNode* sibling_node = nullptr;
+            DomNodeType node_type = dom_node_get_type(next);
 
-                if (next_type == LMD_TYPE_ELEMENT || next_type == LMD_TYPE_STRING) {
-                    DomNode* sibling_node = nullptr;
+            if (node_type == DOM_NODE_ELEMENT) {
+                sibling_node = create_mark_element((DomElement*)next);
+            } else if (node_type == DOM_NODE_TEXT) {
+                sibling_node = create_mark_text((DomText*)next);
+            }
+            // Comments are skipped
 
-                    if (next_type == LMD_TYPE_ELEMENT) {
-                        sibling_node = create_mark_element((Element*)next_item.pointer);
-
-                        // CRITICAL: Link to DomElement for CSS access
-                        // Navigate parallel DomElement tree to get styling
-                        if (this->style) {
-                            DomElement* current_dom = (DomElement*)this->style;
-                            if (current_dom->next_sibling) {
-                                sibling_node->style = (Style*)current_dom->next_sibling;
-                            }
-                        }
-                    } else if (next_type == LMD_TYPE_STRING) {
-                        sibling_node = create_mark_text((String*)next_item.pointer);
-                    }
-
-                    if (sibling_node) {
-                        sibling_node->parent = parent;
-                        this->_next = sibling_node;
-                        return sibling_node;
-                    }
-                    break;  // Found node, done
-                }
-                // Skip other node types and continue searching
+            if (sibling_node) {
+                sibling_node->parent = parent;
+                sibling_node->style = (Style*)next;  // Link to DomElement/DomText for CSS
+                this->_next = sibling_node;
+                return sibling_node;
             }
         }
     }
@@ -203,6 +175,12 @@ DomNode* DomNode::next_sibling() {
         }
         if (current_node) {
             lxb_dom_node_t* nxt = lxb_dom_node_next(current_node);
+
+            // Skip comment nodes
+            while (nxt && nxt->type == LXB_DOM_NODE_TYPE_COMMENT) {
+                nxt = lxb_dom_node_next(nxt);
+            }
+
             if (nxt) {
                 DomNode* dn = (DomNode*)calloc(1, sizeof(DomNode));
                 dn->parent = this->parent;
@@ -224,44 +202,26 @@ DomNode* DomNode::next_sibling() {
 // Mark-specific method implementations
 
 char* DomNode::mark_text_data() {
-    if (type == MARK_TEXT && mark_text) {
-        return mark_text->chars;
+    if (type == MARK_TEXT && dom_text) {
+        return (char*)dom_text->text;
     }
     return nullptr;
 }
 
 Item DomNode::mark_get_attribute(const char* attr_name) {
-    if (type != MARK_ELEMENT || !mark_element) {
+    if (type != MARK_ELEMENT || !dom_element) {
         return ItemNull;
     }
 
-    // Access Lambda Element attributes via shape entries
-    TypeElmt* elem_type = (TypeElmt*)mark_element->type;
-    ShapeEntry* entry = elem_type->shape;
-
-    while (entry) {
-        if (strcmp(entry->name->str, attr_name) == 0) {
-            void* field_ptr = (char*)mark_element->data + entry->byte_offset;
-
-            // Return item based on type
-            if (entry->type->type_id == LMD_TYPE_STRING) {
-                String* str = *(String**)field_ptr;
-                return (Item){.item = s2it(str)};
-            } else if (entry->type->type_id == LMD_TYPE_BOOL) {
-                bool* val = (bool*)field_ptr;
-                Item result;
-                result.bool_val = *val;
-                result.type_id = LMD_TYPE_BOOL;
-                return result;
-            } else if (entry->type->type_id == LMD_TYPE_NULL) {
-                // Empty attribute exists but has null value
-                Item result;
-                result.type_id = LMD_TYPE_NULL;
-                result.item = ITEM_NULL;
-                return result;
-            }
-        }
-        entry = entry->next;
+    // Use DOM element's attribute system
+    const char* value = dom_element_get_attribute(dom_element, attr_name);
+    if (value) {
+        // Return as C string pointer wrapped in Item
+        // Store as raw_pointer since pointer field is only 56-bit
+        Item result;
+        result.type_id = LMD_TYPE_STRING;
+        result.raw_pointer = (void*)value;
+        return result;
     }
 
     // Attribute not found - return item with no type set
@@ -272,28 +232,24 @@ Item DomNode::mark_get_attribute(const char* attr_name) {
 }
 
 Item DomNode::mark_get_content() {
-    if (type != MARK_ELEMENT || !mark_element) {
+    if (type != MARK_ELEMENT || !dom_element) {
         return ItemNull;
     }
 
-    // Lambda Elements are also Lists containing children
-    List* list = (List*)mark_element;
-
-    // Return the list as an Item
-    Item result;
-    result.list = list;
-    result.type_id = LMD_TYPE_LIST;
-    return result;
+    // For DomElement, we could return a list of children, but that requires
+    // traversing the DOM tree. For now, return NULL.
+    // This method may need redesign for the new DomElement-based structure.
+    return ItemNull;
 }
 
 // Static factory methods for creating mark nodes
 
-DomNode* DomNode::create_mark_element(Element* element) {
+DomNode* DomNode::create_mark_element(DomElement* element) {
     if (!element) return nullptr;
 
     DomNode* node = (DomNode*)calloc(1, sizeof(DomNode));
     node->type = MARK_ELEMENT;
-    node->mark_element = element;
+    node->dom_element = element;
     node->style = nullptr;
     node->parent = nullptr;
     node->_next = nullptr;
@@ -302,12 +258,26 @@ DomNode* DomNode::create_mark_element(Element* element) {
     return node;
 }
 
-DomNode* DomNode::create_mark_text(String* text) {
+DomNode* DomNode::create_mark_text(DomText* text) {
     if (!text) return nullptr;
 
     DomNode* node = (DomNode*)calloc(1, sizeof(DomNode));
     node->type = MARK_TEXT;
-    node->mark_text = text;
+    node->dom_text = text;
+    node->style = nullptr;
+    node->parent = nullptr;
+    node->_next = nullptr;
+    node->_child = nullptr;
+
+    return node;
+}
+
+DomNode* DomNode::create_mark_comment(DomComment* comment) {
+    if (!comment) return nullptr;
+
+    DomNode* node = (DomNode*)calloc(1, sizeof(DomNode));
+    node->type = MARK_COMMENT;
+    node->dom_comment = comment;
     node->style = nullptr;
     node->parent = nullptr;
     node->_next = nullptr;
