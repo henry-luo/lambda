@@ -651,8 +651,8 @@ void resolve_lambda_css_property(CssPropertyId prop_id, const CssDeclaration* de
             // The parser should have given us a list of values
             // Expand to: border-top-*, border-right-*, border-bottom-*, border-left-*
 
-            // Check if we have a list of values
-            if (value->type == CSS_VALUE_ENHANCED_LIST && value->data.list.count > 0) {
+            // check if we have a list of values
+            if (value->type == CSS_VALUE_LIST && value->data.list.count > 0) {
                 CssValue** values = value->data.list.values;
                 size_t count = value->data.list.count;
 
